@@ -225,10 +225,23 @@ final class LoxWorker {
 
     private void runSpawned(LoxTask task, Object callee) {
         bind(this);
+        // A native entry is a host frame. The task's own frames cannot be
+        // captured through it, so a task.receive below it must raise
+        // YieldAcrossNativeError (spec/04-semantics.md, task.receive step 3).
+        // A coroutine this entry resumes still runs on its own thread, where
+        // this count is not visible, so a legal yield there is unaffected.
+        boolean nativeEntry = callee instanceof LoxNative;
+        if (nativeEntry) {
+            LoxOps.enterCallback();
+        }
         try {
             LoxOps.call(callee, new Object[0]);
         } catch (Throwable fault) {
             LoxRuntime.endWithFault(fault);
+        } finally {
+            if (nativeEntry) {
+                LoxOps.exitCallback();
+            }
         }
         endTask(task);
     }

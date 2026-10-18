@@ -346,3 +346,20 @@ TEST_F(TaskTest, ACoroutineRunsInTheTaskThatResumesIt) {
               InterpretResult::OK);
     expect_string(h, "log", "truetrue");
 }
+
+// A spawned task whose entry is a native function cannot park in receive.
+// Nothing can rebuild the native frame, so the task ends with an uncaught
+// YieldAcrossNativeError (spec/04-semantics.md, task.receive step 3).
+TEST_F(TaskTest, NativeEntryReceiveOnEmptyMailboxIsUncaught) {
+    VMTestHarness h;
+    testing::internal::CaptureStderr();
+    InterpretResult result = h.run(R"(
+        task.spawn(task.receive);
+        yield;
+    )");
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("Cannot receive across a native callback."),
+              std::string::npos)
+        << err;
+}

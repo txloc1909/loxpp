@@ -1,0 +1,21 @@
+// A native entry that resumes another coroutine is still a host frame on the
+// chain. The receive inside `body` raises, and both coroutines are dead.
+fun body() {
+    task.receive();
+}
+var inner = coroutine.create(body);
+var outer = coroutine.create(inner.resume);
+try {
+    outer.resume();
+} catch (e) {
+    print e.kind;
+    print e.message;
+}
+print outer.status();
+print inner.status();
+
+// STATUS: ok
+// CHECK: YieldAcrossNativeError
+// CHECK: Cannot receive across a native callback.
+// CHECK: dead
+// CHECK: dead

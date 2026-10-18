@@ -28,6 +28,9 @@ public final class TaskTest {
         checkReceiveAcrossNative();
         checkEachTaskHasItsOwnCounters();
         checkReceiveInCoroutineKeepsItRunning();
+        checkReceiveInNativeCoroutineEntryRaises();
+        checkReceiveInNativeCoroutineEntryWithMessage();
+        checkReceiveUnderANativeResumeEntryRaises();
         checkSpawnWorkerEntry();
         checkWorker();
 
@@ -209,6 +212,57 @@ public final class TaskTest {
         checkEquals("owner done", task("receive"), "the owner task finishes");
         checkEquals("go", got[0], "the receive returns inside the coroutine");
         checkEquals("dead", co[0].statusName(), "and the coroutine returned");
+    }
+
+    private static LoxNative receiveNative() {
+        return new LoxNative("receive", 0, args -> task("receive"));
+    }
+
+    // A coroutine whose entry is a native has no host-free frame to keep. A
+    // receive below it must raise, and a throw out of the entry leaves the
+    // coroutine dead (spec/04-semantics.md, task.receive step 3, co.resume
+    // step 5).
+    private static void checkReceiveInNativeCoroutineEntryRaises() {
+        checkEquals(0.0, task("pending"), "the main mailbox starts empty");
+        LoxCoroutine co = new LoxCoroutine(receiveNative());
+        LoxError err = raised(() -> co.resume(NO_ARGS));
+        check(err != null && "YieldAcrossNativeError".equals(kindOf(err)),
+              "a receive below a native coroutine entry raises");
+        checkEquals("Cannot receive across a native callback.", messageOf(err),
+                    "the native-entry receive message");
+        checkEquals("dead", co.statusName(),
+                    "a throw out of a native entry leaves it dead");
+    }
+
+    // A receive that finds a message does not suspend, so the native entry
+    // returns that message and the coroutine is dead.
+    private static void checkReceiveInNativeCoroutineEntryWithMessage() {
+        task("send", task("self"), "m");
+        LoxCoroutine co = new LoxCoroutine(receiveNative());
+        checkEquals("m", co.resume(NO_ARGS),
+                    "a receive below a native entry returns a waiting message");
+        checkEquals("dead", co.statusName(), "the native entry returned");
+    }
+
+    // A native entry that resumes another coroutine keeps its host frame on
+    // the chain, so the inner receive raises and both coroutines are dead.
+    private static void checkReceiveUnderANativeResumeEntryRaises() {
+        LoxCoroutine inner = new LoxCoroutine(
+            new LoxClosure("body", 0, NO_UPVALUES) {
+                @Override
+                protected Object invoke(Object self, Object[] a) {
+                    return task("receive");
+                }
+            });
+        LoxNative resume = new LoxNative("resume", -1, args -> inner.resume(args));
+        LoxCoroutine outer = new LoxCoroutine(resume);
+        LoxError err = raised(() -> outer.resume(NO_ARGS));
+        check(err != null && "YieldAcrossNativeError".equals(kindOf(err)),
+              "a receive below a native resume entry raises");
+        checkEquals("dead", outer.statusName(),
+                    "the outer native entry is dead after the throw");
+        checkEquals("dead", inner.statusName(),
+                    "the inner coroutine is dead after the throw");
     }
 
     private static void checkSpawnWorkerEntry() {

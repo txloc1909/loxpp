@@ -1,0 +1,12 @@
+// A coroutine whose entry is a native returns the native's result. The
+// message is already in the current task's mailbox, so the receive does not
+// suspend.
+var me = task.self();
+task.send(me, "m");
+var co = coroutine.create(task.receive);
+print co.resume();
+print co.status();
+
+// STATUS: ok
+// CHECK: m
+// CHECK: dead
