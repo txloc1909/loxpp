@@ -10,10 +10,13 @@ equivalent), then compares the two runs in two phases.
 Compile phase. Exit status 65 is a compile error (a parser or resolver
 error) on every consumer: build/loxpp returns it, the JVM and QBE wrappers
 return the status of `loxpp --target`, and bootstrap/lox_wrapper.sh returns
-it for its LOXERR65 line. When either run exits 65, both runs must exit 65
-and their stderr text must be the same, or the program reports DIVERGE
-(compile phase). A match prints as "MATCH (compile error)". A compile error
-writes nothing to stdout, so the run-time comparison below cannot see one.
+it for its LOXERR65 line. When either run exits 65, both runs must exit 65,
+and their stdout and their stderr text must be the same, or the program
+reports DIVERGE (compile phase). A match prints as "MATCH (compile error)".
+A compile error writes nothing to stdout, so the run-time comparison below
+cannot see one. The stdout check keeps two cases from a false match: a
+consumer that runs part of the program before it reports the compile error,
+and a program that ends with `exit(65)` after it printed something.
 
 --compile-errors says that every program is a compile-error case: a
 program that native does not reject at compile time reports DIVERGE, so a
@@ -240,7 +243,8 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
 
 
 # The exit status of a compile error on every consumer (see the module
-# docstring). No consumer uses it for a run-time fault.
+# docstring). No consumer uses it for a run-time fault, but a program can end
+# with exit(65), so the compile phase compares stdout too.
 COMPILE_ERROR_STATUS = 65
 
 
@@ -445,12 +449,25 @@ def main() -> None:
             diverged += 1
             continue
         if native_compile or other_compile:
-            if native_compile and other_compile and native_err.rstrip() == other_err.rstrip():
+            if (
+                native_compile
+                and other_compile
+                and native_out == other_out
+                and native_err.rstrip() == other_err.rstrip()
+            ):
                 print(f"MATCH       {lox_file}  (compile error)")
                 matched += 1
                 continue
             print(f"DIVERGE     {lox_file}  (compile phase)")
             print(f"            native exited {native_status}, other exited {other_status}")
+            for line in difflib.unified_diff(
+                native_out.splitlines(),
+                other_out.splitlines(),
+                fromfile="native stdout",
+                tofile=f"{Path(args.other_runner).name} stdout",
+                lineterm="",
+            ):
+                print(f"            {line}")
             for line in difflib.unified_diff(
                 native_err.rstrip().splitlines(),
                 other_err.rstrip().splitlines(),
