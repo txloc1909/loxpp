@@ -1,0 +1,30 @@
+// A bare pattern name is a tag test only when an enum constructor of that
+// name is declared earlier in the source than the match
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). Here
+// `f` is declared before the enum, so the name `Red` in `f` is a binding,
+// although the enum exists when `f` runs. The match in `g` is declared after
+// the enum, so there `Red` is a tag test.
+fun f(v) {
+    var out = match v {
+        case Red => "bound " + str(v)
+    };
+    return out;
+}
+
+enum Color { Red Green }
+
+fun g(v) {
+    return match v {
+        case Red => "red"
+        case Green => "green"
+    };
+}
+
+print f(1);
+print g(Green());
+print g(Red());
+
+// STATUS: ok
+// CHECK: bound 1
+// CHECK: green
+// CHECK: red

@@ -143,6 +143,7 @@ enum Pattern {
     ListPat(elems, rest_name)
     AtPat(at_name, subpat)
     ClassPat(cname)
+    TagPat(cname)
 }
 
 // bodyStmts is the arm's leading declarations/statements (possibly ending in
@@ -1166,8 +1167,8 @@ class Resolver {
         // constructor names in declaration order. Both are global.
         this.enumCtors       = {};
         this.enumDecls       = {};
-        // Global classes declared so far, in source order. See
-        // classifyArmPat for the pattern names that this set changes.
+        // Global classes declared so far, in source order. With enumCtors,
+        // this set decides the pattern names that classifyArmPat changes.
         this.classNames      = {};
     }
 
@@ -1523,15 +1524,17 @@ class Resolver {
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
             case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
             case ClassPat{cname}           => nil
+            case TagPat{cname}             => nil
         };
     }
 
-    // A bare name is a class test only as a whole arm pattern (alone or in
-    // an or-chain) or as the sub-pattern of an @-binding, and only when a
-    // global class of that name is declared earlier in the source. A name
-    // inside braces, parentheses or brackets is always a binding. The
-    // parser cannot tell the two apart, so the resolver rewrites the
-    // pattern here, before the interpreter runs it.
+    // A bare name is a tag test or a class test only as a whole arm pattern
+    // (alone or in an or-chain) or as the sub-pattern of an @-binding, and
+    // only when an enum constructor or a global class of that name is
+    // declared earlier in the source. A name inside braces, parentheses or
+    // brackets is always a binding. The parser cannot tell the two apart,
+    // so the resolver rewrites the pattern here, before the interpreter
+    // runs it.
     classifyArmPat(pat) {
         return match pat {
             case BindPat{name}          => this.classifyBareName(pat, name)
@@ -1549,7 +1552,8 @@ class Resolver {
     }
 
     classifyBareName(pat, name) {
-        if (this.enumCtors.has(name)) return pat;
+        // A constructor wins over a class of the same name.
+        if (this.enumCtors.has(name)) return TagPat(name);
         if (this.classNames.has(name)) return ClassPat(name);
         return pat;
     }
@@ -1560,7 +1564,6 @@ class Resolver {
     }
 
     resolveBindPat(name) {
-        if (this.enumCtors.has(name)) return;
         // In OR-patterns, the same name may appear in multiple alternatives.
         // Skip re-declaration if already bound in the current scope.
         if (len(this.scopes) > 0) {
@@ -1585,12 +1588,11 @@ class Resolver {
         }
     }
 
-    // The constructor that an arm pattern tests, or nil. A bare name is a
-    // constructor when an enum declares it; classifyArmPat has already turned
-    // a class name into a ClassPat.
+    // The constructor that an arm pattern tests, or nil. classifyArmPat has
+    // already turned a bare constructor name into a TagPat.
     patCtorName(pat) {
         return match pat {
-            case BindPat{name}           => this.knownCtor(name)
+            case TagPat{cname}           => this.knownCtor(cname)
             case CtorPat{cname, subpats} => this.knownCtor(cname)
             case AtPat{at_name, subpat}  => this.patCtorName(subpat)
             case _                       => nil
@@ -1607,7 +1609,7 @@ class Resolver {
         if (arm.guard != nil or len(arm.pats) != 1) return false;
         return match arm.pats[0] {
             case WildPat      => true
-            case BindPat{name} => !this.enumCtors.has(name)
+            case BindPat{name} => true
             case _            => false
         };
     }
@@ -4801,6 +4803,7 @@ class Interpreter {
             case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
             case ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
+            case TagPat{cname}             => loxTag(subject) == "enum_val" and subject.tag == cname
         };
     }
 
@@ -4811,10 +4814,6 @@ class Interpreter {
     }
 
     matchBind(name, subject, bindings) {
-        var ctorVal = this.globals[name];
-        if (ctorVal != nil and loxTag(ctorVal) == "enum_ctor" and ctorVal.arity() == 0) {
-            return loxTag(subject) == "enum_val" and subject.tag == name;
-        }
         bindings[name] = subject;
         return true;
     }

@@ -1,0 +1,19 @@
+// A bare constructor name is a tag test for a constructor with fields too:
+// the arm matches an enum value with that constructor, and binds no field
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). The
+// same holds in an or-chain and as the sub-pattern of an @-binding.
+enum Opt { Some(v) None }
+
+print match None() { case Some => "some" case None => "none" };
+print match Some(7) { case Some => "some" case None => "none" };
+print match Some(7) { case None or Some => "either" };
+print match Some(7) {
+    case s @ Some => "whole " + str(match s { case Some(v) => v case None => 0 })
+    case None => "none"
+};
+
+// STATUS: ok
+// CHECK: none
+// CHECK: some
+// CHECK: either
+// CHECK: whole 7
