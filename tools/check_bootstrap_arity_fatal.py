@@ -146,6 +146,38 @@ CASES = [
         ["caught ArityError", "after"], 0,
     ),
     Case(
+        "issue 667 example: a live try runs the earlier defers after a wrong-count defer",
+        PRELUDE
+        + 'fun g() { defer note("d1"); defer h(); print "body"; }\n'
+        "try { g(); } catch (e) { print e.kind; }\n"
+        'print "after";\n',
+        ["body", "d1", "ArityError", "after"], 0,
+    ),
+    Case(
+        "two wrong-count defers with defers between them all drain",
+        PRELUDE
+        + 'fun g() { defer note("d1"); defer h(); defer note("d2"); defer h();'
+        ' defer note("d3"); print "body"; }\n'
+        "try { g(); } catch (e) { print e.kind; }\n"
+        'print "after";\n',
+        ["body", "d3", "d2", "d1", "ArityError", "after"], 0,
+    ),
+    Case(
+        "a wrong-count defer replaces a throw in flight and the defers go on",
+        PRELUDE
+        + 'fun g() { defer note("d1"); defer h(); defer note("d2"); throw "x"; }\n'
+        'fun k() { defer note("dk"); g(); }\n'
+        "try { k(); } catch (e) { print e.kind; }\n"
+        'print "after";\n',
+        ["d2", "d1", "dk", "ArityError", "after"], 0,
+    ),
+    Case(
+        "no try: a wrong-count defer skips the earlier defers of its function",
+        PRELUDE
+        + 'fun g() { defer note("d1"); defer h(); print "body"; }\ng();\n',
+        ["body"], 70, ARITY_1_GOT_0,
+    ),
+    Case(
         "control: a live try catches the arity error of a coroutine start",
         PRELUDE
         + "try { coroutine.create(h).resume(); }\n"
