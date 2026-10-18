@@ -200,8 +200,6 @@ EXPECTED_CALLS = [
     ('ConstructorArityError', '"Constructor called with wrong arity."', RECORDED),
     ('ConstructorArityError', '"Expected 0 arguments but got some."', RECORDED),
     ('ArityError', '"Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + "."', RECORDED),
-    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
-    ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),
     ('UndefinedPropertyError', '"Undefined property on error."', RECORDED),
     ('InvalidReceiverError', '"Method called on invalid receiver."', JUDGED),
     ('UndefinedMemberError', '"Undefined property \'" + name + "\'."', JUDGED),

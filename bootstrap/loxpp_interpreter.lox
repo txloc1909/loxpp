@@ -4524,12 +4524,14 @@ class Interpreter {
         }
         if (loxTag(object) == "list") {
             if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on list.");
+            this.fatalError("Only instances have properties.");
             return nil;
         }
         if (loxTag(object) == "map") {
             if (name == "has" or name == "del" or name == "keys" or name == "values" or name == "entries") return InterpMapMethod(name, object);
-            this.setError("UndefinedMemberError", "Undefined property '" + name + "'.", line);
+            if (isCallTarget) this.fatalError("Undefined method '" + name + "' on map.");
+            this.fatalError("Undefined property '" + name + "' on map.");
             return nil;
         }
         if (loxTag(object) == "file") {
