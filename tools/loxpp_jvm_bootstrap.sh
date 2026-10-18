@@ -36,7 +36,7 @@ case "${LANGUAGE:-LOX}" in
 esac
 
 exitcode=0
-# A fault one layer below the LOXERR protocol above -- the JVM host itself
+# A fault one layer below the LOXERR protocol below -- the JVM host itself
 # failing on its own interpretation of the bootstrap script, with no LOXERR
 # line to report it -- shows up only as loxpp_jvm.sh's own nonzero exit
 # status. Capture that status via a status file written inside the
