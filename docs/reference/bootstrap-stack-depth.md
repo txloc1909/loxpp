@@ -151,3 +151,10 @@ that the bootstrap may support a lower call depth, and
 so. Probe 53 does not bind the bootstrap interpreter. The limit is the shared
 frame budget that this note describes, so it moves with `FRAMES_MAX` and with
 the frames that the interpreter uses for its own calls.
+
+The bootstrap does not run self tail calls in constant call depth: a
+recursion of self tail calls halts with `Stack overflow.` where native
+completes. This is the known gap
+[#716](https://github.com/txloc1909/loxpp/issues/716). The call depth
+exception does not cover it, because the spec says that a self tail call
+never raises `StackOverflowError`.
