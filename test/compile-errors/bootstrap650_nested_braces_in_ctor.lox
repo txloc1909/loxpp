@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Expect ')' after field pattern.
+// Compile error: a field slot of a constructor pattern holds a class pattern.
+class Item {}
+class Box {}
+enum Wrap { W(inner) }
+var r = match W(Box()) { case W(Box{Item}) => 1 };

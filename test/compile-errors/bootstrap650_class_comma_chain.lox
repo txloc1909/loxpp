@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Expect '=>' after pattern.
+// Compile error: a comma chain of class patterns in one arm.
+class Circle {}
+class Square {}
+var r = match Circle() { case Circle, Square => 1 };

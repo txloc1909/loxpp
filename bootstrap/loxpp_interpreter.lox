@@ -156,6 +156,9 @@ class MatchArm {
         this.guard     = guard;
         this.bodyStmts = bodyStmts;
         this.bodyExpr  = bodyExpr;
+        // [comma token, token before it, index of the pattern before it] for
+        // the first comma of an arm that does not start with a literal, or nil.
+        this.chain     = nil;
     }
 }
 
@@ -360,6 +363,7 @@ class Parser {
         this.nextId     = 0;
         this.hadError   = false;
         this.panicMode  = false;
+        this.armChain   = nil;
     }
 
     allocId() {
@@ -999,11 +1003,14 @@ class Parser {
             }
             if (this.panicMode) break;
             var pats = this.parseMatchArmPatterns();
+            var chain = this.armChain;
             var guard = nil;
             if (this.matchT("IF")) guard = this.expression();
-            this.expect("FAT_ARROW", "Expect '=>' after match pattern.");
+            this.expect("FAT_ARROW", "Expect '=>' after pattern.");
             if (this.panicMode) break;
-            arms.append(this.matchArmBody(pats, guard));
+            var arm = this.matchArmBody(pats, guard);
+            arm.chain = chain;
+            arms.append(arm);
         }
         var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
         return MatchExpr(subject, arms, closeTok.line);
@@ -1059,10 +1066,22 @@ class Parser {
         return MatchArm(pats, guard, stmts, tailExpr);
     }
 
+    // Only an arm of literals may chain patterns with commas (spec/02-syntax.md,
+    // armPats). The parser cannot tell a class or constructor name from a
+    // binding, and native reports a different message for each, so for any
+    // other arm it records the first comma in this.armChain and the resolver
+    // reports it.
     parseMatchArmPatterns() {
         var pats = [];
+        this.armChain = nil;
+        var literalArm = this.check("NUMBER") or this.check("STRING") or
+                         this.check("TRUE") or this.check("FALSE") or this.check("NIL");
         pats.append(this.parsePattern());
-        while (this.matchT("OR") or this.matchT("COMMA")) {
+        while (this.check("OR") or this.check("COMMA")) {
+            if (this.check("COMMA") and !literalArm and this.armChain == nil) {
+                this.armChain = [this.peek(), this.previous(), len(pats) - 1];
+            }
+            this.advance();
             if (this.check("RIGHT_BRACE") or this.check("CASE") or this.check("IF") or this.check("FAT_ARROW")) break;
             pats.append(this.parsePattern());
         }
@@ -1089,28 +1108,40 @@ class Parser {
             if (this.matchT("LEFT_PAREN")) {
                 var subpats = [];
                 if (!this.check("RIGHT_PAREN")) {
-                    subpats.append(this.parsePattern());
+                    subpats.append(this.parseFieldPattern("Expect binding name."));
                     while (this.matchT("COMMA")) {
-                        subpats.append(this.parsePattern());
+                        subpats.append(this.parseFieldPattern("Expect binding name."));
                     }
                 }
-                this.expect("RIGHT_PAREN", "Expect ')' after constructor pattern fields.");
+                this.expect("RIGHT_PAREN", "Expect ')' after field pattern.");
                 return CtorPat(nameTok.lexeme, subpats);
             }
             if (this.matchT("LEFT_BRACE")) {
                 var subpats = [];
                 if (!this.check("RIGHT_BRACE")) {
-                    subpats.append(this.parsePattern());
+                    subpats.append(this.parseFieldPattern("Expect field name."));
                     while (this.matchT("COMMA")) {
-                        subpats.append(this.parsePattern());
+                        subpats.append(this.parseFieldPattern("Expect field name."));
                     }
                 }
-                this.expect("RIGHT_BRACE", "Expect '}' after constructor pattern fields.");
+                this.expect("RIGHT_BRACE", "Expect '}' after field pattern.");
                 return CtorPat(nameTok.lexeme, subpats);
             }
             return BindPat(nameTok.lexeme);
         }
         this.parseError(this.peek(), "Expect pattern.");
+        return WildPat();
+    }
+
+    // A field slot of a constructor or class pattern holds one name and no
+    // nested pattern (spec/02-syntax.md, identArmPat).
+    parseFieldPattern(msg) {
+        if (this.check("IDENTIFIER")) {
+            var tok = this.advance();
+            if (tok.lexeme == "_") return WildPat();
+            return BindPat(tok.lexeme);
+        }
+        this.parseError(this.peek(), msg);
         return WildPat();
     }
 
@@ -1558,6 +1589,22 @@ class Resolver {
         return pat;
     }
 
+    // A comma after a pattern of an arm that is not a literal chain. Native
+    // names the binding when the pattern before the comma is a plain name that
+    // stays a binding or `_`, and the missing `=>` otherwise.
+    reportArmChain(chain, pat) {
+        var plainName = match pat {
+            case BindPat{name} => true
+            case WildPat       => true
+            case _             => false
+        };
+        if (plainName) {
+            this.resError(chain[1].lexeme, chain[1].line, "A binding pattern must be the sole arm pattern.");
+        } else {
+            this.resError(chain[0].lexeme, chain[0].line, "Expect '=>' after pattern.");
+        }
+    }
+
     resolveAtPat(at_name, subpat) {
         this.resolvePattern(subpat);
         this.resolveBindPat(at_name);
@@ -1667,6 +1714,7 @@ class Resolver {
             var j = 0;
             while (j < len(arm.pats)) {
                 arm.pats[j] = this.classifyArmPat(arm.pats[j]);
+                if (arm.chain != nil and arm.chain[2] == j) this.reportArmChain(arm.chain, arm.pats[j]);
                 this.resolvePattern(arm.pats[j]);
                 j = j + 1;
             }

@@ -1,0 +1,3 @@
+// DIAGNOSTIC: A binding pattern must be the sole arm pattern.
+// Compile error: a comma chain that starts with a binding name.
+var r = match 1 { case x, y => 1 };

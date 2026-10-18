@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect '=>' after pattern.
+// Compile error: a comma chain of constructor names in one arm.
+enum Dir { Up Down }
+var r = match Up { case Up, Down => 1 };

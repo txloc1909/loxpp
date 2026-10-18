@@ -115,8 +115,6 @@ class Unreachable:
 DEFERRED: dict[str, Deferred] = {
     "'_' cannot be used as an @-binding name.":
         Deferred(680, 'the bootstrap misparses the @-binding'),
-    'A binding pattern must be the sole arm pattern.':
-        Deferred(650, 'the bootstrap accepts the comma chain'),
     "Can't have more than 255 arguments.":
         Deferred(681, 'different token and a second error'),
     "Can't have more than 255 parameters.":
@@ -135,8 +133,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(679, 'different message text'),
     "Expect ')' after field list.":
         Deferred(679, 'different message text'),
-    "Expect ')' after field pattern.":
-        Deferred(679, 'different message text and recovery'),
     "Expect ')' after sequence.":
         Deferred(679, 'different message text'),
     "Expect '.' after 'super'.":
@@ -154,8 +150,6 @@ DEFERRED: dict[str, Deferred] = {
     "Expect ';' after throw expression.":
         Deferred(679, 'different message text'),
     "Expect '=' after destructuring pattern.":
-        Deferred(679, 'different message text'),
-    "Expect '=>' after pattern.":
         Deferred(679, 'different message text'),
     "Expect ']' after element names.":
         Deferred(679, 'different message text'),
@@ -181,14 +175,10 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(641, 'different line at end of file'),
     "Expect '}' after field names.":
         Deferred(679, 'different message text'),
-    "Expect '}' after field pattern.":
-        Deferred(679, 'different message text and recovery'),
     "Expect '}' after match arm body.":
         Deferred(641, 'different line at end of file'),
     "Expect '}' after match body.":
         Deferred(679, 'different message text and line'),
-    'Expect binding name.':
-        Deferred(680, 'the bootstrap runs the program'),
     'Expect element name in sequence pattern.':
         Deferred(679, 'different message text'),
     'Expect element name.':
