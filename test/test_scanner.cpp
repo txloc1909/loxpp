@@ -111,6 +111,41 @@ TEST_F(ScannerTest, StringUnknownEscape) {
     EXPECT_EQ(tokens[0].type, TokenType::ERROR);
 }
 
+TEST_F(ScannerTest, UnknownEscapeSkipsRestOfString) {
+    // The error token replaces the whole literal: nothing in the rest of it
+    // is scanned as code, and the next token follows the closing quote.
+    auto tokens = scanTokens("\"a\\qb\\wc\" 1");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::ERROR);
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[2].type, TokenType::EOF_);
+}
+
+TEST_F(ScannerTest, UnknownEscapeSkipHonoursEscapedQuote) {
+    auto tokens = scanTokens("\"\\q \\\" x\" 1");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::ERROR);
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+}
+
+TEST_F(ScannerTest, UnknownEscapeSkipCountsLines) {
+    // The error keeps the line of the bad escape; the token after the literal
+    // sees the newlines inside it.
+    auto tokens = scanTokens("\"a\\qb\nc\"\n1");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0].type, TokenType::ERROR);
+    EXPECT_EQ(tokens[0].line, 1);
+    EXPECT_EQ(tokens[1].type, TokenType::NUMBER);
+    EXPECT_EQ(tokens[1].line, 3);
+}
+
+TEST_F(ScannerTest, UnknownEscapeSkipEndsAtEndOfInput) {
+    auto tokens = scanTokens("\"a\\qb");
+    ASSERT_EQ(tokens.size(), 2u);
+    EXPECT_EQ(tokens[0].type, TokenType::ERROR);
+    EXPECT_EQ(tokens[1].type, TokenType::EOF_);
+}
+
 TEST_F(ScannerTest, NumberLiteral) {
     const char* source = "123 123.456";
     auto tokens = scanTokens(source);

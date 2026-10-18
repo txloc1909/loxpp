@@ -183,6 +183,7 @@ class Scanner {
         this.current  = 0;
         this.line     = 1;
         this.hadError = false;
+        this.eofInBadString = false;
     }
 
     isAtEnd()   { return this.current >= len(this.source); }
@@ -239,8 +240,7 @@ class Scanner {
                 else if (esc == "r")  { value = value + "\r"; this.advance(); }
                 else {
                     // Report the first unknown escape of a literal, then skip
-                    // to the closing quote. Native rescans the rest of the
-                    // literal as code, so later errors differ (issue #658).
+                    // to the closing quote. Native skips the rest too.
                     if (!badEscape) this.lexError("Unknown escape sequence.");
                     badEscape = true;
                     if (esc == "\n") this.line = this.line + 1;
@@ -252,7 +252,11 @@ class Scanner {
             }
         }
         if (this.isAtEnd()) {
-            if (!badEscape) {
+            if (badEscape) {
+                // Marks the EOF token: the parser enters panic mode when it
+                // reaches that token (see Parser.advance).
+                this.eofInBadString = true;
+            } else {
                 this.line = startLine;
                 this.lexError("Unterminated string.");
             }
@@ -347,7 +351,9 @@ class Scanner {
             this.start = this.current;
             this.scanToken();
         }
-        this.tokens.append(Token("EOF", "", nil, this.line));
+        var eofMark = nil;
+        if (this.eofInBadString) eofMark = "panic";
+        this.tokens.append(Token("EOF", "", eofMark, this.line));
         return this.tokens;
     }
 }
@@ -377,7 +383,14 @@ class Parser {
     previous()   { return this.tokens[this.current - 1]; }
 
     advance() {
-        if (!this.isAtEnd()) this.current = this.current + 1;
+        if (!this.isAtEnd()) {
+            this.current = this.current + 1;
+            // Native scans the error token of a bad literal when it advances
+            // onto it, and that starts panic mode. This literal ends the
+            // input, so the EOF token stands for it. Panic mode stays until
+            // the next synchronize(), as on native.
+            if (this.isAtEnd() and this.peek().literal != nil) this.panicMode = true;
+        }
         return this.previous();
     }
 

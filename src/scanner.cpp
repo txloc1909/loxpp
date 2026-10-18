@@ -310,8 +310,16 @@ Token Scanner::consumeString() {
                 break;
             }
             if (!decodeEscape(peek())) {
+                char bad = peek();
                 advance(); // consume the bad char before reporting
-                return createErrorToken("Unknown escape sequence.");
+                // Build the token before the skip: its line and span end at
+                // the bad escape, not at the end of the literal.
+                Token error = createErrorToken("Unknown escape sequence.");
+                if (bad == '\n') {
+                    m_line++;
+                }
+                skipRestOfString();
+                return error;
             }
         }
         advance();
@@ -326,6 +334,29 @@ Token Scanner::consumeString() {
     auto lexeme = std::string_view{
         m_start + 1, static_cast<std::size_t>(m_current - m_start) - 2};
     return makeToken(TokenType::STRING, lexeme);
+}
+
+void Scanner::skipRestOfString() {
+    // Same closing rule as consumeString: a backslash hides the next character,
+    // so \" does not end the literal. The rest reports no further error.
+    while (peek() != '"' && !isAtEnd()) {
+        if (peek() == '\n') {
+            m_line++;
+        }
+        if (peek() == '\\') {
+            advance();
+            if (isAtEnd()) {
+                return;
+            }
+            if (peek() == '\n') {
+                m_line++;
+            }
+        }
+        advance();
+    }
+    if (!isAtEnd()) {
+        advance(); // the closing quote
+    }
 }
 
 Token Scanner::consumeIdentifier() {
