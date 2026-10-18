@@ -48,6 +48,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WRAPPER = REPO_ROOT / "bootstrap" / "lox_wrapper.sh"
+FATAL_FAST_PATH_PROBE = (
+    REPO_ROOT / "test" / "translation-probes" / "58_defer_overflow_fatal_fast_path.lox"
+)
 
 STATE_LINE_RE = re.compile(
     r"^__BOOTSTRAP_STATE__ defers=(\d+) stringifyDepth=(\d+) "
@@ -91,6 +94,137 @@ CASES = [
         [],
         ["Stack overflow."],
         70,
+    ),
+    (
+        "fatal fast path: no try anywhere, the pending defer of the faulting call does not run",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "main defer"; }\n'
+        "fun main_fn() { defer say(); rec(0); }\n"
+        "main_fn();\n",
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a defer in every unwound frame is skipped (probe 58)",
+        FATAL_FAST_PATH_PROBE.read_text(),
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: spawned task, no try in the task",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "task defer"; }\n'
+        "fun worker() { defer say(); rec(0); }\n"
+        "task.spawn(worker);\n"
+        "task.receive();\n",
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a try in the main task does not cover a spawned task",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "task defer"; }\n'
+        "fun worker() { defer say(); rec(0); }\n"
+        "try {\n"
+        "    task.spawn(worker);\n"
+        "    task.receive();\n"
+        '} catch (e) { print "caught " + e.kind; }\n',
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: coroutine, no try in its resumer",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "co defer"; }\n'
+        "fun body() { defer say(); rec(0); }\n"
+        "coroutine.create(body).resume();\n"
+        'print "after";\n',
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a try inside a suspended coroutine does not cover its next resume",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "co defer"; }\n'
+        "fun body() {\n"
+        "    defer say();\n"
+        '    try { yield 1; } catch (e) { print "no"; }\n'
+        "    rec(0);\n"
+        "}\n"
+        "var co = coroutine.create(body);\n"
+        "co.resume();\n"
+        "co.resume();\n"
+        'print "after";\n',
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: the catch block is not under its own try",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "d"; }\n'
+        "fun f() { defer say(); try { throw 1; } catch (e) { rec(0); } }\n"
+        "f();\n",
+        [],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a caught overflow leaves no try block counted behind it",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        "fun say(s) { print s; }\n"
+        "fun r(n) { try { return r(n + 1); } catch (e) { return e.kind; } }\n"
+        'fun m() { defer say("main defer"); print r(0); rec(0); }\n'
+        "m();\n",
+        ["StackOverflowError"],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "fatal fast path: a task that wakes from a receive inside a try gets back its own count",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        "fun say(s) { print s; }\n"
+        'fun worker(p) { task.send(p, "hi"); }\n'
+        "var me = task.self();\n"
+        "fun m() {\n"
+        '    defer say("main defer");\n'
+        '    try { task.spawn(fun_w); print task.receive(); } catch (e) { print "no"; }\n'
+        "    rec(0);\n"
+        "}\n"
+        "fun fun_w() { worker(me); }\n"
+        "m();\n",
+        ["hi"],
+        ["Stack overflow."],
+        70,
+    ),
+    (
+        "catchable: a try in the same function sees the overflow; the defer of that function runs after the catch",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "d"; }\n'
+        'fun f() { try { defer say(); rec(0); } catch (e) { print "caught " + e.kind; } }\n'
+        "f();\n"
+        'print "after";\n',
+        ["caught StackOverflowError", "d", "after"],
+        [],
+        0,
+    ),
+    (
+        "catchable: the resumer's try covers a coroutine that overflows",
+        "fun rec(n) { return rec(n + 1) + 1; }\n"
+        'fun say() { print "d"; }\n'
+        "fun body() { defer say(); yield 1; rec(0); }\n"
+        "var co = coroutine.create(body);\n"
+        "co.resume();\n"
+        'try { co.resume(); } catch (e) { print "caught " + e.kind; }\n'
+        'print "after";\n',
+        ["d", "caught StackOverflowError", "after"],
+        [],
+        0,
     ),
     (
         "parse-time: deeply nested grouping is a compile error, not a crash",

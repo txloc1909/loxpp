@@ -1664,6 +1664,7 @@ class LoxFunction {
         var savedDefers = interp.pendingDefers;
         var savedStringifyDepth = interp.stringifyDepth;
         var savedNativeDepth = interp.nativeDepth;
+        var savedTryDepth = interp.tryDepth;
         interp.pendingDefers = [];
         // This interpreter is itself a Lox++ program, run by the native VM,
         // so a deeply recursive TARGET program borrows native's own call-
@@ -1678,6 +1679,13 @@ class LoxFunction {
             interp.execBlock(this.body, callEnv);
         } catch (e) {
             if (e.kind != "StackOverflowError") throw e;
+            // tryDepth still holds its value at the fault: the host unwind
+            // skipped the decrements of every execTry it left. With no try
+            // block active in the running task, no catch search can succeed.
+            // Native takes the fatal path here and skips every pending
+            // deferred call, this call's own included (spec, "Fatal Runtime
+            // Errors" and "Call stack overflow's fatal fast path").
+            if (interp.tryDepth == 0) interp.fatalError("Stack overflow.");
             // pendingDefers needs no repair: this try's own scope holds only
             // THIS call's own accumulated defers at the moment of the fault
             // -- the overflow is native refusing to enter the NEXT frame, so
@@ -1695,6 +1703,7 @@ class LoxFunction {
             // invariant of this file.
             interp.stringifyDepth = savedStringifyDepth;
             interp.nativeDepth    = savedNativeDepth;
+            interp.tryDepth       = savedTryDepth;
             interp.returnFlag     = false;
             interp.returnValue    = nil;
             interp.setError("StackOverflowError", "Stack overflow.", 0);
@@ -2491,6 +2500,9 @@ class InterpCoroutine {
         // interp.nativeDepth when this coroutine was last resumed. A yield is
         // legal only while the depth has not grown past it.
         this.resumeDepth = 0;
+        // interp.tryDepth when this coroutine was last resumed: the try
+        // blocks of the resumer, which stay active under the coroutine's own.
+        this.resumeTryDepth = 0;
         this.loxTag      = "coroutine";
         this.host        = coroutine.create(this.run);
     }
@@ -2702,6 +2714,11 @@ class Interpreter {
         // call). A yield cannot cross such a frame on native, so it must not
         // here.
         this.nativeDepth = 0;
+        // Number of try blocks that are executing in the running task, the
+        // resumer's under a running coroutine's own. A target-level stack
+        // overflow is fatal, and skips every pending deferred call, only
+        // when this is 0.
+        this.tryDepth = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
         // recursed into stringify() before the fault" from "stringifyDepth
@@ -2761,6 +2778,7 @@ class Interpreter {
         t.savedDefers         = this.pendingDefers;
         t.savedStringifyDepth = this.stringifyDepth;
         t.savedNativeDepth    = this.nativeDepth;
+        t.savedTryDepth       = this.tryDepth;
         t.savedCo             = this.currentCo;
     }
 
@@ -2770,6 +2788,7 @@ class Interpreter {
         this.pendingDefers  = t.savedDefers;
         this.stringifyDepth = t.savedStringifyDepth;
         this.nativeDepth    = t.savedNativeDepth;
+        this.tryDepth       = t.savedTryDepth;
         this.currentCo      = t.savedCo;
     }
 
@@ -2877,6 +2896,7 @@ class Interpreter {
         this.pendingDefers  = [];
         this.stringifyDepth = 0;
         this.nativeDepth    = 0;
+        this.tryDepth       = 0;
         this.currentCo      = nil;
         var fn = t.fn;
         var args = [];
@@ -3517,9 +3537,13 @@ class Interpreter {
         // coroutine is suspended, so put this coroutine's own back on resume.
         var savedDefers = this.pendingDefers;
         var savedStringifyDepth = this.stringifyDepth;
+        // The try blocks of this coroutine alone: the resumer's are not on
+        // its stack while it is suspended, and the next resumer's replace them.
+        var ownTryDepth = this.tryDepth - co.resumeTryDepth;
         var received = yield v;
         this.pendingDefers = savedDefers;
         this.stringifyDepth = savedStringifyDepth;
+        this.tryDepth = co.resumeTryDepth + ownTryDepth;
         return received;
     }
 
@@ -3551,8 +3575,10 @@ class Interpreter {
         co.state = "running";
         this.currentCo = co;
         co.resumeDepth = this.nativeDepth;
+        co.resumeTryDepth = this.tryDepth;
         var savedDefers = this.pendingDefers;
         var savedStringifyDepth = this.stringifyDepth;
+        var savedTryDepth = this.tryDepth;
         var result = nil;
         try {
             if (co.started) {
@@ -3562,17 +3588,18 @@ class Interpreter {
                 result = co.host.resume(args);
             }
         } catch (e) {
-            this.finishResume(co, parent, savedDefers, savedStringifyDepth);
+            this.finishResume(co, parent, savedDefers, savedStringifyDepth, savedTryDepth);
             throw e;
         }
-        this.finishResume(co, parent, savedDefers, savedStringifyDepth);
+        this.finishResume(co, parent, savedDefers, savedStringifyDepth, savedTryDepth);
         if (this.throwFlag) return nil;
         return result;
     }
 
-    finishResume(co, parent, savedDefers, savedStringifyDepth) {
+    finishResume(co, parent, savedDefers, savedStringifyDepth, savedTryDepth) {
         this.pendingDefers = savedDefers;
         this.stringifyDepth = savedStringifyDepth;
+        this.tryDepth = savedTryDepth;
         this.currentCo = parent;
         if (parent != nil) parent.state = "running";
         if (co.host.status() == "dead") {
@@ -3744,7 +3771,9 @@ class Interpreter {
     }
 
     execTry(tryBlock, catchVar, catchBlock, env) {
+        this.tryDepth = this.tryDepth + 1;
         this.execStmt(tryBlock, env);
+        this.tryDepth = this.tryDepth - 1;
         if (this.throwFlag) {
             this.throwFlag = false;
             var caughtVal = this.thrownValue;

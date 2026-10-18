@@ -1870,7 +1870,7 @@ not part of the language's observable behavior.
 **Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
 row above already covers the general case. Native takes a direct fatal
 path — bypassing the catchable machinery — in two situations: when no
-`try` statement is active anywhere in the program (so a catch search would
+`try` statement is active in the running task (so a catch search would
 fail immediately regardless), and for the re-entrant case the paragraph
 above the catchable table already describes, where a second
 `StackOverflowError` arrives while the first is still unwinding. Both
@@ -1894,7 +1894,7 @@ valid program can reach it.
 **Wrong argument count's fatal fast path.** The catchable `"ArityError"` row
 above already covers the general case: calling a Lox++ function with the
 wrong number of arguments while a `try` statement's handler is active. When
-no handler is active anywhere in the program, native skips constructing the
+no handler is active in the running task, native skips constructing the
 `Error` value entirely and reports the same `"Expected 0 arguments but got
 1."`-shaped message as a direct fatal error (native's own arity and the
 call's argument count) — the ordinary "no handler, so uncaught" outcome the
