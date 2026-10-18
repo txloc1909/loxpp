@@ -1,0 +1,11 @@
+// The last bytes that a program writes to stdout are not a newline. The
+// bootstrap wrapper must pass them on: "abc" reaches stdout, with no newline
+// after it. A wrapper that reads the output line by line can drop such a last
+// line (issue #634). The JVM backend cannot open /dev/stdout on a pipe, so
+// only the bootstrap gate runs this probe.
+var out = open("/dev/stdout", "w");
+out.write("abc");
+out.close();
+
+// STATUS: ok
+// CHECK: abc

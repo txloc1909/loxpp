@@ -75,7 +75,7 @@ each has an off-the-shelf solution.
 | `defer_overflow_kind_spoof` | a plain instance whose `kind` field spoofs `"StackOverflowError"`, thrown and caught entirely inside a deferred call, must not clear the unwind guard early while a real `StackOverflowError` is still unwinding — promoted from jvm-only (issue #322) | P5, P6 |
 | `defer_throw_on_normal_return_during_unwind` | a deferred call's throw on a normal return (no fault propagating out of the deferring frame) must not be handed the unwind guard's identity, even while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
 | `defer_replaces_unrelated_fault_during_unwind` | a deferred call's throw that replaces a different, unrelated fault must not be handed the unwind guard's identity while an unrelated `StackOverflowError` unwinds elsewhere — promoted from jvm-only (issue #322) | P5, P6 |
-| `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on every backend (issue #129) | none (parity gate) |
+| `32_string_nul` | a string literal holding an embedded NUL byte (`\0`): `print` must write every byte, including the text after the NUL, on every backend, the bootstrap included (issue #129, issue #634); CI names it in the bootstrap differential step "NUL probes" | none (parity gate) |
 | `33_class_pattern_match_error` | a `match` whose arms are all class patterns raises a real, reachable `MATCH_ERROR` when no arm matches, through the same fused opcode as the enum case | P8 |
 | `34_match_consumed_result` | a `match` expression's result, once its own closing `POP` retires the synthetic subject local, is exposed as a named local's own value — `PRINT` and `DEFINE_GLOBAL` each need their own fold-aware read, the same way `RETURN` and `SET_GLOBAL` already do | P1, P2 |
 | `37_invoke_field_bound_native_method` | a bound built-in method stored in an instance field and invoked through the field name drives `INVOKE`'s field-shadow arm, not `GET_PROPERTY` followed by `CALL` (spec/04-semantics.md) | P5, P6 |
@@ -129,6 +129,7 @@ each has an off-the-shelf solution.
 | `100_class_name_list_elem_binding` | a name in a sequence pattern (`[Shape, b]`) is a binding, also when a global class has that name — a spec probe | none (spec probe) |
 | `101_class_declared_after_match` | a bare pattern name is a class test only when a global class of that name is declared earlier in the source; the test reads the global when it runs, so a name whose global no longer holds a class matches no value — a spec probe | none (spec probe) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/04-semantics.md, Implementation-Gated Exception, rule 1); probes 95 and 96 do not bind the bootstrap, and this probe holds it to the exception in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
+| `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634); the JVM backend cannot open `/dev/stdout` on a pipe, so only the bootstrap gates run it — `check_spec_probes.py` and the CI step "NUL probes" | none (parity gate) |
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
 | `55_for_in_map_net_zero` | an erase plus an insert in one `for`-in body restores the net size, so a size check misses it — the structural version check must still fail on every backend, with empty stdout (issue #362) — an `error_probes` entry | none (error-parity gate) |
 | `jvm-only/61_operator_overload` | operator overloading (issue #472): every T1 dunder method (`__add__ __sub__ __mul__ __div__ __mod__ __neg__ __lt__ __gt__ __eq__ __contains__ __call__`), the Wave-2 methods (`__index_get__ __index_set__ __len__ __iter__`), and the deferred `__slice__` dispatch on an Instance; `!=`/`<=`/`>=` derive from `__eq__`/`__gt__`/`__lt__`, and the built-in List/String/Map/Number paths stay unchanged. Also the reflected methods (issue #508): a built-in left operand defers to the right operand's `__radd__ __rsub__ __rmul__ __rdiv__ __rmod__ __rlt__ __rgt__` or `__eq__`, with `<=`/`>=` deriving from the reflected `__rgt__`/`__rlt__` — named directly by both check scripts, see the note below the table | P6 |
@@ -143,7 +144,7 @@ each has an off-the-shelf solution.
 | `49_try_catch_map_undefined_property_fatal` | an undefined property read on a Map is fatal even with a live `try` (issue #253) | none (error-parity gate) |
 | `50_try_catch_non_instance_get_property_fatal` | `GET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
 | `51_try_catch_non_instance_set_property_fatal` | `SET_PROPERTY` on a non-Instance receiver is fatal even with a live `try` (issue #253) | none (error-parity gate) |
-| `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401) | none (parity gate) |
+| `56_file_nul` | `File.read`/`readline`/`readlines` return the full binary content when it holds NUL bytes (issue #401); CI names it in the same bootstrap step "NUL probes" (issue #634) | none (parity gate) |
 | `56_file_read` | `File.read()` with arity 0 exists on every consumer, the bootstrap included (issue #378) | none (parity gate) |
 | `56_math_constants` | `math.inf` and `math.nan` are Numbers with the native values, not a native-fn value (issue #329) | none (parity gate) |
 | `57_defer_arity_fatal_fast_path` | the wrong-argument-count fatal fast path skips every pending `defer` when no `try` is live — empty stdout, no `defer-g` (issue #319) | none (error-parity gate) |
@@ -197,7 +198,8 @@ probe of this directory on one consumer and compares the whole stdout, the
 stderr prefix, and the exit status. CI runs it on the native VM, the bootstrap interpreter, the JVM
 backend, and the QBE backend. `tools/diff_runtimes.py` compares the JVM, QBE,
 and bootstrap runs with native; the bootstrap walk takes only the spec
-probes (`--only-spec-probes`). A consumer that does not pass a probe yet
+probes (`--only-spec-probes`), and a separate CI step names `32_string_nul` and
+`56_file_nul`. A consumer that does not pass a probe yet
 can list it in an expected-failure file, which both tools read with
 `--xfail`: a listed probe must fail, and a listed probe that passes fails
 the gate until its line is deleted.
