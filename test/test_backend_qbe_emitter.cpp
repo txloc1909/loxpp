@@ -208,6 +208,14 @@ TEST(QbeEmitter, GlobalAccessReadsAPredeclaredSlot) {
               std::string::npos);
 }
 
+TEST(QbeEmitter, AFunctionWithoutAGlobalDoesNotFetchTheSlotBase) {
+    // The program has globals, so the slot list is non-empty. The emitted
+    // function f itself has no global op and must not pay the prologue call.
+    std::string ssa =
+        emitNestedFrom("var g = 1; fun f() { return 1; } print g;", {0});
+    EXPECT_EQ(ssa.find("rt_global_slots"), std::string::npos);
+}
+
 TEST(QbeEmitter, ArithmeticHasAFastAndSlowPath) {
     std::string ssa = emitScriptFrom("print 1 + 2;");
     EXPECT_NE(ssa.find("call $rt_op_add"), std::string::npos);

@@ -403,6 +403,24 @@ TEST(RtStartup, PredeclaresTheSortedGlobalSlotList) {
     rt_shutdown(rt);
 }
 
+TEST(RtStartup, DefineGlobalAtWritesTheSlot) {
+    // #592: m_globals is the authority, but a compiled read uses the slot.
+    // A declare that updates only the table would pass every other test,
+    // because the unbound slow path reads m_globals.
+    Runtime rt;
+    rt.setGlobalSlotNames({"x"});
+    rt.predeclareGlobalSlots();
+    ObjString* name = rt.memoryManager().makeString("x");
+    rt.push(Value{42.0});
+    rt.opDefineGlobalAt(name, 0);
+    ASSERT_EQ(rt.globalSlotCount(), 1);
+    ASSERT_FALSE(isUnboundGlobal(rt.globalSlotBase()[0]));
+    EXPECT_DOUBLE_EQ(as<Number>(rt.globalSlotBase()[0]), 42.0);
+    auto got = rt.getGlobal("x");
+    ASSERT_TRUE(got.has_value());
+    EXPECT_DOUBLE_EQ(as<Number>(*got), 42.0);
+}
+
 TEST(RtStartup, ReturnsNullOnCompileError) {
     Runtime* rt = rt_startup("fun (", nullptr, 0);
     EXPECT_EQ(rt, nullptr);
