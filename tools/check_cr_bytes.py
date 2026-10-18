@@ -3,10 +3,13 @@
 Byte-exact check for a printed carriage return (byte 13).
 
 tools/diff_runtimes.py and tools/check_spec_probes.py read stdout in text
-mode, and text mode turns each CR byte into a newline. A runner that drops or
-changes a printed CR therefore passes both. This script runs each program on
-native and on a second runner in binary mode, and compares the raw stdout
-bytes and the exit status.
+mode, and text mode turns each CR byte into a newline. A lone CR that a runner
+drops still shows as a difference. Two cases do not show: a runner that
+changes a CR into a newline, and a runner that drops a CR before a newline.
+This script runs each program on native and on a second runner in binary
+mode, and compares the raw stdout bytes and the exit status. The default
+probe holds a lone CR, so it covers a CR changed into a newline; it holds no
+CR before a newline.
 
 Native must print a CR byte itself. Without that rule, two outputs that both
 lost the CR would be equal and the check would pass with nothing checked.
