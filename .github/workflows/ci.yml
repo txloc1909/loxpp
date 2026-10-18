@@ -529,6 +529,20 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/57_defer_arity_fatal_fast_path.lox test/translation-probes/58_defer_overflow_fatal_fast_path.lox test/translation-probes/59_return_out_of_try_leak.lox --timeout 120"
 
+      # Five probes that the walk above skips: they have no STATUS line. A
+      # deferred call raises a second StackOverflowError while the first one
+      # unwinds (issue #637). The spec makes the second one fatal, so the
+      # bootstrap must print nothing and exit 70, as native does.
+      - name: Bootstrap differential suite - re-entrant overflow probes
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/58_stack_overflow_reentrant_fatal.lox test/translation-probes/defer_overflow_during_unwind.lox test/translation-probes/defer_overflow_kind_spoof.lox test/translation-probes/defer_replaces_unrelated_fault_during_unwind.lox test/translation-probes/defer_throw_on_normal_return_during_unwind.lox --timeout 120"
+
       # examples/bench_jump_table.lox is left out by name: it is a
       # 5,000,000-iteration microbenchmark with no CHECK line, and it does
       # not finish inside the timeout on the bootstrap interpreter. The
