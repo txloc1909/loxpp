@@ -1,0 +1,2 @@
+// Compile error: two locals with one name in one scope.
+fun f() { var a = 1; var a = 2; }

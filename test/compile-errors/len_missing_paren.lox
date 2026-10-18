@@ -1,0 +1,2 @@
+// Compile error: `len` with no parenthesis.
+print len 1;

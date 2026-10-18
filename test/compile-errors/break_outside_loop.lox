@@ -1,0 +1,2 @@
+// Compile error: `break` outside a loop or a match.
+break;

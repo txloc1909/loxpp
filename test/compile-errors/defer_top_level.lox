@@ -1,0 +1,4 @@
+// Compile error: `defer` in top-level code.
+fun f() {}
+defer f();
+print "after";

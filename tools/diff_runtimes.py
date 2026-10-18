@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 """
-Differential runner: native loxpp vs. another loxpp backend, stdout only.
+Differential runner: native loxpp vs. another loxpp consumer, at compile time
+and at run time.
 
 Runs each Lox++ program on the native binary and on a second runner
-(tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an
-equivalent), then compares stdout. It does not compare stderr in the ordinary
-comparison and compares the exit code only for the empty-stdout tie-break:
-differential scope is stdout only. The probe criteria that the --xfail
-account uses also include a probe's stderr lines.
+(tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, bootstrap/lox_wrapper.sh, or an
+equivalent), then compares the two runs in two phases.
 
-stderr is still captured for every run, because a spec probe can pin it with
-`// STDERR:` lines (see tools/check_spec_probes.py), and the --xfail account
-must agree with that probe's own pass rule.
+Compile phase. Exit status 65 is a compile error (a parser or resolver
+error) on every consumer: build/loxpp returns it, the JVM and QBE wrappers
+return the status of `loxpp --target`, and bootstrap/lox_wrapper.sh returns
+it for its LOXERR65 line. When either run exits 65, both runs must exit 65
+and their stderr text must be the same, or the program reports DIVERGE
+(compile phase). A match prints as "MATCH (compile error)". A compile error
+writes nothing to stdout, so the run-time comparison below cannot see one.
 
-Four outcomes per program:
+--compile-errors says that every program is a compile-error case: a
+program that native does not reject at compile time reports DIVERGE, so a
+corpus file that stops being a compile error fails and does not pass as a
+quiet run-time match.
+
+Run phase. When neither run exits 65, this script compares stdout. It does
+not compare stderr in the ordinary comparison, and it compares the exit code
+only for the empty-stdout tie-break below: run-time scope is stdout. The
+probe criteria that the --xfail account uses also include a probe's stderr
+lines, because a spec probe can pin them with `// STDERR:` lines (see
+tools/check_spec_probes.py). Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
   STALE        stdout is byte-identical on both runtimes, but the program is
                on the exclusion list. The exclusion is no longer needed and
@@ -63,7 +75,8 @@ this script's default. State that trade-off, do not hide it.
 
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
-        [--exclude <file>] [--xfail <file>] [--consumer <name>] [--timeout <seconds>]
+        [--exclude <file>] [--xfail <file>] [--consumer <name>]
+        [--compile-errors] [--timeout <seconds>]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
@@ -221,6 +234,11 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
     return reasons
 
 
+# The exit status of a compile error on every consumer (see the module
+# docstring). No consumer uses it for a run-time fault.
+COMPILE_ERROR_STATUS = 65
+
+
 class RunTimeout(Exception):
     """A runtime did not finish inside the allowed time."""
 
@@ -230,12 +248,11 @@ def run_program(
 ) -> tuple[str, str, int]:
     """Runs one program and returns (stdout, stderr, exit code).
 
-    The exit code is not part of the ordinary MATCH/PERMUTATION/DIVERGE
-    comparison (differential scope is stdout only) — it exists only for the
-    empty-stdout tie-break in main(), where stdout alone cannot tell a
-    legitimate silent success from a silent crash. stderr is captured for the
-    spec-probe criteria of the --xfail account, which checks a probe's STDERR
-    lines as well as its stdout and exit status.
+    The run-time comparison reads the exit code only for the empty-stdout
+    tie-break in main(), where stdout alone cannot tell a legitimate silent
+    success from a silent crash. The compile phase reads the exit code and
+    stderr (see COMPILE_ERROR_STATUS), and the --xfail account reads a
+    probe's STDERR lines.
 
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
@@ -293,12 +310,12 @@ def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Differential runner: native loxpp vs another loxpp backend, stdout only."
+        description="Differential runner: native loxpp vs another loxpp consumer, compile phase and run phase."
     )
     parser.add_argument("native", help="path to the native loxpp binary")
     parser.add_argument(
         "other_runner",
-        help="path to tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an equivalent runner",
+        help="path to tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, bootstrap/lox_wrapper.sh, or an equivalent runner",
     )
     parser.add_argument(
         "paths", nargs="*", default=[], help="a .lox file, or a directory of .lox files"
@@ -319,6 +336,11 @@ def main() -> None:
         "--consumer",
         default=None,
         help="the consumer the other runner is, for the NOT-BINDING lines of spec probes",
+    )
+    parser.add_argument(
+        "--compile-errors",
+        action="store_true",
+        help="every program must be a compile error on native; one that is not reports DIVERGE",
     )
     parser.add_argument(
         "--only-excluded",
@@ -397,6 +419,33 @@ def main() -> None:
             else:
                 print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
                 xfailed += 1
+            continue
+
+        native_compile = native_status == COMPILE_ERROR_STATUS
+        other_compile = other_status == COMPILE_ERROR_STATUS
+        if args.compile_errors and not native_compile:
+            print(
+                f"DIVERGE     {lox_file}  (not a compile-error case: native exited "
+                f"{native_status}, not {COMPILE_ERROR_STATUS})"
+            )
+            diverged += 1
+            continue
+        if native_compile or other_compile:
+            if native_compile and other_compile and native_err.rstrip() == other_err.rstrip():
+                print(f"MATCH       {lox_file}  (compile error)")
+                matched += 1
+                continue
+            print(f"DIVERGE     {lox_file}  (compile phase)")
+            print(f"            native exited {native_status}, other exited {other_status}")
+            for line in difflib.unified_diff(
+                native_err.rstrip().splitlines(),
+                other_err.rstrip().splitlines(),
+                fromfile="native stderr",
+                tofile=f"{Path(args.other_runner).name} stderr",
+                lineterm="",
+            ):
+                print(f"            {line}")
+            diverged += 1
             continue
 
         if native_out == other_out:

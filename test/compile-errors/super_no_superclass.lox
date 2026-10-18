@@ -1,0 +1,2 @@
+// Compile error: `super` in a class with no superclass.
+class A { f() { return super.f(); } }

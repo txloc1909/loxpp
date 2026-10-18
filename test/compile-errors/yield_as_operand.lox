@@ -1,0 +1,2 @@
+// Compile error: `yield` as the left operand of a binary operator.
+var x = yield + 1;

@@ -1,0 +1,2 @@
+// Compile error: an enum body with no opening brace.
+enum E A B

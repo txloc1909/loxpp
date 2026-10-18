@@ -907,6 +907,17 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/ --xfail tools/probe_xfail_jvm.txt"
 
+      # The compile phase of the differential gate: each parser or resolver
+      # error of test/compile-errors/ must give the same exit status (65)
+      # and the same stderr on the JVM backend as on native.
+      - name: JVM differential suite - compile errors
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/compile-errors/ --compile-errors"
+
       # The full example corpus on the JVM backend, zero failures. --exclude
       # skips the map-iteration-order-sensitive examples
       # (tools/jvm_excluded_examples.txt); the native path below still runs
@@ -1105,6 +1116,17 @@ jobs:
             -w /workspace \
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/probe_xfail_qbe.txt"
+
+      # The compile phase of the differential gate: each parser or resolver
+      # error of test/compile-errors/ must give the same exit status (65)
+      # and the same stderr on the QBE backend as on native.
+      - name: QBE differential suite - compile errors
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh test/compile-errors/ --compile-errors"
 
       # S8's own checkpoint (issue #461): register promotion narrows what the
       # GC can see on the QBE backend's fused stack, so this runs the whole

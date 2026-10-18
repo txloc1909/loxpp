@@ -1,0 +1,2 @@
+// Compile error: `this` in top-level code.
+print this;
