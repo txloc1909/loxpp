@@ -413,7 +413,9 @@ callee(arg1, arg2, ...)
 
 Functions may be called recursively. The depth limit is implementation-defined;
 exceeding it is a **runtime error**, except for the self tail calls described
-next, which do not count toward the depth.
+next, which do not count toward the depth. The bootstrap interpreter may
+support a lower depth than the other implementations (see
+[Implementation-Gated Exception](#implementation-gated-exception-the-bootstrap-interpreter)).
 
 #### Self Tail Calls
 
@@ -1668,10 +1670,12 @@ catchable has no `Error` value.
 
 ### Implementation-Gated Exception: the Bootstrap Interpreter
 
-This specification allows one exception, and only for the bootstrap
-interpreter, the Lox++ interpreter that is written in Lox++. The bootstrap
-interpreter may run every worker on one host thread, with the tasks of all
-workers in one scheduler. Under that form, and only there:
+This specification allows two exceptions, and only for the bootstrap
+interpreter, the Lox++ interpreter that is written in Lox++.
+
+**Worker form.** The bootstrap interpreter may run every worker on one host
+thread, with the tasks of all workers in one scheduler. Under that form, and
+only there:
 
 1. A task runs alone among the tasks of every worker from one suspend point
    to the next, not only among the tasks of its own worker.
@@ -1687,7 +1691,14 @@ same time can behave differently under that form. Examples are a task that
 waits in a blocking call until a task on another worker acts, and a task
 that never reaches a suspend point while a task on another worker must run.
 
-No other implementation may use this exception.
+**Call depth.** The bootstrap interpreter may support a lower call depth than
+the other implementations support. A program that needs more call depth than
+the bootstrap interpreter supports may raise `StackOverflowError`, and the
+program halts when nothing catches it; another implementation can run the same
+program to the end. The depth limit stays implementation-defined, and no other
+rule changes.
+
+No other implementation may use these exceptions.
 
 ### Bounding a Mailbox (Non-Normative)
 
