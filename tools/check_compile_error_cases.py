@@ -161,8 +161,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(679, 'different message text'),
     "Expect ']' after sequence pattern.":
         Deferred(679, 'different message text'),
-    "Expect 'case' in match body.":
-        Deferred(679, 'different message text and token'),
     "Expect 'catch' after try block.":
         Deferred(641, 'different line at end of file'),
     "Expect '{' after 'try'.":

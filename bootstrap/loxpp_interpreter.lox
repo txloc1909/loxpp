@@ -992,7 +992,10 @@ class Parser {
         if (this.panicMode) return MatchExpr(subject, [], 0);
         var arms = [];
         while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
-            this.expect("CASE", "Expect 'case' in match arm.");
+            if (!this.matchT("CASE")) {
+                this.parseError(this.previous(), "Expect 'case' in match body.");
+                break;
+            }
             if (this.panicMode) break;
             var pats = this.parseMatchArmPatterns();
             var guard = nil;
