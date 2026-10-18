@@ -1,0 +1,13 @@
+// A for-in over a value that is not a List, String, Map, or Coroutine is a
+// fatal fault. A try does not catch it, so the catch block and the code after
+// the try never run (spec/04-semantics.md, Fatal Runtime Errors). The program
+// prints nothing and exits with status 70.
+try {
+    for (var x in 5) { print x; }
+} catch (e) {
+    print e.kind;
+}
+print "after";
+
+// STATUS: error
+// EXIT: 70
