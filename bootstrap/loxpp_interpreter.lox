@@ -3572,14 +3572,18 @@ class Interpreter {
         if (this.throwFlag) return nil;
         var index = this.evalExpr(indexExpr, env);
         if (this.throwFlag) return nil;
+        // Native's SET_INDEX leaves the object, the index and the value on the
+        // stack before Runtime::opSetIndex checks the target or the index, so
+        // every effect of the value expression happens before a fault from a
+        // check below.
+        var val = this.evalExpr(valueExpr, env);
+        if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
             if (!this.isValidMapKey(index)) {
                 this.setInvalidMapKeyError(index, line);
                 return nil;
             }
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             // Count only a new key: an overwrite leaves iteration valid,
             // while a paired erase plus insert must still trip the check.
             this.mapSet(object, index, val);
@@ -3591,24 +3595,16 @@ class Interpreter {
             var fl = math.floor(index);
             if (fl != index) { this.setError("IndexNotIntegerError", "List index must be an integer.", line); return nil; }
             if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             object.elements[fl] = val;
             return val;
         }
-        // The object, the index and the value are all evaluated before the
-        // fault, in this order, as Runtime::opSetIndex sees them on the stack.
-        // The fault is fatal here but a catchable NotIndexableError below.
+        // This fault is fatal, but the value has already run, as on native.
         if (isLoxStr(object)) {
-            this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             this.fatalError("Strings are immutable and cannot be indexed for assignment.");
             return nil;
         }
         var m = this.findDunder(object, "__index_set__");
         if (m != nil) {
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             m.bind(object).call(this, [index, val]);
             if (this.throwFlag) return nil;
             return val; // assignment is an expression; its value is the assigned value

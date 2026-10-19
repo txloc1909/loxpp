@@ -1,0 +1,43 @@
+// An index assignment evaluates the collection, the index and the value, in
+// this order, before it checks the target or the index. A List, an invalid
+// map key and a non-indexable target raise a catchable fault after the value
+// has run. Assignment to a String is a halting fault (spec/04-semantics.md,
+// Halting Faults), so it is last: the program prints INDEX and VALUE, then
+// halts. The effects before every fault bind (spec/README.md, Conformance).
+fun badIndex() { print "INDEX"; return 99; }
+fun badKey() { print "KEY"; return [1]; }
+fun v() { print "VALUE"; return "x"; }
+
+var l = [1, 2, 3];
+try { l[badIndex()] = v(); } catch (e) { print e.kind; }
+
+// The List checks run after the value, so a value that grows the list can
+// make an index valid that was out of bounds before it ran.
+var grown = [1];
+fun grow() { print "GROW"; grown.append(2); return 9; }
+grown[1] = grow();
+print grown;
+
+try { 42[badIndex()] = v(); } catch (e) { print e.kind; }
+
+var m = {};
+try { m[badKey()] = v(); } catch (e) { print e.kind; }
+
+var s = "abc";
+s[badIndex()] = v();
+print "after";
+
+// STATUS: error
+// CHECK: INDEX
+// CHECK: VALUE
+// CHECK: IndexOutOfBoundsError
+// CHECK: GROW
+// CHECK: [1, 9]
+// CHECK: INDEX
+// CHECK: VALUE
+// CHECK: NotIndexableError
+// CHECK: KEY
+// CHECK: VALUE
+// CHECK: InvalidMapKeyError
+// CHECK: INDEX
+// CHECK: VALUE
