@@ -76,6 +76,12 @@ writing anything looks identical, on stdout alone, to a program that
 legitimately prints nothing. The exact exit status comparison above rejects
 such a run. A match of two silent runs prints as "MATCH (empty)".
 
+--skip-on-trace exits 125 (ctest's SKIP_RETURN_CODE) when
+LOXPP_BOOTSTRAP_TRACE_ENABLED=1 is in the environment. A build that traces
+execution prints an instruction trace on stdout, so no stdout comparison can
+pass. This flag is opt-in, for a ctest entry that runs one probe on a build
+that may carry the debug trace macros.
+
 On a DIVERGE, this script prints a short diff excerpt and a best-effort guess
 at which opcode family (P1-P8, see docs/reference/bytecode-translation-problems.md) is
 involved, from a syntax scan of the program. This is a hint, not a proof: a
@@ -87,6 +93,7 @@ Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
         [--exclude <file>] [--xfail <file>] [--consumer <name>]
         [--only-spec-probes] [--compile-errors] [--timeout <seconds>]
+        [--skip-on-trace]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
         --exclude <file> --only-excluded <dir>
 
@@ -107,6 +114,7 @@ reason, rather than hanging the whole run.
 
 import argparse
 import difflib
+import os
 import re
 import resource
 import subprocess
@@ -371,7 +379,19 @@ def main() -> None:
         default=30.0,
         help="seconds to allow each runtime per program, default 30",
     )
+    parser.add_argument(
+        "--skip-on-trace",
+        action="store_true",
+        help=(
+            "exit 125 (ctest's SKIP_RETURN_CODE) when "
+            "LOXPP_BOOTSTRAP_TRACE_ENABLED=1 is in the environment"
+        ),
+    )
     args = parser.parse_args()
+
+    if args.skip_on_trace and os.environ.get("LOXPP_BOOTSTRAP_TRACE_ENABLED") == "1":
+        print("SKIP: the build under test traces execution (release preset required)")
+        sys.exit(125)
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
     xfail = parse_xfail_file(args.xfail) if args.xfail else {}
