@@ -616,11 +616,12 @@ TEST(QbeEmitter, CoroutineModeGivesIterHasNextAResumePoint) {
         << "the resume state must belong to the ITER_HAS_NEXT itself";
     std::size_t num = ssa.find("w ", set);
     int state = std::stoi(ssa.substr(num + 2));
-    std::string continuation =
-        labelBlockBody(ssa, "lox_fn_nested_resume" + std::to_string(state));
-    EXPECT_FALSE(continuation.empty())
+    std::string resumeState = "lox_fn_nested_resume" + std::to_string(state);
+    EXPECT_FALSE(labelBlockBody(ssa, resumeState).empty())
         << "the state needs a continuation label, not only a dispatch "
            "reference";
+    EXPECT_NE(ssa.find(", @" + resumeState + ", @"), std::string::npos)
+        << "the prologue must dispatch on this state";
 }
 
 TEST(QbeEmitter, YieldOutsideCoroutineModeThrows) {
