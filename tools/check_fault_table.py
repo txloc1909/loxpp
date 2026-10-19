@@ -29,7 +29,9 @@ Usage:
                                 [--bootstrap PATH] [--timeout SECONDS]
 
 Exits 0 when every non-skipped (row, consumer) pair conforms. Exits 1 and
-prints every mismatch otherwise.
+prints every mismatch otherwise. Exits 2 and names the problem when an
+input is unusable: a missing JVM runtime jar, a stale row corpus, or a bad
+--only value.
 """
 
 import argparse
@@ -42,6 +44,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
+JVM_WRAPPER = REPO_ROOT / "tools" / "loxpp_jvm.sh"
+DEFAULT_JVM_RT_JAR = REPO_ROOT / "runtime" / "jvm" / "lox-rt.jar"
 
 NATIVE = "native"
 JVM = "jvm"
@@ -873,6 +877,27 @@ class ConsumerCommand:
         )
 
 
+def require_jvm_rt_jar(jvm: str) -> None:
+    """Exits 2 when the default JVM wrapper's runtime jar is absent.
+
+    tools/loxpp_jvm.sh exits non-zero with no program output when the jar is
+    missing, and classify() reads that as a fault: every catchable row then
+    reports a divergence against a consumer that never started. A custom
+    --jvm command owns its own runtime and startup, so only the default
+    wrapper is checked.
+    """
+    if Path(jvm).resolve() != JVM_WRAPPER.resolve():
+        return
+    jar = Path(os.environ.get("LOX_RT_JAR") or DEFAULT_JVM_RT_JAR)
+    if not jar.is_file():
+        print(
+            f"check_fault_table.py: no JVM runtime jar at {jar}; "
+            "run tools/build_lox_rt.sh first",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _first_stderr_line(stderr: str) -> str:
     for line in stderr.splitlines():
         stripped = line.strip()
@@ -969,6 +994,7 @@ def main() -> None:
         "--only", default=None, help="run only rows whose name contains this substring (for debugging)"
     )
     args = parser.parse_args()
+    require_jvm_rt_jar(args.jvm)
 
     commands = {
         NATIVE: ConsumerCommand(NATIVE, [args.native]),
@@ -1076,7 +1102,9 @@ def main() -> None:
                 print(f"MATCH       {row.name}  ({native_result.outcome}){suffix}")
 
     print()
-    print(f"{len(rows) - skipped_rows} row(s) checked, {skipped_rows} row(s) not runnable, {diverged} divergence(s)")
+    print(f"rows checked: {len(rows) - skipped_rows}")
+    print(f"rows not runnable: {skipped_rows}")
+    print(f"divergences: {diverged}")
     print(
         "per-consumer row skips: "
         + ", ".join(f"{consumer}={count}" for consumer, count in per_consumer_skips.items())
