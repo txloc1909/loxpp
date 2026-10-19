@@ -44,6 +44,12 @@ TEST(CheckDiagnostics, UnterminatedString) {
     expectOne("var s = \"abc;\n", 1, 9, "Unterminated string");
 }
 
+TEST(CheckDiagnostics, FirstTokenScanError) {
+    // A scan error on the first token goes through the same path as any later
+    // token, so the sink receives the scanner's message, not a parse error.
+    expectOne("\"abc;\n", 1, 1, "Unterminated string");
+}
+
 TEST(CheckDiagnostics, OperatorExpressionIsNotAnAssignmentTarget) {
     // A following '=' is not an assignment after any operator expression, so
     // the statement misses its ';'. Each rule that parses an operator must

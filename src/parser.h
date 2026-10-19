@@ -78,7 +78,7 @@ struct Parser {
     // wires it; vm.cpp leaves it null.
     DiagnosticSink* m_sink{nullptr};
 
-    Parser(const std::string& source);
+    Parser(const std::string& source, DiagnosticSink* sink = nullptr);
 
     void parsePrecedence(Precedence precedence, Compiler* compiler);
 
@@ -86,6 +86,10 @@ struct Parser {
     void errorAtCurrent(const char* message);
     void error(const char* message);
 
+    // Reads the next token, reporting and skipping any scan error. Both the
+    // constructor and advance() call it, so a scan error on the first token is
+    // reported exactly like one on any later token.
+    void scanNextToken();
     void advance();
     void consume(TokenType type, const char* message);
     [[nodiscard]] bool check(TokenType type) const;

@@ -21,8 +21,7 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm,
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink, const CompileOptions& options) {
     ObjFunction* fn = mm->create<ObjFunction>();
-    auto parser = std::make_unique<Parser>(source);
-    parser->m_sink = sink;
+    auto parser = std::make_unique<Parser>(source, sink);
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
     compiler->m_sourceId = options.sourceId;

@@ -217,8 +217,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap has a different limit'),
     'Too many local variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
-    'Unexpected character.':
-        Deferred(641, 'the bootstrap adds a second error'),
     "Unknown constructor or class '<...>'.":
         Deferred(678, 'the bootstrap does not check the name'),
     "Unknown field '<...>' for '<...>'.":
