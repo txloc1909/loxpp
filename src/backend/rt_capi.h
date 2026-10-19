@@ -371,9 +371,10 @@ void rt_set_frame_offset(Runtime* rt, int offset) noexcept;
 // --- coroutine mode (QBE #530/#535) --------------------------------------
 
 // The current (topmost) frame's compiled resume point. A coroutine-mode
-// function's prologue reads it to jump to the block after the call or YIELD
-// it suspended at; the emitted code writes it (rt_set_resume_state) before a
-// resumable call or a YIELD. Always 0 outside coroutine mode.
+// function's prologue reads it to jump to the block after the resume point
+// it suspended at; the emitted code writes it (rt_set_resume_state) before
+// every resume point: a suspending call, ITER_HAS_NEXT, or a YIELD. Always 0
+// outside coroutine mode.
 int rt_resume_state(Runtime* rt) noexcept;
 void rt_set_resume_state(Runtime* rt, int state) noexcept;
 
