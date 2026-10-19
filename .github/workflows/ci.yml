@@ -861,6 +861,28 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_fault_table.py"
 
+      # A missing JVM runtime jar must be a setup error, not a fault: the
+      # wrapper exits without a marker, and the differential run above would
+      # read that as a divergence. CI builds the jar earlier in this job, so
+      # this negative run is the only place the guard itself is exercised.
+      - name: Check fault table - missing JVM jar
+        run: |
+          set +e
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOX_RT_JAR=/nonexistent/lox-rt.jar \
+            loxpp-dev-managed:latest \
+            python3 tools/check_fault_table.py > "$RUNNER_TEMP/fault_table_no_jar.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/fault_table_no_jar.txt"
+          if [ "$status" -ne 2 ]; then
+            echo "expected exit 2 for a missing JVM runtime jar, got $status"
+            exit 1
+          fi
+          grep -q "no JVM runtime jar at /nonexistent/lox-rt.jar" "$RUNNER_TEMP/fault_table_no_jar.txt"
+
       # spec/05-stdlib.md: every File still open when the program ends must
       # be flushed as if close() had been called, on every exit path. Runs
       # on all four consumers this job already has a binary for.
