@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Expect binding name.
+// Compile error: a positional constructor pattern slot holds a literal.
+enum E { A(x) }
+var v = A(1);
+var r = match v { case A(1) => 1 case _ => 0 };
+print "after";

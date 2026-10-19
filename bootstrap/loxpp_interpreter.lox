@@ -139,7 +139,7 @@ enum Pattern {
     WildPat
     LitPat(v)
     BindPat(name)
-    CtorPat(cname, subpats)
+    CtorPat(cname, subpats, named, line)
     ListPat(elems, rest_name)
     AtPat(at_name, subpat)
     ClassPat(cname)
@@ -159,6 +159,8 @@ class MatchArm {
         // [comma token, token before it, index of the pattern before it] for
         // the first comma of an arm that does not start with a literal, or nil.
         this.chain     = nil;
+        // Line of the arm's first pattern, for the resolver's arm-level errors.
+        this.line      = 0;
     }
 }
 
@@ -1041,6 +1043,7 @@ class Parser {
                 break;
             }
             if (this.panicMode) break;
+            var patLine = this.peek().line;
             var pats = this.parseMatchArmPatterns();
             var chain = this.armChain;
             var guard = nil;
@@ -1049,6 +1052,7 @@ class Parser {
             if (this.panicMode) break;
             var arm = this.matchArmBody(pats, guard);
             arm.chain = chain;
+            arm.line = patLine;
             arms.append(arm);
         }
         var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
@@ -1153,7 +1157,7 @@ class Parser {
                     }
                 }
                 this.expect("RIGHT_PAREN", "Expect ')' after field pattern.");
-                return CtorPat(nameTok.lexeme, subpats);
+                return CtorPat(nameTok.lexeme, subpats, false, nameTok.line);
             }
             if (this.matchT("LEFT_BRACE")) {
                 var subpats = [];
@@ -1164,7 +1168,7 @@ class Parser {
                     }
                 }
                 this.expect("RIGHT_BRACE", "Expect '}' after field pattern.");
-                return CtorPat(nameTok.lexeme, subpats);
+                return CtorPat(nameTok.lexeme, subpats, true, nameTok.line);
             }
             return BindPat(nameTok.lexeme);
         }
@@ -1237,6 +1241,9 @@ class Resolver {
         // constructor names in declaration order. Both are global.
         this.enumCtors       = {};
         this.enumDecls       = {};
+        // Constructor name -> its declared field names, in declaration order.
+        // A named-field constructor pattern binds these fields by name.
+        this.enumCtorFields  = {};
         // Global classes declared so far, in source order. With enumCtors,
         // this set decides the pattern names that classifyArmPat changes.
         this.classNames      = {};
@@ -1319,7 +1326,7 @@ class Resolver {
                 this.endScope();
                 nil
             }
-            case EnumDecl{name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines} => this.resolveEnumDecl(name, ctor_names, keyword_line, name_line, ctor_lines)
+            case EnumDecl{name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines} => this.resolveEnumDecl(name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines)
             case SeqDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case ObjDestructure{names, line, initializer}     => this.resolveDestructure(names, line, initializer)
             case TryStmt{try_block, catch_var, catch_block}   => this.resolveTry(try_block, catch_var, catch_block)
@@ -1552,7 +1559,7 @@ class Resolver {
     // An enum is registered when its first constructor is, so an enum with
     // no constructor can be declared twice. A duplicate constructor stops
     // the declaration; the constructors before it stay registered.
-    resolveEnumDecl(name, ctor_names, keyword_line, name_line, ctor_lines) {
+    resolveEnumDecl(name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines) {
         if (len(this.scopes) > 0) {
             this.resError("enum", keyword_line, "Enum declarations are only allowed at global scope.");
             return;
@@ -1569,6 +1576,7 @@ class Resolver {
                 return;
             }
             this.enumCtors[cname] = name;
+            this.enumCtorFields[cname] = ctor_fields_list[i];
             if (!this.enumDecls.has(name)) this.enumDecls[name] = [];
             this.enumDecls[name].append(cname);
             i = i + 1;
@@ -1590,7 +1598,7 @@ class Resolver {
             case WildPat                   => nil
             case LitPat{v}                 => nil
             case BindPat{name}             => this.resolveBindPat(name)
-            case CtorPat{cname, subpats}   => this.resolveSubpats(subpats)
+            case CtorPat{cname, subpats, named, line} => this.resolveCtorPat(cname, subpats, named, line)
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
             case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
             case ClassPat{cname}           => nil
@@ -1665,6 +1673,119 @@ class Resolver {
         while (i < len(subpats)) { this.resolvePattern(subpats[i]); i = i + 1; }
     }
 
+    // A parenthesised or braced pattern names a constructor, or a class. The
+    // parser cannot tell which, so the name is checked here, after the enum
+    // and class declarations that precede the match are known. A named-field
+    // pattern of a constructor names declared fields; a class has no fixed
+    // field set, so its names are bindings.
+    resolveCtorPat(cname, subpats, named, line) {
+        if (this.enumCtors.has(cname)) {
+            if (named) {
+                var fields = this.enumCtorFields[cname];
+                var i = 0;
+                while (i < len(subpats)) {
+                    var fname = match subpats[i] {
+                        case BindPat{name} => name
+                        case _             => nil
+                    };
+                    if (fname != nil and !this.hasName(fields, fname)) {
+                        this.resError(fname, line, "Unknown field '" + fname + "' for '" + cname + "'.");
+                        return;
+                    }
+                    i = i + 1;
+                }
+            }
+            this.resolveSubpats(subpats);
+        } else if (this.classNames.has(cname)) {
+            if (!named) {
+                this.resError(cname, line, "Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').");
+            }
+            this.resolveSubpats(subpats);
+        } else {
+            this.resError(cname, line, "Unknown constructor or class '" + cname + "'.");
+        }
+    }
+
+    hasName(names, name) {
+        var i = 0;
+        while (i < len(names)) {
+            if (names[i] == name) return true;
+            i = i + 1;
+        }
+        return false;
+    }
+
+    isBarePattern(pat) {
+        return match pat {
+            case BindPat{name} => true
+            case WildPat       => true
+            case _             => false
+        };
+    }
+
+    bareName(pat) {
+        return match pat {
+            case BindPat{name} => name
+            case _             => "_"
+        };
+    }
+
+    isLiteralPattern(pat) {
+        return match pat {
+            case LitPat{v} => true
+            case _         => false
+        };
+    }
+
+    // The locals that a pattern alternative binds, in the order native adds
+    // them: a constructor or list binds its slots in source order, and an
+    // @-binding adds its own name after the sub-pattern's names.
+    patternBindNames(pat) {
+        return match pat {
+            case WildPat       => []
+            case LitPat{v}     => []
+            case BindPat{name} => [name]
+            case TagPat{cname} => []
+            case ClassPat{cname} => []
+            case CtorPat{cname, subpats, named, line} => this.patternListBindNames(subpats)
+            case ListPat{elems, rest_name} => this.listPatBindNames(elems, rest_name)
+            case AtPat{at_name, subpat} => this.withName(this.patternBindNames(subpat), at_name)
+        };
+    }
+
+    patternListBindNames(pats) {
+        var names = [];
+        var i = 0;
+        while (i < len(pats)) {
+            var sub = this.patternBindNames(pats[i]);
+            var j = 0;
+            while (j < len(sub)) { names.append(sub[j]); j = j + 1; }
+            i = i + 1;
+        }
+        return names;
+    }
+
+    listPatBindNames(elems, rest_name) {
+        var names = this.patternListBindNames(elems);
+        if (rest_name != nil and rest_name != "_") names.append(rest_name);
+        return names;
+    }
+
+    withName(names, name) {
+        names.append(name);
+        return names;
+    }
+
+    sameNames(a, b) {
+        if (len(a) != len(b)) return false;
+        var i = 0;
+        while (i < len(a)) {
+            if (a[i] != b[i]) return false;
+            i = i + 1;
+        }
+        return true;
+    }
+
     resolveListPat(elems, rest_name) {
         var i = 0;
         while (i < len(elems)) { this.resolvePattern(elems[i]); i = i + 1; }
@@ -1679,7 +1800,7 @@ class Resolver {
     patCtorName(pat) {
         return match pat {
             case TagPat{cname}           => this.knownCtor(cname)
-            case CtorPat{cname, subpats} => this.knownCtor(cname)
+            case CtorPat{cname, subpats, named, line} => this.knownCtor(cname)
             case AtPat{at_name, subpat}  => this.patCtorName(subpat)
             case _                       => nil
         };
@@ -1750,10 +1871,35 @@ class Resolver {
         while (i < len(arms)) {
             var arm = arms[i];
             this.beginScope();
+            // A comma chain of literals is not an or-chain, and neither is a
+            // literal-first arm. Every other arm with more than one pattern
+            // separates its alternatives with `or` (spec/02-syntax.md,
+            // armPats).
+            var orArm = arm.chain == nil and len(arm.pats) > 1 and
+                        !this.isLiteralPattern(arm.pats[0]);
+            var firstNames = nil;
+            var orOpen = true;
             var j = 0;
             while (j < len(arm.pats)) {
                 arm.pats[j] = this.classifyArmPat(arm.pats[j]);
                 if (arm.chain != nil and arm.chain[2] == j) this.reportArmChain(arm.chain, arm.pats[j]);
+                if (orArm and orOpen) {
+                    var pat = arm.pats[j];
+                    if (j == 0) {
+                        if (this.isBarePattern(pat)) {
+                            this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
+                            orOpen = false;
+                        } else {
+                            firstNames = this.patternBindNames(pat);
+                        }
+                    } else if (this.isBarePattern(pat) and j < len(arm.pats) - 1) {
+                        this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
+                        orOpen = false;
+                    } else if (!this.sameNames(firstNames, this.patternBindNames(pat))) {
+                        this.resError("or", arm.line, "Or-pattern alternatives must bind the same names in the same order.");
+                        orOpen = false;
+                    }
+                }
                 this.resolvePattern(arm.pats[j]);
                 j = j + 1;
             }
@@ -2975,9 +3121,12 @@ class LoxError {
 class Interpreter {
     init(locals) {
         this.locals        = locals;
-        // The resolver's enum constructor names. A constructor pattern tests
-        // an enum tag; any other name in a constructor pattern is a class.
-        this.enumCtors     = {};
+        // The resolver's enum constructor names and their declared field
+        // names. A constructor pattern tests an enum tag; any other name in a
+        // constructor pattern is a class. A named-field pattern binds by
+        // name, so the match reads the field index from here.
+        this.enumCtors      = {};
+        this.enumCtorFields = {};
         this.globals       = Environment(nil);
         this.returnFlag    = false;
         this.returnValue   = nil;
@@ -5015,7 +5164,7 @@ class Interpreter {
             case WildPat                   => true
             case LitPat{v}                 => v == subject
             case BindPat{name}             => this.matchBind(name, subject, bindings)
-            case CtorPat{cname, subpats}   => this.matchCtor(cname, subpats, subject, bindings)
+            case CtorPat{cname, subpats, named, line} => this.matchCtor(cname, subpats, named, subject, bindings)
             case ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
             case ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
@@ -5045,15 +5194,31 @@ class Interpreter {
         return subject.tag == cname;
     }
 
-    matchCtor(cname, subpats, subject, bindings) {
+    matchCtor(cname, subpats, named, subject, bindings) {
         var stag = loxTag(subject);
         if (stag != "enum_val" and this.enumCtors.has(cname)) {
             return this.matchTag(cname, subject);
         }
         if (stag == "enum_val") {
             if (subject.tag != cname) return false;
-            if (len(subject.fields) != len(subpats)) return false;
             var i = 0;
+            if (named) {
+                var fields = this.enumCtorFields[cname];
+                while (i < len(subpats)) {
+                    var fname = match subpats[i] {
+                        case BindPat{name} => name
+                        case _             => nil
+                    };
+                    if (fname != nil) {
+                        var idx = this.nameIndex(fields, fname);
+                        if (idx < 0) return false;
+                        if (!this.matchPattern(subpats[i], subject.fields[idx], bindings)) return false;
+                    }
+                    i = i + 1;
+                }
+                return true;
+            }
+            if (len(subject.fields) != len(subpats)) return false;
             while (i < len(subpats)) {
                 if (!this.matchPattern(subpats[i], subject.fields[i], bindings)) return false;
                 i = i + 1;
@@ -5065,6 +5230,15 @@ class Interpreter {
             return this.matchClassPat(subpats, subject, bindings);
         }
         return false;
+    }
+
+    nameIndex(names, name) {
+        var i = 0;
+        while (i < len(names)) {
+            if (names[i] == name) return i;
+            i = i + 1;
+        }
+        return -1;
     }
 
     // The class test of a class pattern: klass is the subject's class or a
@@ -5192,6 +5366,7 @@ try {
         if (!resolver.hadError) {
             interpreter = Interpreter(resolver.locals);
             interpreter.enumCtors = resolver.enumCtors;
+            interpreter.enumCtorFields = resolver.enumCtorFields;
             // The per-call try in LoxFunction.call already converts an
             // overflow inside a target function call into this
             // interpreter's own flag-based error, which unwinds like any

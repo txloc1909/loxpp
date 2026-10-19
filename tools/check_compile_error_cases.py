@@ -113,8 +113,6 @@ class Unreachable:
 
 # Message templates with no case. See the module docstring for the rule.
 DEFERRED: dict[str, Deferred] = {
-    "'_' cannot be used as an @-binding name.":
-        Deferred(680, 'the bootstrap misparses the @-binding'),
     "Can't have more than 255 arguments.":
         Deferred(681, 'different token and a second error'),
     "Can't have more than 255 parameters.":
@@ -123,8 +121,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'different message and a second error'),
     'Cannot have more than 255 entries in a map literal.':
         Deferred(681, 'different message and a second error'),
-    "Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').":
-        Deferred(680, 'the bootstrap runs the program'),
     "Expect '(' after 'catch'.":
         Deferred(641, 'the bootstrap adds a second error'),
     "Expect '(' after 'for'.":
@@ -192,19 +188,15 @@ DEFERRED: dict[str, Deferred] = {
     'Expect method name.':
         Deferred(641, 'the bootstrap omits a second error'),
     "Expect name after '...' in sequence pattern.":
-        Deferred(680, 'the bootstrap misparses the rest name'),
+        Deferred(746, 'the bootstrap accepts the unnamed rest pattern'),
     'Expect parameter name.':
         Deferred(641, 'the bootstrap omits a second error'),
     'Expect superclass method name.':
         Deferred(641, 'the bootstrap adds a second error'),
-    "Expected a structural pattern (constructor, class, or '[') after '@'.":
-        Deferred(680, 'the bootstrap misparses the sub-pattern'),
-    'Or-pattern alternatives must bind the same names in the same order.':
-        Deferred(680, 'the bootstrap accepts the program'),
     'Or-patterns are not supported for sequence patterns.':
-        Deferred(680, 'the bootstrap misparses it'),
+        Deferred(745, 'the bootstrap accepts the chain'),
     "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.":
-        Deferred(680, 'the bootstrap misparses the sub-pattern'),
+        Deferred(744, 'the bootstrap accepts the sub-pattern'),
     'Too many closure variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
     'Too many elements in sequence destructuring.':
@@ -217,10 +209,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap has a different limit'),
     'Too many local variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
-    "Unknown constructor or class '<...>'.":
-        Deferred(678, 'the bootstrap does not check the name'),
-    "Unknown field '<...>' for '<...>'.":
-        Deferred(678, 'the bootstrap does not check the field'),
     'Unreachable arm after catch-all.':
         Deferred(639, 'the bootstrap does not check it'),
     'Unterminated string.':

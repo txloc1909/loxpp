@@ -269,7 +269,8 @@ check rather than a binding. Unknown identifiers continue to act as bindings.
 
 **Or-patterns:** multiple identifier-starting alternatives may be separated by
 `or`. All alternatives must bind the same names in the same order; a mismatch
-is a compile error. The guard and body run once for whichever alternative
+is a compile error. In an or-chain, a bare binding or wildcard may be only the
+last alternative. The guard and body run once for whichever alternative
 matched. Literal comma-chaining (`case 1, 2, 3 =>`) remains valid for backward
 compatibility and is not extended with `or`.
 
@@ -277,6 +278,8 @@ compatibility and is not extended with `or`.
 case Quit or Pause         => stop()
 case Move(x) or Teleport(x) => go(x)   // both bind x
 case A(y)    or B(z)       => ...       // compile error: y ≠ z
+case A(x)    or x          => x         // valid: the last alternative binds x
+case x       or y          => ...       // compile error: a bare binding is first
 ```
 
 **Exhaustiveness:** if a match contains at least one constructor-pattern arm
