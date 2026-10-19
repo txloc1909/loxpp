@@ -287,8 +287,8 @@ listing the absent names.
 
 ### Function call arguments
 
-A call may pass up to 255 arguments. The maximum number of parameters a
-function may declare is also 255.
+The maximum number of arguments of a call, and of parameters of a function,
+is implementation-defined (see [Conformance](README.md#conformance)).
 
 ### `try`/`catch`, `throw`, `defer`
 

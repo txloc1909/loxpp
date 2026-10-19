@@ -10,4 +10,3 @@ yield;
 print "main done";
 
 // STATUS: error
-// STDERR: Cannot receive across a native callback.

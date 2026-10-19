@@ -1,8 +1,9 @@
 // task.spawn_worker takes only a function that a top-level fun declaration
 // made (spec/04-semantics.md, task.spawn_worker). A function declared inside
 // another function is not one, so the call is a runtime error. The error of
-// a stdlib native is fatal (the Fatal Runtime Errors table), so the try
-// does not catch it and nothing after it prints.
+// a stdlib native is a halting fault (the Halting Faults table), so nothing
+// after it prints. No try surrounds the call: an implementation may make a
+// halting fault catchable (spec/README.md, Conformance).
 fun outer() {
     fun inner(m) {
         print "inner ran";
@@ -11,12 +12,8 @@ fun outer() {
 }
 
 print type(task.self());
-try {
-    task.spawn_worker(outer(), nil);
-    print "spawned";
-} catch (e) {
-    print "caught " + e.kind;
-}
+task.spawn_worker(outer(), nil);
+print "spawned";
 print "after";
 
 // STATUS: error

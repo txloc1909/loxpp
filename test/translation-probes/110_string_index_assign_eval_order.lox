@@ -1,7 +1,8 @@
 // An index assignment evaluates the object, the index and the value, in this
-// order, before it checks the object. Assignment to a String is a fatal fault
-// (spec/04-semantics.md, Fatal Runtime Errors), so the value is evaluated
-// first: the program prints INDEX and VALUE, then exits with status 70.
+// order, before it checks the object. Assignment to a String is a halting
+// fault (spec/04-semantics.md, Halting Faults), so the value is evaluated
+// first: the program prints INDEX and VALUE, then halts. The effects before
+// the fault bind (spec/README.md, Conformance).
 fun i() { print "INDEX"; return 0; }
 fun v() { print "VALUE"; return "x"; }
 var s = "abc";
@@ -9,6 +10,5 @@ s[i()] = v();
 print "after";
 
 // STATUS: error
-// EXIT: 70
 // CHECK: INDEX
 // CHECK: VALUE

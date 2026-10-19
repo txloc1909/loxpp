@@ -4,34 +4,38 @@ expected-failure list.
 
 A spec probe is a .lox file that carries one `// STATUS: ok` or
 `// STATUS: error` line and one `// CHECK: <line>` directive per line of its
-expected stdout. The CHECK lines are the whole stdout the spec defines for
-the program, in order: a probe passes only when the stdout lines, with
-trailing white space removed, are exactly the CHECK lines, and when the exit
-status is zero for `ok` and non-zero for `error`. A probe whose spec rule
-defines the exact exit status, such as `exit(3)`, also carries
-`// EXIT: <code>`, and then the exit status must be exactly that code. A
-probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
+expected stdout, compared with trailing white space removed.
+
+- `STATUS: ok`: the stdout lines are exactly the CHECK lines, and the exit
+  status is zero.
+- `STATUS: error`: the program halts (spec/README.md, Conformance). The exit
+  status is non-zero, and the stdout lines start with the CHECK lines: the
+  output before the fault binds, and the deferred calls of a halt may print
+  more, because whether they run is implementation-defined.
+- A program that ends through `exit(code)` does not halt. Its probe carries
+  `// EXIT: <code>`: the exit status must be exactly that code, and the
+  stdout lines are exactly the CHECK lines.
+
+A probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
 the place of --timeout for that probe; a run that times out fails. A .lox
 file with no STATUS line is not a spec probe and is not run here.
 
-A probe that pins stderr text carries one `// STDERR: <line>` directive per
-expected line. The STDERR lines must be the first lines of stderr, in order,
-with trailing white space removed; any later stderr line is not checked, so a
-report may append its own stack trace or the tasks that wait. A probe with no
-STDERR line does not check stderr.
+A probe never checks stderr. Every report and message is
+implementation-defined, so a `// STDERR:` line is an error (exit 2).
 
-A probe whose CHECK lines a spec exception releases one consumer from carries
+A probe whose CHECK lines depend on implementation-defined behavior that one
+consumer chooses differently (spec/README.md, Conformance) carries
 `// NOT-BINDING: <consumer> <probe>`, for example
 `// NOT-BINDING: bootstrap bootstrap-only/one_thread_blocking_call.lox`. The
-probe's header cites the exception. The second field is the spec probe, by
-path from <dir>, that holds that consumer to the exception in its place: it
+probe's header names that behavior. The second field is the spec probe, by
+path from <dir>, that checks that consumer's own choice in its place: it
 must exist and carry a STATUS line, and the consumer's own gate runs it. With
 --consumer <consumer>, this script does not run the probe and reports it as
 EXEMPT. Without --consumer, or for another consumer, the line changes nothing.
 A NOT-BINDING probe is not a gap, so it must not also be on the
 expected-failure list.
 
-A probe passes when its stdout, its stderr prefix, and its exit status agree.
+A probe passes when its stdout and its exit status agree.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
@@ -79,11 +83,10 @@ class SpecProbe:
     path: Path
     status: str  # "ok" or "error"
     checks: list[str]
-    stderr_checks: list[str]  # the expected first lines of stderr
     exit_code: int | None = None  # the exact exit status, when the probe names one
     timeout: float | None = None  # seconds, in place of --timeout
     # consumer -> the probe, by path from the probe directory, that holds the
-    # consumer to the spec exception in place of this one
+    # consumer's own choice in place of this one
     not_binding: dict[str, str] | None = None
 
 
@@ -93,7 +96,6 @@ def parse_probe(path: Path) -> SpecProbe | None:
     exit_code = None
     timeout = None
     checks: list[str] = []
-    stderr_checks: list[str] = []
     not_binding: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         m = NOT_BINDING_RE.match(line)
@@ -122,35 +124,40 @@ def parse_probe(path: Path) -> SpecProbe | None:
         if m:
             checks.append(m.group(1).rstrip())
             continue
-        m = STDERR_RE.match(line)
-        if m:
-            stderr_checks.append(m.group(1).rstrip())
+        if STDERR_RE.match(line):
+            raise ValueError(f"{path}: a STDERR line; the spec binds no stderr text")
     if status is None:
         return None
     if exit_code is not None and (exit_code == 0) != (status == "ok"):
         raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
-    return SpecProbe(path, status, checks, stderr_checks, exit_code, timeout,
-                     not_binding)
+    return SpecProbe(path, status, checks, exit_code, timeout, not_binding)
 
 
 def stdout_lines(stdout: str) -> list[str]:
     return [line.rstrip() for line in stdout.splitlines()]
 
 
-def stderr_lines(stderr: str) -> list[str]:
-    return [line.rstrip() for line in stderr.splitlines()]
+def halts(probe: SpecProbe) -> bool:
+    """True for a probe of a halt: only the output before the fault binds."""
+    return probe.status == "error" and probe.exit_code is None
 
 
-def passes(probe: SpecProbe, stdout: str, stderr: str, exit_code: int) -> bool:
-    """True when one run's stdout, stderr prefix, and exit status match the probe."""
-    if stdout_lines(stdout) != probe.checks:
-        return False
-    if (probe.stderr_checks and
-            stderr_lines(stderr)[:len(probe.stderr_checks)] != probe.stderr_checks):
-        return False
+def stdout_ok(probe: SpecProbe, stdout: str) -> bool:
+    lines = stdout_lines(stdout)
+    if halts(probe):
+        return lines[:len(probe.checks)] == probe.checks
+    return lines == probe.checks
+
+
+def exit_ok(probe: SpecProbe, exit_code: int) -> bool:
     if probe.exit_code is not None:
         return exit_code == probe.exit_code
     return (exit_code == 0) == (probe.status == "ok")
+
+
+def passes(probe: SpecProbe, stdout: str, exit_code: int) -> bool:
+    """True when one run's stdout and exit status match the probe."""
+    return stdout_ok(probe, stdout) and exit_ok(probe, exit_code)
 
 
 def parse_xfail_file(path: Path) -> dict[str, str]:
@@ -198,7 +205,11 @@ def main() -> None:
 
     probes = []
     for path in sorted(args.dir.glob("*.lox")):
-        probe = parse_probe(path)
+        try:
+            probe = parse_probe(path)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(2)
         if probe is not None:
             probes.append(probe)
     if not probes:
@@ -237,11 +248,11 @@ def main() -> None:
         if name in exempt:
             counts["EXEMPT"] += 1
             print(f"EXEMPT {name}  (does not bind {args.consumer}; "
-                  f"{exempt[name]} holds it to the exception)")
+                  f"{exempt[name]} checks its own choice)")
             continue
         timeout = probe.timeout if probe.timeout is not None else args.timeout
         result = run(args.runner, probe, timeout)
-        ok = result is not None and passes(probe, *result)
+        ok = result is not None and passes(probe, result[0], result[2])
         listed = name in xfail
         if listed:
             outcome = "XPASS" if ok else "XFAIL"
@@ -259,27 +270,20 @@ def main() -> None:
                 print(f"      timeout after {timeout:.0f}s")
                 continue
             stdout, stderr, code = result
-            if probe.exit_code is not None:
-                want = str(probe.exit_code)
-                exit_ok = code == probe.exit_code
-            else:
-                want = "zero" if probe.status == "ok" else "non-zero"
-                exit_ok = (code == 0) == (probe.status == "ok")
-            if not exit_ok:
+            if not exit_ok(probe, code):
+                if probe.exit_code is not None:
+                    want = str(probe.exit_code)
+                else:
+                    want = "zero" if probe.status == "ok" else "non-zero"
                 print(f"      exit code {code}, expected {want}")
-            actual_stdout = stdout_lines(stdout)
-            if actual_stdout != probe.checks:
+            if not stdout_ok(probe, stdout):
+                actual_stdout = stdout_lines(stdout)
+                if halts(probe):
+                    actual_stdout = actual_stdout[:len(probe.checks)]
+                    print("      (a halt: the stdout must start with the CHECK lines)")
                 for line in difflib.unified_diff(
                     probe.checks, actual_stdout, "expected stdout", "actual stdout",
                     lineterm=""
-                ):
-                    print(f"      {line}")
-            actual_stderr = stderr_lines(stderr)
-            if (probe.stderr_checks and
-                    actual_stderr[:len(probe.stderr_checks)] != probe.stderr_checks):
-                for line in difflib.unified_diff(
-                    probe.stderr_checks, actual_stderr, "expected stderr prefix",
-                    "actual stderr", lineterm=""
                 ):
                     print(f"      {line}")
 

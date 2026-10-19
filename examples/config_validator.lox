@@ -68,7 +68,7 @@ fun main() {
         try {
             pair = extractPair(parts);
         } catch (fault) {
-            print "error line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
+            print "error line " + str(lineno) + ": " + fault.kind;
             errors = errors + 1;
             lineno = lineno + 1;
             line = f.readline();
@@ -101,7 +101,7 @@ main();
 // CHECK: host=localhost
 // CHECK: port=8080
 // CHECK: debug=true
-// CHECK: error line 5: IndexOutOfBoundsError: List index out of bounds.
+// CHECK: error line 5: IndexOutOfBoundsError
 // CHECK: error line 6: duplicate key port
 // CHECK: timeout=abc
 // CHECK: error line 8: empty key

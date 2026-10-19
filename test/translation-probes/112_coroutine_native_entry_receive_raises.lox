@@ -6,11 +6,11 @@ try {
     co.resume();
 } catch (e) {
     print e.kind;
-    print e.message;
+    print type(e.message);
 }
 print co.status();
 
 // STATUS: ok
 // CHECK: YieldAcrossNativeError
-// CHECK: Cannot receive across a native callback.
+// CHECK: String
 // CHECK: dead

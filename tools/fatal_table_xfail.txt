@@ -1,5 +1,0 @@
-# Rows of the Fatal Runtime Errors table that the bootstrap does not pass yet.
-# Format: <cause text from the spec table> | <group G1..G9 of the fix that owns the row> | <reason>
-# tools/check_fatal_table.py fails on a mismatch that is not listed here, and on a
-# listed row that passes. The fix for a row removes its line from this file.
-

@@ -57,7 +57,7 @@ fun main() {
             try {
                 row = extractRow(parts);
             } catch (fault) {
-                print "skip line " + str(lineno) + ": " + fault.kind + ": " + fault.message;
+                print "skip line " + str(lineno) + ": " + fault.kind;
                 skipped = skipped + 1;
                 lineno = lineno + 1;
                 line = f.readline();
@@ -81,7 +81,7 @@ main();
 // CHECK: === CSV Cleaner ===
 // CHECK: columns: name age city
 // CHECK: Alice 30 London
-// CHECK: skip line 3: IndexOutOfBoundsError: List index out of bounds.
+// CHECK: skip line 3: IndexOutOfBoundsError
 // CHECK: skip line 4: expected 3 columns, got 4
 // CHECK: skip line 5: empty name
 // CHECK: Dave 28 Rome

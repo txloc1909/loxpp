@@ -17,7 +17,7 @@ of lines between workers. It fails when:
 
 A line that mixes the text of two workers has the wrong form, so the check
 fails on it. The bootstrap interpreter runs every worker on one host thread
-(spec/04-semantics.md, Implementation-Gated Exception), so its lines cannot
+(spec/README.md, Conformance: scheduling is implementation-defined), so its lines cannot
 mix, but the rule binds it too, and the check runs on it the same way.
 
 Usage:

@@ -1,10 +1,9 @@
-// The bootstrap interpreter runs every worker on one host thread, under the
-// implementation-gated exception of spec/04-semantics.md, rule 1: "A task
-// runs alone among the tasks of every worker from one suspend point to the
-// next, not only among the tasks of its own worker." Probes
+// The bootstrap interpreter runs every worker on one host thread, so a task
+// runs alone among the tasks of every worker (spec/README.md, Conformance:
+// scheduling is implementation-defined). Probes
 // 95_cpu_bound_task_across_workers and
 // 96_cpu_bound_coroutine_across_workers do not bind the bootstrap, and this
-// probe holds it to the exception in their place.
+// probe checks the bootstrap's own choice in their place.
 //
 // A worker sends "awake", then computes for one second with no suspend
 // point. Under the one-thread form the main task cannot run until the loop

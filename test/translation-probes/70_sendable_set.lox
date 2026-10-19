@@ -58,12 +58,12 @@ print task.pending();
 try {
     task.send(me, [1]);
 } catch (e) {
-    print e.message;
+    print type(e.message);
 }
 try {
     task.send(me, Point([1], 2));
 } catch (e) {
-    print e.message;
+    print type(e.message);
 }
 print task.pending();
 
@@ -91,6 +91,6 @@ print task.pending();
 // CHECK: Coroutine: SendError
 // CHECK: EnumConstructor: SendError
 // CHECK: 7
-// CHECK: Value of type List is not a message.
-// CHECK: Value of type Enum is not a message.
+// CHECK: String
+// CHECK: String
 // CHECK: 7

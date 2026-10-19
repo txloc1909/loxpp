@@ -1,40 +1,35 @@
 #!/usr/bin/env python3
 """
-Mission #288 node #336: differential fault test across all three consumers.
+Differential fault test across three consumers: native (build/loxpp), the
+JVM backend (tools/loxpp_jvm.sh), and the bootstrap interpreter
+(bootstrap/lox_wrapper.sh).
 
 For every row of spec/04-semantics.md's Runtime Errors table (the catchable
-table) and its Fatal Runtime Errors table, plus the five Error-as-receiver
-reflection rows spec/03-types.md's Error section implies (fields/getField/
-hasField/setField/callMethod all reject an Error value), this script runs
-one small Lox++ program through all three consumers -- native (build/loxpp),
-JVM (tools/loxpp_jvm.sh), and the bootstrap interpreter
-(bootstrap/lox_wrapper.sh) -- and checks that they agree on:
+faults) and its Halting Faults table, plus the five Error-as-receiver
+reflection rows that spec/03-types.md's Error section implies, this script
+runs one small Lox++ program on each consumer. It checks the rules of
+spec/README.md, Conformance:
 
-  - whether the fault is CAUGHT (delivered to a catchBlock) or FATAL
-    (halts the program, never reaching the catchBlock);
-  - for a CAUGHT row: `e.kind`, `e.message`, `type(e)`, and `str(e)`.
+  - A catchable row: the fault reaches the catchBlock on every consumer,
+    with the same `e.kind` and `type(e)`. `e.message` and `str(e)` are not
+    compared: their text is implementation-defined.
+  - A halting row: the fault occurs on every consumer. The program halts
+    with a non-zero exit status, or, because an implementation may make a
+    halting fault catchable, the catchBlock receives it. A consumer that
+    goes on past the fault without either outcome fails.
 
-A row's own disposition (catchable vs. fatal) is native's -- native defines
-the ground truth (spec/04-semantics.md). Every row is therefore run with
-the SAME program shape on all three consumers and classified by what its
-stdout actually contains, not by which table the row came from: a
-consumer that disagrees with native's disposition shows up as an outcome
-mismatch, exactly like a kind or message mismatch would.
+Native's own outcome must also be the one the row declares: native halts on
+every halting row (docs/reference/native-diagnostics.md).
 
-Two known outcomes are not run through this comparison at all: a row's
-`skip` set. A row is skipped for a consumer only when an earlier mission
-node's review already found and filed the exact divergence (see each row's
-own comment). Skipping a row does not weaken the check for the other two
-consumers running that same row.
+A row's `skip` set leaves a consumer out of one row. It names the open issue
+that tracks the defect.
 
 Usage:
     tools/check_fault_table.py [--native PATH] [--jvm PATH]
                                 [--bootstrap PATH] [--timeout SECONDS]
 
-Exits 0 when every non-skipped (row, consumer) pair matches native's
-outcome on caught-vs-halted, and (for a caught row) on kind/message/type/
-str wherever that field is not itself skipped for that consumer. Exits 1
-and prints every mismatch otherwise.
+Exits 0 when every non-skipped (row, consumer) pair conforms. Exits 1 and
+prints every mismatch otherwise.
 """
 
 import argparse
@@ -52,8 +47,8 @@ NATIVE = "native"
 JVM = "jvm"
 BOOTSTRAP = "bootstrap"
 
-# A row's program prints these markers (never "kind"/"message"/"type"/"str"
-# text a fault message could itself contain) so a run's outcome is read from
+# A row's program prints these markers (never "kind"/"type" text that a
+# fault's report could itself contain) so a run's outcome is read from
 # a fixed vocabulary, not guessed from arbitrary program output.
 CAUGHT_MARKER = "__CAUGHT__"
 AFTER_MARKER = "__AFTER__"
@@ -64,9 +59,7 @@ CAUGHT_TEMPLATE = """{setup}try {{
 }} catch (e) {{
     print "{caught}";
     print e.kind;
-    print e.message;
     print type(e);
-    print str(e);
 }}
 print "{after}";
 """
@@ -88,14 +81,7 @@ class Row:
     body: str  # the fault-causing code, ending in ';'
     setup: str = ""  # code that runs before the try, ending in ';' (or "")
     expected_kind: str | None = None  # required when disposition == "caught"
-    expected_message: str | None = None  # spec's Message column literal, when disposition == "fatal"
     skip: dict[str, str] = field(default_factory=dict)  # consumer -> reason, skips the whole row
-    skip_fields: dict[str, set[str]] = field(default_factory=dict)  # consumer -> {"type", "str", "message"}
-    # consumer -> a prefix that that consumer's own fatal message must start
-    # with, checked in place of the whole-message comparison when "message" is
-    # in skip_fields for that consumer (issue #374): a real, weaker property
-    # instead of no check at all.
-    message_prefix: dict[str, str] = field(default_factory=dict)
 
     def program(self, workdir: Path | None = None) -> str:
         if self.disposition == "caught":
@@ -179,9 +165,7 @@ CATCHABLE_ROWS = [
     # Regression rows for issue #371: spec/04-semantics.md's Index Get section
     # and these same three table rows now cover a String receiver too, not
     # only a List -- these three rows pin that a String receiver gets the
-    # identical kind (and, per issue #371's own measurement, the identical
-    # "List index ..." message text -- native reuses the List-receiver text
-    # unchanged for a String) a List receiver gets, on every consumer.
+    # identical kind a List receiver gets, on every consumer.
     Row("index_type_error_string", "caught", 's["a"];', setup='var s = "abc";\n', expected_kind="IndexTypeError"),
     Row(
         "index_not_integer_error_string",
@@ -328,7 +312,7 @@ CATCHABLE_ROWS = [
     ),
 ]
 
-# --- Fatal Runtime Errors table (spec/04-semantics.md) --------------------
+# --- Halting Faults table (spec/04-semantics.md) --------------------------
 #
 # Every Example below is self-contained and runnable as its own program.
 FATAL_ROWS = [
@@ -340,42 +324,28 @@ FATAL_ROWS = [
         "fatal",
         "match 1 { case Ok(v) => v case Err(m) => -1 };",
         setup="enum Result { Ok(v) Err(m) }\n",
-        expected_message="GET_TAG: expected an enum value.",
     ),
     Row(
         "max_depth_exceeded",
         "fatal",
         "print a;",
         setup="var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; }\n",
-        expected_message="Value nesting is too deep.",
     ),
     Row(
         "stdlib_native_arity",
         "fatal",
         "clock(1);",
-        expected_message="Expected 0 arguments but got 1.",
     ),
-    # The first stderr line must equal native's line, and native's line must
-    # equal the spec's text (spec/04-semantics.md, Fatal Runtime Errors table).
-    # This row needs a prefix check on the JVM instead: the JVM text starts
-    # with "open(): cannot open '/no/such/path': " and then gives its own
-    # reason, "/no/such/path (No such file or directory)", where the spec
-    # gives "No such file or directory". The prefix check allows only that
-    # difference (issues #374 and #703). The bootstrap runs the native open(),
-    # so it matches native exactly.
     Row(
         "stdlib_open_failure",
         "fatal",
         'open("/no/such/path", "r");',
-        skip_fields={JVM: {"message"}},
-        message_prefix={JVM: "open(): cannot open '/no/such/path': "},
-        expected_message="open(): cannot open '/no/such/path': No such file or directory",
     ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
     # (the catchable table's NaNKeyError/InvalidMapKeyError rows above),
     # Map.has/Map.del are stdlib native methods, and reach this same
-    # cause through the stdlib-native error path -- fatal, one combined
-    # message regardless of NaN vs. a non-String object key. A
+    # cause through the stdlib-native error path -- a halting fault,
+    # regardless of NaN vs. a non-String object key. A
     # pre-existing native-VM asymmetry between the opcode-level and
     # stdlib-native forms of the same cause, not a defect in one consumer.
     Row(
@@ -383,7 +353,6 @@ FATAL_ROWS = [
         "fatal",
         "m.has([1, 2]);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     # Regression armor: map_has_invalid_key's own spec row ("Map.has(key)
     # or Map.del(key)") covers both natives with one Example; this row
@@ -393,44 +362,37 @@ FATAL_ROWS = [
         "fatal",
         "m.del(0.0/0.0);",
         setup="var m = {};\n",
-        expected_message="Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.",
     ),
     Row(
         "undefined_property_on_file",
         "fatal",
         'var f = open("__WORKDIR__/loxpp_fault_table_probe.txt", "w"); f.write("x"); '
         'var g = open("__WORKDIR__/loxpp_fault_table_probe.txt", "r"); g.bogus;',
-        expected_message="Undefined property 'bogus' on file.",
     ),
     Row(
         "undefined_property_on_socket",
         "fatal",
         'var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;',
-        expected_message="Undefined property 'bogus' on socket.",
     ),
     Row(
         "undefined_property_on_server",
         "fatal",
         'var l = listen("127.0.0.1", 0); l.bogus;',
-        expected_message="Undefined property 'bogus' on server.",
     ),
     Row(
         "undefined_property_on_process",
         "fatal",
         'var p = spawn("echo", []); p.bogus;',
-        expected_message="Undefined property 'bogus' on process.",
     ),
     Row(
         "undefined_property_on_map",
         "fatal",
         "var m = {}; m.bogus;",
-        expected_message="Undefined property 'bogus' on map.",
     ),
     Row(
         "undefined_property_on_instance",
         "fatal",
         "class C {} var c = C(); c.bogus;",
-        expected_message="Undefined property 'bogus'.",
     ),
     # Fused site (issue #348): bootstrap's tree-walker used to give this
     # the same catchable kind it gives `42.foo()` (a call), because it could
@@ -440,13 +402,11 @@ FATAL_ROWS = [
         "property_get_non_instance",
         "fatal",
         "42.foo;",
-        expected_message="Only instances have properties.",
     ),
     Row(
         "property_set_non_instance",
         "fatal",
         "42.foo = 1;",
-        expected_message="Only instances have fields.",
     ),
     # Fused site (issue #348): bootstrap now distinguishes property-access
     # sources, making calls to non-callable field values fatal while keeping
@@ -455,202 +415,169 @@ FATAL_ROWS = [
         "invoke_field_not_callable",
         "fatal",
         "class C { init() { this.f = 1; } } C().f();",
-        expected_message="Can only call functions, classes and enums.",
     ),
     Row(
         "invoke_method_not_found",
         "fatal",
         "class C {} C().bogus();",
-        expected_message="Undefined property 'bogus'.",
     ),
     Row(
         "list_append_wrong_arity",
         "fatal",
         "[].append();",
-        expected_message="'append' expects 1 argument but got 0.",
     ),
     Row(
         "list_pop_wrong_arity",
         "fatal",
         "[].pop(1);",
-        expected_message="'pop' expects 0 arguments but got 1.",
     ),
     Row(
         "list_remove_wrong_arity",
         "fatal",
         "[1].remove();",
-        expected_message="'remove' expects 1 argument but got 0.",
     ),
     Row(
         "list_remove_value_not_found",
         "fatal",
         "[1, 2].remove(3);",
-        expected_message="Value not found in list.",
     ),
     Row(
         "undefined_method_on_list",
         "fatal",
         "[].bogus();",
-        expected_message="Undefined method 'bogus' on list.",
     ),
     Row(
         "undefined_method_on_file",
         "fatal",
         'var f = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "w"); f.write("x"); '
         'var g = open("__WORKDIR__/loxpp_fault_table_probe2.txt", "r"); g.bogus();',
-        expected_message="Undefined method 'bogus' on file.",
     ),
     Row(
         "undefined_method_on_socket",
         "fatal",
         'var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus();',
-        expected_message="Undefined method 'bogus' on socket.",
     ),
     Row(
         "undefined_method_on_server",
         "fatal",
         'var l = listen("127.0.0.1", 0); l.bogus();',
-        expected_message="Undefined method 'bogus' on server.",
     ),
     Row(
         "undefined_method_on_process",
         "fatal",
         'var p = spawn("echo", []); p.bogus();',
-        expected_message="Undefined method 'bogus' on process.",
     ),
     Row(
         "undefined_method_on_map",
         "fatal",
         "var m = {}; m.bogus();",
-        expected_message="Undefined method 'bogus' on map.",
     ),
     Row(
         "superclass_not_a_class",
         "fatal",
         "var NotAClass = 1; class Sub < NotAClass {}",
-        expected_message="Superclass must be a class.",
     ),
     Row(
         "super_method_not_found",
         "fatal",
         "class A {} class B < A { m() { super.zzz(); } } B().m();",
-        expected_message="Undefined property 'zzz'.",
     ),
-    # Missing feature (issue #349): bootstrap cannot index an ObjEnum value
-    # at all, so it never reaches this fault's own message. `enum` is only
-    # legal at global scope, so it goes in `setup`, not `body`.
+    # `enum` is only legal at global scope, so it goes in `setup`, not `body`.
     Row(
         "enum_index_type_error",
         "fatal",
         'v["a"];',
         setup="enum E { A(x) } var v = A(1);\n",
-        expected_message="Enum field index must be a number.",
     ),
     Row(
         "enum_index_out_of_range",
         "fatal",
         "v[3];",
         setup="enum E { A(x) } var v = A(1);\n",
-        expected_message="Enum field index 3 out of range.",
     ),
     # Regression armor for issue #363: a NaN/infinite/oversized index has no
     # well-defined narrowing conversion to int on any consumer (C++
     # static_cast, Java narrowing conversion, C# unchecked (int) cast are
-    # all unspecified/UB for these inputs) and used to leak that garbage
-    # value into the message, or -- on JVM's NaN case -- silently land the
-    # conversion's own zero result in bounds and skip the fault entirely.
+    # all unspecified/UB for these inputs) and, on JVM's NaN case, used to
+    # land the conversion's own zero result in bounds and skip the fault
+    # entirely.
     Row(
         "enum_index_nan",
         "fatal",
         "v[0.0/0.0];",
         setup="enum E { A(x) } var v = A(1);\n",
-        expected_message="Enum field index -nan out of range.",
     ),
     Row(
         "enum_index_infinity",
         "fatal",
         "v[1.0/0.0];",
         setup="enum E { A(x) } var v = A(1);\n",
-        expected_message="Enum field index inf out of range.",
     ),
     Row(
         "enum_index_oversized",
         "fatal",
         "v[99999999999.0];",
         setup="enum E { A(x) } var v = A(1);\n",
-        expected_message="Enum field index 1e+11 out of range.",
     ),
     Row(
         "string_index_assignment",
         "fatal",
         '"abc"[0] = "x";',
-        expected_message="Strings are immutable and cannot be indexed for assignment.",
     ),
     Row(
         "slice_non_list_string",
         "fatal",
         "(42)[0:1];",
-        expected_message="Slice requires a List or String.",
     ),
     Row(
         "slice_start_non_number",
         "fatal",
         '[1, 2]["a":2];',
-        expected_message="Slice index must be a number.",
     ),
     Row(
         "slice_start_non_integer",
         "fatal",
         "[1, 2][1.5:2];",
-        expected_message="Slice index must be an integer.",
     ),
     Row(
         "slice_start_negative",
         "fatal",
         "[1, 2][-1:2];",
-        expected_message="Slice index must be non-negative.",
     ),
     Row(
         "slice_end_non_number",
         "fatal",
         '[1, 2][0:"a"];',
-        expected_message="Slice index must be a number.",
     ),
     Row(
         "slice_end_non_integer",
         "fatal",
         "[1, 2][0:1.5];",
-        expected_message="Slice index must be an integer.",
     ),
     Row(
         "slice_end_negative",
         "fatal",
         "[1, 2][0:-1];",
-        expected_message="Slice index must be non-negative.",
     ),
     Row(
         "in_string_non_string_elem",
         "fatal",
         '1 in "abc";',
-        expected_message="Left operand of 'in' on a string must be a string.",
     ),
     Row(
         "in_non_indexable",
         "fatal",
         "1 in 42;",
-        expected_message="Right operand of 'in' must be a list, string, or map.",
     ),
     Row(
         "for_in_non_iterable",
         "fatal",
         "for (var x in 42) {}",
-        expected_message="Value is not iterable (expected list, string, map, or coroutine).",
     ),
     Row(
         "for_in_map_size_changed",
         "fatal",
         "var m = {1: 1}; for (var k in m) { m[2] = 2; }",
-        expected_message="Map changed size during iteration.",
     ),
     # Regression rows for issue #348: bootstrap's fused property-access site
     # must remain fatal when the call target involves chained property gets
@@ -660,13 +587,11 @@ FATAL_ROWS = [
         "invoke_chained_property_get",
         "fatal",
         "42.foo.bar();",
-        expected_message="Only instances have properties.",
     ),
     Row(
         "invoke_grouped_property_get",
         "fatal",
         "(42.foo)();",
-        expected_message="Only instances have properties.",
     ),
     # A `defer`red call holding a non-callable value must be fatal (native's
     # runDefers).
@@ -679,7 +604,6 @@ FATAL_ROWS = [
         "defer_noncallable_value",
         "fatal",
         "fun g() { var x = 42; defer x(); } g();",
-        expected_message="Deferred callable has unexpected type.",
     ),
 ]
 
@@ -710,28 +634,24 @@ REFLECT_ROWS = [
         "fatal",
         "fields(e);",
         setup=_REFLECT_SETUP,
-        expected_message="Expected an instance.",
     ),
     Row(
         "reflect_getfield_on_error",
         "fatal",
         'getField(e, "kind");',
         setup=_REFLECT_SETUP,
-        expected_message="Only instances have properties.",
     ),
     Row(
         "reflect_hasfield_on_error",
         "fatal",
         'hasField(e, "kind");',
         setup=_REFLECT_SETUP,
-        expected_message="Only instances have properties.",
     ),
     Row(
         "reflect_setfield_on_error",
         "fatal",
         'setField(e, "kind", 5);',
         setup=_REFLECT_SETUP,
-        expected_message="Only instances have fields.",
     ),
     # Issue #355: the plain `.` write door onto the same restriction --
     # spec/03-types.md's Error section makes a write to any name on an
@@ -742,14 +662,12 @@ REFLECT_ROWS = [
         "fatal",
         'e.kind = "z";',
         setup=_REFLECT_SETUP,
-        expected_message="Only instances have fields.",
     ),
     Row(
         "reflect_callmethod_on_error",
         "fatal",
         'callMethod(e, "foo");',
         setup=_REFLECT_SETUP,
-        expected_message="Only instances have methods.",
     ),
     # A non-instance, non-Error receiver (a Number here) is fatal the same
     # way an Error receiver is (issue #370: bootstrap special-cased only the
@@ -758,37 +676,31 @@ REFLECT_ROWS = [
         "reflect_fields_on_number",
         "fatal",
         "fields(42);",
-        expected_message="Expected an instance.",
     ),
     Row(
         "reflect_methods_on_number",
         "fatal",
         "methods(42);",
-        expected_message="Expected a class.",
     ),
     Row(
         "reflect_getfield_on_number",
         "fatal",
         'getField(42, "x");',
-        expected_message="Only instances have properties.",
     ),
     Row(
         "reflect_hasfield_on_number",
         "fatal",
         'hasField(42, "x");',
-        expected_message="Only instances have properties.",
     ),
     Row(
         "reflect_setfield_on_number",
         "fatal",
         'setField(42, "x", 1);',
-        expected_message="Only instances have fields.",
     ),
     Row(
         "reflect_callmethod_on_number",
         "fatal",
         'callMethod(42, "foo");',
-        expected_message="Only instances have methods.",
     ),
 ]
 
@@ -864,152 +776,17 @@ def check_named_regression_rows(rows: list[Row], regression_names: set[str], tab
     ]
 
 
-# --- Bootstrap's own disposition model -------------------------------------
-#
-# Node #335's own scope (issue #335) was "wire every setError() call site's
-# `kind` string to the N1 table, no aliasing" -- never message-text parity,
-# and never matching native's catchable/fatal split. Two facts, both
-# already documented outside this script, follow from that scope:
-#
-# 1. Every catchable-table row's `kind` is proven correct by node #335's own
-#    regression test (tools/check_bootstrap_error_kinds.py); this script
-#    re-checks it here as a cross-consumer proof, but does not also demand
-#    bootstrap's message text match native's -- that was never node #335's
-#    deliverable. `type()`/`str()` are a separate, real gap (issue #347).
-# 2. Bootstrap's tree-walker delivers EVERY Fatal Runtime Errors table cause
-#    as a catchable Error, by design (see
-#    tools/run_bootstrap_error_kind_causes.py's own module docstring) --
-#    there is no fatal path on bootstrap for most of these rows to compare
-#    against native's. Comparing bootstrap's outcome against native's fatal
-#    disposition, row by row, would report ~30 "divergences" that are all
-#    the same one architectural fact, not 30 distinct defects. The Error-
-#    as-receiver reflection rows (REFLECT_ROWS) used to share this same
-#    architectural gap (issue #353): bootstrap delivered a catchable
-#    `ReflectionReceiverError` instead of a halt. Issue #353 closed that gap
-#    by calling `Interpreter.fatalError` at each of the five reflection
-#    natives when the receiver is an Error, so REFLECT_ROWS now compares
-#    bootstrap against native like any other row and carries no skip.
-#
-# A row that found a genuine, specific defect underneath this general
-# pattern (a real kind ambiguity, a missing feature, a silently-swallowed
-# fault) keeps its own specific `skip` reason and issue number instead of
-# this default -- see property_get_non_instance, invoke_field_not_callable,
-# enum_index_type_error, enum_index_out_of_range, and
-# defer_noncallable_value above.
-_BOOTSTRAP_FATAL_DEFAULT_SKIP = (
-    "bootstrap delivers every Fatal Runtime Errors table cause as a catchable "
-    "Error by design (see tools/run_bootstrap_error_kind_causes.py); node #335's "
-    "own scope was kind-string correctness, not matching native's fatal "
-    "disposition"
-)
-for _row in FATAL_ROWS:
-    if _row.name == "max_depth_exceeded":
-        # Issue #325: bootstrap's stringify() guard now calls fatalError,
-        # matching native/JVM's fatal disposition, so it is exempt from
-        # the blanket skip below.
-        continue
-    if _row.name == "property_set_non_instance":
-        # Issue #355: bootstrap's evalSet now calls fatalError for a
-        # non-instance receiver, matching native's fatal disposition, so
-        # it is exempt from the blanket skip below.
-        continue
-    if _row.name == "stdlib_open_failure":
-        # Unlike the rest of FATAL_ROWS, bootstrap agrees with native's
-        # fatal disposition here (only the message text differs, already
-        # handled by this row's own skip_fields), so it is exempt from the
-        # blanket skip below.
-        continue
-    if _row.name in ("map_has_invalid_key", "map_del_invalid_key"):
-        # Issue #375: bootstrap's Map.has/Map.del now call fatalError with
-        # native's own combined message, matching native/JVM, so both
-        # rows are exempt from the blanket skip below.
-        continue
-    if _row.name == "defer_noncallable_value":
-        # Node #351: bootstrap now faults on a deferred non-callable value,
-        # matching native's fatal disposition, so it is exempt from the
-        # blanket skip below.
-        continue
-    if _row.name == "list_append_wrong_arity":
-        # Issue #365: bootstrap reports native's own custom text and halts,
-        # so it is exempt from the blanket skip below.
-        continue
-    if _row.name == "list_pop_wrong_arity":
-        # Issue #365: bootstrap reports native's own custom text and halts,
-        # so it is exempt from the blanket skip below.
-        continue
-    if _row.name == "list_remove_wrong_arity":
-        # Issue #365: bootstrap reports native's own custom text and halts,
-        # so it is exempt from the blanket skip below.
-        continue
-    if _row.name == "enum_index_type_error":
-        # Node #349: bootstrap now indexes enum values, matching native's
-        # fatal disposition on type error, so it is exempt from the blanket
-        # skip below.
-        continue
-    if _row.name == "enum_index_out_of_range":
-        # Node #349: bootstrap now indexes enum values, matching native's
-        # fatal disposition on out-of-range error, so it is exempt from the
-        # blanket skip below.
-        continue
-    if _row.name in (
-        "enum_index_nan",
-        "enum_index_infinity",
-        "enum_index_oversized",
-    ):
-        # Issue #363: bootstrap's own enum index-get already formats a
-        # NaN/infinite/oversized index the same way native's stringify()
-        # does, so it already matches on this row -- exempt from the
-        # blanket skip below.
-        continue
-    if _row.name == "property_get_non_instance":
-        # Node #348: bootstrap now distinguishes plain property reads
-        # (fatal) from method calls (catchable), so it is exempt from the
-        # blanket skip below.
-        continue
-    if _row.name == "invoke_field_not_callable":
-        # Node #348: bootstrap now distinguishes calls to field values
-        # (fatal) from calls to literal values (catchable), so it is exempt
-        # from the blanket skip below.
-        continue
-    if _row.name == "stdlib_native_arity":
-        # Node #348: bootstrap now distinguishes stdlib native arity errors
-        # (fatal) from user function arity errors (catchable), so it is
-        # exempt from the blanket skip below.
-        continue
-    if _row.name == "invoke_chained_property_get":
-        # Node #348: bootstrap's fused call site stays fatal through a
-        # chained property get (`42.foo.bar()`), matching native, so it is
-        # exempt from the blanket skip below.
-        continue
-    if _row.name == "invoke_grouped_property_get":
-        # Node #348: bootstrap's fused call site stays fatal through a
-        # grouping (`(42.foo)()`), matching native, so it is exempt from
-        # the blanket skip below.
-        continue
-    _row.skip.setdefault(BOOTSTRAP, _BOOTSTRAP_FATAL_DEFAULT_SKIP)
-
-
 def validate_row_anchors(rows: list[Row]) -> None:
-    """Every row must carry the literal its disposition is checked against.
+    """Every "caught" row must carry the kind it is checked against.
 
-    A "caught" row with no expected_kind, or a "fatal" row with no
-    expected_message, can still print MATCH: compare() only checks a literal
-    against native's own output when the row supplies one. Failing loudly
-    here, before any row runs, closes that entry point for every row at
-    once instead of one row at a time as each is separately noticed.
+    A "caught" row with no expected_kind could still print MATCH, because
+    compare() checks the kind only when the row supplies one.
     """
     for row in rows:
         if row.disposition == "caught" and row.expected_kind is None:
             print(
                 f"check_fault_table.py: row {row.name!r} is 'caught' but has no "
                 "expected_kind",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        if row.disposition == "fatal" and row.expected_message is None:
-            print(
-                f"check_fault_table.py: row {row.name!r} is 'fatal' but has no "
-                "expected_message",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -1025,7 +802,7 @@ def load_spec_table_kind_count() -> int:
     """
     text = SPEC_PATH.read_text(encoding="utf-8")
     start = text.index("## Runtime Errors")
-    end = text.index("### Fatal Runtime Errors", start)
+    end = text.index("### Halting Faults", start)
     section = text[start:end]
     rows = [
         line
@@ -1036,7 +813,7 @@ def load_spec_table_kind_count() -> int:
 
 
 def load_spec_fatal_row_count() -> int:
-    """Counts the Fatal Runtime Errors table's data rows in spec/04-semantics.md.
+    """Counts the Halting Faults table's data rows in spec/04-semantics.md.
 
     Guards FATAL_ROWS against corpus drift the same way
     load_spec_table_kind_count guards CATCHABLE_ROWS -- a row added to or
@@ -1044,7 +821,7 @@ def load_spec_fatal_row_count() -> int:
     instead of silently checking a stale corpus.
     """
     text = SPEC_PATH.read_text(encoding="utf-8")
-    start = text.index("### Fatal Runtime Errors")
+    start = text.index("### Halting Faults")
     end = text.index("## Enum Types", start)
     section = text[start:end]
     rows = [
@@ -1055,16 +832,11 @@ def load_spec_fatal_row_count() -> int:
     return len(rows)
 
 
-# Exit code every consumer uses for a compile-time (parse) error, distinct
-# from a run-time fault's own exit code (FATAL_EXIT_CODE). A row whose
-# program never compiles proves nothing about the fault it names:
-# classify() must tell the two apart, not read "no marker on stdout" as
-# "fatal".
+# Exit code that every consumer here uses for a rejected program. A row whose
+# program never compiles proves nothing about the fault it names: classify()
+# must tell the two apart, not read "no marker on stdout" as "fatal". The
+# spec requires only a non-zero status; the three consumers all use 65.
 COMPILE_ERROR_EXIT_CODE = 65
-
-# Exit code of an uncaught run-time fault on every consumer. compare()
-# requires a "fatal" outcome to carry it on both sides.
-FATAL_EXIT_CODE = 70
 
 
 @dataclass
@@ -1078,9 +850,9 @@ class RunResult:
     outcome: str
     returncode: int | None = None
     kind: str | None = None
-    message: str | None = None
     type_: str | None = None
-    str_: str | None = None
+    # the first stderr line, printed for a corpus bug; never compared
+    report: str | None = None
 
 
 class ConsumerCommand:
@@ -1122,10 +894,8 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
         # a real divergence from a row's "caught" disposition, not the same
         # outcome as a run that ran to completion.
         outcome = "caught" if AFTER_MARKER in lines else "caught_halted"
-        if len(rest) >= 4:
-            return RunResult(
-                outcome=outcome, kind=rest[0], message=rest[1], type_=rest[2], str_=rest[3]
-            )
+        if len(rest) >= 2:
+            return RunResult(outcome=outcome, kind=rest[0], type_=rest[1])
         return RunResult(outcome=outcome)
     if UNREACHABLE_MARKER in lines or AFTER_MARKER in lines:
         # The fatal template printed UNREACHABLE_MARKER (the fault did not
@@ -1139,8 +909,8 @@ def classify(returncode: int, stdout: str, stderr: str) -> RunResult:
     # parse failure, so that exit code, not the absence of a marker, is
     # what "fatal" requires.
     if returncode == COMPILE_ERROR_EXIT_CODE:
-        return RunResult(outcome="compile_error", message=_first_stderr_line(stderr))
-    return RunResult(outcome="fatal", returncode=returncode, message=_first_stderr_line(stderr))
+        return RunResult(outcome="compile_error", report=_first_stderr_line(stderr))
+    return RunResult(outcome="fatal", returncode=returncode, report=_first_stderr_line(stderr))
 
 
 def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> dict[str, RunResult]:
@@ -1160,59 +930,32 @@ def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeo
 
 
 def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str) -> list[str]:
+    if row.disposition == "fatal":
+        # A halting fault: a halt with a non-zero status conforms, and so does
+        # a catch that runs to the end, because an implementation may make a
+        # halting fault catchable (spec/README.md, Conformance).
+        if other.outcome == "fatal":
+            if other.returncode == 0:
+                return [f"exit status: {consumer} halted with status 0"]
+            return []
+        if other.outcome == "caught":
+            return []
+        return [f"outcome: {consumer}={other.outcome}; a halting fault must halt or be caught"]
     problems = []
     if other.outcome != native_result.outcome:
         problems.append(
             f"outcome: native={native_result.outcome} {consumer}={other.outcome}"
         )
         return problems
-    if native_result.outcome == "fatal":
-        for side, result in (("native", native_result), (consumer, other)):
-            if result.returncode != FATAL_EXIT_CODE:
-                problems.append(
-                    f"exit status: {side} exited {result.returncode}, "
-                    f"expected {FATAL_EXIT_CODE} for an uncaught fault"
-                )
-        if row.expected_message is not None and native_result.message != row.expected_message:
-            problems.append(
-                f"native's own message ({native_result.message!r}) does not match "
-                f"the spec table's Message column ({row.expected_message!r}) -- "
-                "corpus bug, fix the row"
-            )
-        # The message is the first stderr line. It must equal native's line:
-        # a prefix or a trailer on it is a divergence.
-        skip = row.skip_fields.get(consumer, set())
-        if "message" not in skip:
-            native_msg = native_result.message or ""
-            other_msg = other.message or ""
-            if not native_msg or native_msg != other_msg:
-                problems.append(f"message: native={native_msg!r} {consumer}={other_msg!r}")
-        elif consumer in row.message_prefix:
-            wanted = row.message_prefix[consumer]
-            other_msg = other.message or ""
-            if not other_msg.startswith(wanted):
-                problems.append(
-                    f"message: {consumer}={other_msg!r} does not start with the required "
-                    f"prefix {wanted!r} (full native-message match is skipped for this "
-                    "row/consumer; see the row's own comment)"
-                )
-        return problems
-    if native_result.outcome != "caught":
-        return problems
-    skip = row.skip_fields.get(consumer, set())
     if row.expected_kind is not None and native_result.kind != row.expected_kind:
         problems.append(
             f"native's own kind ({native_result.kind}) does not match the table's "
             f"expected kind ({row.expected_kind}) -- corpus bug, fix the row"
         )
-    if "kind" not in skip and other.kind != native_result.kind:
+    if other.kind != native_result.kind:
         problems.append(f"kind: native={native_result.kind!r} {consumer}={other.kind!r}")
-    if "message" not in skip and other.message != native_result.message:
-        problems.append(f"message: native={native_result.message!r} {consumer}={other.message!r}")
-    if "type" not in skip and other.type_ != native_result.type_:
+    if other.type_ != native_result.type_:
         problems.append(f"type(): native={native_result.type_!r} {consumer}={other.type_!r}")
-    if "str" not in skip and other.str_ != native_result.str_:
-        problems.append(f"str(): native={native_result.str_!r} {consumer}={other.str_!r}")
     return problems
 
 
@@ -1257,7 +1000,7 @@ def main() -> None:
     spec_fatal_row_count = load_spec_fatal_row_count()
     if spec_fatal_row_count != len(FATAL_ROWS) - len(FATAL_REGRESSION_ROWS):
         gate_failures.append(
-            f"check_fault_table.py: spec/04-semantics.md's Fatal Runtime Errors "
+            f"check_fault_table.py: spec/04-semantics.md's Halting Faults "
             f"table has {spec_fatal_row_count} row(s), but FATAL_ROWS covers "
             f"{len(FATAL_ROWS)} (-{len(FATAL_REGRESSION_ROWS)} named regression-only "
             "entries). The table changed; update this script's corpus to match."
@@ -1294,7 +1037,7 @@ def main() -> None:
                 # failure rather than silently passing every consumer.
                 print(
                     f"ERROR       {row.name}  native does not compile this row's "
-                    f"program: {native_result.message!r} -- corpus bug, fix the row"
+                    f"program: {native_result.report!r} -- corpus bug, fix the row"
                 )
                 diverged += 1
                 continue

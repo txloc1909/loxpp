@@ -7,28 +7,34 @@ Runs each Lox++ program on the native binary and on a second runner
 (tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, bootstrap/lox_wrapper.sh, or an
 equivalent), then compares the two runs in two phases.
 
-Compile phase. Exit status 65 is a compile error (a parser or resolver
-error) on every consumer: build/loxpp returns it, the JVM and QBE wrappers
-return the status of `loxpp --target`, and bootstrap/lox_wrapper.sh returns
-it for its LOXERR65 line. When either run exits 65, both runs must exit 65,
-and their stdout and their stderr text must be the same, or the program
-reports DIVERGE (compile phase). A match prints as "MATCH (compile error)".
-A compile error writes nothing to stdout, so the run-time comparison below
-cannot see one. The stdout check keeps two cases from a false match: a
-consumer that runs part of the program before it reports the compile error,
-and a program that ends with `exit(65)` after it printed something.
+The comparison follows spec/README.md, Conformance: it compares what a
+program can observe and never compares stderr, because every report and
+message is implementation-defined. Native's exit status tells this script
+which case a program is (docs/reference/native-diagnostics.md): 65 with
+empty stdout is a rejection, and 70 is a halt. The other runner may use any
+non-zero status for either.
+
+Rejection. When native rejects the program, the other runner must exit
+non-zero with empty stdout, or the program reports DIVERGE (compile phase).
+A match prints as "MATCH (rejected)". When the other runner rejects a
+program that native runs, the exit status differs, and the run comparison
+below reports DIVERGE.
 
 --compile-errors says that every program is a compile-error case: a
-program that native does not reject at compile time reports DIVERGE, so a
-corpus file that stops being a compile error fails and does not pass as a
-quiet run-time match.
+program that native does not reject reports DIVERGE, so a corpus file that
+stops being a compile error fails and does not pass as a quiet run-time
+match.
 
-Run phase. When neither run exits 65, this script compares stdout. It does
-not compare stderr in the ordinary comparison. It compares the exit status
-exactly: a run with the same stdout but another exit status reports DIVERGE
-(an uncaught fault exits 70 on every runner). The probe criteria that the --xfail account uses also include a probe's stderr
-lines, because a spec probe can pin them with `// STDERR:` lines (see
-tools/check_spec_probes.py). Four outcomes per program:
+Halt. When native halts, the other runner must exit non-zero, and one stdout
+must be a prefix of the other: the output before the fault binds, and the
+deferred calls of a halt may run on one runner and not on the other. A match
+prints as "MATCH (halt)". A program that calls exit(70) on native is checked
+the same way, which is weaker than the exact comparison it could have.
+
+Run. Otherwise this script compares stdout and the exact exit status: a run
+with the same stdout but another exit status reports DIVERGE. The probe
+criteria that the --xfail account uses are those of
+tools/check_spec_probes.py. Four outcomes per program:
   MATCH        stdout is byte-identical on both runtimes.
   STALE        stdout is byte-identical on both runtimes, but the program is
                on the exclusion list. The exclusion is no longer needed and
@@ -52,15 +58,14 @@ form tools/check_spec_probes.py reads. A listed program reports one of two
 outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
-  XPASS        both runs pass the probe: their stdout is its CHECK lines,
-               their stderr starts with its STDERR lines, and their exit
-               status matches its STATUS line. Exit code 1: the backend
-               passes it now, so its line must be deleted.
+  XPASS        both runs pass the probe (tools/check_spec_probes.py). Exit
+               code 1: the backend passes it now, so its line must be
+               deleted.
 
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
-EXEMPT and is not run: a spec exception releases that consumer from the
-probe's output.
+EXEMPT and is not run: the probe depends on implementation-defined behavior
+that the consumer chooses differently.
 
 --only-spec-probes keeps only the spec probes (the .lox files with a
 `// STATUS:` line) of the program list, so a walk of a directory runs the
@@ -239,10 +244,11 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
     return reasons
 
 
-# The exit status of a compile error on every consumer (see the module
-# docstring). No consumer uses it for a run-time fault, but a program can end
-# with exit(65), so the compile phase compares stdout too.
-COMPILE_ERROR_STATUS = 65
+# Native's exit status for a rejected program and for a halt
+# (docs/reference/native-diagnostics.md). A program can also end with
+# exit(65), so a rejection also needs empty stdout.
+NATIVE_REJECT_STATUS = 65
+NATIVE_HALT_STATUS = 70
 
 
 class RunTimeout(Exception):
@@ -254,9 +260,7 @@ def run_program(
 ) -> tuple[str, str, int]:
     """Runs one program and returns (stdout, stderr, exit code).
 
-    The run-time comparison requires the two exit codes to be equal. The
-    compile phase reads the exit code and stderr (see COMPILE_ERROR_STATUS),
-    and the --xfail account reads a probe's STDERR lines.
+    stderr is returned for a diagnostic print only; no comparison reads it.
 
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
@@ -424,8 +428,8 @@ def main() -> None:
             probe = parse_probe(lox_file)
             if (
                 probe is not None
-                and passes(probe, native_out, native_err, native_status)
-                and passes(probe, other_out, other_err, other_status)
+                and passes(probe, native_out, native_status)
+                and passes(probe, other_out, other_status)
             ):
                 print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
                 xpassed += 1
@@ -434,40 +438,41 @@ def main() -> None:
                 xfailed += 1
             continue
 
-        native_compile = native_status == COMPILE_ERROR_STATUS
-        other_compile = other_status == COMPILE_ERROR_STATUS
-        if args.compile_errors and not native_compile:
+        native_rejects = native_status == NATIVE_REJECT_STATUS and native_out == ""
+        if args.compile_errors and not native_rejects:
             print(
                 f"DIVERGE     {lox_file}  (not a compile-error case: native exited "
-                f"{native_status}, not {COMPILE_ERROR_STATUS})"
+                f"{native_status} with {len(native_out)} byte(s) of stdout)"
             )
             diverged += 1
             continue
-        if native_compile or other_compile:
-            if (
-                native_compile
-                and other_compile
-                and native_out == other_out
-                and native_err.rstrip() == other_err.rstrip()
-            ):
-                print(f"MATCH       {lox_file}  (compile error)")
+        if native_rejects:
+            if other_status != 0 and other_out == "":
+                print(f"MATCH       {lox_file}  (rejected)")
                 matched += 1
                 continue
-            print(f"DIVERGE     {lox_file}  (compile phase)")
-            print(f"            native exited {native_status}, other exited {other_status}")
+            print(f"DIVERGE     {lox_file}  (compile phase: native rejects the program)")
+            print(f"            other exited {other_status}, with {len(other_out)} byte(s) of stdout")
+            for line in other_out.splitlines()[:20]:
+                print(f"            | {line}")
+            diverged += 1
+            continue
+
+        if native_status == NATIVE_HALT_STATUS:
+            if other_status == 0:
+                print(f"DIVERGE     {lox_file}  (native halts, but other exited 0)")
+                diverged += 1
+                continue
+            if native_out.startswith(other_out) or other_out.startswith(native_out):
+                print(f"MATCH       {lox_file}  (halt)")
+                matched += 1
+                continue
+            print(f"DIVERGE     {lox_file}  (halt: neither stdout is a prefix of the other)")
             for line in difflib.unified_diff(
                 native_out.splitlines(),
                 other_out.splitlines(),
                 fromfile="native stdout",
                 tofile=f"{Path(args.other_runner).name} stdout",
-                lineterm="",
-            ):
-                print(f"            {line}")
-            for line in difflib.unified_diff(
-                native_err.rstrip().splitlines(),
-                other_err.rstrip().splitlines(),
-                fromfile="native stderr",
-                tofile=f"{Path(args.other_runner).name} stderr",
                 lineterm="",
             ):
                 print(f"            {line}")

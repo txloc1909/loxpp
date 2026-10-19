@@ -15,10 +15,11 @@ Two things a diff of stdout cannot tell apart:
   stringifyDepth, the return flags). A leaked value does not usually break
   the program that leaks it -- it breaks whatever the SAME process runs
   next, so a plain pass/fail per example can miss it entirely.
-- A caught fault and an uncaught one must produce different output (a
-  `.kind`/`.message` pair delivered to a `catch`, versus a single clean
-  `Stack overflow.` line and no native traceback) for the same underlying
-  event.
+- A caught fault and an uncaught one must produce different outcomes (a
+  `.kind` delivered to a `catch`, versus a halt with a non-zero status, a
+  report on stderr, and no native traceback) for the same underlying event.
+  The report text is implementation-defined (spec/README.md, Conformance),
+  so only its presence is checked.
 
 CASES below covers both. check_defer_count_matches_depth() checks a count,
 not a bool: every unwound call runs its own defer, not just one of them.
@@ -84,22 +85,29 @@ STATE_START = {
 }
 
 # (name, program, expected stdout lines, expected stderr lines, expected
-# exit code). bootstrap/lox_wrapper.sh reroutes a LOXERR65/LOXERR70-prefixed
+# exit code). For a case that exits 0 the stdout and stderr must be exactly
+# the expected lines. For a halt (a non-zero expected exit code) the run must
+# exit non-zero, its stdout must start with the expected lines (the output
+# before the fault binds; the deferred calls of a halt may print more), and
+# its stderr must not be empty: the report text and the exact status are
+# implementation-defined (spec/README.md, Conformance), so the expected
+# stderr lines and code of a halt document native's choice only.
+# bootstrap/lox_wrapper.sh reroutes a LOXERR65/LOXERR70-prefixed
 # line to stderr with the prefix stripped (its own controlled-halt
 # protocol); everything else it passes through to stdout unchanged.
 CASES = [
     (
-        "catchable: target try/catch sees the spec's kind and message",
+        "catchable: target try/catch sees the spec's kind",
         'fun f(n) { return f(n + 1); }\n'
         'try {\n'
         '    f(0);\n'
         '    print "no error";\n'
         '} catch (e) {\n'
         '    print "caught " + e.kind;\n'
-        '    print e.message;\n'
+        '    print type(e.message);\n'
         '}\n'
         'print "after";\n',
-        ["caught StackOverflowError", "Stack overflow.", "after"],
+        ["caught StackOverflowError", "String", "after"],
         [],
         0,
     ),
@@ -329,7 +337,7 @@ CASES = [
 # bootstrap has no frame reserve for a deferred call that runs during an
 # overflow unwind. Issue #716: the bootstrap does not run a self tail call in
 # constant call depth. Each entry pins the gap: native must finish
-# with exit 0, and the bootstrap must halt with one "Stack overflow." line.
+# with exit 0, and the bootstrap must halt with a report on stderr.
 # When a fix lands, an entry starts to match native and
 # check_known_gaps() fails; move the entry to CASES then.
 def _gap_program(deferred_body: str, extra: str = "") -> str:
@@ -404,16 +412,25 @@ def check_cases() -> list[str]:
     failures = []
     for name, program, expected_stdout, expected_stderr, expected_exit in CASES:
         stdout_lines, stderr_lines, exit_code = run(program)
-        if exit_code != expected_exit:
+        if (exit_code == 0) != (expected_exit == 0):
             failures.append(
-                f"{name}: exited {exit_code} (expected {expected_exit}), "
+                f"{name}: exited {exit_code} (expected {'0' if expected_exit == 0 else 'non-zero'}), "
                 f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"
             )
             continue
-        if stdout_lines != expected_stdout:
-            failures.append(f"{name}: expected stdout {expected_stdout!r}, got {stdout_lines!r}")
-        if stderr_lines != expected_stderr:
-            failures.append(f"{name}: expected stderr {expected_stderr!r}, got {stderr_lines!r}")
+        if expected_exit == 0:
+            if stdout_lines != expected_stdout:
+                failures.append(f"{name}: expected stdout {expected_stdout!r}, got {stdout_lines!r}")
+            if stderr_lines != expected_stderr:
+                failures.append(f"{name}: expected stderr {expected_stderr!r}, got {stderr_lines!r}")
+        else:
+            if stdout_lines[:len(expected_stdout)] != expected_stdout:
+                failures.append(
+                    f"{name}: a halt: expected stdout to start with {expected_stdout!r}, "
+                    f"got {stdout_lines!r}"
+                )
+            if not stderr_lines:
+                failures.append(f"{name}: a halt with no report on stderr")
         if any("] in " in line for line in stdout_lines + stderr_lines):
             failures.append(
                 f"{name}: a native traceback line leaked into output: "
@@ -450,7 +467,7 @@ def check_known_gaps() -> list[str]:
                 f"known gap #{issue} ({name}): the bootstrap now matches native; "
                 "move this entry from KNOWN_GAPS to CASES"
             )
-        elif (stdout_lines, stderr_lines, exit_code) != ([], ["Stack overflow."], 70):
+        elif exit_code == 0 or not stderr_lines:
             failures.append(
                 f"known gap #{issue} ({name}): expected the pinned halt, got exit {exit_code}, "
                 f"stdout {stdout_lines!r}, stderr {stderr_lines!r}"

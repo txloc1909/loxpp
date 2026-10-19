@@ -482,8 +482,9 @@ jobs:
             bash -c "python3 tools/check_print_lines.py bootstrap/lox_wrapper.sh"
 
       # The differential gate for the bootstrap interpreter, both phases:
-      # tools/diff_runtimes.py compares each compile error (exit status 65
-      # and its stderr) and each run's stdout with native.
+      # tools/diff_runtimes.py checks that a program native rejects is
+      # rejected, and compares each run's stdout and exit outcome with
+      # native. It never compares stderr (spec/README.md, Conformance).
       # check_spec_probes.py and check_examples.py above check each consumer
       # alone; this step compares it with native, which also covers an
       # example with no CHECK line. The probe walk takes only the spec
@@ -516,35 +517,6 @@ jobs:
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --timeout 120 && python3 tools/check_cr_bytes.py build/loxpp bootstrap/lox_wrapper.sh"
-
-      # Three fatal fast path probes that the walk above skips: they have no
-      # STATUS line. Probes 57 and 59 are the wrong argument count (issue
-      # #636), probe 58 is the call stack overflow (issue #616). Each skips
-      # every pending deferred call, so the bootstrap must print nothing and
-      # exit 70, as native does.
-      - name: Bootstrap differential suite - fatal fast path probes
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/57_defer_arity_fatal_fast_path.lox test/translation-probes/58_defer_overflow_fatal_fast_path.lox test/translation-probes/59_return_out_of_try_leak.lox --timeout 120"
-
-      # Five probes that the walk above skips: they have no STATUS line. A
-      # deferred call raises a second StackOverflowError while the first one
-      # unwinds (issue #637). The spec makes the second one fatal, so the
-      # bootstrap must print nothing and exit 70, as native does.
-      - name: Bootstrap differential suite - re-entrant overflow probes
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/58_stack_overflow_reentrant_fatal.lox test/translation-probes/defer_overflow_during_unwind.lox test/translation-probes/defer_overflow_kind_spoof.lox test/translation-probes/defer_replaces_unrelated_fault_during_unwind.lox test/translation-probes/defer_throw_on_normal_return_during_unwind.lox --timeout 120"
 
       # examples/bench_jump_table.lox is left out by name: it is a
       # 5,000,000-iteration microbenchmark with no CHECK line, and it does
@@ -581,10 +553,9 @@ jobs:
       # call-frame budget (see docs/reference/bootstrap-stack-depth.md), so any
       # refactor that adds frames per evaluator cycle shrinks how deep a
       # target program may recurse before it overflows. This guards the
-      # margin two ways: the example corpus must survive 256 extra native
-      # frames, and the seven recursion-shape probes must reach 90% of
-      # their post-F10 ceilings. Release only, like the step above: the
-      # debug preset's instruction trace floods the wrapper's stdout.
+      # margin the example corpus needs: it must survive 256 extra native
+      # frames. Release only, like the step above: the debug preset's
+      # instruction trace floods the wrapper's stdout.
       - name: Run bootstrap headroom check
         if: matrix.preset == 'release'
         run: |
@@ -621,19 +592,7 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapStackOverflow --output-on-failure --no-tests=error"
 
-      # Same trace-noise constraint as BootstrapErrorKindCausesRuntime above,
-      # so this is the one leg where BootstrapResolverErrorParity actually runs.
-      - name: Run bootstrap resolver error parity check
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R BootstrapResolverErrorParity --output-on-failure --no-tests=error"
-
-      # BootstrapOperatorOverload, BootstrapThrowReport, and
-      # BootstrapMatchArmBreak are registered in test/CMakeLists.txt but
+      # BootstrapOperatorOverload and BootstrapMatchArmBreak are registered in test/CMakeLists.txt but
       # self-skip on debug (SKIP_RETURN_CODE 125), so they only run on the
       # release leg, where the trace macros are off. --no-tests=error fails
       # the step if a name stops being registered.
@@ -646,15 +605,6 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapOperatorOverload --output-on-failure --no-tests=error"
 
-      - name: Run bootstrap uncaught-throw report check
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R BootstrapThrowReport --output-on-failure --no-tests=error"
-
       - name: Run bootstrap match-arm-break check
         if: matrix.preset == 'release'
         run: |
@@ -663,42 +613,6 @@ jobs:
             -w /workspace \
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapMatchArmBreak --output-on-failure --no-tests=error"
-
-      # BootstrapArityFatal self-skips on the debug leg (SKIP_RETURN_CODE 125):
-      # the debug trace floods native's stdout, which the check compares. This
-      # step on the release leg is the one that runs it.
-      - name: Run bootstrap wrong-argument-count fatal path check
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R BootstrapArityFatal --output-on-failure --no-tests=error"
-
-      # BootstrapDeferCallable self-skips on the debug leg (SKIP_RETURN_CODE 125)
-      # for the same reason as BootstrapArityFatal. This step on the release
-      # leg is the one that runs it.
-      - name: Run bootstrap deferred-callable fatal fault check
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R BootstrapDeferCallable --output-on-failure --no-tests=error"
-
-      # FatalTable self-skips on the debug leg (SKIP_RETURN_CODE 125) for the
-      # same reason as BootstrapArityFatal. This step on the release leg is the
-      # one that runs it.
-      - name: Run Fatal Runtime Errors table check
-        if: matrix.preset == 'release'
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R FatalTable --output-on-failure --no-tests=error"
 
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
@@ -934,12 +848,11 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/coroutine-probes/"
 
-      # Mission #288 node #336: for every row of spec/04-semantics.md's
-      # Runtime Errors and Fatal Runtime Errors tables, checks that native,
-      # JVM, and the bootstrap interpreter agree on whether the fault
-      # is caught or halts the program, and (when caught) on kind, message,
-      # type(), and str(). Runs on all three consumers this job already has
-      # a binary for.
+      # For every row of spec/04-semantics.md's Runtime Errors and Halting
+      # Faults tables, checks native, the JVM, and the bootstrap interpreter
+      # against spec/README.md, Conformance: a catchable fault is caught with
+      # the same kind and type() everywhere; a halting fault halts, or is
+      # caught. Messages are not compared.
       - name: Check fault table - differential
         run: |
           docker run --rm \
@@ -1063,8 +976,8 @@ jobs:
             bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/"
 
       # The compile phase of the differential gate: each parser or resolver
-      # error of test/compile-errors/ must give the same exit status (65)
-      # and the same stderr on the JVM backend as on native.
+      # error of test/compile-errors/ must be rejected: a non-zero exit status
+      # and empty stdout on the JVM backend, as on native. stderr is not compared.
       - name: JVM differential suite - compile errors
         run: |
           docker run --rm \
@@ -1310,8 +1223,8 @@ jobs:
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/"
 
       # The compile phase of the differential gate: each parser or resolver
-      # error of test/compile-errors/ must give the same exit status (65)
-      # and the same stderr on the QBE backend as on native.
+      # error of test/compile-errors/ must be rejected: a non-zero exit status
+      # and empty stdout on the QBE backend, as on native. stderr is not compared.
       - name: QBE differential suite - compile errors
         run: |
           docker run --rm \

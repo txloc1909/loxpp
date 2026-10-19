@@ -152,20 +152,15 @@ fun producer() {
     tx.close();
 }
 
-// DeadlockError is fatal, so the catch block and the line after the try do
-// not run. Any catchable fault in its place, such as a wrong message that
-// chanValue rejects, prints a line that the CHECK lines do not allow.
+// DeadlockError is a halting fault, so the line after the loop does not run.
+// No try surrounds the loop: an implementation may make a halting fault
+// catchable (spec/README.md, Conformance).
 Receiver(task.spawn(producer), 3);
-try {
-    while (true) {
-        var msg = task.receive();
-        print "took " + str(chanValue(msg));
-    }
-} catch (e) {
-    print "caught a fault";
-    print e.kind;
+while (true) {
+    var msg = task.receive();
+    print "took " + str(chanValue(msg));
 }
-print "after the try";
+print "after the loop";
 
 // STATUS: error
 // CHECK: send 1

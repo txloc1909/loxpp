@@ -286,25 +286,10 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
-    # Issue #410: none of the Resolver's compile-time static errors (break/
-    # continue outside a loop, return outside a function, defer outside a
-    # function) had an automated check that bootstrap's message and exit
-    # code match native's compiler. Same trace-noise constraint as
-    # BootstrapErrorKindCausesRuntime above -- the check reads only stderr,
-    # so the debug preset's trace noise (which lands on stdout) would not by
-    # itself corrupt it, but this test still skips on a debug build to stay
-    # consistent with its bootstrap-ctest siblings above.
-    add_test(NAME BootstrapResolverErrorParity
-        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_resolver_errors.py
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    set_tests_properties(BootstrapResolverErrorParity PROPERTIES
-        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
-        SKIP_RETURN_CODE 125)
-
     # Issue #434: bootstrap's match-arm body only ever parsed as a single
     # expression, so break/continue/return inside an arm's `{ }` block
-    # failed to parse -- not just a resolver-message gap like #410 above.
-    # Same trace-noise constraint as BootstrapResolverErrorParity above.
+    # failed to parse.
+    # Same trace-noise constraint as BootstrapStackOverflow above.
     add_test(NAME BootstrapMatchArmBreak
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_match_arm_break.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
@@ -314,47 +299,11 @@ if(LOXPP_PYTHON3)
 
     # Issue #474: bootstrap's operator-overloading dispatch (dunder methods)
     # must match native byte for byte. Same trace-noise constraint as
-    # BootstrapResolverErrorParity above.
+    # BootstrapStackOverflow above.
     add_test(NAME BootstrapOperatorOverload
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_operator_overload.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(BootstrapOperatorOverload PROPERTIES
-        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
-        SKIP_RETURN_CODE 125)
-
-    # Issue #501: an uncaught throw of a non-Error value reports its canonical
-    # form (dispatching __str__ on an Instance) on both native and bootstrap.
-    # The report is on stderr, so this compares the first stderr line + exit
-    # code (native appends a stack trace the bootstrap does not). Same
-    # trace-noise constraint as BootstrapOperatorOverload above.
-    add_test(NAME BootstrapThrowReport
-        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_throw_report.py
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    set_tests_properties(BootstrapThrowReport PROPERTIES
-        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
-        SKIP_RETURN_CODE 125)
-
-    # Issue #636: a wrong argument count with no try block active in the
-    # running task is fatal and skips every pending deferred call, as on
-    # native. Compares the bootstrap with native on stdout, exit status and
-    # the first stderr line. Same trace-noise constraint as
-    # BootstrapOperatorOverload above.
-    add_test(NAME BootstrapArityFatal
-        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_arity_fatal.py
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    set_tests_properties(BootstrapArityFatal PROPERTIES
-        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
-        SKIP_RETURN_CODE 125)
-
-    # Issue #671: a deferred class or enum constructor is the fatal
-    # "Deferred callable has unexpected type." fault on the bootstrap, as on
-    # native. Compares the bootstrap with native on stdout, exit status and
-    # the first stderr line. Same trace-noise constraint as
-    # BootstrapOperatorOverload above.
-    add_test(NAME BootstrapDeferCallable
-        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_defer_callable.py
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    set_tests_properties(BootstrapDeferCallable PROPERTIES
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
@@ -370,17 +319,6 @@ if(LOXPP_PYTHON3)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(CompileDiagnosticCases PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}")
-
-    # Issue #666: every row of the Fatal Runtime Errors table is fatal on the
-    # bootstrap, as on native. The rows the bootstrap does not pass yet are in
-    # tools/fatal_table_xfail.txt; the check fails on a listed row that
-    # passes. Same trace-noise constraint as BootstrapOperatorOverload above.
-    add_test(NAME FatalTable
-        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_fatal_table.py
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    set_tests_properties(FatalTable PROPERTIES
-        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
-        SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

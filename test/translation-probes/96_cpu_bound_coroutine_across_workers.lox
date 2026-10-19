@@ -13,11 +13,10 @@
 // that defect. The code change does not depend on the processor count.
 //
 // The CHECK lines do not bind the bootstrap interpreter. It runs every
-// worker on one host thread under the implementation-gated exception of
-// spec/04-semantics.md, rule 1: "A task runs alone among the tasks of every
-// worker from one suspend point to the next, not only among the tasks of its
-// own worker." The probe on the NOT-BINDING line holds the bootstrap to that
-// rule in place of this one.
+// worker on one host thread, so a task runs alone among the tasks of every
+// worker (spec/README.md, Conformance: scheduling is implementation-defined).
+// The probe on the NOT-BINDING line checks the bootstrap's own choice in
+// place of this one.
 // NOT-BINDING: bootstrap bootstrap-only/cpu_bound_work_blocks_all_workers.lox
 
 var main = task.self();
