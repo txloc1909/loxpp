@@ -10,7 +10,7 @@ equivalent), then compares the two runs in two phases.
 The comparison follows spec/README.md, Conformance: it compares what a
 program can observe and never compares stderr, because every report and
 message is implementation-defined. Native's exit status tells this script
-which case a program is (docs/reference/native-diagnostics.md): 65 with
+which case a program is (`loxpp --help`, src/main.cpp): 65 with
 empty stdout is a rejection, and 70 is a halt. The other runner may use any
 non-zero status for either.
 
@@ -245,7 +245,7 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
 
 
 # Native's exit status for a rejected program and for a halt
-# (docs/reference/native-diagnostics.md). A program can also end with
+# (`loxpp --help`, src/main.cpp). A program can also end with
 # exit(65), so a rejection also needs empty stdout.
 NATIVE_REJECT_STATUS = 65
 NATIVE_HALT_STATUS = 70

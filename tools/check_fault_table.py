@@ -19,7 +19,7 @@ spec/README.md, Conformance:
     goes on past the fault without either outcome fails.
 
 Native's own outcome must also be the one the row declares: native halts on
-every halting row (docs/reference/native-diagnostics.md).
+every halting row.
 
 A row's `skip` set leaves a consumer out of one row. It names the open issue
 that tracks the defect.
