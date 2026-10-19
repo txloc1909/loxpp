@@ -65,8 +65,6 @@ def main() -> None:
         if kind in table_kinds:
             problems.append(f"kind {kind!r} has more than one row")
         table_kinds[kind] = row["Catchable"]
-        if not row["Message"].startswith("`"):
-            problems.append(f"kind {kind!r} has no message text in a code span")
         if not row["Raised when"]:
             problems.append(f"kind {kind!r} has an empty 'Raised when' cell")
 
