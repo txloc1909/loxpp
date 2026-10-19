@@ -1,7 +1,8 @@
 # Observable conformance for the secondary backends
 
-**Status:** proposal. Waits for the owner's approval and for the owner's
-change to `VISION.md`. It answers #722 and widens that issue to the JVM and
+**Status:** proposal. The owner answered its open questions (see "Owner
+answers"). Waits for the owner's approval and for the owner's change to
+`VISION.md`. It answers #722 and widens that issue to the JVM and
 QBE backends.
 
 ## Why
@@ -151,7 +152,7 @@ those probes at full conformance.
 | `spec/README.md` | A new section, "Conformance", that defines the two levels, the valid run, the table of what must match, and the closed list. |
 | `spec/04-semantics.md`, "Implementation-Gated Exception: the Bootstrap Interpreter" | Delete. Its two exceptions become items 3 and 4 of the closed list. The call-depth paragraph under "Calls" points to the new section. |
 | `spec/04-semantics.md`, the Runtime Errors and Fatal Runtime Errors tables, and the other `Message` columns | No text change. Each table states that its `Message` column and its `Catchable` column bind at full conformance. |
-| `AGENTS.md`, "Plans for a language change" | Rule 1: a secondary backend owes observable conformance. Rule 3: "its output matches the native VM within observable conformance". Rule 5: the compile phase compares rejection (exit 65), not text. |
+| `AGENTS.md`, "Plans for a language change" | Rule 1: a secondary backend owes observable conformance. A language change updates the bootstrap in the same PR, only as much as CI requires. Rule 3: "its output matches the native VM within observable conformance". Rule 5: the compile phase compares rejection (exit 65), not text. |
 
 ### Non-binding documents
 
@@ -218,11 +219,16 @@ backend code.
   `docs/reference/bootstrap-accepted-fatal-limits.md` already records eight
   kinds that the owner accepted as different.
 
-## Open questions
+## Owner answers
 
-1. Does the owner accept the loss of the JVM as an oracle for error text and
-   for the fatal table?
-2. Does compile rejection stay binding (this proposal), or does it go too?
-3. Must a language change still update the bootstrap in the same PR? This
-   proposal says yes, for valid-run behavior only: without that, the
-   capability claim decays without notice.
+The owner answered the three open questions on PR #731 (2026-10-19).
+
+1. **The JVM as an oracle.** The owner accepts that the JVM stops being an
+   oracle for error text and for the Fatal Runtime Errors table.
+2. **Compile rejection.** It stays binding: exit 65 and nothing runs, in
+   both directions.
+3. **A language change and the bootstrap.** A language change still updates
+   the bootstrap in the same PR, but only as much as CI requires. Under the
+   gates of this proposal, CI requires the valid-run behavior and compile
+   rejection of the new construct. `AGENTS.md`, "Plans for a language
+   change", rule 1, says this for the bootstrap entry.
