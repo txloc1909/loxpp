@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Expect ';' after expression.
+// Compile error: an operator expression whose right operand has an index. The
+// '=' is not an assignment, so the statement misses its ';' at the '='.
+var a = 1;
+var b = [0];
+a + b[0] = 3;

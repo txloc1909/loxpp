@@ -179,6 +179,9 @@ class Compiler {
     uint16_t identifierConstant(const Token& name);
     void emitConstantOp(Op op, uint16_t idx);
     void namedVariable(const Token& name, bool canAssign);
+    // Clears the parse-time assignment flag after an operator expression,
+    // whose value is never an assignment target.
+    void markNotAssignable();
 
     // Walks the enclosing chain to the root compiler.
     Compiler* findRootCompiler();

@@ -96,6 +96,11 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
     }
 
     const bool atAssignmentLevel = (precedence <= Precedence::ASSIGNMENT);
+    // A nested expression runs at its own precedence level, and its parselets
+    // overwrite both fields. Save the enclosing level's values so that a
+    // nested argument, index, or element cannot decide this level's '='.
+    const bool enclosingCanAssign = m_canAssign;
+    const bool enclosingAtAssignmentLevel = m_atAssignmentLevel;
     m_canAssign = atAssignmentLevel;
     m_atAssignmentLevel = atAssignmentLevel;
     (compiler->*prefixRule)();
@@ -116,6 +121,8 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
     if (m_canAssign && match(TokenType::EQUAL)) {
         error("Invalid assignment target.");
     }
+    m_canAssign = enclosingCanAssign;
+    m_atAssignmentLevel = enclosingAtAssignmentLevel;
 }
 
 void Parser::errorAt(const Token& token, const char* message) {

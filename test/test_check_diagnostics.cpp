@@ -44,6 +44,17 @@ TEST(CheckDiagnostics, UnterminatedString) {
     expectOne("var s = \"abc;\n", 1, 9, "Unterminated string");
 }
 
+TEST(CheckDiagnostics, OperatorExpressionIsNotAnAssignmentTarget) {
+    // A following '=' is not an assignment after any operator expression, so
+    // the statement misses its ';'. Each rule that parses an operator must
+    // leave the flag cleared; a missing clear reports "Invalid assignment
+    // target." instead.
+    expectOne("a + b[0] = 3;\n", 1, 10, "Expect ';' after expression.");
+    expectOne("a and b[0] = 3;\n", 1, 12, "Expect ';' after expression.");
+    expectOne("a or b[0] = 3;\n", 1, 11, "Expect ';' after expression.");
+    expectOne("-b[0] = 3;\n", 1, 7, "Expect ';' after expression.");
+}
+
 TEST(CheckDiagnostics, NonExhaustiveMatchOnEnum) {
     expectOne("enum Coin { Heads Tails }\n"
               "var r = match Heads() { case Heads => 1 };\n",
