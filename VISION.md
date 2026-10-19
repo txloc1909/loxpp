@@ -79,7 +79,7 @@ first.
 | Backend | Role | Shipped | Obligation |
 |---|---|---|---|
 | Native VM | The runtime users run. It must be simple, and fast for a dynamic language. Performance work targets it first. | Yes | Implements the full spec. It is the reference for all other backends. |
-| JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Conforms to the spec where it serves as an oracle. It does not need features that exist only to give native code low-level access, such as FFI or a JIT. |
+| JVM | A semantic oracle: a mature managed runtime that checks the meaning of Lox++ bytecode. Also a performance baseline to work toward. | No | Conforms to the spec where it serves as an oracle. It does not have to implement a feature that exists only to give native code low-level access, such as FFI or a JIT. It may implement one when the JVM makes it cheap. |
 | QBE | An experiment: the first lightweight path to an AOT binary, and tests along the AOT-to-JIT range. | No | Owes what the current experiment needs. A language change does not have to wait for QBE. |
 | Bootstrap interpreter | A capability test: a practical language can implement itself. It is not expected to be fast today. Once the native VM has a solid JIT, the speed of the bootstrap interpreter becomes a meaningful benchmark of that JIT. | No | Conforms to the spec. |
 
