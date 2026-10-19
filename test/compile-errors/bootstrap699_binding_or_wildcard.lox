@@ -1,0 +1,4 @@
+// DIAGNOSTIC: A binding pattern must be the sole arm pattern.
+// Compile error: a wildcard is the first alternative of an or-chain.
+var r = match 3 { case _ or _ => 1 case _ => 0 };
+print "after";
