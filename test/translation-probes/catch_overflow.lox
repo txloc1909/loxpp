@@ -8,6 +8,6 @@ try {
     print "no error";
 } catch (e) {
     print "caught " + e.kind;
-    print e.message;
+    print type(e.message);
 }
 print "after";

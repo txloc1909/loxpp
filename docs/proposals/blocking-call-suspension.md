@@ -15,7 +15,7 @@ The review on #711 found five blockers. The owner decided the open forks on
 | F1: scope | Calls on the network and `sleep` suspend only their task. `input()`, `run()`, and the Process calls continue to block the worker. |
 | F2: contexts where a task cannot suspend | A blocking call in such a context blocks the worker, as it does today. It does not raise. |
 | F3: name resolution in `connect` | The worker blocks while `connect` resolves a host name. The TCP connect suspends. |
-| F4: the bootstrap interpreter | It keeps its one-thread exception. Its conformance with native is the subject of #722; this mission does not wait for #722. |
+| F4: the bootstrap interpreter | It keeps its one-thread form. `spec/README.md`, Conformance, makes scheduling implementation-defined for every implementation, so a blocking call may block every worker there. |
 | Socket faults | A socket fault becomes catchable. This is a prerequisite, #726, not a node of this mission. |
 | Close while parked | Follows the socket-fault rule: the parked call raises the fault of a call on a closed socket. |
 | A `for`-in over a Map that another task changes | The fault stays fatal. The spec warns about it (see "Constraints", C1). |
@@ -68,7 +68,7 @@ The proposal is bound by these controls in `VISION.md`.
   socket-fault prerequisite makes this true for sockets. Without it, a server
   with many connections ends at the first fault of one connection.
 - **The backends**: the native VM decides; the JVM is a semantic oracle; the
-  bootstrap follows its one-thread exception (#722); QBE owes what the current
+  bootstrap keeps its one-thread form (`spec/README.md`, Conformance); QBE owes what the current
   experiment needs.
 - **Distribution**: the poller stays behind the Linux platform boundary.
 
@@ -129,8 +129,8 @@ Two workarounds are also closed.
 Coroutines are stackful, so a readiness primitive with a timeout would let a
 Lox++ library do this work. This proposal does not add one: the spec reserved
 invisible suspension, and it keeps the surface unchanged. The cost is that the
-bootstrap interpreter cannot implement the change; #722 decides what the
-bootstrap owes.
+bootstrap interpreter cannot implement the change; scheduling is
+implementation-defined (`spec/README.md`, Conformance), so it does not have to.
 
 ## Prerequisites
 
@@ -143,7 +143,7 @@ Two issues must land before the spec node of this mission.
    a native entry a context where the task cannot suspend.
 2. **#726: catchable socket faults.** Today a socket fault is fatal:
    it uses the row "A stdlib native function reports its own error" of the
-   Fatal Runtime Errors table. A write to a peer that closed gives
+   Halting Faults table. A write to a peer that closed gives
    `write(): Broken pipe` and exit 70, inside `try`. A refused connection does
    the same. After this mission a server holds many connections on one worker,
    and the first fault of one connection would end all of them. That issue
@@ -326,7 +326,7 @@ constraints on every node, and the spec states C1, C6 and C7.
 - **C1. A `for`-in over a Map that another task changes.** A park inside
   `for (var k in m)` while another task adds a key to `m` ends the program with
   the fatal fault "Map changed size during iteration." (`spec/04-semantics.md`,
-  Fatal Runtime Errors). The fault stays fatal. The spec and the `for`-in
+  Halting Faults). The fault stays fatal. The spec and the `for`-in
   section warn: a `for`-in over a Map that another task can change must not
   contain a call that can suspend. A probe shows the fatal result.
 - **C2. A `for`-in over a List that another task changes.** The behavior is
@@ -357,7 +357,7 @@ the shared state in one task, which the other tasks reach with messages.
 |---|---|---|
 | Native VM | The whole model: poller, park and resume, readiness registry, socket transport, liveness, teardown, the contexts rule. | The reference implementation. |
 | JVM | Oracle parity: a task that waits in a call of the first class lets the other tasks of its worker run, in the same order. | The handoff in `runtime/jvm/src/lox/LoxWorker.java` stops the worker; it needs a park and resume path in the scheduler. |
-| Bootstrap interpreter | Its one-thread exception: "A blocking call blocks every worker, not only its own." It cannot pass the same-worker probes. #722 decides its obligation. | `spec/04-semantics.md`, Implementation-Gated Exception; a bootstrap-only probe binds it. |
+| Bootstrap interpreter | Its one-thread form: a blocking call blocks every worker. It cannot pass the same-worker probes, and they do not bind it, because scheduling is implementation-defined. | `spec/README.md`, Conformance; a bootstrap-only probe checks its choice. |
 | QBE | Runs the same probes. It links the native runtime. Check the coroutine mode and its C frames; #723 also covers a native-entry defect on QBE. | `src/backend/qbe_emitter.cpp`. |
 | Spec | The two-class rule, the markers, the tables, the contexts rule, the Scheduling rule, the `connect` exception, C1, the probes. | `spec/04-semantics.md`, `spec/05-stdlib.md`. |
 | LSP docs | The text of the nine calls says "suspends the task until". No signature changes. | `src/lsp/stdlib_docs.cpp`. |
@@ -536,7 +536,7 @@ blocks its worker.
 - `VISION.md`, "What Lox++ is", "What counts as a language gap", "Design
   goals", "The backends", "Distribution".
 - `spec/04-semantics.md`, Suspend Points, Scheduling, Deadlock, Ending, `for`
-  statement, Fatal Runtime Errors, Implementation-Gated Exception.
+  statement, Halting Faults; `spec/README.md`, Conformance.
 - `spec/05-stdlib.md`, Blocking calls, `sleep`, `connect`, Socket methods,
   Server methods.
 - `docs/decisions/concurrency-model-decision.md`, "Scheduler" and "What this

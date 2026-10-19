@@ -1435,7 +1435,7 @@ public final class LoxOps {
         LoxWorker w = LoxWorker.current();
         if (w.stringifyDepth == MAX_STRINGIFY_DEPTH) {
             // A raw, valueless LoxError is uncatchable, even inside a
-            // try/catch (spec/04-semantics.md's Fatal Runtime Errors
+            // try/catch (spec/04-semantics.md's Halting Faults
             // section) — matching native's own fatal disposition here.
             throw new LoxError("Value nesting is too deep.");
         }

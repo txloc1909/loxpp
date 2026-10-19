@@ -79,7 +79,9 @@ these things:
    bootstrap interpreter, and each tool that parses or lowers the construct
    (the resolver, the LSP, the tree-sitter grammar, the editor syntaxes).
    For each backend, state what the change owes it under the backend roles
-   in `VISION.md`.
+   in `VISION.md`. Every backend owes the spec as `spec/README.md`,
+   "Conformance", defines it. A language change updates the bootstrap
+   interpreter in the same PR, but only as much as CI requires.
    A consumer found later, after CI turns red, means the plan was incomplete.
 2. **Use a table when the spec lists a set.** If the spec names a set that can
    be counted (fault kinds, opcodes, exit paths, suspend points), write it as
@@ -87,7 +89,10 @@ these things:
    before any backend work starts.
 3. **Check each backend against native at its own review.** The done
    criterion of every backend node includes: its output matches the native VM
-   and every other backend that already merged, within that backend's role. Do not defer this to a differential-test node at the
+   and every other backend that already merged, on the behavior that the spec
+   binds and within that backend's role. Messages and the other
+   implementation-defined behavior of `spec/README.md`, "Conformance", are
+   not compared. Do not defer this to a differential-test node at the
    end.
 4. **Write a named bug class into the decision at once.** When a review
    names a structural bug class, record it in the decision under
@@ -95,7 +100,8 @@ these things:
    shared layer it belongs to (for example, an analysis pass). Then check
    every other pass that uses the same data, not only every node.
 5. **Make the differential gate cover both phases.** The gate must compare
-   compile-time behavior (parser and resolver errors) and run-time behavior.
+   compile-time behavior (whether the program is rejected) and run-time
+   behavior.
    Run-time parity does not prove compile-time parity.
 
 ### Plans that limit their scope

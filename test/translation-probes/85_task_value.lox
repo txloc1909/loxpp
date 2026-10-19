@@ -1,6 +1,6 @@
 // A Task value (spec/03-types.md, Task) is truthy, has type "Task" and the
 // string form <task>, is not a valid map key, and is not iterable. A for-in
-// over a non-iterable value is fatal (the Fatal Runtime Errors table), so
+// over a non-iterable value is a halting fault (the Halting Faults table), so
 // nothing after the loop prints.
 var t = task.self();
 if (t) print "truthy";

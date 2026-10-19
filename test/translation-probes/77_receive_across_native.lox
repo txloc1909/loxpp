@@ -15,10 +15,10 @@ try {
     print Reader();
 } catch (e) {
     print e.kind;
-    print e.message;
+    print type(e.message);
 }
 
 // STATUS: ok
 // CHECK: read one
 // CHECK: YieldAcrossNativeError
-// CHECK: Cannot receive across a native callback.
+// CHECK: String

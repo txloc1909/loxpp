@@ -148,7 +148,8 @@ addition to the mutation methods:
 | `elem in list` | `true` if any element compares equal to `elem` under `==`. |
 | `for (var x in list)` | Iterates over elements in order. |
 
-The maximum number of elements in a list literal is 255.
+The maximum number of elements in a list literal is implementation-defined
+(see [Conformance](README.md#conformance)).
 
 ### Map
 
@@ -206,7 +207,8 @@ integer index.
 | `m.values()` | Returns a List of all values (order matches `m.keys()`). |
 | `m.entries()` | Returns a List of `[key, value]` two-element Lists (order matches `m.keys()`). |
 
-The maximum number of key-value pairs in a map literal is 255.
+The maximum number of key-value pairs in a map literal is
+implementation-defined (see [Conformance](README.md#conformance)).
 
 ### Error
 
@@ -222,7 +224,7 @@ read-only:
 
 | Field | Meaning |
 |---|---|
-| `message` | Human-readable description of the fault — the same text the implementation reports when that fault is left uncaught. |
+| `message` | Human-readable description of the fault. Its text is implementation-defined (see [Conformance](README.md#conformance)). |
 | `kind` | A string identifying the category of fault; see the [Runtime Errors](04-semantics.md#runtime-errors) table for the kind used by each fault defined in this specification. |
 
 ```lox
@@ -231,7 +233,7 @@ try {
     print xs[0];
 } catch (e) {
     print e.kind;     // IndexOutOfBoundsError
-    print e.message;  // List index out of bounds.
+    print e.message;  // implementation-defined text
 }
 ```
 
@@ -474,10 +476,10 @@ Every value has a canonical string form, produced by `print` and by the
 | Socket | `<socket>` |
 | Server | `<server>` |
 | Process | `<process>` |
-| Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. Note that an *uncaught* `throw` of an Error reports only `message`, not this form — see [§04-semantics, `throw` Statement](04-semantics.md#throw-statement). |
+| Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. |
 | Coroutine | `<coroutine>` |
 | Task | `<task>` |
 
 The nesting depth of a value that a canonical string form can hold is
-implementation-defined. A value more deeply nested than that limit causes a
-**runtime error**.
+implementation-defined (see [Conformance](README.md#conformance)). A value
+more deeply nested than that limit causes a **runtime error**.

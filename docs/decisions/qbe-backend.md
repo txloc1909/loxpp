@@ -325,7 +325,7 @@ Each stage ends with a check that can be run, in the style of
 | **S4** Calls and closures | `CALL`/`RETURN`/`CLOSURE`/upvalues/`CLOSE_UPVALUE`, frame limits | Probes 06 and 08, V1/V2/V3 with no capture analysis, `fib` |
 | **S5** The rest of the language | Classes, `INVOKE`/super, lists and maps, iterators, `SLICE`/`IN`, enums, `JUMP_TABLE` compare chains | Probes 09–14 and 16 |
 | **S6** Errors | Status protocol, try/catch, `THROW`, `defer`, fatal errors and exit codes, stack overflow | `check_fault_table.py`; stack-overflow probes; whole corpus under `LOXPP_STRESS_GC=1` |
-| **S7** Parity gate | `diff_runtimes.py` runner, `check_qbe_probes.sh`, the bootstrap interpreter compiled with QBE | Full corpus byte-identical to native. The CLR backend is deleted after this stage. |
+| **S7** Parity gate | `diff_runtimes.py` runner, `check_qbe_probes.sh`, the bootstrap interpreter compiled with QBE | Full corpus byte-identical to native for portable programs (`spec/README.md`, Conformance). The CLR backend is deleted after this stage. |
 | **S8** Speed (optional) | Register promotion for slots that are never captured and do not escape, safe points, `GET_TAG;JUMP_TABLE` fusion | A new benchmark report |
 
 ## Open questions

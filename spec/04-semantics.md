@@ -96,7 +96,7 @@ to a new variable in the current scope.
 - `_` is a positional wildcard: `source[i]` is accessed and discarded; no
   variable is created. The duplicate-name restriction does not apply to `_`.
 - Elements beyond the last pattern position are never accessed.
-- Out-of-bounds access raises a **runtime error** ("List index out of bounds.").
+- Out-of-bounds access raises a **runtime error**.
 - The source sequence is not exposed as a user-accessible variable.
 - Pattern-bound variables are mutable (same default as `var`).
 - Trailing comma in the pattern is allowed.
@@ -269,8 +269,9 @@ same canonical string form. `__str__` redefines an Instance's canonical form
 everywhere it is rendered — directly, or nested inside a List, Map, or Enum
 value. An Instance without `__str__` renders as `ClassName instance`, as
 before. A `__str__` that calls back into `str` or `print` recurses; the
-implementation's canonical-string depth limit (200 heap levels) bounds it and
-raises the same `Value nesting is too deep.` fault as any other deep nesting.
+canonical-string depth limit bounds it and raises the same fault as any other
+deep nesting (see [Halting Faults](#halting-faults); the limit is
+implementation-defined, see [Conformance](README.md#conformance)).
 
 Internal equality — `in` against a List and `list.remove` — always uses
 identity equality and never consults `__eq__`.
@@ -309,23 +310,20 @@ obj.name
 1. Evaluate `obj`.
 2. If `obj` is a Map, look up `name` in the map class method table. If found, return a new bound built-in method
    wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
-   two property-get reads of the same map's method never yield the same object. If not found, raise a runtime error
-   ("Undefined property 'name' on map.").
+   two property-get reads of the same map's method never yield the same object. If not found, raise a runtime error.
 3. If `obj` is a File, look up `name` in the file class method table. If found, return a new bound built-in method
    wrapping the native function and `obj` as receiver. Each evaluation creates a new value, so
-   two property-get reads of the same file's method never yield the same object. If not found, raise a runtime error
-   ("Undefined property 'name' on file.").
+   two property-get reads of the same file's method never yield the same object. If not found, raise a runtime error.
 4. If `obj` is a Socket, Server, or Process, look up `name` in that type's own class method table. If found,
    return a new bound built-in method wrapping the native function and `obj` as receiver, again as a fresh value
-   on every read. If not found, this is a **runtime error** ("Undefined property 'name' on socket.",
-   "Undefined property 'name' on server.", or "Undefined property 'name' on process.", matching the type).
+   on every read. If not found, this is a **runtime error**.
 5. If `obj` is an `Error` ([§03-types](03-types.md#error)): if `name` is `message` or `kind`, return that
-   field's value (a String). Otherwise, this is a **runtime error** ("Undefined property 'name' on error.").
-6. If `obj` is not an Instance, this is a **runtime error** ("Only instances have properties.").
+   field's value (a String). Otherwise, this is a **runtime error**.
+6. If `obj` is not an Instance, this is a **runtime error**.
 7. If the instance's field table contains `name`, return that field value. Fields shadow methods.
 8. Otherwise, look up `name` in the instance's class method table. If found, return a BoundMethod
    wrapping the closure and `obj` as receiver.
-9. If neither step 7 nor 8 found `name`, this is a **runtime error** ("Undefined property 'name'.").
+9. If neither step 7 nor 8 found `name`, this is a **runtime error**.
 
 ### Property Set
 
@@ -334,7 +332,7 @@ obj.name = expr
 ```
 
 1. Evaluate `obj`.
-2. If `obj` is not an Instance, this is a **runtime error** ("Only instances have fields.").
+2. If `obj` is not an Instance, this is a **runtime error**.
 3. Evaluate `expr`.
 4. Store the result in the instance's field table under `name` (creating the field if it does not
    exist, overwriting if it does).
@@ -358,8 +356,7 @@ Instance whose class defines `__call__`. If the field value is not callable, tha
 `this` evaluates to the instance on which the enclosing method was invoked. It is only valid inside
 a method body. Using `this` outside any class method is a **static error**.
 
-`this` is **read-only**. Assigning to it is a **static error** ("Invalid
-assignment target."). It is a local binding for every other purpose: each method
+`this` is **read-only**. Assigning to it is a **static error**. It is a local binding for every other purpose: each method
 call makes a new one, and a nested function can capture it. See
 [Binding Identity](#binding-identity).
 
@@ -411,11 +408,10 @@ callee(arg1, arg2, ...)
 7. The call expression evaluates to the function's return value (or `nil` if
    none).
 
-Functions may be called recursively. The depth limit is implementation-defined;
-exceeding it is a **runtime error**, except for the self tail calls described
-next, which do not count toward the depth. The bootstrap interpreter may
-support a lower depth than the other implementations (see
-[Implementation-Gated Exception](#implementation-gated-exception-the-bootstrap-interpreter)).
+Functions may be called recursively. The depth limit is implementation-defined
+(see [Conformance](README.md#conformance)); exceeding it is a **runtime
+error**, except for the self tail calls described next, which do not count
+toward the depth.
 
 #### Self Tail Calls
 
@@ -654,7 +650,7 @@ visited. Removing elements is not directly possible (List has no `remove`).
 Each Map holds a structural version that grows on every insert of a new key
 and every erase of a live key. For a Map, the iterator records the version
 at creation; if the version differs at the next iterator step, that step is
-a **runtime error** ("Map changed size during iteration."). This covers
+a **runtime error**. This covers
 inserting a new key and removing a key, including growth that rehashes the
 Map, and also a paired erase plus insert that restores the net size. It
 matches Python, which reports the same fault for a dictionary size change.
@@ -701,7 +697,7 @@ class Name < SuperName { method* }
 ```
 
 1. If `< SuperName` is present, evaluates `SuperName`. If it is not a Class, this is a
-   **runtime error** ("Superclass must be a class."). A class cannot inherit from itself — that is
+   **runtime error**. A class cannot inherit from itself — that is
    a **static error**.
 2. A new Class value is created with the given `Name`.
 3. If a superclass is present, its method table is **copied into the new class at definition
@@ -717,8 +713,7 @@ class Name < SuperName { method* }
 of the class is created (see "Instance Creation" above).
 
 - Inside `init`, a bare `return ;` exits early; `this` is still returned as the call result.
-- `return expr ;` with a non-`nil` expression inside `init` is a **static error** ("Can't return a
-  value from an initializer.").
+- `return expr ;` with a non-`nil` expression inside `init` is a **static error**.
 - `init` implicitly returns `this`.
 
 ### Function Declaration
@@ -813,15 +808,10 @@ throw expr ;
 5. If no `try` statement catches it — the search in step 2 reaches the top
    of the program with no match — the `throw` is **uncaught**. Every
    function call on the way to the top still runs its pending deferred
-   calls (step 3a). Execution then halts and the error is reported exactly
-   as an uncaught runtime error is reported (see [Runtime
-   Errors](#runtime-errors)):
-   - If the thrown value is an `Error` value ([§03-types](03-types.md#error)),
-     the reported message is that value's `message` field, unchanged.
-   - For any other value, the reported message is that value's canonical
-     string representation ([§03-types, Canonical String
-     Representation](03-types.md#canonical-string-representation)) — the
-     same text `str()` would produce.
+   calls (step 3a). Execution then halts, as an uncaught runtime error does
+   (see [Conformance](README.md#conformance), Halts). Whether those
+   deferred calls run before the program ends is implementation-defined, as
+   for every halt, and so is the text of the report.
 6. A `throw` statement never completes normally: no statement written
    after it in the same block ever executes.
 7. `throw` may appear anywhere a statement may appear, including inside a
@@ -882,8 +872,7 @@ defer callee ( arguments ) ;
    `try`/`catch` still runs when the whole enclosing function call exits,
    not when that inner construct exits.
 7. `defer` is permitted only inside a function body. Using `defer` at the
-   top level of a script (outside any function) is a **static error**
-   ("Can't defer at the top level."), matching how `return` at the top
+   top level of a script (outside any function) is a **static error**, matching how `return` at the top
    level is a static error.
 
 ---
@@ -1154,8 +1143,8 @@ print outer(); // 7
 
 An empty `[]` produces a List with zero elements.
 
-The maximum number of element expressions in a list literal is 255 (the same
-limit as function call arguments).
+The maximum number of element expressions in a list literal is
+implementation-defined (see [Conformance](README.md#conformance)).
 
 ### Map Literal
 
@@ -1175,7 +1164,8 @@ limit as function call arguments).
 
 An empty `{}` produces a Map with zero entries.
 
-The maximum number of key-value pairs in a map literal is 255.
+The maximum number of key-value pairs in a map literal is
+implementation-defined (see [Conformance](README.md#conformance)).
 
 ### Index Get
 
@@ -1193,14 +1183,14 @@ collection[key]
       value.
    c. If `key` is absent, the expression evaluates to `nil`.
 4. If `collection` is a **List** or a **String**:
-   a. If `key` is not a Number, this is a **runtime error** ("List index must be a number.").
+   a. If `key` is not a Number, this is a **runtime error**.
    b. If `key` is not an integer-valued number (i.e., `key ≠ floor(key)`),
-      this is a **runtime error** ("List index must be an integer.").
+      this is a **runtime error**.
    c. Let `i` be the integer value of `key`.
-   d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error** ("List index out of bounds.").
+   d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error**.
    e. For a List, the expression evaluates to `collection[i]`. For a String,
       it evaluates to the one-character String at position `i`.
-5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
+5. Otherwise, this is a **runtime error**.
 
 Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
 identical — both are the same Number value used as index 1.
@@ -1223,7 +1213,7 @@ collection[key] = expr
    b. Evaluate `expr`.
    c. Store the result in `collection[i]`.
    d. The expression evaluates to the stored value (same as assignment semantics).
-5. Otherwise, this is a **runtime error** ("Only lists and maps can be indexed.").
+5. Otherwise, this is a **runtime error**.
 
 ### Slice Get
 
@@ -1242,18 +1232,18 @@ Evaluate `seq`, then `start`, then `end` (left-to-right).
 If `seq` is an Instance whose class defines `__slice__`, call it with `start`
 and `end` and use its result (see [Operator Overloading](#operator-overloading));
 the built-in behaviour below does not apply. Otherwise, if `seq` is not a List
-or String, this is a **runtime error** ("Slice requires a List or String.").
+or String, this is a **runtime error**.
 
 **Step 3 — Validate `start`.**
-- If `start` is not a Number → runtime error ("Slice index must be a number.").
-- If `start` is not integer-valued (i.e., `start ≠ floor(start)`) → runtime error ("Slice index must be an integer.").
-- If `start < 0` → runtime error ("Slice index must be non-negative.").
+- If `start` is not a Number → runtime error.
+- If `start` is not integer-valued (i.e., `start ≠ floor(start)`) → runtime error.
+- If `start < 0` → runtime error.
 - Let `s = integer value of start`.
 
 **Step 4 — Validate `end`.**
-- If `end` is not a Number → runtime error ("Slice index must be a number.").
-- If `end` is not integer-valued → runtime error ("Slice index must be an integer.").
-- If `end < 0` → runtime error ("Slice index must be non-negative.").
+- If `end` is not a Number → runtime error.
+- If `end` is not integer-valued → runtime error.
+- If `end < 0` → runtime error.
 - Let `e = integer value of end`.
 
 **Step 5 — Clamp bounds.**  
@@ -1278,7 +1268,7 @@ Let `n = len(seq)`.
 list.append(value)
 ```
 
-1. Evaluate `list`. If the result is not a List, this is a **runtime error** ("Only instances have methods.").
+1. Evaluate `list`. If the result is not a List, this is a **runtime error**.
 2. Appends `value` to the end of the list.
 3. The expression evaluates to `nil`.
 
@@ -1288,8 +1278,8 @@ list.append(value)
 list.pop()
 ```
 
-1. Evaluate `list`. If the result is not a List, this is a **runtime error** ("Only instances have methods.").
-2. If the list is empty, this is a **runtime error** ("Cannot pop from an empty list.").
+1. Evaluate `list`. If the result is not a List, this is a **runtime error**.
+2. If the list is empty, this is a **runtime error**.
 3. Removes the last element from the list.
 4. The expression evaluates to the removed element.
 
@@ -1605,7 +1595,8 @@ suspend point, and a spawn is never one.
 
 **Blocking calls.** A blocking call blocks the worker that makes it: no task
 on that worker runs until the call returns. Tasks on other workers keep
-running. A blocking call is in the table so that a later version can let
+running, on an implementation that runs workers at the same time (see
+[Conformance](README.md#conformance), Scheduling). A blocking call is in the table so that a later version can let
 other tasks of the worker run while the call waits, with no change to the
 rule above.
 
@@ -1643,9 +1634,8 @@ run.
 A call of `exit(code)` in any task ends the program at once, with that exit
 code. A throw that no `try` statement in its task catches is uncaught: it
 ends the program as an uncaught runtime error does ([`throw`
-Statement](#throw-statement), step 5). The pending deferred calls of the
-task that threw run first, as step 5 says; every other task is abandoned. A
-fatal fault in any task ends the program.
+Statement](#throw-statement), step 5); every other task is abandoned. A
+halting fault in any task ends the program.
 
 A `print` statement writes its whole line at once: lines that tasks on
 different workers print never mix inside one line.
@@ -1655,57 +1645,23 @@ different workers print never mix inside one line.
 When the main task waits in `task.receive()`, no task on any worker is
 running or ready to run, no task is in a blocking call, and no message is on
 its way to a task, the program can never progress. It then ends with
-`DeadlockError`. The fault is fatal: no `try` statement catches it, and no
-pending deferred call runs. The report contains the message in the table
-below, and it can also list the tasks that wait.
+`DeadlockError`. It is a halting fault (see [Halting
+Faults](#halting-faults)). The report can list the tasks that wait.
 
 ### Worker and Task Faults
 
-| Kind | Raised when | Catchable | Message |
-|---|---|---|---|
-| `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes | `Value of type T is not a message.`, where `T` is `type(msg)` |
-| `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes | `Cannot send to a task that has ended.` |
-| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain, or while a deferred call runs | yes | `Cannot receive across a native callback.` |
-| `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no | `Deadlock: every task waits in receive.` |
+| Kind | Raised when | Catchable |
+|---|---|---|
+| `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes |
+| `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes |
+| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain, or while a deferred call runs | yes |
+| `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no |
 
 A catchable fault in this table is delivered to a `catch` block as an
-`Error` value whose `kind` is the `Kind` column and whose `message` is the
-`Message` column. `YieldAcrossNativeError` is the kind that the [Runtime
-Errors](#runtime-errors) table gives a `yield` across a native callback; a
-receive uses the same kind with its own message. A fault that is not
-catchable has no `Error` value.
-
-### Implementation-Gated Exception: the Bootstrap Interpreter
-
-This specification allows two exceptions, and only for the bootstrap
-interpreter, the Lox++ interpreter that is written in Lox++.
-
-**Worker form.** The bootstrap interpreter may run every worker on one host
-thread, with the tasks of all workers in one scheduler. Under that form, and
-only there:
-
-1. A task runs alone among the tasks of every worker from one suspend point
-   to the next, not only among the tasks of its own worker.
-2. A blocking call blocks every worker, not only its own.
-3. Workers do not run at the same time, so more workers do not make a
-   program faster.
-
-Every other rule of this section holds under that form with no change: each
-worker has its own global variables, a value passes between workers only as
-a message, each fault in the table above occurs in the same cases, and the
-order rules hold. A program whose progress needs two workers to run at the
-same time can behave differently under that form. Examples are a task that
-waits in a blocking call until a task on another worker acts, and a task
-that never reaches a suspend point while a task on another worker must run.
-
-**Call depth.** The bootstrap interpreter may support a lower call depth than
-the other implementations support. A program that needs more call depth than
-the bootstrap interpreter supports may raise `StackOverflowError`, and the
-program halts when nothing catches it; another implementation can run the same
-program to the end. The depth limit stays implementation-defined, and no other
-rule changes.
-
-No other implementation may use these exceptions.
+`Error` value whose `kind` is the `Kind` column. `YieldAcrossNativeError` is
+the kind that the [Runtime Errors](#runtime-errors) table gives a `yield`
+across a native callback; a receive uses the same kind. A fault that is not
+catchable is a halting fault (see [Conformance](README.md#conformance)).
 
 ### Bounding a Mailbox (Non-Normative)
 
@@ -1739,8 +1695,8 @@ task hold one end only.
 
 ## Runtime Errors
 
-A runtime error halts execution immediately and reports an error message —
-**unless** it happens during the execution of a `try` statement's
+A runtime error halts the program (see [Conformance](README.md#conformance),
+Halts) — **unless** it is catchable and it happens during the execution of a `try` statement's
 `tryBlock` (directly, or inside any function called from within it), in
 which case it does not halt the program; instead it is delivered to that
 `try` statement's `catchBlock` as an `Error` value, exactly as the
@@ -1749,17 +1705,17 @@ value. An error that occurs during the execution of the `catchBlock`
 itself is not caught by that same `try` statement. A `StackOverflowError`
 that is raised while another `StackOverflowError` is already unwinding —
 that is, by a deferred call that runs during that unwind — is not
-delivered to any `catchBlock`; it halts the program as an uncaught error.
+delivered to any `catchBlock`; it is a halting fault.
 Every cause in the table below is catchable this way; see
-[Fatal Runtime Errors](#fatal-runtime-errors) for the faults that are not.
+[Halting Faults](#halting-faults) for the faults that are not.
 
 The faults of workers and tasks have their own table, [Worker and Task
 Faults](#worker-and-task-faults).
 
 The table lists each cause, an example, and the `kind` field
 ([§03-types](03-types.md#error)) of the `Error` value delivered to
-`catchBlock` when it is caught. The `Error`'s `message` field holds the
-same text the implementation reports when the fault is left uncaught.
+`catchBlock` when it is caught. The `Error`'s `message` field is a String
+whose text is implementation-defined.
 
 | Cause | Example | `Error.kind` |
 |---|---|---|
@@ -1792,134 +1748,63 @@ same text the implementation reports when the fault is left uncaught.
 **The two map-key rows above cover an index read or write, a map or set
 literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
 methods, not one of those four forms, and an invalid key given to either
-is fatal — see the Fatal Runtime Errors table's own `Map.has`/`Map.del`
-row below, and [Fatal Runtime Errors](#fatal-runtime-errors) generally.
+is a halting fault — see the `Map.has`/`Map.del` row of [Halting
+Faults](#halting-faults).
 
-### Fatal Runtime Errors
+### Halting Faults
 
-The causes above are every fault the native implementation delivers as a
-catchable `Error` value. Native also has a second, **larger** set of faults
-that always halt the program: they are never delivered to a `catchBlock`,
-even from inside a `try` statement's `tryBlock`. Each row below is fatal
-today — this is a record of current native behavior, not a design decision
-that a future version must keep. There is no `Error.kind` for a fatal
-fault; the message is the only text the implementation reports.
+Each cause below is a **halting fault**: it halts the program, even inside a
+`try` statement's `tryBlock` (see [Conformance](README.md#conformance)). An
+implementation may make a halting fault catchable instead, with an
+implementation-defined `kind`; a program that catches one is not portable.
+A halting fault has no `kind` that this specification defines, and the text
+of its report is implementation-defined. Whether the pending deferred calls
+run before the program ends is implementation-defined, as for every halt.
 
-A fatal fault also skips every pending deferred call — not only the ones
-belonging to a function whose call the fault unwinds past, but the ones
-belonging to the function where the fault happened. This differs from a
-catchable fault left uncaught, where [`throw`
-Statement](#throw-statement) step 5 still runs every pending deferred call
-on the way to the top: a fatal fault halts the program immediately at the
-point of the fault, while an uncaught catchable fault halts it only after
-every pending deferred call on the unwind path has already run.
-
-| Cause | Example | Message |
-|---|---|---|
-| `GET_TAG` applied to a non-enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` | `GET_TAG: expected an enum value.` |
-| `print` of a value nested deeper than the implementation's canonical-string depth limit (200 heap levels today) | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` | `Value nesting is too deep.` |
-| A native function is called with an argument count other than its arity | `clock(1);` | `Expected 0 arguments but got 1.` |
-| A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (the compiler checks only that `defer` is followed by a call expression — `defer 42;` fails to compile with `Expect a call expression after 'defer'.` — not that the callee is callable, so a variable holding a non-callable value reaches this check at run time) | `Deferred callable has unexpected type.` |
-| A stdlib native function reports its own error while running | `open("/no/such/path", "r");` | `open(): cannot open '/no/such/path': No such file or directory` |
-| `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` | `Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.` |
-| Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) | `Undefined property 'bogus' on file.` |
-| Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` | `Undefined property 'bogus' on socket.` |
-| Undefined property read on a Server value | `var l = listen("127.0.0.1", 0); l.bogus;` | `Undefined property 'bogus' on server.` |
-| Undefined property read on a Process value | `var p = spawn("echo", []); p.bogus;` | `Undefined property 'bogus' on process.` |
-| Undefined property read on a Map value | `var m = {}; m.bogus;` | `Undefined property 'bogus' on map.` |
-| Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` | `Undefined property 'bogus'.` |
-| Property read on a value that is not an Instance, Map, File, or Error | `42.foo;` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) | `Only instances have properties.` |
-| Property write on a value that is not an Instance | `42.foo = 1;` | `Only instances have fields.` |
-| A field looked up by [Method Invocation](#method-invocation) shadows the method name but is not callable | `class C { init() { this.f = 1; } } C().f();` | `Can only call functions, classes and enums.` |
-| `obj.method(...)` where `method` is not found on the instance's class | `class C {} C().bogus();` | `Undefined property 'bogus'.` |
-| `list.append(...)` called with an argument count other than 1 | `[].append();` | `'append' expects 1 argument but got 0.` |
-| `list.pop(...)` called with any argument | `[].pop(1);` | `'pop' expects 0 arguments but got 1.` |
-| `list.remove(...)` called with an argument count other than 1 | `[1].remove();` | `'remove' expects 1 argument but got 0.` |
-| `list.remove(value)` where `value` is not present | `[1, 2].remove(3);` | `Value not found in list.` |
-| Undefined method invoked on a List | `[].bogus();` | `Undefined method 'bogus' on list.` |
-| Undefined method invoked on a File | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus();` (a missing path fails first with the stdlib-error row above) | `Undefined method 'bogus' on file.` |
-| Undefined method invoked on a Socket | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus();` | `Undefined method 'bogus' on socket.` |
-| Undefined method invoked on a Server | `var l = listen("127.0.0.1", 0); l.bogus();` | `Undefined method 'bogus' on server.` |
-| Undefined method invoked on a Process | `var p = spawn("echo", []); p.bogus();` | `Undefined method 'bogus' on process.` |
-| Undefined method invoked on a Map | `var m = {}; m.bogus();` | `Undefined method 'bogus' on map.` |
-| `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` | `Superclass must be a class.` |
-| `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` | `Undefined property 'zzz'.` |
-| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` | `Enum field index must be a number.` |
-| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` | `Enum field index 3 out of range.` |
-| Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) | `Strings are immutable and cannot be indexed for assignment.` |
-| `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` | `Slice requires a List or String.` |
-| `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2];` | `Slice index must be a number.` |
-| `seq[start:end]` where `start` is not integer-valued | `[1, 2][1.5:2];` | `Slice index must be an integer.` |
-| `seq[start:end]` where `start` is negative | `[1, 2][-1:2];` | `Slice index must be non-negative.` |
-| `seq[start:end]` where `end` is not a Number | `[1, 2][0:"a"];` | `Slice index must be a number.` |
-| `seq[start:end]` where `end` is not integer-valued | `[1, 2][0:1.5];` | `Slice index must be an integer.` |
-| `seq[start:end]` where `end` is negative | `[1, 2][0:-1];` | `Slice index must be non-negative.` |
-| `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` | `Left operand of 'in' on a string must be a string.` |
-| `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` | `Right operand of 'in' must be a list, string, or map.` |
-| `for (var x in expr)` where `expr` is not a List, String, Map, or Coroutine | `for (var x in 42) {}` | `Value is not iterable (expected list, string, map, or coroutine).` |
-| Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` | `Map changed size during iteration.` |
-
-**`print`'s depth-limit fault is fatal, with no `Error.kind`, on every
-consumer.** `Op::PRINT` clears any pending stdlib error before it
-stringifies its operand, so the row above is not a stdlib-error path; it is
-the canonical-string depth guard in `stringifyObj` (`src/object.cpp`), which
-also fires the same way, with the same message, when `str()` calls into the
-same guard through a native call. Native and the JVM backend both halt the
-program on this fault, even inside a `try` statement — the JVM guard says
-so explicitly, in a comment, at its own matching depth check. There is no catchable-table row for this fault: an
-earlier draft of this table gave it one (kind `MaxDepthExceededError`), the
-opposite disposition from every implementation; the bootstrap interpreter
-was the only consumer that followed that draft, and it now matches the
-other three instead (see #325).
-
-**A stdlib native's own error text is not enumerated here.** The row above
-gives one example message; the text a stdlib native reports differs call
-by call and is defined by that native, not by `src/vm.cpp`. Enumerating
-every `nativeRuntimeError` string under `src/stdlib/` is out of this
-node's scope (`runtimeError` call sites in `src/vm.cpp` only) and is a
-follow-up issue if it is wanted.
-
-**Internal invariant checks are excluded.** A handful of `RAISE_ERROR` call
-sites in `src/vm.cpp` guard invariants the compiler itself is responsible
-for (for example, that `GET_ITER` always pushes an `ObjIterator` before
-`ITER_HAS_NEXT`/`ITER_NEXT` run). Their messages are prefixed `BUG:`. No
-valid Lox++ program can reach them; seeing one means the implementation,
-not the program, is broken. They are excluded from the table above and are
-not part of the language's observable behavior.
-
-**Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
-row above already covers the general case. Native takes a direct fatal
-path — bypassing the catchable machinery — in two situations: when no
-`try` statement is active in the running task (so a catch search would
-fail immediately regardless), and for the re-entrant case the paragraph
-above the catchable table already describes, where a second
-`StackOverflowError` arrives while the first is still unwinding. Both
-produce the same `"Stack overflow."` message as the catchable row; this is
-not a distinct fault.
-
-**Shared uncaught-fault reporting is not a distinct fault.** `handleThrow`
-reports the final "no handler found" message for every catchable row above
-from two call sites of its own. When the unhandled value is an `Error`
-value — including an explicit uncaught `throw` of an `Error` — it reuses
-that value's own `message` field unchanged. When an explicit uncaught
-`throw` carries a value that is **not** an `Error` value, native reports
-that value's canonical string representation with no added prefix (for
-example, `throw 42;` reports `42`) — both branches match the [`throw`
-Statement](#throw-statement)'s own text this way. Likewise,
-`raiseThrowableError`'s fallback for when the `Error` class itself is not
-yet initialized cannot fire once any Lox++ program has started running —
-the class is created during VM setup, before user code executes — so no
-valid program can reach it.
-
-**Wrong argument count's fatal fast path.** The catchable `"ArityError"` row
-above already covers the general case: calling a Lox++ function with the
-wrong number of arguments while a `try` statement's handler is active. When
-no handler is active in the running task, native skips constructing the
-`Error` value entirely and reports the same `"Expected 0 arguments but got
-1."`-shaped message as a direct fatal error (native's own arity and the
-call's argument count) — the ordinary "no handler, so uncaught" outcome the
-[Runtime Errors](#runtime-errors) section already describes, not a distinct
-fault.
+| Cause | Example |
+|---|---|
+| A constructor pattern is matched against a value that is not an enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` |
+| `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
+| A native function is called with an argument count other than its arity | `clock(1);` |
+| A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
+| A stdlib native function reports its own error while running | `open("/no/such/path", "r");` |
+| `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
+| Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) |
+| Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` |
+| Undefined property read on a Server value | `var l = listen("127.0.0.1", 0); l.bogus;` |
+| Undefined property read on a Process value | `var p = spawn("echo", []); p.bogus;` |
+| Undefined property read on a Map value | `var m = {}; m.bogus;` |
+| Property read on an Instance where the name is neither a field nor a method | `class C {} var c = C(); c.bogus;` |
+| Property read on a value that is not an Instance, Map, File, or Error | `42.foo;` (see [§03-types, Error](03-types.md#error) and [Property Get](#property-get)) |
+| Property write on a value that is not an Instance | `42.foo = 1;` |
+| A field looked up by [Method Invocation](#method-invocation) shadows the method name but is not callable | `class C { init() { this.f = 1; } } C().f();` |
+| `obj.method(...)` where `method` is not found on the instance's class | `class C {} C().bogus();` |
+| `list.append(...)` called with an argument count other than 1 | `[].append();` |
+| `list.pop(...)` called with any argument | `[].pop(1);` |
+| `list.remove(...)` called with an argument count other than 1 | `[1].remove();` |
+| `list.remove(value)` where `value` is not present | `[1, 2].remove(3);` |
+| Undefined method invoked on a List | `[].bogus();` |
+| Undefined method invoked on a File | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus();` (a missing path fails first with the stdlib-error row above) |
+| Undefined method invoked on a Socket | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus();` |
+| Undefined method invoked on a Server | `var l = listen("127.0.0.1", 0); l.bogus();` |
+| Undefined method invoked on a Process | `var p = spawn("echo", []); p.bogus();` |
+| Undefined method invoked on a Map | `var m = {}; m.bogus();` |
+| `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` |
+| `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` |
+| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` |
+| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` |
+| Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) |
+| `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` |
+| `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2];` |
+| `seq[start:end]` where `start` is not integer-valued | `[1, 2][1.5:2];` |
+| `seq[start:end]` where `start` is negative | `[1, 2][-1:2];` |
+| `seq[start:end]` where `end` is not a Number | `[1, 2][0:"a"];` |
+| `seq[start:end]` where `end` is not integer-valued | `[1, 2][0:1.5];` |
+| `seq[start:end]` where `end` is negative | `[1, 2][0:-1];` |
+| `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` |
+| `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` |
+| `for (var x in expr)` where `expr` is not a List, String, Map, or Coroutine | `for (var x in 42) {}` |
+| Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` |
 
 ---
 

@@ -174,7 +174,7 @@ probes=(
     "examples/try_catch_error_instance_properties_catchable.lox"
     "examples/try_catch_error_vs_ordinary_instance_catchability.lox"
     # Issue #268: LoxClosure's own frame-count ceiling delivers a catchable
-    # StackOverflowError, matching native's kind, message, and post-catch
+    # StackOverflowError, matching native's kind and post-catch
     # continuation. Promoted out of jvm-only/ (issue #445).
     "test/translation-probes/catch_overflow.lox"
     # Issue #268: pins the success side of the frame-count ceiling boundary
@@ -185,11 +185,10 @@ probes=(
     # unwinds, replaces it — the guard must still clear so a later,
     # unrelated overflow is caught.
     "test/translation-probes/jvm-only/defer_replaces_overflow.lox"
-    # Mission #288 node #333: JVM fault sites wired against N1's completed
-    # spec/04-semantics.md table (spec/03-types.md's Error section for the
-    # message/kind fields). Each probe below pins one catchable row's exact
-    # kind and message text that tools/check_fault_table.py's own spec-table
-    # rows do not already cover for JVM (issue #442 point 5: seven sibling
+    # JVM fault sites wired against the spec/04-semantics.md table. Each
+    # probe below pins one catchable row's kind, and that `message` is a
+    # String, where tools/check_fault_table.py's own spec-table rows do not
+    # already cover the JVM (issue #442 point 5: seven sibling
     # probes here duplicated a fault-table row byte-for-byte and were
     # removed once that was confirmed against a live JVM run).
     "test/translation-probes/jvm-only/try_catch_invoke_on_error_invalid_receiver.lox"
@@ -260,11 +259,11 @@ error_probes=(
     "test/translation-probes/44_reflect_hasfield_non_instance.lox"
     "test/translation-probes/45_reflect_methods_non_instance.lox"
     "test/translation-probes/46_reflect_callmethod_non_instance.lox"
-    # Mission #288 node #333: fault sites native routes through RAISE_ERROR
-    # (fatal, never delivered to a catchBlock), which the JVM backend had
-    # wired as catchable instead (over-catching) or left unguarded entirely
-    # (the stringify depth guard, added for this node — see
-    # spec/04-semantics.md's Fatal Runtime Errors section).
+    # Halting faults (spec/04-semantics.md, Halting Faults). The spec lets
+    # an implementation make one catchable; the JVM backend chooses to halt
+    # on each, as native does, and these probes pin that choice. They
+    # also catch a fault site the JVM leaves unguarded entirely (the
+    # stringify depth guard).
     "test/translation-probes/jvm-only/fault_set_property_on_error_fatal.lox"
     "test/translation-probes/jvm-only/fault_invoke_field_not_callable_fatal.lox"
     "test/translation-probes/jvm-only/fault_invoke_method_not_found_fatal.lox"
@@ -413,17 +412,10 @@ for probe in "${error_probes[@]}"; do
     # exit (status 1) for a host fault that happens before the Lox program
     # can raise anything: a missing or bad runtime jar, a class the verifier
     # rejects, or a class that is not found. A Lox-level fault ends the JVM
-    # with status 70, as on native, and reports native's own message line.
-    # Both facts are required.
+    # with status 70, as on native. The report text is implementation-defined
+    # (spec/README.md, Conformance), so it is not compared.
     if [ "$jvm_status" -ne 70 ]; then
         echo "check_jvm_probes.sh: FAIL $probe (JVM run exited $jvm_status, not 70)" >&2
-        cat "$jvm_err" >&2
-        failed_probes+=("$probe")
-        continue
-    fi
-    native_message="$(head -n 1 "$native_err")"
-    if ! grep -qxF -- "$native_message" "$jvm_err"; then
-        echo "check_jvm_probes.sh: FAIL $probe (JVM stderr lacks native's message: $native_message)" >&2
         cat "$jvm_err" >&2
         failed_probes+=("$probe")
         continue

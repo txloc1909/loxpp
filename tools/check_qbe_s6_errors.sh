@@ -5,8 +5,8 @@
 # fatal stack overflow (Q3), the unwind guard's own edge cases (a spoofed
 # "kind" field, a throw on normal return, a throw that replaces an
 # unrelated fault — all while a real StackOverflowError unwinds
-# elsewhere), the two fatal fast paths that must skip pending defers
-# entirely, a return leaking out of a still-open try, a throw ending a
+# elsewhere), the two fatal fast paths (a halt: a non-zero status, and
+# the output before the fault), a return leaking out of a still-open try, a throw ending a
 # try body's own local bindings, and — the two probes every other one
 # here leaves untested — a deferred call's side effect actually becoming
 # observable on an ordinary successful return and on a caught throw.
@@ -154,7 +154,22 @@ for entry in "${probes[@]}"; do
     native_out="$("$loxpp_bin" "$src" 2>"$name.native_stderr")" || native_status=$?
     native_status="${native_status:-0}"
 
-    if [ "$qbe_out" = "$native_out" ] && [ "$qbe_status" = "$native_status" ]; then
+    # A halt (spec/README.md, Conformance) needs a non-zero status, and the
+    # output before the fault binds: one stdout must be a prefix of the
+    # other, because the deferred calls of a halt are implementation-defined.
+    if [ "$native_status" != 0 ]; then
+        if [ "$qbe_status" != 0 ] &&
+            [[ "$native_out" == "$qbe_out"* || "$qbe_out" == "$native_out"* ]]; then
+            matched=1
+        else
+            matched=0
+        fi
+    elif [ "$qbe_out" = "$native_out" ] && [ "$qbe_status" = "$native_status" ]; then
+        matched=1
+    else
+        matched=0
+    fi
+    if [ "$matched" = 1 ]; then
         printf '  ok    %s\n' "$name"
     else
         printf '  FAIL  %s\n' "$name"

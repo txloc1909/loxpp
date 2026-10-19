@@ -7,10 +7,8 @@ try {
     print list[10];  // Out of bounds
 } catch (e) {
     print e.kind;        // Should print: IndexOutOfBoundsError
-    print e.message;     // Should print: List index out of bounds.
 }
 
 print "Program continues after catching error";
 // CHECK: IndexOutOfBoundsError
-// CHECK: List index out of bounds.
 // CHECK: Program continues after catching error

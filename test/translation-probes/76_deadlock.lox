@@ -1,8 +1,10 @@
 // When the main task waits in task.receive() and no task on any worker can
 // run again, the program ends with DeadlockError (spec/04-semantics.md,
-// Deadlock). The fault is fatal: the try around the receive does not catch
-// it, and the pending deferred call does not run. A task on a second worker
-// waits too, so the check spans workers.
+// Deadlock). It is a halting fault, so the code after the receive does not
+// run. Whether the pending deferred call runs is implementation-defined
+// (spec/README.md, Conformance), so no CHECK line follows the receive, and no
+// try surrounds it, because an implementation may make a halting fault
+// catchable. A task on a second worker waits too, so the check spans workers.
 fun waiter() {
     print "waiter waits";
     task.receive();
@@ -22,12 +24,8 @@ fun run() {
     task.spawn(waiter);
     task.spawn_worker(far, nil);
     print "main waits";
-    try {
-        task.receive();
-        print "main woke";
-    } catch (e) {
-        print "caught " + e.kind;
-    }
+    task.receive();
+    print "main woke";
 }
 
 run();

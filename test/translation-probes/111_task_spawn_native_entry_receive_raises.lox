@@ -5,4 +5,3 @@ task.spawn(task.receive);
 yield;
 
 // STATUS: error
-// STDERR: Cannot receive across a native callback.

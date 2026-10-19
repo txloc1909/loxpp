@@ -14,12 +14,12 @@ try {
     print "spawned";
 } catch (e) {
     print e.kind;
-    print e.message;
+    print type(e.message);
 }
 task.spawn_worker(good, task.self());
 print task.receive();
 
 // STATUS: ok
 // CHECK: SendError
-// CHECK: Value of type List is not a message.
+// CHECK: String
 // CHECK: good entry ran

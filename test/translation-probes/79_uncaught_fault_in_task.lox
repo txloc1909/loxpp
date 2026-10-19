@@ -1,10 +1,11 @@
 // A throw that no try in its task catches ends the program, as an uncaught
-// runtime error does (spec/04-semantics.md, Ending). The deferred calls of
-// the task that threw run first. The try in the main task does not catch
-// it, and the main task does not continue. A second task, spawned after the
-// failing one, would send to the main task: if the fault ended only its own
-// task, that task would run and wake the main task, which would then print
-// more lines and end with exit status 0.
+// runtime error does (spec/04-semantics.md, Ending). Whether the deferred
+// calls of the task that threw run first is implementation-defined
+// (spec/README.md, Conformance), so no CHECK line follows the throw. The try
+// in the main task does not catch it, and the main task does not continue.
+// A second task, spawned after the failing one, would send to the main task:
+// if the fault ended only its own task, that task would run and wake the
+// main task, which would then print more lines and end with exit status 0.
 fun cleanup() {
     print "task deferred call ran";
 }
@@ -34,4 +35,3 @@ print "main continues";
 // STATUS: error
 // CHECK: main waits
 // CHECK: task throws
-// CHECK: task deferred call ran

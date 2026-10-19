@@ -108,8 +108,8 @@ each has an off-the-shelf solution.
 | `80_main_end_abandons` | the program ends when the main task ends: a task that has not run never runs, and a waiting task's deferred call does not run — a spec probe | none (spec probe) |
 | `81_exit_from_task` | `exit(code)` in a spawned task ends the program at once — a spec probe | none (spec probe) |
 | `82_send_order_across_workers` | messages from one worker to one task arrive in the order of the sends; a handle a worker sends of itself is `==` to the one `task.spawn_worker` returned — a spec probe | none (spec probe) |
-| `83_blocking_call_blocks_one_worker` | a blocking call blocks only its own worker: one worker waits for ever in `Server.accept()`, and the main task on another worker keeps running and ends the program; an implementation that blocks every worker hangs and fails on the probe's `TIMEOUT` — a spec probe; it does not bind the bootstrap interpreter (its `NOT-BINDING` line, spec/04-semantics.md rule 2), which `bootstrap-only/one_thread_blocking_call` checks in its place | none (spec probe) |
-| `bootstrap-only/one_thread_blocking_call` | the bootstrap interpreter runs every worker on one host thread, so a blocking call on a worker also blocks the main task (spec/04-semantics.md, Implementation-Gated Exception, rule 2) — a spec probe that only the bootstrap gate runs | none (spec probe) |
+| `83_blocking_call_blocks_one_worker` | a blocking call blocks only its own worker: one worker waits for ever in `Server.accept()`, and the main task on another worker keeps running and ends the program; an implementation that blocks every worker hangs and fails on the probe's `TIMEOUT` — a spec probe; it does not bind the bootstrap interpreter (its `NOT-BINDING` line, spec/README.md, Conformance), which `bootstrap-only/one_thread_blocking_call` checks in its place | none (spec probe) |
+| `bootstrap-only/one_thread_blocking_call` | the bootstrap interpreter runs every worker on one host thread, so a blocking call on a worker also blocks the main task (spec/README.md, Conformance: scheduling is implementation-defined) — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `84_spawn_worker_entry_closure` | `task.spawn_worker` with a function that is not from a top-level `fun` declaration (a nested function) is a fatal runtime error — a spec probe | none (spec probe) |
 | `85_task_value` | a Task is truthy, has type `Task` and the form `<task>`, is not a valid map key (`InvalidMapKeyError`), and is not iterable (fatal) — a spec probe | none (spec probe) |
 | `86_spawn_arity` | a spawned function runs with no arguments under the usual arity check; the uncaught `ArityError` in the task ends the program, so a second task that would wake the main task never runs — a spec probe | none (spec probe) |
@@ -130,13 +130,13 @@ each has an off-the-shelf solution.
 | `101_class_declared_after_match` | a bare pattern name is a class test only when a global class of that name is declared earlier in the source; the test reads the global when it runs, so a name whose global no longer holds a class matches no value — a spec probe | none (spec probe) |
 | `102_string_cr_escape` | the `\r` escape in a string literal is one carriage return (U+000D), and the characters around it stay in place (`spec/01-lexical.md`, string escapes); read with `len` and `ord`, so no CHECK line holds a carriage return (issue #651) — a spec probe | none (spec probe) |
 | `103_undefined_global` | a global is undefined until its declaration runs: a read, an assignment, and a call that reads it each raise a catchable `UndefinedVariableError`, and the same names work after the declaration; it covers the QBE backend's unbound global slot (issue #592) — a spec probe | none (spec probe) |
-| `104_for_in_not_iterable_fatal` | a for-in over a value that is not a List, String, Map, or Coroutine is fatal: a `try` does not catch it, the program prints nothing and exits 70 (`spec/04-semantics.md`, Fatal Runtime Errors; issue #617) — a spec probe | none (spec probe) |
+| `104_for_in_not_iterable_fatal` | a for-in over a value that is not a List, String, Map, or Coroutine is a halting fault: the fault occurs, the program prints nothing and exits non-zero (`spec/04-semantics.md`, Halting Faults; issue #617) — a spec probe | none (spec probe) |
 | `105_return_folded_match` | a function returns a `match` expression: the result is a named local, so `RETURN` sees operand depth 0. Both the sparse literal-arm form and the enum `JUMP_TABLE` form must return the right value on every backend (issue #647) — a spec probe | P1, P8 |
 | `106_enum_name_field_binding` | a field name in a class pattern (`Box{Red}`) is a binding, also when an enum constructor has that name (issue #648) — a spec probe | none (spec probe) |
 | `107_enum_declared_after_match` | a bare pattern name is a constructor tag test only when an enum constructor of that name is declared earlier in the source; in a function declared before the enum, the name is a binding (issue #648) — a spec probe | none (spec probe) |
 | `108_enum_bare_name_tag_test` | a bare constructor name is a tag test also for a constructor with fields, alone, in an `or`-chain and as the sub-pattern of an `@`-binding (issue #648) — a spec probe | none (spec probe) |
 | `109_enum_ctor_over_class` | when an enum constructor and a global class have the same name, a bare pattern name is a tag test (issue #648) — a spec probe | none (spec probe) |
-| `110_string_index_assign_eval_order` | an index assignment to a String evaluates the index and the value before it raises the fatal fault: the program prints `INDEX` and `VALUE`, then exits 70 (`spec/04-semantics.md`, Fatal Runtime Errors) — a spec probe | none (spec probe) |
+| `110_string_index_assign_eval_order` | an index assignment to a String evaluates the index and the value before it raises the halting fault: the program prints `INDEX` and `VALUE`, then halts (`spec/04-semantics.md`, Halting Faults) — a spec probe | none (spec probe) |
 | `111_task_spawn_native_entry_receive_raises` | a task whose entry is a native function cannot suspend in `task.receive`: the native has no frame to rebuild, so the receive raises `YieldAcrossNativeError` (`spec/04-semantics.md`, task.receive step 3, issue #723) — a spec probe | none (spec probe) |
 | `112_coroutine_native_entry_receive_raises` | a coroutine whose entry is a native raises `YieldAcrossNativeError` on a receive with an empty mailbox, the resumer catches it, and the coroutine becomes dead (`spec/04-semantics.md`, co.resume step 5, issue #723) — a spec probe | none (spec probe) |
 | `113_coroutine_native_resume_entry_receive_raises` | a native entry that resumes another coroutine keeps the host frame on the chain: the inner receive raises, and both coroutines are dead (issue #723) — a spec probe | none (spec probe) |
@@ -144,7 +144,7 @@ each has an off-the-shelf solution.
 | `115_task_spawn_native_entry_receive_with_message` | a receive below a native entry that finds a message returns at once, so the task ends; a second send then raises `DeadTaskError`, which proves the task consumed the message and is not parked (issue #723) — a spec probe | none (spec probe) |
 | `116_coroutine_native_entry_receive_with_message` | a coroutine whose entry is a native returns that native's result, and the coroutine is dead; the message is already present, so no suspension happens (issue #723) — a spec probe | none (spec probe) |
 | `117_coroutine_native_entry_for_in` | a for-in over a coroutine whose native entry returns without yielding runs its body zero times and leaves the coroutine dead (issue #723) — a spec probe | none (spec probe) |
-| `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/04-semantics.md, Implementation-Gated Exception, rule 1); probes 95 and 96 do not bind the bootstrap, and this probe holds it to the exception in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
+| `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
 | `48_file_visible_after_close` | a File's write-close-reopen cycle: once `close()` returns, a fresh `open()` on the same path sees everything the closed handle wrote (`spec/05-stdlib.md`, File section) — pins the after-close half of the visibility guarantee, not the buffered-before-close half, which is implementation-defined and allowed to differ | none (parity gate) |
@@ -185,7 +185,7 @@ each has an off-the-shelf solution.
 | `jvm-only/fault_set_index_string_fatal` | `SET_INDEX` on a String is fatal | none (error-parity gate) |
 | `jvm-only/fault_set_property_on_error_fatal` | `SET_PROPERTY` on a caught Error is fatal | none (error-parity gate) |
 | `jvm-only/fault_slice_non_sliceable_fatal` | a slice on an Instance with no `__slice__` is fatal, a raw `LoxError`, not a catchable Error | none (error-parity gate) |
-| `jvm-only/fault_stringify_too_deep_in_try` | the stringify depth guard is fatal even inside a live `try` (the Fatal Runtime Errors section) | none (error-parity gate) |
+| `jvm-only/fault_stringify_too_deep_in_try` | the stringify depth guard is fatal even inside a live `try` (the Halting Faults section) | none (error-parity gate) |
 | `jvm-only/fault_stringify_too_deep_print` | a self-referential list printed 300 deep trips the stringify depth guard at `print` | none (error-parity gate) |
 | `jvm-only/try_catch_enum_ctor_arity_message` | an enum constructor called with the wrong arity is catchable; `kind` and `message` match native | none (parity gate) |
 | `jvm-only/try_catch_error_property_read_still_works` | a caught Error's `kind` and `message` fields stay readable through `GET_PROPERTY` | none (parity gate) |
@@ -204,15 +204,18 @@ each has an off-the-shelf solution.
 The `66` to `96` probes are **spec probes** for the workers and tasks of
 `spec/04-semantics.md`. A spec probe carries a `// STATUS: ok` or
 `// STATUS: error` line and one `// CHECK:` line per line of the stdout the
-spec defines for it. A probe whose rule fixes the exact exit status also
-carries `// EXIT: <code>`, and a probe that fails by hanging carries
-`// TIMEOUT: <seconds>`. A probe that fixes stderr text carries one
-`// STDERR: <line>` per expected line; those lines must be the first lines of
-stderr, in order, and later stderr lines are not checked, so a report may
-append its own stack trace or the tasks that wait. A probe with no `STDERR`
-line does not check stderr. `tools/check_spec_probes.py` runs every spec
-probe of this directory on one consumer and compares the whole stdout, the
-stderr prefix, and the exit status. CI runs it on the native VM, the bootstrap interpreter, the JVM
+spec defines for it. A probe that ends through `exit(code)` also carries
+`// EXIT: <code>`, and a probe that fails by hanging carries
+`// TIMEOUT: <seconds>`. A probe never pins stderr text: every report and
+message is implementation-defined (`spec/README.md`, Conformance), and
+`tools/check_spec_probes.py` rejects a `// STDERR:` line. For a
+`STATUS: ok` probe the whole stdout must equal the CHECK lines. For a
+`STATUS: error` probe the exit status must be non-zero and the stdout must
+start with the CHECK lines: the output before a halt binds, and the deferred
+calls of a halt may print more. A probe whose fault is a halting fault puts
+no `try` around it, because an implementation may make a halting fault
+catchable. `tools/check_spec_probes.py` runs every spec probe of this
+directory on one consumer. CI runs it on the native VM, the bootstrap interpreter, the JVM
 backend, and the QBE backend. `tools/diff_runtimes.py` compares the JVM, QBE,
 and bootstrap runs with native; the bootstrap walk takes only the spec
 probes (`--only-spec-probes`), and separate CI steps name `32_string_nul`,

@@ -1,9 +1,8 @@
-// The bootstrap interpreter runs every worker on one host thread, under the
-// implementation-gated exception of spec/04-semantics.md, rule 2: "A
-// blocking call blocks every worker, not only its own." So probe
-// 83_blocking_call_blocks_one_worker does not bind the bootstrap, and this
-// probe holds the bootstrap to the exception in its place: a blocking call
-// on a worker also blocks the main task.
+// The bootstrap interpreter runs every worker on one host thread, so a
+// blocking call blocks every worker (spec/README.md, Conformance: scheduling
+// is implementation-defined). So probe 83_blocking_call_blocks_one_worker
+// does not bind the bootstrap, and this probe checks the bootstrap's own
+// choice in its place: a blocking call on a worker also blocks the main task.
 //
 // The worker wakes the main task with a send, then sleeps. Under the
 // one-thread form the main task cannot run before the sleep ends, so the

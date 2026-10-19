@@ -14,13 +14,11 @@ message gap (that part was issue #410).
 CASES below covers the block form end to end: parsing, the resolver's
 `break`-is-legal-with-no-enclosing-loop / `continue`-still-needs-a-real-
 loop split, and the interpreter's break/continue/return handling inside an
-arm. Each case's *expected* stdout, stderr, and exit code come from
-running native -- there is no separately maintained "expected output"
+arm. Each case's *expected* stdout and exit outcome come from running
+native -- there is no separately maintained "expected output"
 string to fall out of sync with src/compiler.cpp's behavior.
 
-Same trace-noise and release-build constraints as
-tools/check_bootstrap_resolver_errors.py (see that file's docstring): a
-debug build's LOXPP_DEBUG_TRACE_EXECUTION/LOXPP_DEBUG_PRINT_CODE floods
+Release build only: a debug build's LOXPP_DEBUG_TRACE_EXECUTION/LOXPP_DEBUG_PRINT_CODE floods
 native's stdout with a disassembly of bootstrap/loxpp_interpreter.lox
 itself, so this check skips itself (ctest's SKIP_RETURN_CODE) rather than
 compare against noise.
@@ -29,10 +27,11 @@ Usage:
     tools/check_bootstrap_match_arm_break.py [--native PATH] [--bootstrap PATH]
                                               [--timeout SECONDS]
 
-Exits 0 when every case's bootstrap run matches native's stdout, stderr,
-and exit code. Exits 1 and prints every mismatch otherwise. Exits 125
-(ctest's SKIP_RETURN_CODE) when --trace-enabled says the binary under test
-was built with the debug trace macros on.
+Exits 0 when every case's bootstrap run matches native's stdout, and its
+exit status is zero exactly when native's is. Exits 1 and prints every
+mismatch otherwise. Exits 125 (ctest's SKIP_RETURN_CODE) when
+--trace-enabled says the binary under test was built with the debug trace
+macros on.
 """
 
 import argparse
@@ -198,12 +197,13 @@ def check_case(case: Case, native: RunResult, bootstrap: RunResult) -> list[str]
     if bootstrap.timed_out:
         problems.append("bootstrap timed out")
         return problems
-    if bootstrap.exit_code != native.exit_code:
-        problems.append(f"exit code: native={native.exit_code} bootstrap={bootstrap.exit_code}")
+    # A rejection or a halt needs only a non-zero status: its report and its
+    # exact status are implementation-defined (spec/README.md, Conformance).
+    if native.exit_code == 0 or bootstrap.exit_code == 0:
+        if bootstrap.exit_code != native.exit_code:
+            problems.append(f"exit code: native={native.exit_code} bootstrap={bootstrap.exit_code}")
     if bootstrap.stdout != native.stdout:
         problems.append(f"stdout: native={native.stdout!r} bootstrap={bootstrap.stdout!r}")
-    if bootstrap.stderr != native.stderr:
-        problems.append(f"stderr: native={native.stderr!r} bootstrap={bootstrap.stderr!r}")
     return problems
 
 

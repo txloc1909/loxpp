@@ -14,10 +14,10 @@ try {
     print "sent";
 } catch (e) {
     print e.kind;
-    print e.message;
+    print type(e.message);
 }
 
 // STATUS: ok
 // CHECK: bye
 // CHECK: DeadTaskError
-// CHECK: Cannot send to a task that has ended.
+// CHECK: String

@@ -762,8 +762,10 @@ Returns the number of messages in the mailbox of the current task.
 
 A **blocking call** waits for another party outside the program: a user
 at standard input, the network, another process, or time. It blocks the worker that makes it, every
-task on that worker, and nothing else (see [§04-semantics, Suspend
-Points](04-semantics.md#suspend-points)). Each blocking call is a suspend
+task on that worker, and nothing else on an implementation that runs
+workers at the same time (see [§04-semantics, Suspend
+Points](04-semantics.md#suspend-points), and [Conformance](README.md#conformance),
+Scheduling). Each blocking call is a suspend
 point of the task that makes it. The section of each blocking call says
 `**Blocks:** yes`; the table below lists them all.
 
@@ -869,7 +871,7 @@ property access can reach them (see §04-semantics, Property Get).
 The order of the returned names is unspecified. Sort the result if a
 deterministic order is needed.
 
-Runtime error ("Expected an instance.") if `instance` is not an Instance.
+Runtime error if `instance` is not an Instance.
 
 **Arity:** 1  
 **Returns:** List of String
@@ -884,7 +886,7 @@ its own methods plus every method inherited from a superclass.
 The order of the returned names is unspecified. Sort the result if a
 deterministic order is needed.
 
-Runtime error ("Expected a class.") if `class` is not a Class.
+Runtime error if `class` is not a Class.
 
 **Arity:** 1  
 **Returns:** List of String
@@ -905,7 +907,7 @@ method by that name.
 Returns `nil` if `instance` has no field named `name` (use `hasField` to
 distinguish "absent" from "present and nil").
 
-Runtime error ("Only instances have properties.") if `instance` is not an
+Runtime error if `instance` is not an
 Instance.
 
 **Arity:** 2  
@@ -920,7 +922,7 @@ Returns `true` if `instance` has a field named `name` — equivalently, whether
 field table only; a method named `name` does not make `hasField` return
 `true`.
 
-Runtime error ("Only instances have properties.") if `instance` is not an
+Runtime error if `instance` is not an
 Instance.
 
 **Arity:** 2  
@@ -937,7 +939,7 @@ compile-time identifier.
 
 Returns `value` (assignment is an expression, matching `.` assignment).
 
-Runtime error ("Only instances have fields.") if `instance` is not an
+Runtime error if `instance` is not an
 Instance.
 
 **Arity:** 3  
@@ -958,10 +960,8 @@ ordinary `instance.name(...)` call does. A function value stored in a field
 is called as-is (slot 0 is the function itself, as for a plain call).
 
 **Restriction:** a Class or Enum constructor value is callable via `()`, but
-`callMethod` does not support it — calling one raises a **runtime error**
-("callMethod does not support class or enum constructor values."). Any other
-non-callable value raises a runtime error
-("callMethod requires a callable value.").
+`callMethod` does not support it — calling one raises a **runtime error**. Any other
+non-callable value raises a runtime error.
 
 ```lox
 class Foo {}
@@ -974,8 +974,8 @@ var b = Bar();
 print callMethod(b, "greet");          // "hi"
 ```
 
-Runtime error ("Only instances have methods.") if `instance` is not an
-Instance. Runtime error ("Undefined property 'name'.") if `name` names
+Runtime error if `instance` is not an
+Instance. Runtime error if `name` names
 neither a field nor a method. Runtime error if the resolved callable is
 called with the wrong number of arguments, matching ordinary call-arity
 checking. A `throw` inside the called body propagates as an ordinary throw:

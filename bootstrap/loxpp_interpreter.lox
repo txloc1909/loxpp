@@ -2756,8 +2756,8 @@ class InterpCoroutineModule {
     init() { this.loxTag = "comodule"; }
 }
 
-// Workers and tasks (spec/04-semantics.md) run under the implementation-gated
-// exception for this interpreter: every worker runs on the one host thread,
+// Workers and tasks (spec/04-semantics.md) run on one host thread in this
+// interpreter, which spec/README.md, Conformance, allows: every worker runs on the one host thread,
 // and the tasks of every worker share the host's one scheduler. A worker is
 // its own set of global variables. A Lox++ task is one host task, so the
 // host's run queue orders the tasks exactly as native's does.
@@ -3674,7 +3674,7 @@ class Interpreter {
         }
         var tag = loxTag(iterable);
         // Native's for-in guard is an always-fatal site, so a try cannot
-        // catch it (spec/04-semantics.md, Fatal Runtime Errors).
+        // catch it (spec/04-semantics.md, Halting Faults).
         if (tag != "list" and !isLoxStr(iterable) and tag != "map" and tag != "coroutine") {
             this.fatalError("Value is not iterable (expected list, string, map, or coroutine).");
             return;
@@ -4843,11 +4843,10 @@ class Interpreter {
                 if (doBody) {
                     // No leading statements (the pre-#434 plain-expression
                     // arm, or a `{ }` block with nothing but a tail
-                    // expression): evaluate it directly, matching the exact
-                    // pre-#434 call depth. tools/check_bootstrap_headroom.sh
-                    // (issue #248) calibrates a floor for match-shaped
-                    // recursion against that depth; routing this common case
-                    // through evalMatchArmBody's extra native frame broke it.
+                    // expression): evaluate it directly, so this common case
+                    // adds no native frame per arm. Each extra frame lowers
+                    // the depth a target program can recurse through a match
+                    // (docs/reference/bootstrap-stack-depth.md).
                     if (len(arm.bodyStmts) == 0) return this.evalExpr(arm.bodyExpr, armEnv);
                     return this.evalMatchArmBody(arm, armEnv);
                 }
