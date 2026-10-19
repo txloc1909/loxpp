@@ -209,8 +209,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap has a different limit'),
     'Too many local variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
-    'Unexpected character.':
-        Deferred(641, 'the bootstrap adds a second error'),
     'Unreachable arm after catch-all.':
         Deferred(639, 'the bootstrap does not check it'),
     'Unterminated string.':

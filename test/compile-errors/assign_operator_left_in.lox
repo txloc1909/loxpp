@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Expect ';' after expression.
+// Compile error: 'in' is an operator, so the '=' after it is not an
+// assignment and the statement misses its ';'.
+var a = 1;
+a in [1] = 3;

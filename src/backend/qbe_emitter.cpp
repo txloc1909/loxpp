@@ -59,15 +59,26 @@ constexpr int kCatchStateBase = 0x40000000;
         opName(op));
 }
 
-// Coroutine mode (QBE #530/#535): every opcode whose runtime path can push a
-// Lox callable frame — a closure, method, class init, instance __call__, or
-// an operator/iterator dunder — is a resume point. The runtime op then
-// returns OpResult::Call instead of running the callee, and this function
-// returns kRtCall to the driver. Ops that only run natives synchronously
-// (PRINT/STR: __str__ runs through stringify; ITER_HAS_NEXT: it drives a
-// nested coroutine; BUILD_MAP: __hash__/__eq__ run through hashMapKey;
-// RUN_DEFERS: reentrantCall) never return Call and are not resume points.
-bool isResumableCall(Op op) {
+// Coroutine mode (QBE #530/#535): a resume point is an opcode whose runtime
+// path can leave this frame suspended, so the driver needs the state of its
+// continuation after the op. Three shapes do that:
+//   - the op pushes a Lox callable frame — a closure, method, class init,
+//     instance __call__, or an operator/iterator dunder — and returns
+//     OpResult::Call. This function then returns kRtCall to the driver, which
+//     re-enters it here after the callee finishes;
+//   - the op runs a native that suspends the task — task.receive through
+//     CALL, or a resume through a bound native. The native's result arrives
+//     at this op's continuation;
+//   - the op is ITER_HAS_NEXT, which resumes a coroutine. If that coroutine
+//     blocks in task.receive, suspendForTaskSwitch suspends this frame too,
+//     and the value the wake-up produced is this op's result.
+// YIELD is a resume point of its own kind: the frame returns kRtYield to the
+// driver, which re-enters it after the YIELD when the coroutine runs again.
+// Ops that only run natives synchronously (PRINT/STR: __str__ runs through
+// stringify; BUILD_MAP: __hash__/__eq__ run through hashMapKey; RUN_DEFERS:
+// reentrantCall) never return Call, and a receive below one raises
+// YieldAcrossNativeError instead of suspending, so they are not resume points.
+bool isResumePoint(Op op) {
     switch (op) {
     case Op::CALL:
     case Op::INVOKE:
@@ -87,6 +98,8 @@ bool isResumableCall(Op op) {
     case Op::IN:
     case Op::LEN:
     case Op::GET_ITER:
+    case Op::ITER_HAS_NEXT:
+    case Op::YIELD:
         return true;
     default:
         return false;
@@ -127,9 +140,7 @@ class Emitter {
             // Coroutine mode: pre-collect every resume point's offset so the
             // prologue can dispatch on rt_resume_state before the body is
             // emitted. The offset doubles as the state id.
-            if (options.coroutineMode &&
-                (isResumableCall(fn.instructions[i].op) ||
-                 fn.instructions[i].op == Op::YIELD)) {
+            if (options.coroutineMode && isResumePoint(fn.instructions[i].op)) {
                 m_resumeStates.push_back(fn.instructions[i].offset);
             }
         }
@@ -846,13 +857,12 @@ class Emitter {
     void emitInstruction(const DecodedInstruction& ins) {
         const auto& [before, after] = stateOf(ins.offset);
         // Coroutine mode: record this op's resume point before the op runs.
-        // If it suspends (a YIELD, or a call the runtime leaves to the
-        // driver), the driver saves this state and re-enters here, at the
-        // label emitted after the op. The state also survives a completed op
-        // safely: only a resume point can suspend, and each resume point
-        // overwrites it before it can suspend.
-        bool coroutinePoint = m_options.coroutineMode &&
-                              (isResumableCall(ins.op) || ins.op == Op::YIELD);
+        // If it suspends (a YIELD, a call the runtime leaves to the driver, or
+        // a task switch inside ITER_HAS_NEXT), the driver saves this state and
+        // re-enters here, at the label emitted after the op. The state also
+        // survives a completed op safely: only a resume point can suspend, and
+        // each resume point overwrites it before it can suspend.
+        bool coroutinePoint = m_options.coroutineMode && isResumePoint(ins.op);
         if (coroutinePoint) {
             m_body << "\tcall $rt_set_resume_state(l %rt, w " << ins.offset
                    << ")\n";

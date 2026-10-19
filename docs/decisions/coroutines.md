@@ -92,9 +92,13 @@ a collection is a process-global pause, not a coroutine's work.
   coroutine mode (`qbe::needsCoroutineMode`): every function becomes a
   resume-block state machine
   (`CallFrame::compiledState`), and `Runtime::runCompiledFrames` drives the
-  frames, re-entering each at its saved point. The interpreter fallback was
-  dropped: a caller that does not itself contain `YIELD` must still suspend,
-  and dynamic dispatch makes the safe fallback set the whole program.
+  frames, re-entering each at its saved point. Every opcode whose runtime
+  path can suspend a frame needs a resume point. That set is `YIELD`, the ops
+  that push a callable frame for the driver or call a native that can suspend
+  the task, and `ITER_HAS_NEXT`, because its nested resume can suspend the
+  task in `task.receive` (#729). The interpreter fallback was dropped: a
+  caller that does not itself contain `YIELD` must still suspend, and dynamic
+  dispatch makes the safe fallback set the whole program.
 - JVM: each coroutine is a virtual thread; `yield`/`resume` use a handoff over
   two zero-capacity queues. No stack copying (shared-heap object model). The
   carrier pool is raised from the processor count, so a CPU-bound coroutine

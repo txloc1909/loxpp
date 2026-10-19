@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Unexpected character.
+// Compile error: a scan error on the very first token. Native must report the
+// scanner's message, not the parse error that follows it.
+$1;

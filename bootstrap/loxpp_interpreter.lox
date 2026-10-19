@@ -117,7 +117,7 @@ enum Stmt {
     Block(statements)
     ClassDecl(name, super_id, super_name, super_line, methods)
     ExpressionStmt(expr)
-    FunDecl(name, line, params, body)
+    FunDecl(name, line, params, body, selfTailOk)
     IfStmt(condition, then_branch, else_branch)
     PrintStmt(expr)
     ReturnStmt(line, value)
@@ -516,11 +516,37 @@ class Parser {
             }
         }
         this.expect("RIGHT_PAREN", "Expect ')' after parameters.");
-        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, [], false);
         this.expect("LEFT_BRACE", "Expect '{' before " + kind + " body.");
-        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, [], false);
+        var selfTailOk = kind == "function" and this.bodyAllowsSelfTail();
         var body = this.blockContents();
-        return FunDecl(nameTok.lexeme, nameTok.line, params, body);
+        return FunDecl(nameTok.lexeme, nameTok.line, params, body, selfTailOk);
+    }
+
+    // True when the body that starts at the current token may reuse its call
+    // frame for a self tail call: no nested fun or class (a closure could
+    // capture a parameter), no try (a handler would re-run per iteration),
+    // and no defer (its list belongs to one call). A token scan, as in
+    // native's bodyAllowsSelfTail (src/compiler.cpp), so a form nested in any
+    // sub-expression is seen too.
+    bodyAllowsSelfTail() {
+        var i = this.current;
+        var depth = 1;
+        while (i < len(this.tokens)) {
+            var t = this.tokens[i].type;
+            if (t == "DEFER" or t == "TRY" or t == "FUN" or t == "CLASS") return false;
+            if (t == "LEFT_BRACE") {
+                depth = depth + 1;
+            } else if (t == "RIGHT_BRACE") {
+                depth = depth - 1;
+                if (depth == 0) return true;
+            } else if (t == "EOF") {
+                return false;
+            }
+            i = i + 1;
+        }
+        return false;
     }
 
     varDeclaration() {
@@ -1907,6 +1933,11 @@ class Environment {
     init(enclosing) {
         this.enclosing = enclosing;
         this.values    = {};
+        // The LoxFunction whose body runs in this environment, or nil. Set
+        // only by LoxFunction.call, and read by execReturn through the
+        // environment chain, so a coroutine or task that suspends keeps it on
+        // its own stack without interpreter-wide state.
+        this.selfFn    = nil;
     }
 
     define(name, value) {
@@ -1954,13 +1985,26 @@ class Environment {
 // RUNTIME OBJECTS
 // ===========================================================================
 
+// A return that is a self tail call (spec/04-semantics.md, "Self Tail Calls"):
+// the arguments for the next iteration of the same call frame. Only
+// LoxFunction.call reads it, and no target value can be one: a target
+// instance belongs to a target class, not to this one.
+class InterpTailCall {
+    init(next) { this.next = next; }
+}
+
 class LoxFunction {
-    init(name, params, body, closure, isInitializer) {
+    // selfTailOk is true only when the declaration was a `fun` whose body
+    // holds no nested fun or class, no try, and no defer (Parser.
+    // bodyAllowsSelfTail). A self tail call needs a name that this function
+    // still owns and a body that can restart in the same frame.
+    init(name, params, body, closure, isInitializer, selfTailOk) {
         this.name          = name;
         this.params        = params;
         this.body          = body;
         this.closure       = closure;
         this.isInitializer = isInitializer;
+        this.selfTailOk    = selfTailOk;
         this.loxTag        = "function";
         // True for a function that a top-level `fun` declaration made: the
         // only kind of function task.spawn_worker takes.
@@ -1972,7 +2016,7 @@ class LoxFunction {
     bind(instance) {
         var env = Environment(this.closure);
         env.define("this", instance);
-        return LoxFunction(this.name, this.params, this.body, env, this.isInitializer);
+        return LoxFunction(this.name, this.params, this.body, env, this.isInitializer, false);
     }
 
     call(interp, args) {
@@ -1987,17 +2031,47 @@ class LoxFunction {
             interp.setError("ArityError", "Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }
-        var callEnv = Environment(this.closure);
-        var i = 0;
-        while (i < len(this.params)) {
-            callEnv.define(this.params[i].lexeme, args[i]);
-            i = i + 1;
-        }
         var savedDefers = interp.pendingDefers;
         var savedStringifyDepth = interp.stringifyDepth;
         var savedNativeDepth = interp.nativeDepth;
         var savedTryDepth = interp.tryDepth;
         interp.pendingDefers = [];
+        var returnVal = nil;
+        var nextArgs = args;
+        // A self tail call reuses this frame (spec/04-semantics.md, "Self
+        // Tail Calls"), so the body runs again here instead of in a new
+        // LoxFunction.call. execReturn returns an InterpTailCall with the
+        // next argument values; every other return ends the loop.
+        var tailStep = true;
+        while (tailStep) {
+            tailStep = false;
+            var callEnv = Environment(this.closure);
+            callEnv.selfFn = this;
+            var i = 0;
+            while (i < len(this.params)) {
+                callEnv.define(this.params[i].lexeme, nextArgs[i]);
+                i = i + 1;
+            }
+            returnVal = this.runBody(interp, callEnv, savedDefers, savedStringifyDepth,
+                                     savedNativeDepth, savedTryDepth);
+            var stepArgs = match returnVal {
+                case InterpTailCall{next} => next
+                case _ => nil
+            };
+            if (stepArgs != nil) {
+                nextArgs = stepArgs;
+                returnVal = nil;
+                interp.pendingDefers = [];
+                tailStep = true;
+            }
+        }
+        if (this.isInitializer) return this.closure.getAt(0, "this");
+        return returnVal;
+    }
+
+    // One iteration of this function's body. LoxFunction.call calls it again
+    // when the returned value is an InterpTailCall.
+    runBody(interp, callEnv, savedDefers, savedStringifyDepth, savedNativeDepth, savedTryDepth) {
         // This interpreter is itself a Lox++ program, run by the native VM,
         // so a deeply recursive TARGET program borrows native's own call-
         // frame budget through this method's own recursion. Native delivers
@@ -2117,7 +2191,6 @@ class LoxFunction {
             }
             j = j - 1;
         }
-        if (this.isInitializer) return this.closure.getAt(0, "this");
         return returnVal;
     }
 
@@ -3721,14 +3794,18 @@ class Interpreter {
         if (this.throwFlag) return nil;
         var index = this.evalExpr(indexExpr, env);
         if (this.throwFlag) return nil;
+        // Native's SET_INDEX leaves the object, the index and the value on the
+        // stack before Runtime::opSetIndex checks the target or the index, so
+        // every effect of the value expression happens before a fault from a
+        // check below.
+        var val = this.evalExpr(valueExpr, env);
+        if (this.throwFlag) return nil;
         var tag = loxTag(object);
         if (tag == "map") {
             if (!this.isValidMapKey(index)) {
                 this.setInvalidMapKeyError(index, line);
                 return nil;
             }
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             // Count only a new key: an overwrite leaves iteration valid,
             // while a paired erase plus insert must still trip the check.
             this.mapSet(object, index, val);
@@ -3740,24 +3817,16 @@ class Interpreter {
             var fl = math.floor(index);
             if (fl != index) { this.setError("IndexNotIntegerError", "List index must be an integer.", line); return nil; }
             if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             object.elements[fl] = val;
             return val;
         }
-        // The object, the index and the value are all evaluated before the
-        // fault, in this order, as Runtime::opSetIndex sees them on the stack.
-        // The fault is fatal here but a catchable NotIndexableError below.
+        // This fault is fatal, but the value has already run, as on native.
         if (isLoxStr(object)) {
-            this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             this.fatalError("Strings are immutable and cannot be indexed for assignment.");
             return nil;
         }
         var m = this.findDunder(object, "__index_set__");
         if (m != nil) {
-            var val = this.evalExpr(valueExpr, env);
-            if (this.throwFlag) return nil;
             m.bind(object).call(this, [index, val]);
             if (this.throwFlag) return nil;
             return val; // assignment is an expression; its value is the assigned value
@@ -4001,7 +4070,7 @@ class Interpreter {
             case Block{statements}                               => this.execBlock(statements, Environment(env))
             case ClassDecl{name, super_id, super_name, super_line, methods} => this.execClass(name, super_id, super_name, super_line, methods, env)
             case ExpressionStmt{expr}                            => { this.evalExpr(expr, env) }
-            case FunDecl{name, line, params, body}               => this.execFun(name, params, body, env)
+            case FunDecl{name, line, params, body, selfTailOk}   => this.execFun(name, params, body, selfTailOk, env)
             case IfStmt{condition, then_branch, else_branch}     => this.execIf(condition, then_branch, else_branch, env)
             case PrintStmt{expr}                                 => this.execPrint(expr, env)
             case ReturnStmt{line, value}                         => this.execReturn(line, value, env)
@@ -4050,8 +4119,8 @@ class Interpreter {
         }
     }
 
-    execFun(name, params, body, env) {
-        var fn = LoxFunction(name, params, body, env, false);
+    execFun(name, params, body, selfTailOk, env) {
+        var fn = LoxFunction(name, params, body, env, false, selfTailOk);
         // Only a worker's globals environment has no enclosing one.
         fn.topLevel = env.enclosing == nil;
         env.define(name, fn);
@@ -4063,7 +4132,7 @@ class Interpreter {
         match method {
             case FunDecl{name, line, params, body} => {
                 var isInit = name == "init";
-                methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit)
+                methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit, false)
             }
             case _ => nil
         };
@@ -4122,13 +4191,68 @@ class Interpreter {
     }
 
     execReturn(line, valueExpr, env) {
-        var val = nil;
         if (valueExpr != nil) {
-            val = this.evalExpr(valueExpr, env);
+            var tailArgs = this.selfTailArgs(valueExpr, env);
+            if (tailArgs != nil) {
+                var next = [];
+                var i = 0;
+                while (i < len(tailArgs)) {
+                    var a = this.evalExpr(tailArgs[i], env);
+                    if (this.throwFlag) return;
+                    next.append(a);
+                    i = i + 1;
+                }
+                this.returnFlag  = true;
+                this.returnValue = InterpTailCall(next);
+                return;
+            }
+            var val = this.evalExpr(valueExpr, env);
             if (this.throwFlag) return;
+            this.returnFlag  = true;
+            this.returnValue = val;
+            return;
         }
         this.returnFlag  = true;
-        this.returnValue = val;
+        this.returnValue = nil;
+    }
+
+    // The argument expressions when `value` is a self tail call of the
+    // function that runs in `env` (spec/04-semantics.md, "Self Tail Calls"),
+    // else nil. The parser has already cleared selfTailOk for a body where a
+    // call cannot restart the frame (nested fun or class, try, defer).
+    selfTailArgs(value, env) {
+        var cand = match value {
+            case Call{callee, paren_line, args} => match callee {
+                case Variable{id, name, line} => [id, name, args]
+                case _ => nil
+            }
+            case _ => nil
+        };
+        if (cand == nil) return nil;
+        var fn = this.currentFunction(env);
+        if (fn == nil or !fn.selfTailOk) return nil;
+        if (cand[1] != fn.name) return nil;
+        // The resolver left the name global, so no parameter or local of the
+        // same name shadows the function.
+        if (this.locals.has(cand[0])) return nil;
+        if (len(cand[2]) != fn.arity()) return nil;
+        // A global may be rebound at any time, so the name must still hold
+        // the running function. List membership compares the two values
+        // directly, which is the identity test native's own guard makes.
+        if (!this.globals.values.has(fn.name)) return nil;
+        if (!(this.globals.values[fn.name] in [fn])) return nil;
+        return cand[2];
+    }
+
+    // The function whose body is executing at `env`: the nearest environment
+    // that LoxFunction.call made. nil outside every target function body.
+    currentFunction(env) {
+        var e = env;
+        while (e != nil) {
+            if (e.selfFn != nil) return e.selfFn;
+            e = e.enclosing;
+        }
+        return nil;
     }
 
     execVar(name, initializer, env) {
@@ -4707,7 +4831,13 @@ class Interpreter {
             return InterpMathFn(name);
         }
         if (loxTag(object) == "list") {
-            if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
+            // A List is not in Property Get's bound-method set (steps 2-5),
+            // so only a direct call -- which evalCall routes here as a call
+            // target -- reaches a List method. Any other read is a property
+            // read on a value that is not an Instance.
+            if (isCallTarget and (name == "append" or name == "pop" or name == "remove")) {
+                return InterpListMethod(name, object);
+            }
             if (isCallTarget) this.fatalError("Undefined method '" + name + "' on list.");
             this.fatalError("Only instances have properties.");
             return nil;

@@ -1,0 +1,15 @@
+// A List built-in method is not a value: a read of `l.pop` that is not a
+// direct call is a halting fault (spec/04-semantics.md, Property Get step 6
+// and Halting Faults). A direct call `l.pop()` still runs, and so do
+// `l.append(x)` and `l.remove(x)`.
+var l = [1, 2, 3];
+l.append(4);
+print l.pop();
+l.remove(1);
+print l;
+print l.pop;
+print "unreachable";
+
+// STATUS: error
+// CHECK: 4
+// CHECK: [2, 3]

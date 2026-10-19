@@ -2,13 +2,9 @@
 //
 // count, sum, and foldl each recurse in tail position: the recursive call is
 // the whole of the returning expression, with an accumulator carrying the
-// result. A proper tail-call implementation would run these in constant stack
-// space for any size.
-//
-// Lox++ does not do tail-call elimination yet (issue #555), so each call still
-// uses one frame. The sizes here stay small, so the file runs today on every
-// backend, including the bootstrap interpreter, whose per-call frame cost is
-// the tightest. Once TCO lands, the same code works unchanged at any size.
+// result. Each one is a self tail call (spec/04-semantics.md), so every
+// backend, the bootstrap interpreter included, runs it in constant call depth
+// at any size. The sizes here stay small only to keep the example readable.
 
 // count up from `i` to `n`, returning how many steps it took. The accumulator
 // is `acc`; the call to count is the entire return expression.

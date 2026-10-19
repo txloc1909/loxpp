@@ -1203,17 +1203,25 @@ collection[key] = expr
 
 1. Evaluate `collection`.
 2. Evaluate `key`.
-3. If `collection` is a **Map**:
+3. Evaluate `expr`.
+4. If `collection` is a **Map**:
    a. Validate `key` — same rules as Index Get step 3a above.
-   b. Evaluate `expr`.
-   c. Insert or update `key → value` in the map.
-   d. The expression evaluates to the stored value.
-4. If `collection` is a **List**:
+   b. Insert or update `key → value` in the map.
+   c. The expression evaluates to the stored value.
+5. If `collection` is a **List**:
    a. Perform the same type and bounds checks as Index Get steps 4a–4d.
-   b. Evaluate `expr`.
-   c. Store the result in `collection[i]`.
-   d. The expression evaluates to the stored value (same as assignment semantics).
-5. Otherwise, this is a **runtime error**.
+   b. Store the result in `collection[i]`.
+   c. The expression evaluates to the stored value (same as assignment semantics).
+6. If `collection` is an **Instance** whose class defines `__index_set__`,
+   call it with `key` and the evaluated value (see [Operator
+   Overloading](#operator-overloading)); the expression evaluates to the
+   assigned value.
+7. Otherwise, this is a **runtime error**.
+
+The checks in steps 4a and 5a run after `expr` is evaluated, so a fault from
+a check follows every effect of `expr`. This is the same order as [Map
+Literal](#map-literal), which evaluates every value before it validates its
+keys.
 
 ### Slice Get
 
