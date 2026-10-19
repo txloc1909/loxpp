@@ -407,6 +407,25 @@ FATAL_ROWS = [
         "fatal",
         "42.foo;",
     ),
+    # Issue #707: the same spec row, on a List. A List is not in Property
+    # Get steps 2-5, so a read of a List method is a property read on a
+    # non-Instance. A direct call stays legal; the defer row below covers
+    # the other read path.
+    Row(
+        "list_method_read",
+        "fatal",
+        "l.append;",
+        setup="var l = [1];\n",
+    ),
+    # Issue #674: the callee of `defer` is evaluated as steps 1-2 of
+    # Function Call, so the same read faults at the defer statement on a
+    # List method.
+    Row(
+        "list_method_read_defer",
+        "fatal",
+        "g();",
+        setup="var l = [];\nfun g() { defer l.append(1); }\n",
+    ),
     Row(
         "property_set_non_instance",
         "fatal",
@@ -761,6 +780,10 @@ FATAL_REGRESSION_ROWS = {
     # map_has_invalid_key through Map.del instead of Map.has, to pin both
     # natives, not a second spec table row.
     "map_del_invalid_key",
+    # Issues #674, #707: both rows exercise property_get_non_instance's spec
+    # row on a List method, once as a plain read and once as a defer callee.
+    "list_method_read",
+    "list_method_read_defer",
 }
 
 
