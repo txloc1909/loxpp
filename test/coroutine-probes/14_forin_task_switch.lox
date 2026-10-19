@@ -1,0 +1,27 @@
+// A task switch inside ITER_HAS_NEXT: the for-in frame suspends while the
+// coroutine it resumed waits in task.receive. The wake-up produces this
+// iteration's value, so the loop must continue after ITER_HAS_NEXT and must
+// not resume the coroutine a second time.
+var main = task.self();
+
+fun sender() {
+    yield;
+    task.send(main, "hi");
+}
+
+fun body() {
+    yield "first";
+    var m = task.receive();
+    yield "got " + m;
+    yield "last";
+}
+
+var co = coroutine.create(body);
+task.spawn(sender);
+for (var x in co) {
+    print x;
+}
+
+// CHECK: first
+// CHECK: got hi
+// CHECK: last

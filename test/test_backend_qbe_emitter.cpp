@@ -598,6 +598,29 @@ TEST(QbeEmitter, CoroutineModeEmitsCallStatusHandling) {
         << "a resumable call must return kRtCall to the driver";
 }
 
+TEST(QbeEmitter, CoroutineModeGivesIterHasNextAResumePoint) {
+    // ITER_HAS_NEXT resumes a coroutine. When that coroutine blocks in
+    // task.receive, the task switches and this frame suspends too; the wake-up
+    // supplies the loop's next element as this op's result. Without a resume
+    // point here, the driver re-enters at the previous state and resumes the
+    // coroutine a second time.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun f(co) { for (var x in co) { print x; } }", {0}, options);
+    std::size_t iter = ssa.find("call $rt_op_iter_has_next");
+    ASSERT_NE(iter, std::string::npos);
+    std::size_t set = ssa.rfind("call $rt_set_resume_state(l %rt, w", iter);
+    ASSERT_NE(set, std::string::npos);
+    ASSERT_EQ(ssa.find("call $rt_op_", set + 1), iter)
+        << "the resume state must belong to the ITER_HAS_NEXT itself";
+    std::size_t num = ssa.find("w ", set);
+    int state = std::stoi(ssa.substr(num + 2));
+    EXPECT_NE(ssa.find("lox_fn_nested_resume" + std::to_string(state)),
+              std::string::npos)
+        << "the prologue and the continuation must share the state";
+}
+
 TEST(QbeEmitter, YieldOutsideCoroutineModeThrows) {
     qbe::EmitOptions options; // coroutineMode defaults false
     EXPECT_THROW(emitNestedWithOptions("fun gen() { yield 1; }", {0}, options),
