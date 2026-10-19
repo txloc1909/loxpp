@@ -38,64 +38,10 @@ deferred call on the way to the top before it ends the program. When a
 halting fault occurs, native skips every pending deferred call, including
 the ones of the function where the fault happened.
 
-The messages of the halting faults:
-
-| Cause | Message |
-|---|---|
-| A constructor pattern is matched against a value that is not an enum value | `GET_TAG: expected an enum value.` |
-| `print` of a value nested deeper than the implementation's canonical-string depth limit | `Value nesting is too deep.` |
-| A native function is called with an argument count other than its arity | `Expected 0 arguments but got 1.` |
-| A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `Deferred callable has unexpected type.` |
-| A stdlib native function reports its own error while running | `open(): cannot open '/no/such/path': No such file or directory` |
-| `Map.has(key)` or `Map.del(key)` called with an invalid key | `Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__. NaN is not allowed.` |
-| Undefined property read on a File value | `Undefined property 'bogus' on file.` |
-| Undefined property read on a Socket value | `Undefined property 'bogus' on socket.` |
-| Undefined property read on a Server value | `Undefined property 'bogus' on server.` |
-| Undefined property read on a Process value | `Undefined property 'bogus' on process.` |
-| Undefined property read on a Map value | `Undefined property 'bogus' on map.` |
-| Property read on an Instance where the name is neither a field nor a method | `Undefined property 'bogus'.` |
-| Property read on a value that is not an Instance, Map, File, or Error | `Only instances have properties.` |
-| Property write on a value that is not an Instance | `Only instances have fields.` |
-| A field looked up by Method Invocation (`spec/04-semantics.md`) shadows the method name but is not callable | `Can only call functions, classes and enums.` |
-| `obj.method(...)` where `method` is not found on the instance's class | `Undefined property 'bogus'.` |
-| `list.append(...)` called with an argument count other than 1 | `'append' expects 1 argument but got 0.` |
-| `list.pop(...)` called with any argument | `'pop' expects 0 arguments but got 1.` |
-| `list.remove(...)` called with an argument count other than 1 | `'remove' expects 1 argument but got 0.` |
-| `list.remove(value)` where `value` is not present | `Value not found in list.` |
-| Undefined method invoked on a List | `Undefined method 'bogus' on list.` |
-| Undefined method invoked on a File | `Undefined method 'bogus' on file.` |
-| Undefined method invoked on a Socket | `Undefined method 'bogus' on socket.` |
-| Undefined method invoked on a Server | `Undefined method 'bogus' on server.` |
-| Undefined method invoked on a Process | `Undefined method 'bogus' on process.` |
-| Undefined method invoked on a Map | `Undefined method 'bogus' on map.` |
-| `class Sub < Super {}` where `Super` is not a Class | `Superclass must be a class.` |
-| `super.method(...)` where `method` is not found on the superclass | `Undefined property 'zzz'.` |
-| Enum field indexed (`enumVal[i]`) with a non-Number index | `Enum field index must be a number.` |
-| Enum field indexed with an out-of-range index | `Enum field index 3 out of range.` |
-| Index-assignment on a String | `Strings are immutable and cannot be indexed for assignment.` |
-| `seq[start:end]` where `seq` is not a List or String | `Slice requires a List or String.` |
-| `seq[start:end]` where `start` is not a Number | `Slice index must be a number.` |
-| `seq[start:end]` where `start` is not integer-valued | `Slice index must be an integer.` |
-| `seq[start:end]` where `start` is negative | `Slice index must be non-negative.` |
-| `seq[start:end]` where `end` is not a Number | `Slice index must be a number.` |
-| `seq[start:end]` where `end` is not integer-valued | `Slice index must be an integer.` |
-| `seq[start:end]` where `end` is negative | `Slice index must be non-negative.` |
-| `elem in seq` where `seq` is a String and `elem` is not a String | `Left operand of 'in' on a string must be a string.` |
-| `elem in seq` where `seq` is not a List, String, or Map | `Right operand of 'in' must be a list, string, or map.` |
-| `for (var x in expr)` where `expr` is not a List, String, Map, or Coroutine | `Value is not iterable (expected list, string, map, or coroutine).` |
-| Map size changed during `for`-in iteration | `Map changed size during iteration.` |
-
-The messages of the worker and task faults:
-
-| Kind | Message |
-|---|---|
-| `SendError` | `Value of type T is not a message.`, where `T` is `type(msg)` |
-| `DeadTaskError` | `Cannot send to a task that has ended.` |
-| `YieldAcrossNativeError` (from `task.receive()`) | `Cannot receive across a native callback.` |
-| `DeadlockError` | `Deadlock: every task waits in receive.` The report also lists the tasks that wait. |
-
-The message of a catchable fault is the `message` field of its `Error`
-value. The texts are in `src/vm.cpp` and `src/stdlib/`.
+The message texts are not listed here, because no contract binds them. They
+are in `src/vm.cpp` (run-time faults), `src/stdlib/` (stdlib natives),
+and `src/parser.cpp`, `src/compiler.cpp`, and `src/scanner.cpp` (static
+errors). Native's own tests pin some of them.
 
 ## Limits
 
@@ -109,8 +55,8 @@ value. The texts are in `src/vm.cpp` and `src/stdlib/`.
 ## Implementation notes
 
 **`print`'s depth-limit fault is a halting fault on native.** `Op::PRINT`
-clears any pending stdlib error before it stringifies its operand, so the
-print row is not a stdlib-error path; it is the canonical-string depth guard
+clears any pending stdlib error before it stringifies its operand, so this
+fault is not a stdlib-error path; it is the canonical-string depth guard
 in `stringifyObj` (`src/object.cpp`), which also fires the same way when
 `str()` calls into the same guard through a native call.
 
@@ -122,8 +68,8 @@ sites in `src/vm.cpp` guard invariants the compiler itself is responsible
 for (for example, that `GET_ITER` always pushes an `ObjIterator` before
 `ITER_HAS_NEXT`/`ITER_NEXT` run). Their messages are prefixed `BUG:`. No
 valid Lox++ program can reach them; seeing one means the implementation,
-not the program, is broken. They are not in the tables above and are not
-part of the language's observable behavior.
+not the program, is broken. They are not part of the language's observable
+behavior.
 
 **Call stack overflow's fatal fast path.** The catchable `"StackOverflowError"`
 row of the spec's Runtime Errors table covers the general case. Native takes a direct fatal
