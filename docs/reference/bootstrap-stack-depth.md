@@ -155,9 +155,10 @@ A self tail call does not use the budget above:
 constant call depth. The bootstrap decides this the way native does. The
 parser clears the option for a body that holds a nested `fun` or `class`, a
 `try`, or a `defer`, because such a body cannot restart in the same frame.
-The resolver keeps the option only when the callee name is global, not a
-parameter or a local. At the return, the interpreter checks that the global
-still holds the running function. That check uses list membership, not `==`,
-so a rebound value's own `__eq__` never runs. Every other call, including
-mutual recursion and a tail call of another function, still uses a frame
-from the same budget.
+At the return, the interpreter requires a bare variable callee, a name that
+the resolver left out of the local map (so it is global), that name equal to
+the running function's own name, the argument count equal to the arity, and
+the global still holding the running function. It tests that last point with
+list membership, as native's guard does. Every other call, including mutual
+recursion and a tail call of another function, still uses a frame from the
+same budget.

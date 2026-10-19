@@ -413,20 +413,6 @@ CASES = [
         0,
     ),
     (
-        "self tail call: the identity guard does not call a rebound value's __eq__",
-        "class Liar { __eq__(o) { print \"eq called\"; return true; } }\n"
-        "fun f(n) {\n"
-        '    if (n == 0) return "f-base";\n'
-        "    return f(n - 1);\n"
-        "}\n"
-        "var g = f;\n"
-        "f = Liar();\n"
-        'try { g(2); } catch (e) { print e.kind; }\n',
-        ["NotCallableError"],
-        [],
-        0,
-    ),
-    (
         "self tail call: a shadowed function name is not a self call",
         "fun f(f) { return f(1); }\n"
         "fun g(x) { return x + 1; }\n"

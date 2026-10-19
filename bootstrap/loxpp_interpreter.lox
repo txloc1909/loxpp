@@ -4091,9 +4091,9 @@ class Interpreter {
         // same name shadows the function.
         if (this.locals.has(cand[0])) return nil;
         if (len(cand[2]) != fn.arity()) return nil;
-        // A global may be rebound at any time. Native's guard checks that the
-        // name still holds the running function and uses list membership, not
-        // '==', so a rebound value's own __eq__ never runs; do the same.
+        // A global may be rebound at any time, so the name must still hold
+        // the running function. List membership compares the two values
+        // directly, which is the identity test native's own guard makes.
         if (!this.globals.values.has(fn.name)) return nil;
         if (!(this.globals.values[fn.name] in [fn])) return nil;
         return cand[2];
