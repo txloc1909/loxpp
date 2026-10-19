@@ -1,8 +1,7 @@
 // The callee of a defer statement is evaluated exactly as steps 1-2 of
 // Function Call (spec/04-semantics.md, defer Statement). So `l.append` in
 // `defer l.append(1)` is a property read, and a List is not in Property Get
-// steps 2-5: the read is a halting fault. The deferred call is never
-// recorded, and the function body does not run.
+// steps 2-5: the read is a halting fault at the defer statement.
 var l = [];
 l.append(1);
 print len(l);
