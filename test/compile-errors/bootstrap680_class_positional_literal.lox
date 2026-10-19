@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').
+// Compile error: a class pattern uses positional field syntax with a literal.
+class A {}
+var v = A();
+var r = match v { case A(1) => 1 case _ => 0 };
+print "after";

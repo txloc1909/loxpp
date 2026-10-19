@@ -123,8 +123,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'different message and a second error'),
     'Cannot have more than 255 entries in a map literal.':
         Deferred(681, 'different message and a second error'),
-    "Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').":
-        Deferred(680, 'the bootstrap runs the program'),
     "Expect '(' after 'catch'.":
         Deferred(641, 'the bootstrap adds a second error'),
     "Expect '(' after 'for'.":
@@ -199,8 +197,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(641, 'the bootstrap adds a second error'),
     "Expected a structural pattern (constructor, class, or '[') after '@'.":
         Deferred(680, 'the bootstrap misparses the sub-pattern'),
-    'Or-pattern alternatives must bind the same names in the same order.':
-        Deferred(680, 'the bootstrap accepts the program'),
     'Or-patterns are not supported for sequence patterns.':
         Deferred(680, 'the bootstrap misparses it'),
     "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.":

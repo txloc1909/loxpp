@@ -1667,6 +1667,9 @@ class Resolver {
             }
             this.resolveSubpats(subpats);
         } else if (this.classNames.has(cname)) {
+            if (!named) {
+                this.resError(cname, line, "Class patterns only support named-field syntax (e.g., 'ClassName{field1, field2}').");
+            }
             this.resolveSubpats(subpats);
         } else {
             this.resError(cname, line, "Unknown constructor or class '" + cname + "'.");
@@ -1680,6 +1683,70 @@ class Resolver {
             i = i + 1;
         }
         return false;
+    }
+
+    isBarePattern(pat) {
+        return match pat {
+            case BindPat{name} => true
+            case WildPat       => true
+            case _             => false
+        };
+    }
+
+    isLiteralPattern(pat) {
+        return match pat {
+            case LitPat{v} => true
+            case _         => false
+        };
+    }
+
+    // The locals that a pattern alternative binds, in the order native adds
+    // them: a constructor or list binds its slots in source order, and an
+    // @-binding adds its own name after the sub-pattern's names.
+    patternBindNames(pat) {
+        return match pat {
+            case WildPat       => []
+            case LitPat{v}     => []
+            case BindPat{name} => [name]
+            case TagPat{cname} => []
+            case ClassPat{cname} => []
+            case CtorPat{cname, subpats, named, line} => this.patternListBindNames(subpats)
+            case ListPat{elems, rest_name} => this.listPatBindNames(elems, rest_name)
+            case AtPat{at_name, subpat} => this.withName(this.patternBindNames(subpat), at_name)
+        };
+    }
+
+    patternListBindNames(pats) {
+        var names = [];
+        var i = 0;
+        while (i < len(pats)) {
+            var sub = this.patternBindNames(pats[i]);
+            var j = 0;
+            while (j < len(sub)) { names.append(sub[j]); j = j + 1; }
+            i = i + 1;
+        }
+        return names;
+    }
+
+    listPatBindNames(elems, rest_name) {
+        var names = this.patternListBindNames(elems);
+        if (rest_name != nil and rest_name != "_") names.append(rest_name);
+        return names;
+    }
+
+    withName(names, name) {
+        names.append(name);
+        return names;
+    }
+
+    sameNames(a, b) {
+        if (len(a) != len(b)) return false;
+        var i = 0;
+        while (i < len(a)) {
+            if (a[i] != b[i]) return false;
+            i = i + 1;
+        }
+        return true;
     }
 
     resolveListPat(elems, rest_name) {
@@ -1767,10 +1834,31 @@ class Resolver {
         while (i < len(arms)) {
             var arm = arms[i];
             this.beginScope();
+            // A comma chain of literals is not an or-chain, and neither is a
+            // literal-first arm. Every other arm with more than one pattern
+            // separates its alternatives with `or` (spec/02-syntax.md,
+            // armPats).
+            var orArm = arm.chain == nil and len(arm.pats) > 1 and
+                        !this.isLiteralPattern(arm.pats[0]);
+            var firstNames = nil;
+            var orOpen = true;
             var j = 0;
             while (j < len(arm.pats)) {
                 arm.pats[j] = this.classifyArmPat(arm.pats[j]);
                 if (arm.chain != nil and arm.chain[2] == j) this.reportArmChain(arm.chain, arm.pats[j]);
+                if (orArm and orOpen) {
+                    var pat = arm.pats[j];
+                    if (j == 0) {
+                        if (this.isBarePattern(pat)) {
+                            orOpen = false;
+                        } else {
+                            firstNames = this.patternBindNames(pat);
+                        }
+                    } else if (!this.sameNames(firstNames, this.patternBindNames(pat))) {
+                        this.resError("or", 0, "Or-pattern alternatives must bind the same names in the same order.");
+                        orOpen = false;
+                    }
+                }
                 this.resolvePattern(arm.pats[j]);
                 j = j + 1;
             }
