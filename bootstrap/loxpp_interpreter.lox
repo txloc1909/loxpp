@@ -3044,9 +3044,12 @@ class LoxError {
 class Interpreter {
     init(locals) {
         this.locals        = locals;
-        // The resolver's enum constructor names. A constructor pattern tests
-        // an enum tag; any other name in a constructor pattern is a class.
-        this.enumCtors     = {};
+        // The resolver's enum constructor names and their declared field
+        // names. A constructor pattern tests an enum tag; any other name in a
+        // constructor pattern is a class. A named-field pattern binds by
+        // name, so the match reads the field index from here.
+        this.enumCtors      = {};
+        this.enumCtorFields = {};
         this.globals       = Environment(nil);
         this.returnFlag    = false;
         this.returnValue   = nil;
@@ -5064,8 +5067,24 @@ class Interpreter {
         }
         if (stag == "enum_val") {
             if (subject.tag != cname) return false;
-            if (len(subject.fields) != len(subpats)) return false;
             var i = 0;
+            if (named) {
+                var fields = this.enumCtorFields[cname];
+                while (i < len(subpats)) {
+                    var fname = match subpats[i] {
+                        case BindPat{name} => name
+                        case _             => nil
+                    };
+                    if (fname != nil) {
+                        var idx = this.nameIndex(fields, fname);
+                        if (idx < 0) return false;
+                        if (!this.matchPattern(subpats[i], subject.fields[idx], bindings)) return false;
+                    }
+                    i = i + 1;
+                }
+                return true;
+            }
+            if (len(subject.fields) != len(subpats)) return false;
             while (i < len(subpats)) {
                 if (!this.matchPattern(subpats[i], subject.fields[i], bindings)) return false;
                 i = i + 1;
@@ -5077,6 +5096,15 @@ class Interpreter {
             return this.matchClassPat(subpats, subject, bindings);
         }
         return false;
+    }
+
+    nameIndex(names, name) {
+        var i = 0;
+        while (i < len(names)) {
+            if (names[i] == name) return i;
+            i = i + 1;
+        }
+        return -1;
     }
 
     // The class test of a class pattern: klass is the subject's class or a
@@ -5204,6 +5232,7 @@ try {
         if (!resolver.hadError) {
             interpreter = Interpreter(resolver.locals);
             interpreter.enumCtors = resolver.enumCtors;
+            interpreter.enumCtorFields = resolver.enumCtorFields;
             // The per-call try in LoxFunction.call already converts an
             // overflow inside a target function call into this
             // interpreter's own flag-based error, which unwinds like any

@@ -1,0 +1,19 @@
+// named_field_pattern.lox — named-field constructor patterns bind by name.
+//
+// A named-field pattern may list a constructor's fields in any order, and may
+// name only some of them (spec/02-syntax.md, identArmPat). Each name binds the
+// field with that name, not the field at that position.
+
+enum Pair { P(first, second) }
+
+var p = P(1, 2);
+
+// The pattern lists the fields in the opposite order from the declaration.
+var swapped = match p { case P{second, first} => [first, second] };
+// CHECK: order: [1, 2]
+print "order: " + str(swapped);
+
+// A named-field pattern may bind a subset of the fields.
+var second_only = match p { case P{second} => second };
+// CHECK: subset: 2
+print "subset: " + str(second_only);
