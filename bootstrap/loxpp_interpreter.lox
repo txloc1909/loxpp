@@ -159,6 +159,8 @@ class MatchArm {
         // [comma token, token before it, index of the pattern before it] for
         // the first comma of an arm that does not start with a literal, or nil.
         this.chain     = nil;
+        // Line of the arm's first pattern, for the resolver's arm-level errors.
+        this.line      = 0;
     }
 }
 
@@ -1015,6 +1017,7 @@ class Parser {
                 break;
             }
             if (this.panicMode) break;
+            var patLine = this.peek().line;
             var pats = this.parseMatchArmPatterns();
             var chain = this.armChain;
             var guard = nil;
@@ -1023,6 +1026,7 @@ class Parser {
             if (this.panicMode) break;
             var arm = this.matchArmBody(pats, guard);
             arm.chain = chain;
+            arm.line = patLine;
             arms.append(arm);
         }
         var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
@@ -1857,16 +1861,16 @@ class Resolver {
                     var pat = arm.pats[j];
                     if (j == 0) {
                         if (this.isBarePattern(pat)) {
-                            this.resError(this.bareName(pat), 0, "A binding pattern must be the sole arm pattern.");
+                            this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
                             orOpen = false;
                         } else {
                             firstNames = this.patternBindNames(pat);
                         }
                     } else if (this.isBarePattern(pat) and j < len(arm.pats) - 1) {
-                        this.resError(this.bareName(pat), 0, "A binding pattern must be the sole arm pattern.");
+                        this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
                         orOpen = false;
                     } else if (!this.sameNames(firstNames, this.patternBindNames(pat))) {
-                        this.resError("or", 0, "Or-pattern alternatives must bind the same names in the same order.");
+                        this.resError("or", arm.line, "Or-pattern alternatives must bind the same names in the same order.");
                         orOpen = false;
                     }
                 }
