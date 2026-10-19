@@ -100,9 +100,10 @@ excluded program that starts to fail for a reason other than reordering
 turns DIVERGE, and the run exits 1.
 
 If <name>.input exists next to a .lox file, it is piped in as stdin, on both
-runtimes. Each runtime gets --timeout seconds (default 30); a runtime that
-does not finish in time reports DIVERGE for that program, with a timeout
-reason, rather than hanging the whole run.
+runtimes; otherwise the program gets empty stdin, so a run does not depend on
+what the caller's stdin holds. Each runtime gets --timeout seconds (default
+30); a runtime that does not finish in time reports DIVERGE for that program,
+with a timeout reason, rather than hanging the whole run.
 """
 
 import argparse
@@ -265,7 +266,7 @@ def run_program(
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
     """
-    stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
+    stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else ""
     try:
         result = subprocess.run(
             cmd,

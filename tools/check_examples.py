@@ -5,7 +5,8 @@ Lightweight FileCheck-style tester for Lox++ example programs.
 For each examples/*.lox file (alphabetical order):
   1. Extract all '// CHECK: <text>' directives in file order.
   2. If no CHECK directives are found, skip the file.
-  3. If examples/<name>.input exists, pipe it as stdin.
+  3. If examples/<name>.input exists, pipe it as stdin; otherwise stdin is
+     empty, so a run does not depend on what the caller's stdin holds.
   4. Run loxpp and capture stdout.
   5. For each CHECK directive, scan forward through the remaining output
      lines until a stripped line matches the CHECK text exactly.
@@ -58,7 +59,7 @@ def extract_checks(lox_file: Path) -> list[str]:
 
 
 def run_example(loxpp: str, lox_file: Path, input_file: Path) -> tuple[int, list[str]]:
-    stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else None
+    stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else ""
     # stderr is not matched against anything, and a debug build's GC log can
     # be gigabytes under LOXPP_STRESS_GC, so discard it instead of holding it
     # in memory.
