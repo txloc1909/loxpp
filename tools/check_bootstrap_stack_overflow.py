@@ -21,7 +21,10 @@ Two things a diff of stdout cannot tell apart:
   The report text is implementation-defined (spec/README.md, Conformance),
   so only its presence is checked.
 
-CASES below covers both. check_defer_count_matches_depth() checks a count,
+CASES below covers both, and the self tail calls that the spec exempts from
+the depth limit (spec/04-semantics.md, "Self Tail Calls"): such a recursion
+finishes in constant call depth, while every body that cannot reuse a frame
+still overflows. check_defer_count_matches_depth() checks a count,
 not a bool: every unwound call runs its own defer, not just one of them.
 check_state_restore_probes() sweeps ambient depths looking for one that
 actually interrupts stringify() mid-recursion, and checks stringifyDepth
@@ -98,7 +101,7 @@ STATE_START = {
 CASES = [
     (
         "catchable: target try/catch sees the spec's kind",
-        'fun f(n) { return f(n + 1); }\n'
+        'fun f(n) { return f(n + 1) + 1; }\n'
         'try {\n'
         '    f(0);\n'
         '    print "no error";\n'
@@ -113,7 +116,7 @@ CASES = [
     ),
     (
         "uncaught: clean stop, no target try -- one message line, no traceback",
-        'fun f(n) { return f(n + 1); }\n'
+        'fun f(n) { return f(n + 1) + 1; }\n'
         'f(0);\n',
         [],
         ["Stack overflow."],
@@ -330,13 +333,163 @@ CASES = [
         ["[line 0] Error: Stack overflow."],
         65,
     ),
+    # spec/04-semantics.md, "Self Tail Calls": the depth limit does not apply
+    # to a return whose whole operand is a call of the running function by its
+    # own name. These cases bind that rule, and the bail-outs that keep the
+    # call ordinary.
+    (
+        "self tail call: deep recursion finishes in constant call depth",
+        "fun count(n, acc) {\n"
+        "    if (n == 0) return acc;\n"
+        "    return count(n - 1, acc + 1);\n"
+        "}\n"
+        "print count(100000, 0);\n",
+        ["100000"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: every argument reads the old parameter values",
+        "fun fib(n, a, b) {\n"
+        "    if (n == 0) return a;\n"
+        "    return fib(n - 1, b, a + b);\n"
+        "}\n"
+        "print fib(30, 0, 1);\n",
+        ["832040"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: locals and loops above the parameters are dropped",
+        "fun f(n, total) {\n"
+        "    var step = 2;\n"
+        "    for (var i = 0; i < 3; i = i + 1) {\n"
+        "        if (i == 1) {\n"
+        "            var inner = i * step;\n"
+        "            if (n == 0) return total;\n"
+        "            return f(n - 1, total + inner);\n"
+        "        }\n"
+        "    }\n"
+        "    return -1;\n"
+        "}\n"
+        "print f(100000, 0);\n",
+        ["200000"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a nested fun, class, try, or defer keeps the ordinary call",
+        "fun noop() { }\n"
+        "fun fNested(n) { fun g() { return n; } return fNested(n + 1); }\n"
+        "fun fTry(n) { try { n = n; } catch (e) { } return fTry(n + 1); }\n"
+        "fun fDefer(n) { defer noop(); return fDefer(n + 1); }\n"
+        "fun fClass(n) { class D { m() { return n; } } return fClass(n + 1); }\n"
+        'try { fNested(0); } catch (e) { print "nested " + e.kind; }\n'
+        'try { fTry(0); } catch (e) { print "try " + e.kind; }\n'
+        'try { fDefer(0); } catch (e) { print "defer " + e.kind; }\n'
+        'try { fClass(0); } catch (e) { print "class " + e.kind; }\n'
+        'print "after";\n',
+        ["nested StackOverflowError", "try StackOverflowError",
+         "defer StackOverflowError", "class StackOverflowError", "after"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a rebound global name takes the ordinary call",
+        "var traces = 0;\n"
+        "fun count(n) {\n"
+        '    if (n == 0) return "base";\n'
+        "    return count(n - 1);\n"
+        "}\n"
+        "var orig = count;\n"
+        "fun count(n) {\n"
+        "    traces = traces + 1;\n"
+        "    return orig(n);\n"
+        "}\n"
+        "print count(3);\n"
+        "print traces;\n",
+        ["base", "4"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: the identity guard does not call a rebound value's __eq__",
+        "class Liar { __eq__(o) { print \"eq called\"; return true; } }\n"
+        "fun f(n) {\n"
+        '    if (n == 0) return "f-base";\n'
+        "    return f(n - 1);\n"
+        "}\n"
+        "var g = f;\n"
+        "f = Liar();\n"
+        'try { g(2); } catch (e) { print e.kind; }\n',
+        ["NotCallableError"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a shadowed function name is not a self call",
+        "fun f(f) { return f(1); }\n"
+        "fun g(x) { return x + 1; }\n"
+        "print f(g);\n",
+        ["2"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a wrong argument count keeps the ordinary arity error",
+        "fun f(a) { return f(); }\n"
+        "try { f(1); } catch (e) { print e.kind; }\n",
+        ["ArityError"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a block-scoped function keeps the ordinary call",
+        "var kind;\n"
+        "{\n"
+        "    fun f(n) { return f(n + 1); }\n"
+        "    try { f(0); } catch (e) { kind = e.kind; }\n"
+        "}\n"
+        "print kind;\n",
+        ["StackOverflowError"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a tail call of another function keeps the ordinary call",
+        "fun g(n) { return f(n + 1); }\n"
+        "fun f(n) { return g(n + 1); }\n"
+        "try { f(0); } catch (e) { print e.kind; }\n",
+        ["StackOverflowError"],
+        [],
+        0,
+    ),
+    (
+        "self tail call: a coroutine body keeps one frame across every resume",
+        "fun gen(n) {\n"
+        "    if (n == 0) return \"done\";\n"
+        "    yield n;\n"
+        "    return gen(n - 1);\n"
+        "}\n"
+        "var co = coroutine.create(gen);\n"
+        "var first = co.resume(10000);\n"
+        "var resumes = 0;\n"
+        'while (co.status() == "suspended") {\n'
+        "    co.resume();\n"
+        "    resumes = resumes + 1;\n"
+        "}\n"
+        "print first;\n"
+        "print resumes;\n",
+        ["10000", "10000"],
+        [],
+        0,
+    ),
 ]
 
 
 # Programs that native completes and the bootstrap halts on. Issue #687: the
 # bootstrap has no frame reserve for a deferred call that runs during an
-# overflow unwind. Issue #716: the bootstrap does not run a self tail call in
-# constant call depth. Each entry pins the gap: native must finish
+# overflow unwind. Each entry pins the gap: native must finish
 # with exit 0, and the bootstrap must halt with a report on stderr.
 # When a fix lands, an entry starts to match native and
 # check_known_gaps() fails; move the entry to CASES then.
@@ -353,16 +506,6 @@ def _gap_program(deferred_body: str, extra: str = "") -> str:
 
 
 KNOWN_GAPS = [
-    (
-        "5000 self tail calls (the two CASES that recurse with `return f(n + 1);` rely on this)",
-        "fun f(n) {\n"
-        "    if (n == 0) return 0;\n"
-        "    return f(n - 1);\n"
-        "}\n"
-        "f(5000);\n"
-        'print "after";\n',
-        716,
-    ),
     ("a deferred call with one assignment", _gap_program("ran = ran + 1;"), 687),
     (
         "a deferred call that calls one helper",
@@ -543,7 +686,9 @@ MIN_STRINGIFY_DEPTH_FLOOR = 20
 
 def stringify_depth_probe(ambient_depth: int) -> str:
     return (
-        "fun deep(d, v) { if (d == 0) { print v; return 0; } return deep(d - 1, v); }\n"
+        # Non-tail on purpose: this probe needs the ambient native call depth
+        # that a self tail call would remove (spec/04-semantics.md).
+        "fun deep(d, v) { if (d == 0) { print v; return 0; } return 1 + deep(d - 1, v); }\n"
         "fun nest(n) { var v = []; var i = 0; while (i < n) { v = [v]; i = i + 1; } return v; }\n"
         "try {\n"
         f"    deep({ambient_depth}, nest(5000));\n"
@@ -792,7 +937,7 @@ def main() -> int:
         return 1
     checked = [p for p in examples_dir.glob("*.lox") if p.name not in EXCLUDED_EXAMPLES]
     print(
-        f"OK: {len(CASES)} catchability/clean-stop cases, 1 defer-count probe, "
+        f"OK: {len(CASES)} fault/self-tail-call cases, 1 defer-count probe, "
         f"{len(KNOWN_GAPS)} pinned known gaps, {len(STRINGIFY_DEPTH_SWEEP)} stringifyDepth-restore sweep points, and "
         f"{len(checked)} example state-restore checks, all match."
     )
