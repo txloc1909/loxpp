@@ -4682,7 +4682,13 @@ class Interpreter {
             return InterpMathFn(name);
         }
         if (loxTag(object) == "list") {
-            if (name == "append" or name == "pop" or name == "remove") return InterpListMethod(name, object);
+            // A List is not in Property Get's bound-method set (steps 2-5),
+            // so only a direct call -- which evalCall routes here as a call
+            // target -- reaches a List method. Any other read is a property
+            // read on a value that is not an Instance.
+            if (isCallTarget and (name == "append" or name == "pop" or name == "remove")) {
+                return InterpListMethod(name, object);
+            }
             if (isCallTarget) this.fatalError("Undefined method '" + name + "' on list.");
             this.fatalError("Only instances have properties.");
             return nil;
