@@ -307,6 +307,23 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Issues #674, #707: a property read of a List method that is not a direct
+    # call is a halting fault on every consumer. Probes 118 and 119 pin it in
+    # the shared spec-probe gate; this runs the same differential comparison
+    # in ctest. Same trace-noise constraint as BootstrapOperatorOverload
+    # above.
+    add_test(NAME BootstrapListMethodRead
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
+                $<TARGET_FILE:loxpp>
+                ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/118_list_pop_read_faults.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/119_defer_list_method_callee_faults.lox
+                --skip-on-trace
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapListMethodRead PROPERTIES
+        ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issue #642: every compile message native can report has a case in
     # test/compile-errors/ or a recorded reason. The checker reads the message
     # templates from src/parser.cpp, src/compiler.cpp, and src/scanner.cpp, so
