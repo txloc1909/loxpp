@@ -1,0 +1,6 @@
+// DIAGNOSTIC: A binding pattern must be the sole arm pattern.
+// Compile error: an or-chain contains a bare binding alternative.
+var x = 1;
+var y = 2;
+var r = match 3 { case x or y => 1 case _ => 0 };
+print "after";

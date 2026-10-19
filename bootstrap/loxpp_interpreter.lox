@@ -1693,6 +1693,13 @@ class Resolver {
         };
     }
 
+    bareName(pat) {
+        return match pat {
+            case BindPat{name} => name
+            case _             => "_"
+        };
+    }
+
     isLiteralPattern(pat) {
         return match pat {
             case LitPat{v} => true
@@ -1850,10 +1857,14 @@ class Resolver {
                     var pat = arm.pats[j];
                     if (j == 0) {
                         if (this.isBarePattern(pat)) {
+                            this.resError(this.bareName(pat), 0, "A binding pattern must be the sole arm pattern.");
                             orOpen = false;
                         } else {
                             firstNames = this.patternBindNames(pat);
                         }
+                    } else if (this.isBarePattern(pat) and j < len(arm.pats) - 1) {
+                        this.resError(this.bareName(pat), 0, "A binding pattern must be the sole arm pattern.");
+                        orOpen = false;
                     } else if (!this.sameNames(firstNames, this.patternBindNames(pat))) {
                         this.resError("or", 0, "Or-pattern alternatives must bind the same names in the same order.");
                         orOpen = false;
