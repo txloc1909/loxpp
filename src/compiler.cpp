@@ -21,8 +21,7 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm,
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink, const CompileOptions& options) {
     ObjFunction* fn = mm->create<ObjFunction>();
-    auto parser = std::make_unique<Parser>(source);
-    parser->m_sink = sink;
+    auto parser = std::make_unique<Parser>(source, sink);
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
     compiler->m_sourceId = options.sourceId;
@@ -157,6 +156,7 @@ void Compiler::unary() {
     default:
         return; // Unreachable.
     }
+    markNotAssignable();
 }
 
 void Compiler::binary() {
@@ -214,6 +214,7 @@ void Compiler::binary() {
     default:
         return; // Unreachable.
     }
+    markNotAssignable();
 }
 
 void Compiler::literal() {
@@ -260,6 +261,11 @@ void Compiler::string() {
 void Compiler::variable() {
     namedVariable(m_parser->m_previous, m_parser->m_canAssign);
 }
+
+// An operator expression is never an assignment target (spec/02-syntax.md,
+// assignment). A following '=' is therefore not an assignment: leave it for
+// the caller, which reports the missing ';'.
+void Compiler::markNotAssignable() { m_parser->m_canAssign = false; }
 
 void Compiler::call() {
     // The callee is already on the stack. Parse the argument list.
@@ -2043,9 +2049,7 @@ void Compiler::mapLiteral() {
 }
 
 void Compiler::subscript() {
-    bool canAssign =
-        m_parser->m_canAssign; // save: nested expression() clobbers it
-    expression();              // compile first index
+    expression(); // compile first index
 
     if (m_parser->match(TokenType::COLON)) {
         // Slice: seq[start:end] — end expression is required
@@ -2055,7 +2059,7 @@ void Compiler::subscript() {
     } else {
         // Plain index: seq[i]
         m_parser->consume(TokenType::RIGHT_BRACKET, "Expect ']' after index.");
-        if (canAssign && m_parser->match(TokenType::EQUAL)) {
+        if (m_parser->m_canAssign && m_parser->match(TokenType::EQUAL)) {
             expression();
             emitByte(Op::SET_INDEX);
         } else {
@@ -2466,6 +2470,7 @@ void Compiler::and_() {
     emitByte(Op::POP);
     m_parser->parsePrecedence(Precedence::AND, this);
     patchJump(endJump);
+    markNotAssignable();
 }
 
 void Compiler::or_() {
@@ -2475,6 +2480,7 @@ void Compiler::or_() {
     emitByte(Op::POP);
     m_parser->parsePrecedence(Precedence::OR, this);
     patchJump(endJump);
+    markNotAssignable();
 }
 
 void Compiler::emitReturn() {

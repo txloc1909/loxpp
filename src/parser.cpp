@@ -75,11 +75,13 @@ static const ParseRule rules[] = {
 #undef RULE_TERMINAL
 #undef T
 
-Parser::Parser(const std::string& source) : m_scanner(source) {
-    m_current = m_scanner.scanOneToken();
-    m_previous = m_current;
+Parser::Parser(const std::string& source, DiagnosticSink* sink)
+    : m_scanner(source), m_sink(sink) {
     m_hadError = false;
     m_panicMode = false;
+    // The first token takes the same error path as every later token.
+    scanNextToken();
+    m_previous = m_current;
 }
 
 const ParseRule* Parser::getRule(TokenType type) {
@@ -96,6 +98,11 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
     }
 
     const bool atAssignmentLevel = (precedence <= Precedence::ASSIGNMENT);
+    // A nested expression runs at its own precedence level, and its parselets
+    // overwrite both fields. Save the enclosing level's values so that a
+    // nested argument, index, or element cannot decide this level's '='.
+    const bool enclosingCanAssign = m_canAssign;
+    const bool enclosingAtAssignmentLevel = m_atAssignmentLevel;
     m_canAssign = atAssignmentLevel;
     m_atAssignmentLevel = atAssignmentLevel;
     (compiler->*prefixRule)();
@@ -116,6 +123,8 @@ void Parser::parsePrecedence(Precedence precedence, Compiler* compiler) {
     if (m_canAssign && match(TokenType::EQUAL)) {
         error("Invalid assignment target.");
     }
+    m_canAssign = enclosingCanAssign;
+    m_atAssignmentLevel = enclosingAtAssignmentLevel;
 }
 
 void Parser::errorAt(const Token& token, const char* message) {
@@ -158,16 +167,19 @@ void Parser::errorAtCurrent(const char* message) {
 
 void Parser::error(const char* message) { errorAt(m_previous, message); }
 
-void Parser::advance() {
-    m_previous = m_current;
+void Parser::scanNextToken() {
     for (;;) {
         m_current = m_scanner.scanOneToken();
         if (m_current.type != TokenType::ERROR) {
-            break;
+            return;
         }
-
         errorAtCurrent(m_current.lexeme.data());
     }
+}
+
+void Parser::advance() {
+    m_previous = m_current;
+    scanNextToken();
 }
 
 void Parser::consume(TokenType type, const char* message) {

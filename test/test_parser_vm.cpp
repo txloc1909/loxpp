@@ -580,3 +580,73 @@ TEST_F(ParserVMTest, TwoDotRun_AfterSuper_CompileError) {
                           "class B < A { m() { super..x; } }"),
               InterpretResult::COMPILE_ERROR);
 }
+
+// ---------------------------------------------------------------------------
+// Assignment targets (spec/02-syntax.md, assignment)
+//
+// A nested expression must not change the enclosing level's decision about
+// '=': "call '.' IDENTIFIER" and "call '[' expression ']'" stay valid targets
+// whatever the nested argument or index contains.
+// ---------------------------------------------------------------------------
+
+TEST_F(ParserVMTest, AssignmentTarget_PropertyOfCallWithOperatorArgument) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class A {}
+        var a = A();
+        fun f(x) { return a; }
+        f(1 - 1).b = 3;
+        var r = a.b;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST_F(ParserVMTest, AssignmentTarget_PropertyOfIndexWithOperatorIndex) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class A {}
+        var a = A();
+        var xs = [a];
+        xs[0 + 0].b = 3;
+        var r = a.b;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST_F(ParserVMTest, AssignmentTarget_PropertyOfGroupedOperatorExpression) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class A {}
+        var a = A();
+        (true and a).b = 3;
+        var r = a.b;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}
+
+TEST_F(ParserVMTest, AssignmentTarget_IndexSetOfCallWithOperatorArgument) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var xs = [0];
+        fun f(x) { return xs; }
+        f(1 - 1)[0] = 9;
+        var r = xs[0];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "9");
+}
+
+TEST_F(ParserVMTest, AssignmentTarget_AssignmentIsExpressionValue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class A {}
+        var a = A();
+        fun f(x) { return a; }
+        var r = f(1 - 1).b = 3;
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("r"), "3");
+}

@@ -53,6 +53,14 @@ struct Parser {
     // derives it from the calling precedence. A different compilation backend
     // can read this field without any change to the parser.
     //
+    // Each precedence level saves the enclosing value and restores it when the
+    // level ends. A nested expression (an argument, an index, a list element)
+    // therefore cannot change the enclosing level's decision about '='.
+    //
+    // A parselet whose value is never an assignment target — an operator
+    // expression — clears the flag before its level ends. The '=' is then left
+    // for the caller, which reports the missing ';'.
+    //
     // Note: canAssign is NOT a per-rule property of ParseRule. A ParseRule
     // (parselet) does not statically know if it is an l-value; that depends on
     // the calling context (whether precedence <= ASSIGNMENT). Adding it to
@@ -60,9 +68,9 @@ struct Parser {
     bool m_canAssign{false};
 
     // True when parsePrecedence was entered at ASSIGNMENT precedence, the only
-    // level at which a `yield` expression is valid. Unlike m_canAssign, this
-    // records the precedence context itself, so a prefix rule can tell an
-    // assignment-level call from an operand-position call.
+    // level at which a `yield` expression is valid. It is saved and restored
+    // with m_canAssign. It records the precedence context itself, so a prefix
+    // rule can tell an assignment-level call from an operand-position call.
     bool m_atAssignmentLevel{false};
 
     // When set, errorAt collects diagnostics here and prints nothing. Null (the
@@ -70,7 +78,7 @@ struct Parser {
     // wires it; vm.cpp leaves it null.
     DiagnosticSink* m_sink{nullptr};
 
-    Parser(const std::string& source);
+    Parser(const std::string& source, DiagnosticSink* sink = nullptr);
 
     void parsePrecedence(Precedence precedence, Compiler* compiler);
 
@@ -78,6 +86,10 @@ struct Parser {
     void errorAtCurrent(const char* message);
     void error(const char* message);
 
+    // Reads the next token, reporting and skipping any scan error. Both the
+    // constructor and advance() call it, so a scan error on the first token is
+    // reported exactly like one on any later token.
+    void scanNextToken();
     void advance();
     void consume(TokenType type, const char* message);
     [[nodiscard]] bool check(TokenType type) const;
