@@ -150,9 +150,14 @@ Conformance, "Limits"). Probe 53 does not bind the bootstrap interpreter. The li
 frame budget that this note describes, so it moves with `FRAMES_MAX` and with
 the frames that the interpreter uses for its own calls.
 
-The bootstrap does not run self tail calls in constant call depth: a
-recursion of self tail calls halts with `Stack overflow.` where native
-completes. This is the known gap
-[#716](https://github.com/txloc1909/loxpp/issues/716). The call-depth
-limit does not cover it, because the spec says that a self tail call never
-raises `StackOverflowError`.
+A self tail call does not use the budget above:
+`spec/04-semantics.md`, "Self Tail Calls", says that such a recursion runs in
+constant call depth. The bootstrap decides this the way native does. The
+parser clears the option for a body that holds a nested `fun` or `class`, a
+`try`, or a `defer`, because such a body cannot restart in the same frame.
+The resolver keeps the option only when the callee name is global, not a
+parameter or a local. At the return, the interpreter checks that the global
+still holds the running function. That check uses list membership, not `==`,
+so a rebound value's own `__eq__` never runs. Every other call, including
+mutual recursion and a tail call of another function, still uses a frame
+from the same budget.
