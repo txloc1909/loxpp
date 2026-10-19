@@ -113,8 +113,6 @@ class Unreachable:
 
 # Message templates with no case. See the module docstring for the rule.
 DEFERRED: dict[str, Deferred] = {
-    "'_' cannot be used as an @-binding name.":
-        Deferred(680, 'the bootstrap misparses the @-binding'),
     "Can't have more than 255 arguments.":
         Deferred(681, 'different token and a second error'),
     "Can't have more than 255 parameters.":
@@ -190,17 +188,15 @@ DEFERRED: dict[str, Deferred] = {
     'Expect method name.':
         Deferred(641, 'the bootstrap omits a second error'),
     "Expect name after '...' in sequence pattern.":
-        Deferred(680, 'the bootstrap misparses the rest name'),
+        Deferred(746, 'the bootstrap accepts the unnamed rest pattern'),
     'Expect parameter name.':
         Deferred(641, 'the bootstrap omits a second error'),
     'Expect superclass method name.':
         Deferred(641, 'the bootstrap adds a second error'),
-    "Expected a structural pattern (constructor, class, or '[') after '@'.":
-        Deferred(680, 'the bootstrap misparses the sub-pattern'),
     'Or-patterns are not supported for sequence patterns.':
-        Deferred(680, 'the bootstrap misparses it'),
+        Deferred(745, 'the bootstrap accepts the chain'),
     "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.":
-        Deferred(680, 'the bootstrap misparses the sub-pattern'),
+        Deferred(744, 'the bootstrap accepts the sub-pattern'),
     'Too many closure variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
     'Too many elements in sequence destructuring.':

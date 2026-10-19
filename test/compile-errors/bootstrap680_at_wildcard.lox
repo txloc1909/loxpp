@@ -1,0 +1,6 @@
+// DIAGNOSTIC: '_' cannot be used as an @-binding name.
+// Compile error: a wildcard is the @-binding name.
+enum E { A(x) }
+var v = A(1);
+var r = match v { case _ @ A(x) => 1 case _ => 0 };
+print "after";
