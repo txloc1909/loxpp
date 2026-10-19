@@ -219,10 +219,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap accepts the program'),
     'Unexpected character.':
         Deferred(641, 'the bootstrap adds a second error'),
-    "Unknown constructor or class '<...>'.":
-        Deferred(678, 'the bootstrap does not check the name'),
-    "Unknown field '<...>' for '<...>'.":
-        Deferred(678, 'the bootstrap does not check the field'),
     'Unreachable arm after catch-all.':
         Deferred(639, 'the bootstrap does not check it'),
     'Unterminated string.':
