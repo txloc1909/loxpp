@@ -415,6 +415,14 @@ FATAL_ROWS = [
         "var {bogus} = C();",
         setup="class C {}\n",
     ),
+    # Issue #748: a Map is in Property Get steps 2-5, so destructuring a
+    # missing Map method is the Map's own halting fault.
+    Row(
+        "undefined_property_in_map_destructure",
+        "fatal",
+        "var {bogus} = m;",
+        setup="var m = {};\n",
+    ),
     # Issue #748: a non-instance destructuring source is a property read on a
     # non-Instance. This row checks that the fault occurs. The table accepts a
     # catchable fault, so probe 122 checks that it is not catchable.
@@ -814,6 +822,7 @@ FATAL_REGRESSION_ROWS = {
     # undefined_property_on_instance and property_get_non_instance.
     "undefined_property_in_class_pattern",
     "undefined_property_in_destructure",
+    "undefined_property_in_map_destructure",
     "destructure_non_instance",
 }
 
