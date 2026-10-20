@@ -5,14 +5,14 @@ to `docs/decisions/` and names its tracking issue.
 
 ## Owner decisions
 
-The owner answered three of the four open questions on 2026-10-21.
+The owner answered the four open questions on 2026-10-21.
 
 | Question | Decision |
 |---|---|
 | Strict qualification, or bare names when unique | Strict. A pattern and an expression always write `E.A`. |
 | `str` shows the enum name | No. `str` gives `<A>` and `A(1)`, as today. |
 | `E` alone is a value | No. The import mission can change this if module access needs it. |
-| Remove the literal comma chain | Open. See "Open question: the comma chain". |
+| Remove the literal comma chain | Yes, option A. `or` joins every alternative. See "The comma chain". |
 
 ## Summary
 
@@ -238,7 +238,7 @@ On acceptance this is a mission with a tracking issue.
   static type on the subject. Lox++ is dynamically typed
   (`docs/decisions/dynamic-functional-programming.md`), so it is not possible.
 
-## Open question: the comma chain
+## The comma chain
 
 Pattern rule 8 removes `case 1, 2 =>`. The comma chain is not a bug, and it
 does not give a wrong result alone. The case for its removal is simplicity,
@@ -268,7 +268,7 @@ not safety.
 
 | Option | `case 1, 2` | `case 1 or 2` | Arm forms | #756 |
 |---|---|---|---|---|
-| A. Remove the comma chain (recommended) | static error | matches 1 and 2 | one | fixed by the grammar |
+| A. Remove the comma chain (chosen) | static error | matches 1 and 2 | one | fixed by the grammar |
 | B. Keep the comma, reject `or` after a literal | matches 1 and 2 | static error | two | fixed by a parser check |
 | C. Keep both | matches 1 and 2 | matches 1 and 2 | one, with two spellings | fixed by the grammar |
 | D. Use `,` for every alternative | matches 1 and 2 | static error | one | fixed by the grammar |
@@ -282,8 +282,7 @@ not safety.
   commas at two levels in one arm, and `or` already joins identifier
   alternatives in 10 programs.
 
-The recommendation is A. If the owner prefers B, #756 is still a one-line
-rule, and the rest of this proposal does not change.
+The owner chose A on 2026-10-21.
 
 ## Relation to the import system
 
