@@ -291,6 +291,9 @@ an arm (across all alternatives in or-patterns), or that an unguarded
 `_`/binding wildcard is present. A missing constructor is a compile error
 listing the absent names.
 
+An arm that follows an unguarded catch-all arm (`case _` or a plain binding)
+is unreachable and is a compile error.
+
 ### Function call arguments
 
 The maximum number of arguments of a call, and of parameters of a function,

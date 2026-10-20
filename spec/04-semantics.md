@@ -500,6 +500,8 @@ match subject { matchArm* }
    d. If the pattern matches (and the guard, if present, is truthy), evaluate the arm's body **expression** and return its value as the result of the `match` expression.
 3. If no arm matches: raise **`MatchError`** at runtime. The `match` expression does not produce a value.
 
+An arm that follows an unguarded catch-all arm (`case _` or a plain binding) is unreachable and is a compile error.
+
 All arms must be written so that their body expressions leave exactly one value; this is enforced structurally by the compiler (each arm stores its result into a pre-allocated slot before cleanup).
 
 When a `match` expression is used as a statement (`exprStmt`), the result value is discarded.

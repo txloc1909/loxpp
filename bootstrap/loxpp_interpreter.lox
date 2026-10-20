@@ -1897,9 +1897,14 @@ class Resolver {
         this.resolveExpr(subject);
         var seen = {};
         var catchAll = false;
+        var reportedUnreachable = false;
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
+            if (catchAll and !reportedUnreachable) {
+                this.resError("case", arm.line, "Unreachable arm after catch-all.");
+                reportedUnreachable = true;
+            }
             this.beginScope();
             // A comma chain of literals is not an or-chain, and neither is a
             // literal-first arm. Every other arm with more than one pattern
