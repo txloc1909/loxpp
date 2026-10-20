@@ -5070,8 +5070,10 @@ class Interpreter {
         return s + ")";
     }
 
+    // An enum declaration defines its constructors, never the type name: a
+    // reference to the type name is an undefined global read
+    // (spec/02-syntax.md, `enum` declaration).
     execEnumDecl(name, ctor_names, ctor_fields_list, env) {
-        env.define(name, nil);
         var i = 0;
         while (i < len(ctor_names)) {
             var ctor = LoxEnumCtor(name, ctor_names[i], ctor_fields_list[i]);

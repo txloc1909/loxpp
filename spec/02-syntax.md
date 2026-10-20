@@ -255,6 +255,9 @@ var r = Ok(42);
 var n = None();
 ```
 
+- The enum name is not a value and declares no global. A reference to it, in a
+  read or in an assignment target, is an undefined-variable fault
+  (`UndefinedVariableError`, `spec/04-semantics.md`).
 - Enum declarations are only permitted at global scope.
 - Duplicate enum names and duplicate constructor names within an enum are
   compile errors.
