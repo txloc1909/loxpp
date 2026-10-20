@@ -1744,6 +1744,13 @@ class Resolver {
         };
     }
 
+    isListPattern(pat) {
+        return match pat {
+            case ListPat{elems, rest_name} => true
+            case _                         => false
+        };
+    }
+
     // The locals that a pattern alternative binds, in the order native adds
     // them: a constructor or list binds its slots in source order, and an
     // @-binding adds its own name after the sub-pattern's names.
@@ -1893,7 +1900,10 @@ class Resolver {
                 if (orArm and orOpen) {
                     var pat = arm.pats[j];
                     if (j == 0) {
-                        if (this.isBarePattern(pat)) {
+                        if (this.isListPattern(pat)) {
+                            this.resError("]", arm.line, "Or-patterns are not supported for sequence patterns.");
+                            orOpen = false;
+                        } else if (this.isBarePattern(pat)) {
                             this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
                             orOpen = false;
                         } else {
