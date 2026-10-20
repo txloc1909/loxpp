@@ -14,7 +14,7 @@ fun v() { print "VALUE"; return "x"; }
 var l = [1, 2, 3];
 
 // The collection expression runs before the index, so its effect comes first
-// even when the index faults.
+// even when the index is out of bounds.
 fun coll() { print "COLL"; return l; }
 try { coll()[badIndex()] = v(); } catch (e) { print e.kind; }
 
