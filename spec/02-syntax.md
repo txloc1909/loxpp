@@ -265,20 +265,22 @@ print c(1);                        // Some(1)
 - Two enums with the same name, and two constructors with the same name in
   one enum, are compile errors. Constructors of different enums may have the
   same name.
-- No other name that the program declares may be the enum name, at any
+- No variable that the program declares may have the enum name, at any
   scope and anywhere in the source, before or after the enum declaration.
   This covers a global or local variable, a function, a class, another enum,
-  a parameter, a pattern binding, an `@`-binding name, a `catch` variable, a
-  `for`-in variable, and a name in a destructuring declaration. Each is a
-  compile error. So `E` in `E.A` always names the enum.
+  a parameter, a pattern binding (also a name in `E.A{...}`), an
+  `@`-binding name, a `catch` variable, a `for`-in variable, and a name in a
+  destructuring declaration. Each is a compile error. So `E` in `E.A` always
+  names the enum. A member name is not a variable, so it may be the enum
+  name: a constructor (`enum E { E }`), a constructor field, a method, or a
+  property.
+- The enum name means the enum in the whole program, before and after its
+  declaration. A use of the enum name that comes before the declaration in
+  the source, alone or as `E.A`, is a compile error.
 - The enum name may be the name of a built-in global
-  ([§05-stdlib](05-stdlib.md)). From the declaration to the end of the
-  program, the name means the enum, so the built-in cannot be reached by that
-  name there. For example, after `enum type { A }`, `type(x)` is a compile
-  error, because `type` alone is not a value.
-- An enum is visible from its declaration to the end of the program. A use of
-  `E.A` that comes before the declaration of `E` in the source is a compile
-  error.
+  ([§05-stdlib](05-stdlib.md)). The enum hides the built-in in the whole
+  program. For example, in a program that declares `enum type { A }`,
+  `type(x)` is a compile error, because `type` alone is not a value.
 - In an expression, `E.A` is the constructor value. These are compile errors:
   `E.B` when `E` has no constructor `B`; the enum name `E` when a `.` and a
   constructor name do not follow it; an assignment to `E` or to `E.A`.

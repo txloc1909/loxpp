@@ -4,7 +4,7 @@
 #
 # Mission #771 (docs/decisions/enum-constructor-namespaces.md): the spec
 # states the final rules before the consumers implement them.
-128_enum_qualified_constructor.lox #774 (N2): E.A in expressions and patterns
+155_enum_qualified_constructor.lox #774 (N2): E.A in expressions and patterns
 129_enum_shared_constructor_name.lox #777 (N6): shared constructor names and the enum test
 130_match_or_literal_alternatives.lox #777 (N6): or between literal patterns
 131_enum_bare_constructor_name.lox #777 (N6): a constructor name alone is not a constructor
@@ -27,3 +27,6 @@
 152_enum_name_in_destructuring_rejected.lox #774 (N2): the enum name may not be declared again
 153_enum_name_as_at_binding_rejected.lox #774 (N2): the enum name may not be declared again
 154_enum_name_as_local_class_rejected.lox #774 (N2): the enum name may not be declared again
+156_builtin_before_enum_declaration_rejected.lox #774 (N2): the enum hides a built-in in the whole program
+157_enum_name_before_declaration_rejected.lox #774 (N2): the enum name before its declaration is a compile error
+158_enum_name_as_member_name.lox #777 (N6): a constructor may have the name of its enum

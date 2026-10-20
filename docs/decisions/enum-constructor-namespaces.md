@@ -15,7 +15,7 @@ The owner answered the four open questions on 2026-10-21.
 | Remove the literal comma chain | Yes, option A. `or` joins every alternative. See "The comma chain". |
 | A constructor pattern tested against a value that is not an enum value (review of #780) | It does not match, and the match goes on. The halting fault is removed. Alternatives are tried from left to right. |
 | Other declarations with the enum name (review of #780) | No declaration of the program may have the enum name, at any scope and anywhere in the source (declaration rule 4). |
-| An enum with the name of a built-in global (review of #780) | Allowed. From the declaration on, the name means the enum. The import mission decides how built-ins are protected. |
+| An enum with the name of a built-in global (review of #780) | Allowed. The enum hides the built-in in the whole program. #781 tracks how the import mission protects built-ins. |
 
 ## Summary
 
@@ -74,18 +74,19 @@ use the same shape: a name, a `.`, and a member name.
 2. Two constructors of one enum must not have the same name. Two enums must
    not have the same name. Each is a static error, as today.
 3. Constructors of different enums may have the same name.
-4. No other name that the program declares may be the enum name, at any
+4. No variable that the program declares may have the enum name, at any
    scope and anywhere in the source: a global or local variable, a function,
    a class, another enum, a parameter, a pattern binding, an `@`-binding
    name, a `catch` variable, a `for`-in variable, or a destructured name.
    Each is a static error. Because of this rule, `E` in `E.A` always names
    the enum, and a reader does not have to look for a shadowing declaration.
-   A built-in global is not declared by the program, so an enum may have its
-   name; from the declaration on, the name means the enum.
-5. An enum is visible from its declaration to the end of the program. A use
-   of `E.A` before the declaration of `E` in the source is a static error.
-   The pattern rule has this form today; this proposal applies it to
-   expressions too.
+   A member name (a constructor, a field, a method) is not a variable, so it
+   may be the enum name. A built-in global is not declared by the program,
+   so an enum may have its name, and the enum hides it in the whole
+   program.
+5. The enum name means the enum in the whole program. A use of the enum
+   name before its declaration in the source, alone or as `E.A`, is a static
+   error.
 
 ### Expressions
 

@@ -1,0 +1,17 @@
+// The enum name means the enum in the whole program. A bare use of it before
+// the declaration is a compile error, as after it (spec/02-syntax.md, enum
+// declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+try {
+    print E;
+} catch (e) {
+    print e.kind;
+}
+enum E { A }
+
+// STATIC-ERROR
+// STATUS: error

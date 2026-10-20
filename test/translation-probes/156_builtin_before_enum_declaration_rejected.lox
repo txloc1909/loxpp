@@ -1,0 +1,17 @@
+// The enum hides a built-in global with its name in the whole program, so a
+// call of the built-in before the enum declaration is a compile error
+// (spec/02-syntax.md, enum declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+try {
+    print type(1);
+} catch (e) {
+    print e.kind;
+}
+enum type { A }
+
+// STATIC-ERROR
+// STATUS: error

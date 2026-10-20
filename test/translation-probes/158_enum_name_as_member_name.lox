@@ -1,0 +1,23 @@
+// A member name is not a variable, so it may be the name of an enum: a
+// constructor, a constructor field, a method, and a property
+// (spec/02-syntax.md, enum declaration).
+enum E { E(E) F }
+class C {
+    E() {
+        return "method";
+    }
+}
+
+var v = E.E(5);
+print v;
+print match v { case E.E(x) => x case E.F => 0 };
+var c = C();
+print c.E();
+c.F = "property";
+print c.F;
+
+// STATUS: ok
+// CHECK: E(5)
+// CHECK: 5
+// CHECK: method
+// CHECK: property
