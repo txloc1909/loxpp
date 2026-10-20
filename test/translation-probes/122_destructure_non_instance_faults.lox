@@ -1,0 +1,12 @@
+// A destructuring declaration reads a named property from its source object,
+// so a source that is not an instance is a halting fault (spec/04-semantics.md,
+// Destructuring Declaration and Property Get step 6), not a catchable error.
+try {
+    var {x} = 42;
+    print "unreachable";
+} catch (e) {
+    print "caught " + e.kind;
+}
+print "unreachable";
+
+// STATUS: error

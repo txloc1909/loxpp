@@ -1,0 +1,16 @@
+// A destructuring declaration reads each name as a property read of the
+// source object (spec/04-semantics.md, Destructuring Declaration), so a name
+// that is neither a field nor a method is a halting fault, not a nil binding.
+class Box {
+    init() { this.value = 7; }
+}
+
+var b = Box();
+var {value} = b;
+print value;
+
+var {bogus} = b;
+print "unreachable";
+
+// STATUS: error
+// CHECK: 7
