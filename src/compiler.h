@@ -247,6 +247,10 @@ class Compiler {
     // for method calls so they compile as GET_PROPERTY + CALL instead, allowing
     // CALL to be patched to DEFER_RECORD without special INVOKE handling.
     bool m_disableInvokeFusion{false};
+    // Chunk size just after the most recent complete call expression, or -1
+    // when the last operand parsed was not one. deferStatement() compares it
+    // with the chunk size to tell a call from an expression ending in CALL.
+    int m_lastCallEnd{-1};
     // Count of handler records open at the current emit point. It matches
     // the runtime handler stack depth on each path: PUSH_HANDLER adds one,
     // the normal-path POP_HANDLER removes one, and catch entry removes one

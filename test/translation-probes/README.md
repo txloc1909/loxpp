@@ -173,6 +173,7 @@ each has an off-the-shelf solution.
 | `63_ord_chr_string_order` | `ord()`/`chr()` byte conversion and String byte ordering on every backend (issue #507) | none (parity gate) |
 | `defer_runs_before_caught_throw_propagates` | a deferred call runs when its own function exits by `throw`, before the fault propagates to the caller's `catch` (`spec/04-semantics.md`) | none (parity gate) |
 | `defer_runs_on_normal_return` | a deferred call runs at the right point on an ordinary `return`, and its return value does not change the already-computed result | none (parity gate) |
+| `defer_super_method` | `defer super.m(...)` defers a call to the superclass method; the arguments evaluate at the `defer`, the call at function exit (`spec/02-syntax.md`, `deferStmt`) | none (parity gate) |
 | `jvm-only/fault_defer_class_construction_fatal` | a `defer`red class construction is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
 | `jvm-only/fault_defer_noncallable_value_fatal` | a `defer`red non-callable value is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
 | `jvm-only/fault_enum_index_range_fatal` | an enum payload read out of range is fatal, through `RAISE_ERROR`, not a catchable Error | none (error-parity gate) |

@@ -104,6 +104,7 @@ void Compiler::expression() {
 void Compiler::grouping() {
     expression();
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after expression.");
+    m_lastCallEnd = -1;
 }
 
 void Compiler::lenExpr() {
@@ -281,6 +282,7 @@ void Compiler::call() {
     }
     m_parser->consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
     emitBytes(Op::CALL, argCount);
+    m_lastCallEnd = static_cast<int>(getCurrentChunk()->size());
 }
 
 void Compiler::declaration() {
@@ -1929,7 +1931,26 @@ void Compiler::super_() {
 
     namedVariable(Token{TokenType::THIS, "this", 0}, false); // push receiver
 
-    if (m_parser->match(TokenType::LEFT_PAREN)) {
+    if (m_disableInvokeFusion && m_parser->match(TokenType::LEFT_PAREN)) {
+        // Defer context: GET_SUPER + CALL, so that CALL can be patched to
+        // DEFER_RECORD, as dot() does for a method call.
+        namedVariable(Token{TokenType::SUPER, "super", 0}, false);
+        emitConstantOp(Op::GET_SUPER, nameConst);
+        uint8_t argCount = 0;
+        if (!m_parser->check(TokenType::RIGHT_PAREN)) {
+            do {
+                if (argCount == 255) {
+                    m_parser->error("Can't have more than 255 arguments.");
+                }
+                expression();
+                argCount++;
+            } while (m_parser->match(TokenType::COMMA));
+        }
+        m_parser->consume(TokenType::RIGHT_PAREN,
+                          "Expect ')' after arguments.");
+        emitBytes(Op::CALL, argCount);
+        m_lastCallEnd = static_cast<int>(getCurrentChunk()->size());
+    } else if (m_parser->match(TokenType::LEFT_PAREN)) {
         uint8_t argCount = 0;
         if (!m_parser->check(TokenType::RIGHT_PAREN)) {
             do {
@@ -2008,6 +2029,7 @@ void Compiler::dot() {
         // DEFER_RECORD and re-anchors relative to CALL's own bookkeeping;
         // a drifted starting point corrupts that re-anchor too).
         emitBytes(Op::CALL, argCount);
+        m_lastCallEnd = static_cast<int>(getCurrentChunk()->size());
     } else {
         emitConstantOp(Op::GET_PROPERTY, nameConst);
     }
@@ -2376,14 +2398,27 @@ void Compiler::deferStatement() {
     // compiler emits GET_PROPERTY + CALL instead of the fused INVOKE
     // superinstruction. This allows CALL to be patched to DEFER_RECORD
     // without special INVOKE handling.
+    //
+    // The operand is parsed at call precedence, so `defer f() or f()` stops
+    // after the first call and is rejected below. m_lastCallEnd rejects an
+    // operand that merely ends in a CALL byte pair, such as `(f())`.
     m_disableInvokeFusion = true;
-    expression();
+    m_lastCallEnd = -1;
+    m_parser->parsePrecedence(Precedence::CALL, this);
     m_disableInvokeFusion = false;
 
     Chunk* chunk = getCurrentChunk();
     int callPos = static_cast<int>(chunk->size()) - 2;
-    if (callPos < 0 || toOpcode(chunk->at(callPos)) != Op::CALL) {
+    if (callPos < 0 || toOpcode(chunk->at(callPos)) != Op::CALL ||
+        m_lastCallEnd != static_cast<int>(chunk->size())) {
         m_parser->error("Expect a call expression after 'defer'.");
+        return;
+    }
+    // An infix operator after the call (`f() or f()`) makes the operand a
+    // larger expression, not a call.
+    if (Parser::getRule(m_parser->m_current.type)->precedence !=
+        Precedence::NONE) {
+        m_parser->errorAtCurrent("Expect a call expression after 'defer'.");
         return;
     }
     // The argc byte (chunk->at(callPos + 1)) stays the same.

@@ -1,0 +1,12 @@
+// `defer super.m(...)` has the form of a method call (spec/02-syntax.md,
+// deferStmt), so it defers a call to the superclass method. The arguments
+// are evaluated when the defer statement runs, the call itself when the
+// function exits. Expected output: Bx, Ax.
+class A { m(s) { print "A" + s; } }
+class B < A {
+  m(s) {
+    defer super.m(s);
+    print "B" + s;
+  }
+}
+B().m("x");

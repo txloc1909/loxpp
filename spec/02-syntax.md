@@ -307,7 +307,9 @@ See `tryStmt` / `throwStmt` / `deferStmt` in the main EBNF.
 - `defer`'s operand must have the syntactic form of a function or method
   call, `callee(arguments)`. Any expression that is not shaped like a call
   — a bare identifier, a property access with no trailing `(...)`, a
-  literal, and so on — is a parse error.
+  literal, a parenthesised call, a call joined to another operand by an
+  operator such as `or`, and so on — is a parse error. `super.m(...)` has
+  the form of a method call and is a valid operand.
 
 See [§04-semantics](04-semantics.md#try-statement) for the full evaluation
 rules of all three statements, and [§03-types](03-types.md#error) for the
