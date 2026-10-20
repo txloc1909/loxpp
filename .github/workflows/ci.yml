@@ -457,6 +457,18 @@ jobs:
             loxpp-dev:latest \
             bash -c "python3 tools/check_examples.py bootstrap/lox_wrapper.sh examples/"
 
+      # A wrapper that waits for its stdin forwarder never exits while the
+      # caller keeps stdin open (issue #698). CI's own stdin is closed, so
+      # only a check that holds a stdin pipe open finds the defect.
+      - name: Check bootstrap wrapper exits with stdin open
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_bootstrap_stdin_exit.py bootstrap/lox_wrapper.sh"
+
       # spec/04-semantics.md, Workers and Tasks, Ending: lines that tasks on
       # different workers print never mix inside one line. The order of the
       # lines of two workers is not defined, so this check reads the lines in
@@ -1102,6 +1114,16 @@ jobs:
             loxpp-dev-managed:latest \
             bash -c "python3 tools/check_examples.py tools/loxpp_jvm_bootstrap.sh examples/ --exclude tools/jvm_excluded_examples.txt"
 
+      # The same stdin-open check as the native wrapper's step in
+      # build-and-test: the JVM twin has its own copy of the feeder.
+      - name: JVM bootstrap wrapper exits with stdin open
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c "python3 tools/check_bootstrap_stdin_exit.py tools/loxpp_jvm_bootstrap.sh"
+
       # The JVM bootstrap wrapper's own stdout filter, on the probes that the
       # spec walk cannot take: the two NUL probes have no STATUS line, and a
       # CHECK line cannot hold a NUL byte. The filter must keep every NUL byte
@@ -1362,6 +1384,20 @@ jobs:
               cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j$(nproc)
               files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
               python3 tools/diff_runtimes.py bootstrap/lox_wrapper.sh tools/loxpp_qbe_bootstrap.sh $files --timeout 60
+            '
+
+      # The same stdin-open check as the native wrapper's step in
+      # build-and-test: the QBE twin has its own copy of the feeder.
+      - name: QBE bootstrap wrapper exits with stdin open
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-qbe:latest \
+            bash -c '
+              set -e
+              cmake --preset release && cmake --build build --target loxpp loxrt -j$(nproc)
+              python3 tools/check_bootstrap_stdin_exit.py tools/loxpp_qbe_bootstrap.sh
             '
 
       # The same wrapper-filter gate as the JVM job's step of that name, on
