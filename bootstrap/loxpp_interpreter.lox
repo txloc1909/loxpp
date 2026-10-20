@@ -1177,11 +1177,11 @@ class Parser {
     }
 
     // A field slot of a constructor or class pattern holds one name and no
-    // nested pattern (spec/02-syntax.md, identArmPat).
+    // nested pattern (spec/02-syntax.md, identArmPat). The name "_" is a
+    // field name here, not a wildcard.
     parseFieldPattern(msg) {
         if (this.check("IDENTIFIER")) {
             var tok = this.advance();
-            if (tok.lexeme == "_") return WildPat();
             return BindPat(tok.lexeme);
         }
         this.parseError(this.peek(), msg);
@@ -1198,21 +1198,28 @@ class Parser {
         return WildPat();
     }
 
+    // A rest marker names the suffix it binds. A bare "..." is a compile error
+    // (spec/02-syntax.md, seqElem). The fallback name keeps the parser moving
+    // to the closing bracket without a second, cascading error.
+    parseRestName() {
+        if (!this.check("IDENTIFIER")) {
+            this.parseError(this.peek(), "Expect name after '...' in sequence pattern.");
+            return "_";
+        }
+        return this.advance().lexeme;
+    }
+
     parseListPattern() {
         var elems = [];
         var rest_name = nil;
         if (!this.check("RIGHT_BRACKET")) {
             if (this.matchT("ELIPSIS")) {
-                var rname = "_";
-                if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
-                rest_name = rname;
+                rest_name = this.parseRestName();
             } else {
                 elems.append(this.parseListPatternElem());
                 while (this.matchT("COMMA")) {
                     if (this.matchT("ELIPSIS")) {
-                        var rname = "_";
-                        if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
-                        rest_name = rname;
+                        rest_name = this.parseRestName();
                         break;
                     }
                     elems.append(this.parseListPatternElem());
@@ -1613,19 +1620,28 @@ class Resolver {
     // brackets is always a binding. The parser cannot tell the two apart,
     // so the resolver rewrites the pattern here, before the interpreter
     // runs it.
-    classifyArmPat(pat) {
+    classifyArmPat(pat, line) {
         return match pat {
             case BindPat{name}          => this.classifyBareName(pat, name)
-            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat)
+            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat, line)
             case _                      => pat
         };
     }
 
-    classifyAtPat(pat, at_name, subpat) {
+    classifyAtPat(pat, at_name, subpat, line) {
+        // The sub-pattern of an @-binding may name a constructor or a class.
+        // A name that resolves to neither is a plain binding; "_" is a
+        // wildcard unless a constructor or class with that name is declared.
         var sub = match subpat {
             case BindPat{name} => this.classifyBareName(subpat, name)
+            case WildPat       => this.classifyBareName(subpat, "_")
             case _             => subpat
         };
+        if (this.isLiteralPattern(sub)) {
+            this.resError("@", line, "Expected a structural pattern (constructor, class, or '[') after '@'.");
+        } else if (this.isBarePattern(sub) or this.isAtPattern(sub)) {
+            this.resError("@", line, "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.");
+        }
         return AtPat(at_name, sub);
     }
 
@@ -1734,6 +1750,20 @@ class Resolver {
         return match pat {
             case LitPat{v} => true
             case _         => false
+        };
+    }
+
+    isListPattern(pat) {
+        return match pat {
+            case ListPat{elems, rest_name} => true
+            case _                         => false
+        };
+    }
+
+    isAtPattern(pat) {
+        return match pat {
+            case AtPat{at_name, subpat} => true
+            case _                      => false
         };
     }
 
@@ -1881,12 +1911,15 @@ class Resolver {
             var orOpen = true;
             var j = 0;
             while (j < len(arm.pats)) {
-                arm.pats[j] = this.classifyArmPat(arm.pats[j]);
+                arm.pats[j] = this.classifyArmPat(arm.pats[j], arm.line);
                 if (arm.chain != nil and arm.chain[2] == j) this.reportArmChain(arm.chain, arm.pats[j]);
                 if (orArm and orOpen) {
                     var pat = arm.pats[j];
                     if (j == 0) {
-                        if (this.isBarePattern(pat)) {
+                        if (this.isListPattern(pat)) {
+                            this.resError("]", arm.line, "Or-patterns are not supported for sequence patterns.");
+                            orOpen = false;
+                        } else if (this.isBarePattern(pat)) {
                             this.resError(this.bareName(pat), arm.line, "A binding pattern must be the sole arm pattern.");
                             orOpen = false;
                         } else {

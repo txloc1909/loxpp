@@ -187,16 +187,10 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(679, 'different message text'),
     'Expect method name.':
         Deferred(641, 'the bootstrap omits a second error'),
-    "Expect name after '...' in sequence pattern.":
-        Deferred(746, 'the bootstrap accepts the unnamed rest pattern'),
     'Expect parameter name.':
         Deferred(641, 'the bootstrap omits a second error'),
     'Expect superclass method name.':
         Deferred(641, 'the bootstrap adds a second error'),
-    'Or-patterns are not supported for sequence patterns.':
-        Deferred(745, 'the bootstrap accepts the chain'),
-    "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.":
-        Deferred(744, 'the bootstrap accepts the sub-pattern'),
     'Too many closure variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
     'Too many elements in sequence destructuring.':
