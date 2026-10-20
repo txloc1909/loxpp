@@ -5137,8 +5137,9 @@ class Interpreter {
         if (this.throwFlag) return;
         var i = 0;
         while (i < len(names)) {
-            env.define(names[i], this.getProperty(val, names[i], line, false));
+            var field = this.getProperty(val, names[i], line, false);
             if (this.throwFlag) return;
+            env.define(names[i], field);
             i = i + 1;
         }
     }
