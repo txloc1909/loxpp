@@ -184,6 +184,7 @@ each has an off-the-shelf solution.
 | `defer_super_method` | `defer super.m(...)` defers a call to the superclass method; the arguments evaluate at the `defer`, the call at function exit (`spec/02-syntax.md`, `deferStmt`) | none (parity gate) |
 | `jvm-only/fault_defer_class_construction_fatal` | a `defer`red class construction is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
 | `jvm-only/fault_defer_noncallable_value_fatal` | a `defer`red non-callable value is fatal, not delivered to any `catchBlock` | none (error-parity gate) |
+| `jvm-only/fault_enum_index_fractional_fatal` | an enum payload read with a fractional index is fatal, not a catchable Error | none (error-parity gate) |
 | `jvm-only/fault_enum_index_range_fatal` | an enum payload read out of range is fatal, through `RAISE_ERROR`, not a catchable Error | none (error-parity gate) |
 | `jvm-only/fault_enum_index_type_fatal` | an enum payload read with a non-Number index is fatal | none (error-parity gate) |
 | `jvm-only/fault_invoke_field_not_callable_fatal` | `INVOKE` on a non-callable field is fatal | none (error-parity gate) |

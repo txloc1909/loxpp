@@ -770,6 +770,9 @@ public final class LoxOps {
                 throw new LoxError("Enum field index " + formatNumber(n) +
                                         " out of range.");
             }
+            if (n != Math.floor(n)) {
+                throw new LoxError("Enum field index must be an integer.");
+            }
             int idx = (int)n;
             if (idx < 0 || idx >= payload.length) {
                 throw new LoxError("Enum field index " + idx +

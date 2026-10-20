@@ -268,6 +268,7 @@ error_probes=(
     "test/translation-probes/jvm-only/fault_invoke_field_not_callable_fatal.lox"
     "test/translation-probes/jvm-only/fault_invoke_method_not_found_fatal.lox"
     "test/translation-probes/jvm-only/fault_enum_index_type_fatal.lox"
+    "test/translation-probes/jvm-only/fault_enum_index_fractional_fatal.lox"
     "test/translation-probes/jvm-only/fault_enum_index_range_fatal.lox"
     "test/translation-probes/jvm-only/fault_set_index_string_fatal.lox"
     "test/translation-probes/jvm-only/fault_stringify_too_deep_print.lox"

@@ -3825,6 +3825,7 @@ class Interpreter {
             } else {
                 fl = math.ceil(index);
             }
+            if (fl != index) { this.fatalError("Enum field index must be an integer."); return nil; }
             if (fl < 0 or fl >= len(object.fields)) { this.fatalError("Enum field index " + str(fl) + " out of range."); return nil; }
             return object.fields[fl];
         }
