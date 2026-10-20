@@ -16,4 +16,5 @@ try {
     print e.kind;
 }
 
+// STATIC-ERROR
 // STATUS: error

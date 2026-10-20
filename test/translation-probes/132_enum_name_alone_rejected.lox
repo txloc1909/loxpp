@@ -7,10 +7,10 @@
 // this probe.
 enum E { A }
 try {
-    var x = E;
-    print "ran";
+    print E;
 } catch (e) {
     print e.kind;
 }
 
+// STATIC-ERROR
 // STATUS: error

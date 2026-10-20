@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -68,6 +69,57 @@ inline std::vector<std::filesystem::path> corpusFiles() {
     }
     std::sort(files.begin(), files.end());
     return files;
+}
+
+// A translation probe that carries this line is a static error: every
+// consumer must reject it, so the native compiler produces no bytecode for it.
+inline bool hasStaticErrorMarker(const std::filesystem::path& probe) {
+    std::istringstream lines(readFile(probe));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line == "// STATIC-ERROR") {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The probe file names in tools/xfail/spec-probes-native.txt: the spec probes
+// that native does not pass yet. Native may reject such a probe at compile
+// time, so it may have no bytecode either.
+inline std::set<std::string> nativeExpectedFailureProbes() {
+    std::istringstream lines(
+        readFile(projectRoot() / "tools" / "xfail" / "spec-probes-native.txt"));
+    std::set<std::string> names;
+    std::string line;
+    while (std::getline(lines, line)) {
+        const std::size_t start = line.find_first_not_of(" \t");
+        if (start == std::string::npos || line[start] == '#') {
+            continue;
+        }
+        const std::size_t end = line.find(' ', start);
+        names.insert(line.substr(start, end - start));
+    }
+    return names;
+}
+
+// The translation probes that the native compiler must compile. A test that
+// compiles every probe and inspects its bytecode sweeps these. It leaves out
+// the static-error probes and the probes on native's expected-failure list;
+// ChunkDecoderTest.StaticErrorProbesDoNotCompile checks the first group.
+inline std::vector<std::filesystem::path> compiledTranslationProbes() {
+    const std::set<std::string> expectedFailures =
+        nativeExpectedFailureProbes();
+    std::vector<std::filesystem::path> probes;
+    for (const std::filesystem::path& probe :
+         listLoxFiles(projectRoot() / "test" / "translation-probes")) {
+        if (expectedFailures.count(probe.filename().string()) != 0U ||
+            hasStaticErrorMarker(probe)) {
+            continue;
+        }
+        probes.push_back(probe);
+    }
+    return probes;
 }
 
 } // namespace loxpp_test

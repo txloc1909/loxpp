@@ -248,8 +248,7 @@ TEST(HandlerDepthTest, OuterTrySurvivesInnerCatchBreak) {
 }
 
 TEST(HandlerDepthTest, RunsOverEveryProbeWithNoInconsistency) {
-    std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "test" / "translation-probes");
+    std::vector<fs::path> probes = loxpp_test::compiledTranslationProbes();
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkFileNoInconsistency(probe);

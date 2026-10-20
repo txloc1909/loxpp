@@ -371,8 +371,7 @@ TEST(AbstractStackTest, MaxStackWithLocalsIsNotInflatedByLateRecognition) {
 // The return-value, corpus-consistency, and merge-consistency checks for
 // the probe corpus specifically.
 TEST(AbstractStackTest, RunsOverEveryProbeWithNoInconsistency) {
-    std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "test" / "translation-probes");
+    std::vector<fs::path> probes = loxpp_test::compiledTranslationProbes();
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkProbeFile(probe);

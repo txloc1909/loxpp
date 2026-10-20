@@ -16,4 +16,5 @@ fun f() {
 enum E { A }
 print f();
 
+// STATIC-ERROR
 // STATUS: error
