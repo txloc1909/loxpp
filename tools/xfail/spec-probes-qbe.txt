@@ -17,3 +17,13 @@
 138_enum_constructor_assignment_rejected.lox #774 (N2): an assignment to E.A is a compile error
 141_match_comma_chain_rejected.lox #777 (N6): the comma chain is a parse error
 142_bare_positional_pattern_rejected.lox #777 (N6): A(x) with no enum name is a compile error
+145_ctor_pattern_non_enum_no_match.lox #777 (N6): a constructor pattern does not match a value that is not an enum value
+146_enum_hides_builtin_global.lox #774 (N2): an enum name hides a built-in global
+147_enum_name_as_parameter_rejected.lox #774 (N2): the enum name may not be declared again
+148_enum_name_as_pattern_binding_rejected.lox #774 (N2): the enum name may not be declared again
+149_enum_name_as_catch_variable_rejected.lox #774 (N2): the enum name may not be declared again
+150_enum_name_as_for_in_variable_rejected.lox #774 (N2): the enum name may not be declared again
+151_enum_name_as_local_function_rejected.lox #774 (N2): the enum name may not be declared again
+152_enum_name_in_destructuring_rejected.lox #774 (N2): the enum name may not be declared again
+153_enum_name_as_at_binding_rejected.lox #774 (N2): the enum name may not be declared again
+154_enum_name_as_local_class_rejected.lox #774 (N2): the enum name may not be declared again

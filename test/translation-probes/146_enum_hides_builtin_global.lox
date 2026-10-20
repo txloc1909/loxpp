@@ -1,0 +1,17 @@
+// An enum name may be the name of a built-in global. Before the declaration
+// the name is the built-in; from the declaration to the end of the program it
+// is the enum (spec/02-syntax.md, enum declaration).
+fun kind(v) {
+    return type(v);
+}
+print type(1);
+enum type { A B }
+print type.A;
+print match type.B() { case type.A => "A" case type.B => "B" };
+print kind("s");
+
+// STATUS: ok
+// CHECK: Number
+// CHECK: <A>
+// CHECK: B
+// CHECK: String

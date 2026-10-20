@@ -341,15 +341,6 @@ CATCHABLE_ROWS = [
 #
 # Every Example below is self-contained and runnable as its own program.
 FATAL_ROWS = [
-    # `enum` is only legal at global scope, so the declaration goes in
-    # `setup` (emitted before the `try`); only the faulting `match` goes in
-    # `body`.
-    Row(
-        "get_tag_non_enum",
-        "fatal",
-        "match 1 { case Ok(v) => v case Err(m) => -1 };",
-        setup="enum Result { Ok(v) Err(m) }\n",
-    ),
     Row(
         "max_depth_exceeded",
         "fatal",

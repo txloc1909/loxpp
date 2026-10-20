@@ -265,9 +265,17 @@ print c(1);                        // Some(1)
 - Two enums with the same name, and two constructors with the same name in
   one enum, are compile errors. Constructors of different enums may have the
   same name.
-- The enum name must not be the name of another global declaration (a class,
-  a function, a variable, or another enum). A local variable or a parameter
-  must not have it. Each is a compile error.
+- No other name that the program declares may be the enum name, at any
+  scope and anywhere in the source, before or after the enum declaration.
+  This covers a global or local variable, a function, a class, another enum,
+  a parameter, a pattern binding, an `@`-binding name, a `catch` variable, a
+  `for`-in variable, and a name in a destructuring declaration. Each is a
+  compile error. So `E` in `E.A` always names the enum.
+- The enum name may be the name of a built-in global
+  ([§05-stdlib](05-stdlib.md)). From the declaration to the end of the
+  program, the name means the enum, so the built-in cannot be reached by that
+  name there. For example, after `enum type { A }`, `type(x)` is a compile
+  error, because `type` alone is not a value.
 - An enum is visible from its declaration to the end of the program. A use of
   `E.A` that comes before the declaration of `E` in the source is a compile
   error.
@@ -299,8 +307,11 @@ test.
 **Alternatives:** the alternatives of an arm are separated by `or`, and an
 alternative can be any pattern, a literal included. All alternatives must
 bind the same names in the same order; a mismatch is a compile error. A bare
-binding or wildcard may be only the last alternative. The guard and body run
-once for whichever alternative matched.
+binding or wildcard may be only the last alternative. The alternatives are
+tried from left to right, and the first that matches is used. The guard and
+body run once for whichever alternative matched. A constructor pattern does
+not match a value that is not an enum value, so `case 0 or E.A` is a valid
+arm for a subject of any type.
 
 ```lox
 case 1 or 2                          => "small"

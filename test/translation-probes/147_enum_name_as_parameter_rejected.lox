@@ -1,0 +1,19 @@
+// A parameter must not have the name of an enum, also in a function that
+// comes before the enum declaration (spec/02-syntax.md, enum declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+fun f(E) {
+    return E;
+}
+enum E { A }
+try {
+    print f(1);
+} catch (e) {
+    print e.kind;
+}
+
+// STATIC-ERROR
+// STATUS: error

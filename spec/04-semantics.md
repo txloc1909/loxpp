@@ -506,7 +506,7 @@ match subject { matchArm* }
 
 1. Evaluate `subject` exactly once and store it internally (not user-accessible).
 2. Arms are tested in source order. For each arm:
-   a. Evaluate the pattern against the stored subject (tag check, literal equality, or wildcard).
+   a. Evaluate the pattern against the stored subject (constructor test, literal equality, class test, or wildcard). The alternatives of an arm are tried from left to right, and the first that matches is used.
    b. If the pattern does not match, proceed to the next arm.
    c. If the pattern matches and a guard (`if expr`) is present, evaluate the guard. If the guard is falsy, proceed to the next arm.
    d. If the pattern matches (and the guard, if present, is truthy), evaluate the arm's body **expression** and return its value as the result of the `match` expression.
@@ -528,7 +528,7 @@ statement).
 
 Each name in the braces of a class pattern is a property read of the matched instance, as in [Property Get](#property-get), and the arm binds the result. A name that is neither a field nor a method of the instance is a runtime error.
 
-**Constructor patterns.** A pattern of the form `E.A`, `E.A(...)` or `E.A{...}` is a constructor pattern ([§02-syntax](02-syntax.md#extended-match-arm-patterns) states which forms are compile errors). It matches a value only when the constructor `A` of the declaration of `E` made that value. A value that a constructor of another enum made does not match, even when that constructor has the same name or the same position in its declaration. When the pattern matches, `E.A(x, y)` binds each name to the field at its position, and `E.A{f}` binds each name to the field of that name; `_` binds nothing. A bare name is never a constructor pattern, even when a constructor of that name exists: a bare name is the wildcard `_`, a binding, or a class test.
+**Constructor patterns.** A pattern of the form `E.A`, `E.A(...)` or `E.A{...}` is a constructor pattern ([§02-syntax](02-syntax.md#extended-match-arm-patterns) states which forms are compile errors). It matches a value only when the constructor `A` of the declaration of `E` made that value. A value that a constructor of another enum made does not match, even when that constructor has the same name or the same position in its declaration. A value that is not an enum value does not match either; the test never faults. When the pattern matches, `E.A(x, y)` binds each name to the field at its position, and `E.A{f}` binds each name to the field of that name; `_` binds nothing. A bare name is never a constructor pattern, even when a constructor of that name exists: a bare name is the wildcard `_`, a binding, or a class test.
 
 
 ---
@@ -1789,7 +1789,6 @@ run before the program ends is implementation-defined, as for every halt.
 
 | Cause | Example |
 |---|---|
-| A constructor pattern is matched against a value that is not an enum value | `enum Result { Ok(v) Err(m) } match 1 { case Result.Ok(v) => v case Result.Err(m) => -1 };` |
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
 | A native function is called with an argument count other than its arity | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |

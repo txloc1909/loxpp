@@ -1,0 +1,35 @@
+// A constructor pattern does not match a value that is not an enum value, and
+// the test never faults: the match goes on to the next alternative or arm
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). The
+// alternatives of an arm are tried from left to right (spec/02-syntax.md,
+// Extended match arm patterns, "Alternatives").
+enum E { A(x) B }
+class C {}
+
+fun test(v) {
+    return match v {
+        case E.A(x)    => "A " + str(x)
+        case 0 or E.B  => "zero or B"
+        case _         => "other " + type(v)
+    };
+}
+print test(E.A(1));
+print test(E.B());
+print test(0);
+print test(5);
+print test("s");
+print test(nil);
+print test([1]);
+print test(C());
+print match 7 { case E.B or 7 => "seven" case _ => "no" };
+
+// STATUS: ok
+// CHECK: A 1
+// CHECK: zero or B
+// CHECK: zero or B
+// CHECK: other Number
+// CHECK: other String
+// CHECK: other Nil
+// CHECK: other List
+// CHECK: other Instance
+// CHECK: seven
