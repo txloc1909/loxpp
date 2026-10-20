@@ -2627,20 +2627,28 @@ class InterpMathFn {
     }
     call(interp, args) {
         var a = args[0];
-        if (this.name == "sqrt")  return math.sqrt(a);
-        if (this.name == "floor") return math.floor(a);
-        if (this.name == "ceil")  return math.ceil(a);
         if (this.name == "abs")   return math.abs(a);
+        if (this.name == "ceil")  return math.ceil(a);
+        if (this.name == "floor") return math.floor(a);
+        if (this.name == "round") return math.round(a);
+        if (this.name == "sqrt")  return math.sqrt(a);
+        if (this.name == "cbrt")  return math.cbrt(a);
+        if (this.name == "exp")   return math.exp(a);
         if (this.name == "log")   return math.log(a);
+        if (this.name == "log2")  return math.log2(a);
+        if (this.name == "log10") return math.log10(a);
         if (this.name == "sin")   return math.sin(a);
         if (this.name == "cos")   return math.cos(a);
         if (this.name == "tan")   return math.tan(a);
+        if (this.name == "asin")  return math.asin(a);
+        if (this.name == "acos")  return math.acos(a);
+        if (this.name == "atan")  return math.atan(a);
         var b = args[1];
         if (this.name == "pow")   return math.pow(a, b);
-        if (this.name == "min")   return math.min(a, b);
-        if (this.name == "max")   return math.max(a, b);
         if (this.name == "atan2") return math.atan2(a, b);
         if (this.name == "hypot") return math.hypot(a, b);
+        if (this.name == "min")   return math.min(a, b);
+        if (this.name == "max")   return math.max(a, b);
         return nil;
     }
     toString() { return "<native fn>"; }
@@ -4838,6 +4846,17 @@ class Interpreter {
         return callee.call(this, args);
     }
 
+    // The math object's function fields, from src/math.cpp's kMathFunctions.
+    isMathFnName(name) {
+        return name == "abs"   or name == "ceil"  or name == "floor" or
+               name == "round" or name == "sqrt"  or name == "cbrt"  or
+               name == "exp"   or name == "log"   or name == "log2"  or
+               name == "log10" or name == "sin"   or name == "cos"   or
+               name == "tan"   or name == "asin"  or name == "acos"  or
+               name == "atan"  or name == "pow"   or name == "atan2" or
+               name == "hypot" or name == "min"   or name == "max";
+    }
+
     // A property read, as native's GET_PROPERTY does (spec/04-semantics.md,
     // Property Get). An Instance takes a field, then a bound method, then a
     // fatal fault. A bare field lookup returns nil for both a nil-valued
@@ -4857,7 +4876,9 @@ class Interpreter {
             if (name == "e")   return math.e;
             if (name == "inf") return math.inf;
             if (name == "nan") return math.nan;
-            return InterpMathFn(name);
+            if (this.isMathFnName(name)) return InterpMathFn(name);
+            this.fatalError("Undefined property '" + name + "'.");
+            return nil;
         }
         if (loxTag(object) == "list") {
             // A List is not in Property Get's bound-method set (steps 2-5),
