@@ -1908,8 +1908,9 @@ class Resolver {
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
-            // Native reports one error and enters panic mode. One report per
-            // match keeps the bootstrap's error count the same.
+            // One report per match. The number of compile reports is
+            // implementation-defined (spec/README.md, Conformance); native
+            // enters panic mode after the first.
             if (catchAll and !reportedUnreachable) {
                 this.resError("case", arm.caseLine, "Unreachable arm after catch-all.");
                 reportedUnreachable = true;
