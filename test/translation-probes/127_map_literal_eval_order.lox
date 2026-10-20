@@ -1,27 +1,31 @@
 // A map literal evaluates every key-value pair in source order before it
 // validates any key, and it validates every key before it inserts any pair
 // (spec/04-semantics.md, Map Literal, steps 1-3). So a later pair still runs
-// when an earlier key is invalid, and a valid key's __hash__ does not run
-// when a later key is invalid.
+// when an earlier key is invalid, a valid key's __hash__ does not run when a
+// later key is invalid, and a duplicate key keeps the last value.
 fun k1() { print "K1"; return [1]; }
 fun v1() { print "V1"; return 1; }
 fun k2() { print "K2"; return 2; }
 fun v2() { print "V2"; return 2; }
 
-try { var first = {k1(): v1(), k2(): v2()}; } catch (e) { print e.kind; }
+try { ({k1(): v1(), k2(): v2()}); } catch (e) { print e.kind; }
 
 class Key {
     __hash__() { print "HASH"; return 1; }
     __eq__(other) { return false; }
 }
 
-try { var second = {Key(): 1, [2]: 2}; } catch (e) { print e.kind; }
+try { ({Key(): 1, [2]: 2}); } catch (e) { print e.kind; }
 
 // An evaluation fault in a later pair wins over an earlier invalid key,
 // because no key is validated until every pair has run.
 fun boom() { print "BOOM"; throw "VALUE"; }
 
-try { var third = {[3]: 1, 4: boom()}; } catch (e) { print e; }
+try { ({[3]: 1, 4: boom()}); } catch (e) { print e; }
+
+// Pairs are inserted in source order, so a duplicate key keeps the last value.
+var dup = {"k": 1, "k": 2};
+print dup["k"];
 
 // STATUS: ok
 // CHECK: K1
@@ -32,3 +36,4 @@ try { var third = {[3]: 1, 4: boom()}; } catch (e) { print e; }
 // CHECK: InvalidMapKeyError
 // CHECK: BOOM
 // CHECK: VALUE
+// CHECK: 2
