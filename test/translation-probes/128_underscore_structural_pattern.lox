@@ -1,0 +1,11 @@
+// A "_" followed by "(" or "{" is the head of a structural pattern, not the
+// wildcard. It may name a constructor with fields (spec/02-syntax.md,
+// armPat).
+enum E { _(x) B }
+
+print match _(9) { case _(y) => y case B => 0 };
+print match _(3) { case _{x} => x case B => 0 };
+
+// STATUS: ok
+// CHECK: 9
+// CHECK: 3

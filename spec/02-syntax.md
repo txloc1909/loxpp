@@ -296,6 +296,8 @@ declared earlier in the source, and `A` must be a constructor of `E`;
 otherwise the pattern is a compile error. A bare identifier in a pattern is
 never a constructor pattern: it is the wildcard `_`, a binding, or a class
 test.
+`_` alone is the wildcard. `_` followed by `{` is the name of a class pattern
+and resolves like any other name.
 
 - `E.A` tests the constructor and binds no field.
 - `E.A(x, y)` lists one name for each field of `A`, in declaration order. A
@@ -329,6 +331,9 @@ arm (across all alternatives), or that an unguarded `_`/binding wildcard is
 present. A missing constructor is a compile error listing the absent names.
 A match with constructor patterns of more than one enum makes this check for
 each enum.
+
+An arm that follows an unguarded catch-all arm (`case _` or a plain binding)
+is unreachable and is a compile error.
 
 ### Function call arguments
 

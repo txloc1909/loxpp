@@ -1,0 +1,6 @@
+// DIAGNOSTIC: Unreachable arm after catch-all.
+// Compile error: an arm follows an unguarded catch-all arm.
+fun f() {
+    var x = match 1 { case 1 => 2 case _ => 3 case 4 => 5 };
+    return x;
+}

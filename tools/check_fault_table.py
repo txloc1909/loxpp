@@ -564,6 +564,13 @@ FATAL_ROWS = [
         'v["a"];',
         setup="enum E { A(x) } var v = A(1);\n",
     ),
+    # Issue #764: a fractional index is rejected, as for a List and a String.
+    Row(
+        "enum_index_fractional",
+        "fatal",
+        "v[0.5];",
+        setup="enum E { A(x) } var v = A(1);\n",
+    ),
     Row(
         "enum_index_out_of_range",
         "fatal",

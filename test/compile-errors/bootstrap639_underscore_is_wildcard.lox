@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Unreachable arm after catch-all.
+// Compile error: a "_" pattern is the wildcard, not a constructor named "_".
+enum E { _(x) B }
+var x = match B() { case _ => 1 case B => 2 };

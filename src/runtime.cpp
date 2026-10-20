@@ -2978,6 +2978,12 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
                          stringify(indexVal).c_str());
             return OpResult::Fatal;
         }
+        // A fractional index is a type error, as for a List and a String;
+        // truncation would silently select a field.
+        if (n != std::floor(n)) {
+            runtimeError("Enum field index must be an integer.");
+            return OpResult::Fatal;
+        }
         int idx = static_cast<int>(n);
         if (idx < 0 || idx >= static_cast<int>(e->fields.size())) {
             runtimeError("Enum field index %d out of range.", idx);
