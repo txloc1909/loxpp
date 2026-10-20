@@ -121,21 +121,23 @@ primary        ::= "true"
 
 matchArm       ::= "case" armPats ( "if" expression )? "=>" armBody ;
 
-armPats        ::= literalPat ( "," literalPat )*       (* literal comma-chain *)
-                 | identArmPat ( "or" identArmPat )* ;  (* identifier-starting alternatives *)
+armPats        ::= armPat ( "or" armPat )* ;           (* alternatives *)
 
-armPat         ::= literalPat | identArmPat ;
+armPat         ::= literalPat
+                 | IDENTIFIER "@" subPat                               (* @-binding: bind whole value, then inspect structure *)
+                 | ctorPat
+                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* class pattern *)
+                 | IDENTIFIER ;                                        (* "_" = wildcard, else binding or class test *)
 literalPat     ::= NUMBER | STRING | "true" | "false" | "nil" ;
 
-identArmPat    ::= IDENTIFIER "@" subPat                               (* @-binding: bind whole value, then inspect structure *)
-                 | IDENTIFIER                                          (* "_" = wildcard, else binding or zero-field constructor *)
-                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* named-field constructor/class pattern *)
-                 | IDENTIFIER "(" IDENTIFIER ( "," IDENTIFIER )* ")" ; (* positional constructor pattern *)
-
-subPat         ::= IDENTIFIER                                          (* zero-field constructor or class type check *)
-                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"
-                 | IDENTIFIER "(" IDENTIFIER ( "," IDENTIFIER )* ")"
+subPat         ::= ctorPat
+                 | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* class pattern *)
+                 | IDENTIFIER                                          (* class test *)
                  | "[" ( seqElem ( "," seqElem )* )? "]" ;
+
+ctorPat        ::= IDENTIFIER "." IDENTIFIER                           (* enum name "." constructor name *)
+                   ( "(" IDENTIFIER ( "," IDENTIFIER )* ")"            (* positional fields *)
+                   | "{" IDENTIFIER ( "," IDENTIFIER )* "}" )? ;       (* named fields *)
 
 seqElem        ::= "..." IDENTIFIER | IDENTIFIER ;
 
@@ -244,52 +246,78 @@ value of an assignment expression is the assigned value.
 See `enumDecl` / `enumCtor` in the main EBNF.
 
 An `enum` declaration introduces a closed type with one or more constructors.
-Each constructor name becomes a globally-scoped callable that returns an enum
-value when called with the declared number of arguments. Constructors with no
-field list take zero arguments.
+It declares the enum name at global scope. It does not declare a name for a
+constructor: a program writes the constructor `A` of the enum `E` as `E.A`.
+Calling `E.A` with the declared number of arguments returns an enum value.
+Constructors with no field list take zero arguments.
 
 ```lox
 enum Result { Ok(value) Err(msg) }
 enum Option { Some(v) None }
-var r = Ok(42);
-var n = None();
+enum Shape { Circle(r) None }      // a second None is valid
+var r = Result.Ok(42);
+var n = Option.None();
+var c = Option.Some;               // a constructor is a value
+print c(1);                        // Some(1)
 ```
 
-- The enum name is not a value and declares no global. A reference to it, in a
-  read or in an assignment target, is an undefined-variable fault
-  (`UndefinedVariableError`, `spec/04-semantics.md`).
 - Enum declarations are only permitted at global scope.
-- Duplicate enum names and duplicate constructor names within an enum are
-  compile errors.
+- Two enums with the same name, and two constructors with the same name in
+  one enum, are compile errors. Constructors of different enums may have the
+  same name.
+- The enum name must not be the name of another global declaration (a class,
+  a function, a variable, or another enum). A local variable or a parameter
+  must not have it. Each is a compile error.
+- An enum is visible from its declaration to the end of the program. A use of
+  `E.A` that comes before the declaration of `E` in the source is a compile
+  error.
+- In an expression, `E.A` is the constructor value. These are compile errors:
+  `E.B` when `E` has no constructor `B`; the enum name `E` when a `.` and a
+  constructor name do not follow it; an assignment to `E` or to `E.A`.
+- A constructor name alone is an ordinary variable name. When no variable of
+  that name exists, a read of it is an undefined-variable fault
+  (`UndefinedVariableError`, `spec/04-semantics.md`).
 - Calling a constructor with the wrong number of arguments is a runtime error.
 
 ### Extended `match` arm patterns
 
-See `armPats` / `armPat` / `identArmPat` in the main EBNF.
+See `armPats` / `armPat` / `ctorPat` in the main EBNF.
 
-When the pattern name resolves to a known constructor, the arm performs a tag
-check rather than a binding. Unknown identifiers continue to act as bindings.
+A pattern of the form `E.A` is a constructor pattern. `E` must be an enum
+declared earlier in the source, and `A` must be a constructor of `E`;
+otherwise the pattern is a compile error. A bare identifier in a pattern is
+never a constructor pattern: it is the wildcard `_`, a binding, or a class
+test.
 
-**Or-patterns:** multiple identifier-starting alternatives may be separated by
-`or`. All alternatives must bind the same names in the same order; a mismatch
-is a compile error. In an or-chain, a bare binding or wildcard may be only the
-last alternative. The guard and body run once for whichever alternative
-matched. Literal comma-chaining (`case 1, 2, 3 =>`) remains valid for backward
-compatibility and is not extended with `or`.
+- `E.A` tests the constructor and binds no field.
+- `E.A(x, y)` lists one name for each field of `A`, in declaration order. A
+  list with more or fewer names than `A` has fields is a compile error. The
+  name `_` binds nothing.
+- `E.A{f, g}` binds the named fields. Each name must be a field of `A`; it
+  may list a subset of the fields.
+
+**Alternatives:** the alternatives of an arm are separated by `or`, and an
+alternative can be any pattern, a literal included. All alternatives must
+bind the same names in the same order; a mismatch is a compile error. A bare
+binding or wildcard may be only the last alternative. The guard and body run
+once for whichever alternative matched.
 
 ```lox
-case Quit or Pause         => stop()
-case Move(x) or Teleport(x) => go(x)   // both bind x
-case A(y)    or B(z)       => ...       // compile error: y ≠ z
-case A(x)    or x          => x         // valid: the last alternative binds x
-case x       or y          => ...       // compile error: a bare binding is first
+case 1 or 2                          => "small"
+case Cmd.Quit or Cmd.Pause           => stop()
+case Cmd.Move(x) or Cmd.Teleport(x)  => go(x)   // both bind x
+case Cmd.Move(y) or Cmd.Teleport(z)  => ...     // compile error: y ≠ z
+case Cmd.Move(x) or x                => x       // valid: the last alternative binds x
+case x or y                          => ...     // compile error: a bare binding is first
+case 1, 2                            => ...     // parse error: use or
 ```
 
-**Exhaustiveness:** if a match contains at least one constructor-pattern arm
-from enum `E`, the compiler verifies that every constructor of `E` appears as
-an arm (across all alternatives in or-patterns), or that an unguarded
-`_`/binding wildcard is present. A missing constructor is a compile error
-listing the absent names.
+**Exhaustiveness:** if a match contains at least one constructor pattern of
+enum `E`, the compiler verifies that every constructor of `E` appears in an
+arm (across all alternatives), or that an unguarded `_`/binding wildcard is
+present. A missing constructor is a compile error listing the absent names.
+A match with constructor patterns of more than one enum makes this check for
+each enum.
 
 ### Function call arguments
 

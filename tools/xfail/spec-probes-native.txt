@@ -1,0 +1,19 @@
+# Spec probes that the native VM does not pass yet (tools/check_spec_probes.py
+# --xfail). One line per probe: the file name, then the reason. Delete a line
+# when the probe passes: the gate reports it as XPASS and fails.
+#
+# Mission #771 (docs/decisions/enum-constructor-namespaces.md): the spec
+# states the final rules before the consumers implement them.
+128_enum_qualified_constructor.lox #774 (N2): E.A in expressions and patterns
+129_enum_shared_constructor_name.lox #777 (N6): shared constructor names and the enum test
+130_match_or_literal_alternatives.lox #777 (N6): or between literal patterns
+131_enum_bare_constructor_name.lox #777 (N6): a constructor name alone is not a constructor
+132_enum_name_alone_rejected.lox #774 (N2): the enum name alone is a compile error
+133_enum_unknown_constructor_rejected.lox #774 (N2): E.B with no constructor B is a compile error
+134_enum_name_as_local_rejected.lox #774 (N2): an enum name as a local is a compile error
+135_enum_name_global_collision_rejected.lox #774 (N2): an enum name as another global is a compile error
+136_enum_use_before_declaration_rejected.lox #774 (N2): E.A before the declaration of E is a compile error
+137_enum_name_assignment_rejected.lox #774 (N2): an assignment to E is a compile error
+138_enum_constructor_assignment_rejected.lox #774 (N2): an assignment to E.A is a compile error
+141_match_comma_chain_rejected.lox #777 (N6): the comma chain is a parse error
+142_bare_positional_pattern_rejected.lox #777 (N6): A(x) with no enum name is a compile error

@@ -1,0 +1,16 @@
+// An assignment to E.A is a compile error (spec/02-syntax.md, enum
+// declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A }
+try {
+    E.A = 1;
+    print "ran";
+} catch (e) {
+    print e.kind;
+}
+
+// STATUS: error

@@ -1,0 +1,15 @@
+// A positional pattern names its enum: A(x) with no enum name and "." is not
+// a pattern, and it is a compile error (spec/02-syntax.md, the armPat rule).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A(x) }
+try {
+    print match E.A(1) { case A(x) => x case _ => 0 };
+} catch (e) {
+    print e.kind;
+}
+
+// STATUS: error

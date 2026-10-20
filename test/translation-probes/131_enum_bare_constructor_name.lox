@@ -1,0 +1,23 @@
+// A constructor name alone is not a constructor. In an expression it is an
+// ordinary variable name, so a read with no such variable is the catchable
+// UndefinedVariableError (spec/02-syntax.md, enum declaration). In a pattern
+// a bare name is never a constructor pattern: it is a binding that matches
+// every value (spec/04-semantics.md, match Expression, "Constructor
+// patterns").
+enum E { A B }
+
+try {
+    print A;
+} catch (e) {
+    print e.kind;
+}
+
+print match E.B() { case A => "bound " + str(A) };
+
+var B = "a variable";
+print B;
+
+// STATUS: ok
+// CHECK: UndefinedVariableError
+// CHECK: bound B
+// CHECK: a variable

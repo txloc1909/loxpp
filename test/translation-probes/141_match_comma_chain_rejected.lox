@@ -1,0 +1,15 @@
+// The alternatives of an arm are separated by or. A comma between literal
+// patterns is a parse error (spec/02-syntax.md, Extended match arm
+// patterns, "Alternatives").
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+try {
+    print match 2 { case 1, 2 => "small" case _ => "other" };
+} catch (e) {
+    print e.kind;
+}
+
+// STATUS: error
