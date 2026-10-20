@@ -428,3 +428,30 @@ TEST_F(MatchExpressionTest, MatchInArmAfterFailedGuard) {
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 11);
 }
+
+// "_" is the wildcard pattern even when an enum constructor has that name
+// (spec/02-syntax.md, armPat).
+TEST_F(MatchExpressionTest, UnderscoreIsWildcardOverConstructorName) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { _(x) B }
+        var r = match B() { case _ => 1 };
+        var s = match 99 { case _ => 2 };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 1);
+    expect_num(*h.getGlobal("s"), 2);
+}
+
+// The same rule applies to a class named "_".
+TEST_F(MatchExpressionTest, UnderscoreIsWildcardOverClassName) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class _ {}
+        var r = match _() { case _ => 1 };
+        var s = match 99 { case _ => 2 };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("r"), 1);
+    expect_num(*h.getGlobal("s"), 2);
+}

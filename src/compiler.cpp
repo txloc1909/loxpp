@@ -1102,7 +1102,9 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 Token subTok = m_parser->m_current;
                 m_parser->advance();
                 std::string subName(subTok.lexeme);
-                const ConstructorInfo* subInfo = findConstructor(subName);
+                // "_" is the wildcard, never a constructor or class name.
+                const ConstructorInfo* subInfo =
+                    subName == "_" ? nullptr : findConstructor(subName);
                 if (subInfo != nullptr) {
                     subCtorName = subName;
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
@@ -1118,7 +1120,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                     addLocal(atTok);
                     markInitialized();
-                } else if (findClass(subName)) {
+                } else if (subName != "_" && findClass(subName)) {
                     ObjString* cn = m_mm->makeString(subTok.lexeme);
                     m_mm->pushTempRoot(cn);
                     uint16_t cnConst =
@@ -1162,7 +1164,11 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         int localsBefore = m_localCount;
         std::string ctorName;
 
-        const ConstructorInfo* info = findConstructor(patName);
+        // "_" is the wildcard pattern (spec/02-syntax.md, armPat), even when
+        // a constructor or class has that name.
+        bool isWildcard = patName == "_";
+        const ConstructorInfo* info =
+            isWildcard ? nullptr : findConstructor(patName);
         if (info != nullptr) {
             ctorName = patName;
             if (!skipPatternCheck) {
@@ -1176,7 +1182,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 emitByte(Op::POP);
             }
             compileCtorPattern(subjectSlot, *info, patTok);
-        } else if (findClass(patName)) {
+        } else if (!isWildcard && findClass(patName)) {
             ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
             m_mm->pushTempRoot(classNameStr);
             uint16_t classNameConst =
@@ -1633,6 +1639,12 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
 
         std::string ctorName(m_parser->m_current.lexeme);
         m_parser->advance();
+
+        // A wildcard arm is not a tag arm, so the jump table is not eligible.
+        if (ctorName == "_") {
+            ok = false;
+            break;
+        }
 
         const ConstructorInfo* info = findConstructor(ctorName);
         if (info == nullptr) {

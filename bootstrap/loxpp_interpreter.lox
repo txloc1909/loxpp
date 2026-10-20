@@ -161,6 +161,8 @@ class MatchArm {
         this.chain     = nil;
         // Line of the arm's first pattern, for the resolver's arm-level errors.
         this.line      = 0;
+        // Line of the arm's `case` token, for errors about the arm itself.
+        this.caseLine  = 0;
     }
 }
 
@@ -1043,6 +1045,7 @@ class Parser {
                 break;
             }
             if (this.panicMode) break;
+            var caseLine = this.previous().line;
             var patLine = this.peek().line;
             var pats = this.parseMatchArmPatterns();
             var chain = this.armChain;
@@ -1053,6 +1056,7 @@ class Parser {
             var arm = this.matchArmBody(pats, guard);
             arm.chain = chain;
             arm.line = patLine;
+            arm.caseLine = caseLine;
             arms.append(arm);
         }
         var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
@@ -1630,11 +1634,10 @@ class Resolver {
 
     classifyAtPat(pat, at_name, subpat, line) {
         // The sub-pattern of an @-binding may name a constructor or a class.
-        // A name that resolves to neither is a plain binding; "_" is a
-        // wildcard unless a constructor or class with that name is declared.
+        // A name that resolves to neither is a plain binding. "_" is always
+        // the wildcard, so it is not a structural sub-pattern.
         var sub = match subpat {
             case BindPat{name} => this.classifyBareName(subpat, name)
-            case WildPat       => this.classifyBareName(subpat, "_")
             case _             => subpat
         };
         if (this.isLiteralPattern(sub)) {
@@ -1901,8 +1904,10 @@ class Resolver {
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
+            // Native reports one error and enters panic mode. One report per
+            // match keeps the bootstrap's error count the same.
             if (catchAll and !reportedUnreachable) {
-                this.resError("case", arm.line, "Unreachable arm after catch-all.");
+                this.resError("case", arm.caseLine, "Unreachable arm after catch-all.");
                 reportedUnreachable = true;
             }
             this.beginScope();
