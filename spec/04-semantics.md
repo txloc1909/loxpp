@@ -1192,7 +1192,11 @@ collection[key]
    d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error**.
    e. For a List, the expression evaluates to `collection[i]`. For a String,
       it evaluates to the one-character String at position `i`.
-5. Otherwise, this is a **runtime error**.
+5. If `collection` is an **Instance** whose class defines `__index_get__`,
+   call it with `key` (see [Operator
+   Overloading](#operator-overloading)); the expression evaluates to the
+   method's return value.
+6. Otherwise, this is a **runtime error**.
 
 Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
 identical — both are the same Number value used as index 1.
