@@ -333,12 +333,12 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
                 $<TARGET_FILE:loxpp>
                 ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/120_class_pattern_missing_field.lox
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/121_destructure_property_reads.lox
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/122_destructure_missing_field.lox
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/123_destructure_non_instance_faults.lox
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/124_map_destructure_missing_name.lox
-                ${PROJECT_SOURCE_DIR}/test/translation-probes/125_math_property_missing_name.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/121_class_pattern_missing_field.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/122_destructure_property_reads.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/123_destructure_missing_field.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/124_destructure_non_instance_faults.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/125_map_destructure_missing_name.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/126_math_property_missing_name.lox
                 --skip-on-trace
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(BootstrapInstancePropertyRead PROPERTIES
