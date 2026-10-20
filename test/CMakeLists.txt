@@ -337,6 +337,8 @@ if(LOXPP_PYTHON3)
                 ${PROJECT_SOURCE_DIR}/test/translation-probes/121_destructure_property_reads.lox
                 ${PROJECT_SOURCE_DIR}/test/translation-probes/122_destructure_missing_field.lox
                 ${PROJECT_SOURCE_DIR}/test/translation-probes/123_destructure_non_instance_faults.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/124_map_destructure_missing_name.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/125_math_property_missing_name.lox
                 --skip-on-trace
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(BootstrapInstancePropertyRead PROPERTIES

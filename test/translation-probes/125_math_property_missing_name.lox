@@ -1,0 +1,13 @@
+// The math object has fixed fields. A name that is not a math function or
+// constant is a halting property fault, also through destructuring
+// (spec/04-semantics.md, Property Get steps 7-9).
+print math.pi;
+var {floor} = math;
+print floor(2.9);
+
+var {bogus} = math;
+print "unreachable";
+
+// STATUS: error
+// CHECK: 3.14159
+// CHECK: 2

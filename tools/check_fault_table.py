@@ -398,6 +398,13 @@ FATAL_ROWS = [
         "fatal",
         "class C {} var c = C(); c.bogus;",
     ),
+    # Issue #748: the math object is an Instance with fixed fields, and the
+    # bootstrap used to return a function for any name.
+    Row(
+        "undefined_property_on_math",
+        "fatal",
+        "math.bogus;",
+    ),
     # Issue #748: native compiles a class pattern's braced name as
     # GET_PROPERTY, so the same spec row applies inside a class pattern.
     Row(
@@ -819,7 +826,9 @@ FATAL_REGRESSION_ROWS = {
     "list_method_read_defer",
     # Issue #748: a class pattern and an object destructuring both read a
     # property through GET_PROPERTY, so they share the spec rows of
-    # undefined_property_on_instance and property_get_non_instance.
+    # undefined_property_on_instance and property_get_non_instance. The math
+    # object is an Instance on native, so its row shares the same spec row.
+    "undefined_property_on_math",
     "undefined_property_in_class_pattern",
     "undefined_property_in_destructure",
     "undefined_property_in_map_destructure",
