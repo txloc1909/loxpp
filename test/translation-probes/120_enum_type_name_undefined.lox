@@ -1,0 +1,21 @@
+// An `enum` declaration makes each constructor name a global, and the enum
+// type name is not a value (spec/02-syntax.md, `enum` declaration): a read,
+// an assignment and a call of the type name each raise a catchable
+// UndefinedVariableError, and a property read faults on that same read, not
+// on the property. A global may take the name afterwards.
+enum E { A(x) B }
+
+try { print E; } catch (e) { print "read " + e.kind; }
+try { E = 1; } catch (e) { print "assign " + e.kind; }
+try { print E.A; } catch (e) { print "get " + e.kind; }
+try { print E(); } catch (e) { print "call " + e.kind; }
+
+var E = 5;
+print E;
+
+// STATUS: ok
+// CHECK: read UndefinedVariableError
+// CHECK: assign UndefinedVariableError
+// CHECK: get UndefinedVariableError
+// CHECK: call UndefinedVariableError
+// CHECK: 5
