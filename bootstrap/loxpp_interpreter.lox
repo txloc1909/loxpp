@@ -4845,6 +4845,18 @@ class Interpreter {
         return callee.call(this, args);
     }
 
+    // A property read on an instance, as native's GET_PROPERTY does: a field
+    // shadows a method, and a name that is neither is a fatal fault. instGet
+    // returns nil for both a nil-valued field and a missing member, so every
+    // caller that needs the fault goes through here.
+    getInstanceProperty(object, name) {
+        if (object.fields.has(name)) return object.fields[name];
+        var method = object.klass.findMethod(name);
+        if (method != nil) return method.bind(object);
+        this.fatalError("Undefined property '" + name + "'.");
+        return nil;
+    }
+
     // Undefined-member faults below are fatal: native's are always-fatal
     // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
     // The table's "UndefinedPropertyError" is reserved for a narrower cause,
@@ -4937,11 +4949,7 @@ class Interpreter {
             this.setError("InvalidReceiverError", "Method called on invalid receiver.", line);
             return nil;
         }
-        var val = object.instGet(name, 0);
-        if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
-            this.fatalError("Undefined property '" + name + "'.");
-            return nil;
-        }
+        var val = this.getInstanceProperty(object, name);
         // Calling a non-callable field value is fatal on native. Check before
         // checking for basic non-callables.
         if (isCallTarget and object.fields.has(name) and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
@@ -5102,23 +5110,20 @@ class Interpreter {
 
     // Destructuring a field reads it exactly the way `source.fieldName`
     // does (spec/04-semantics.md, Destructuring Declaration), so a
-    // non-instance source hits the same fault evalGet's own non-instance,
-    // non-call check hits: native's always-fatal "Only instances have
+    // non-instance source hits native's always-fatal "Only instances have
     // properties." (src/vm.cpp Op::GET_PROPERTY), not the catchable
     // "InvalidReceiverError" row, whose one documented cause is a method
-    // call on a non-instance (`42.foo()`) -- destructuring is never a call,
-    // so it needs its own kind, not that one's.
+    // call on a non-instance (`42.foo()`).
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
         if (this.throwFlag) return;
         if (loxTag(val) != "instance") {
-            this.setError("InvalidDestructureReceiverError", "Object destructuring requires an instance.", line);
+            this.fatalError("Only instances have properties.");
             return;
         }
         var i = 0;
         while (i < len(names)) {
-            var field = val.instGet(names[i], line);
-            env.define(names[i], field);
+            env.define(names[i], this.getInstanceProperty(val, names[i]));
             i = i + 1;
         }
     }
@@ -5295,7 +5300,7 @@ class Interpreter {
         while (i < len(subpats)) {
             var subpat = subpats[i];
             var fieldVal = match subpat {
-                case BindPat{name} => subject.instGet(name, 0)
+                case BindPat{name} => this.getInstanceProperty(subject, name)
                 case WildPat       => nil
                 case _             => nil
             };
