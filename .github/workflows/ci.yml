@@ -907,6 +907,53 @@ jobs:
           fi
           grep -q "no JVM runtime jar at /nonexistent/lox-rt.jar" "$RUNNER_TEMP/fault_table_no_jar.txt"
 
+      # A consumer that cannot start must be a setup error too, not a fault.
+      # The empty jar passes the missing-jar preflight (the file exists) and
+      # fails only when the JVM wrapper tries to load a program, which is
+      # exactly the startup check this step pins. A halting row would accept
+      # that non-zero exit as a halt, so the assertions also require that the
+      # tool stops before the table and prints no DIVERGE line.
+      - name: Check fault table - unstartable consumer
+        run: |
+          set +e
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            bash -c ": > /tmp/broken-lox-rt.jar && LOX_RT_JAR=/tmp/broken-lox-rt.jar python3 tools/check_fault_table.py" \
+            > "$RUNNER_TEMP/fault_table_unstartable.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/fault_table_unstartable.txt"
+          if [ "$status" -ne 2 ]; then
+            echo "expected exit 2 for an unstartable consumer, got $status"
+            exit 1
+          fi
+          grep -q "consumer jvm cannot run a trivial program" "$RUNNER_TEMP/fault_table_unstartable.txt"
+          if grep -q "DIVERGE" "$RUNNER_TEMP/fault_table_unstartable.txt"; then
+            echo "the tool ran the table instead of stopping at the startup check"
+            exit 1
+          fi
+
+          # A custom command owns its startup, the same rule as the missing-jar
+          # preflight: a stand-in such as /bin/true must stay usable, so the
+          # tool must report a row divergence, not a startup error.
+          set +e
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev-managed:latest \
+            python3 tools/check_fault_table.py --jvm /bin/true --only arithmetic_type_error \
+            > "$RUNNER_TEMP/fault_table_custom_jvm.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/fault_table_custom_jvm.txt"
+          if [ "$status" -ne 1 ]; then
+            echo "expected exit 1 for a custom --jvm command, got $status"
+            exit 1
+          fi
+          grep -Fq "DIVERGE     arithmetic_type_error  [jvm]" "$RUNNER_TEMP/fault_table_custom_jvm.txt"
+
       # spec/05-stdlib.md: every File still open when the program ends must
       # be flushed as if close() had been called, on every exit path. Runs
       # on all four consumers this job already has a binary for.

@@ -21,6 +21,14 @@ spec/README.md, Conformance:
 Native's own outcome must also be the one the row declares: native halts on
 every halting row.
 
+Before the table, each consumer's default command must run one trivial
+program. A consumer that cannot start (a corrupt runtime jar, a missing
+jasmin, a broken bootstrap wrapper) prints no marker and exits non-zero,
+which classify() would otherwise read as a halting fault. A custom
+--native/--jvm/--bootstrap command that is not the default path owns its
+startup: the caller may use a tracer, /bin/true, or another build layout,
+so the tool does not check that command.
+
 A row's `skip` set leaves a consumer out of one row. It names the open issue
 that tracks the defect.
 
@@ -30,8 +38,8 @@ Usage:
 
 Exits 0 when every non-skipped (row, consumer) pair conforms. Exits 1 and
 prints every mismatch otherwise. Exits 2 and names the problem when an
-input is unusable: a missing JVM runtime jar, a stale row corpus, or a bad
---only value.
+input is unusable: a missing JVM runtime jar, a consumer that cannot run a
+trivial program, a stale row corpus, or a bad --only value.
 """
 
 import argparse
@@ -44,12 +52,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
-JVM_WRAPPER = REPO_ROOT / "tools" / "loxpp_jvm.sh"
+DEFAULT_NATIVE = REPO_ROOT / "build" / "loxpp"
+DEFAULT_JVM = REPO_ROOT / "tools" / "loxpp_jvm.sh"
+DEFAULT_BOOTSTRAP = REPO_ROOT / "bootstrap" / "lox_wrapper.sh"
 DEFAULT_JVM_RT_JAR = REPO_ROOT / "runtime" / "jvm" / "lox-rt.jar"
 
 NATIVE = "native"
 JVM = "jvm"
 BOOTSTRAP = "bootstrap"
+
+CONSUMER_DEFAULT_PATHS = {
+    NATIVE: DEFAULT_NATIVE,
+    JVM: DEFAULT_JVM,
+    BOOTSTRAP: DEFAULT_BOOTSTRAP,
+}
 
 # A row's program prints these markers (never "kind"/"type" text that a
 # fault's report could itself contain) so a run's outcome is read from
@@ -57,6 +73,11 @@ BOOTSTRAP = "bootstrap"
 CAUGHT_MARKER = "__CAUGHT__"
 AFTER_MARKER = "__AFTER__"
 UNREACHABLE_MARKER = "__UNREACHABLE__"
+
+# The startup probe prints this marker. It is distinct from the row markers
+# so a broken row corpus can never satisfy the startup check.
+STARTUP_PROGRAM = 'print "__STARTUP_OK__";\n'
+STARTUP_MARKER = "__STARTUP_OK__"
 
 CAUGHT_TEMPLATE = """{setup}try {{
     {body}
@@ -958,7 +979,7 @@ def require_jvm_rt_jar(jvm: str) -> None:
     --jvm command owns its own runtime and startup, so only the default
     wrapper is checked.
     """
-    if Path(jvm).resolve() != JVM_WRAPPER.resolve():
+    if Path(jvm).resolve() != DEFAULT_JVM.resolve():
         return
     jar = Path(os.environ.get("LOX_RT_JAR") or DEFAULT_JVM_RT_JAR)
     if not jar.is_file():
@@ -967,6 +988,60 @@ def require_jvm_rt_jar(jvm: str) -> None:
             "run tools/build_lox_rt.sh first",
             file=sys.stderr,
         )
+        sys.exit(2)
+
+
+def _indented_stderr(stderr: str | bytes | None) -> str:
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", "replace")
+    text = (stderr or "").strip()
+    if not text:
+        return "\n  (no stderr)"
+    return "\n" + "\n".join(f"  {line}" for line in text.splitlines())
+
+
+def check_consumer_startup(commands: dict[str, ConsumerCommand], workdir: Path, timeout: float) -> None:
+    """Exits 2 unless each default consumer runs one trivial program.
+
+    classify() reads a consumer that never started as a halting fault: it
+    exits non-zero with no marker, and a fatal row accepts any non-zero
+    exit. A corrupt runtime jar, a missing jasmin, or a broken bootstrap
+    wrapper would therefore pass a fatal row silently. The probe separates
+    "the consumer cannot run a program" from "the program halts".
+
+    A --native/--jvm/--bootstrap command that is not the default path owns
+    its startup: the caller may use a tracer, /bin/true, or another build
+    layout, so this function does not judge that command. Row comparison
+    stays the only check for it.
+    """
+    probe = workdir / "__startup_probe.lox"
+    probe.write_text(STARTUP_PROGRAM, encoding="utf-8")
+    failures: list[str] = []
+    for consumer, command in commands.items():
+        if Path(command.argv[0]).resolve() != CONSUMER_DEFAULT_PATHS[consumer].resolve():
+            continue
+        try:
+            proc = command.run(probe, timeout)
+        except subprocess.TimeoutExpired as exc:
+            failures.append(
+                f"check_fault_table.py: consumer {consumer} cannot run a trivial program: "
+                f"timed out after {timeout:g}s" + _indented_stderr(exc.stderr)
+            )
+            continue
+        except OSError as exc:
+            failures.append(
+                f"check_fault_table.py: consumer {consumer} cannot run a trivial program: {exc}"
+            )
+            continue
+        if proc.returncode == 0 and STARTUP_MARKER in proc.stdout.splitlines():
+            continue
+        failures.append(
+            f"check_fault_table.py: consumer {consumer} cannot run a trivial program "
+            f"(exit status {proc.returncode}); its stderr:" + _indented_stderr(proc.stderr)
+        )
+    if failures:
+        for failure in failures:
+            print(failure, file=sys.stderr)
         sys.exit(2)
 
 
@@ -1058,9 +1133,9 @@ def compare(row: Row, native_result: RunResult, other: RunResult, consumer: str)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--native", default=str(REPO_ROOT / "build" / "loxpp"))
-    parser.add_argument("--jvm", default=str(REPO_ROOT / "tools" / "loxpp_jvm.sh"))
-    parser.add_argument("--bootstrap", default=str(REPO_ROOT / "bootstrap" / "lox_wrapper.sh"))
+    parser.add_argument("--native", default=str(DEFAULT_NATIVE))
+    parser.add_argument("--jvm", default=str(DEFAULT_JVM))
+    parser.add_argument("--bootstrap", default=str(DEFAULT_BOOTSTRAP))
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument(
         "--only", default=None, help="run only rows whose name contains this substring (for debugging)"
@@ -1122,6 +1197,7 @@ def main() -> None:
     per_consumer_skips = {JVM: 0, BOOTSTRAP: 0}
     with tempfile.TemporaryDirectory(prefix="loxpp_fault_table_") as tmp:
         workdir = Path(tmp)
+        check_consumer_startup(commands, workdir, args.timeout)
         for row in rows:
             results = run_row(row, commands, workdir, args.timeout)
             native_result = results.get(NATIVE)
