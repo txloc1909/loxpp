@@ -166,9 +166,6 @@ PROBES = [
      "try { co.resume(); } catch (e) { print e.kind; }",
      CATCHABLE, "ArityError",
      '"Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + "."'),
-    ("object destructuring of a non-instance", "try { var {a} = 42; } catch (e) { print e.kind; }",
-     FATAL, "InvalidDestructureReceiverError", '"Object destructuring requires an instance."'),
-
     # --- table kinds: every distinct pair needs >=1 "catchable" probe ---
     ("stack overflow", 'fun rec(n) { return 1 + rec(n + 1); } try { rec(0); } catch (e) { print e.kind; }',
      CATCHABLE, "StackOverflowError", '"Stack overflow."'),

@@ -2239,13 +2239,6 @@ class LoxInstance {
         this.loxTag = "instance";
     }
 
-    instGet(name, line) {
-        if (this.fields.has(name)) return this.fields[name];
-        var method = this.klass.findMethod(name);
-        if (method != nil) return method.bind(this);
-        return nil;
-    }
-
     instSet(name, value) {
         this.fields[name] = value;
     }
@@ -2450,7 +2443,7 @@ fun reflectCallMethod(interp, args) {
     }
     if (tag == "function") {
         // A method resolved from the class is unbound; bind `this` to the
-        // instance, exactly as instGet() does for an ordinary method call. A
+        // instance, exactly as getProperty() does for an ordinary method call. A
         // function value stored in a field is called as-is (native's Op::CALL
         // of a field closure binds slot 0 to the closure, not the instance).
         if (!viaField) callee = callee.bind(instance);
@@ -4845,29 +4838,20 @@ class Interpreter {
         return callee.call(this, args);
     }
 
-    // A property read on an instance, as native's GET_PROPERTY does: a field
-    // shadows a method, and a name that is neither is a fatal fault. instGet
-    // returns nil for both a nil-valued field and a missing member, so every
-    // caller that needs the fault goes through here.
-    getInstanceProperty(object, name) {
-        if (object.fields.has(name)) return object.fields[name];
-        var method = object.klass.findMethod(name);
-        if (method != nil) return method.bind(object);
-        this.fatalError("Undefined property '" + name + "'.");
-        return nil;
-    }
-
-    // Undefined-member faults below are fatal: native's are always-fatal
-    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
-    // The table's "UndefinedPropertyError" is reserved for a narrower cause,
-    // an undefined property read on a caught Error value itself (the "error"
-    // branch below).
+    // A property read, as native's GET_PROPERTY does (spec/04-semantics.md,
+    // Property Get). An Instance takes a field, then a bound method, then a
+    // fatal fault. A bare field lookup returns nil for both a nil-valued
+    // field and a missing member, so it cannot tell those cases apart. An
+    // Error takes kind or message, and a missing name there is the one
+    // catchable case.
     //
-    // Receive isCallTarget to distinguish plain property reads from method calls
-    // on non-instances. See evalCall's syntactic dispatch.
-    evalGet(objectExpr, name, line, env, isCallTarget) {
-        var object = this.evalExpr(objectExpr, env);
-        if (this.throwFlag) return nil;
+    // Undefined-member faults here are fatal: native's are always-fatal
+    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
+    // The table's "UndefinedPropertyError" is reserved for the Error branch.
+    //
+    // Receive isCallTarget to distinguish plain property reads from method
+    // calls on non-instances. See evalCall's syntactic dispatch.
+    getProperty(object, name, line, isCallTarget) {
         if (loxTag(object) == "math") {
             if (name == "pi")  return math.pi;
             if (name == "e")   return math.e;
@@ -4949,14 +4933,28 @@ class Interpreter {
             this.setError("InvalidReceiverError", "Method called on invalid receiver.", line);
             return nil;
         }
-        var val = this.getInstanceProperty(object, name);
-        // Calling a non-callable field value is fatal on native. Check before
-        // checking for basic non-callables.
-        if (isCallTarget and object.fields.has(name) and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
-            this.fatalError("Can only call functions, classes and enums.");
+        if (object.fields.has(name)) {
+            var val = object.fields[name];
+            // Calling a non-callable field value is fatal on native. Check
+            // before checking for basic non-callables.
+            if (isCallTarget and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
+                this.fatalError("Can only call functions, classes and enums.");
+                return nil;
+            }
+            return val;
+        }
+        var method = object.klass.findMethod(name);
+        if (method == nil) {
+            this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
-        return val;
+        return method.bind(object);
+    }
+
+    evalGet(objectExpr, name, line, env, isCallTarget) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.throwFlag) return nil;
+        return this.getProperty(object, name, line, isCallTarget);
     }
 
     // Native's Op::SET_PROPERTY raises this fatally with its own message,
@@ -5109,21 +5107,17 @@ class Interpreter {
     }
 
     // Destructuring a field reads it exactly the way `source.fieldName`
-    // does (spec/04-semantics.md, Destructuring Declaration), so a
-    // non-instance source hits native's always-fatal "Only instances have
-    // properties." (src/vm.cpp Op::GET_PROPERTY), not the catchable
-    // "InvalidReceiverError" row, whose one documented cause is a method
-    // call on a non-instance (`42.foo()`).
+    // does (spec/04-semantics.md, Destructuring Declaration), so it goes
+    // through the same property read as any other Get. A source that is not
+    // in Property Get steps 2-5 hits native's fatal "Only instances have
+    // properties." (src/vm.cpp Op::GET_PROPERTY).
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
         if (this.throwFlag) return;
-        if (loxTag(val) != "instance") {
-            this.fatalError("Only instances have properties.");
-            return;
-        }
         var i = 0;
         while (i < len(names)) {
-            env.define(names[i], this.getInstanceProperty(val, names[i]));
+            env.define(names[i], this.getProperty(val, names[i], line, false));
+            if (this.throwFlag) return;
             i = i + 1;
         }
     }
@@ -5300,7 +5294,7 @@ class Interpreter {
         while (i < len(subpats)) {
             var subpat = subpats[i];
             var fieldVal = match subpat {
-                case BindPat{name} => this.getInstanceProperty(subject, name)
+                case BindPat{name} => this.getProperty(subject, name, 0, false)
                 case WildPat       => nil
                 case _             => nil
             };
