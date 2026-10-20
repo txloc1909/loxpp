@@ -1198,21 +1198,28 @@ class Parser {
         return WildPat();
     }
 
+    // A rest marker names the suffix it binds. A bare "..." is a compile error
+    // (spec/02-syntax.md, seqElem). The fallback name keeps the parser moving
+    // to the closing bracket without a second, cascading error.
+    parseRestName() {
+        if (!this.check("IDENTIFIER")) {
+            this.parseError(this.peek(), "Expect name after '...' in sequence pattern.");
+            return "_";
+        }
+        return this.advance().lexeme;
+    }
+
     parseListPattern() {
         var elems = [];
         var rest_name = nil;
         if (!this.check("RIGHT_BRACKET")) {
             if (this.matchT("ELIPSIS")) {
-                var rname = "_";
-                if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
-                rest_name = rname;
+                rest_name = this.parseRestName();
             } else {
                 elems.append(this.parseListPatternElem());
                 while (this.matchT("COMMA")) {
                     if (this.matchT("ELIPSIS")) {
-                        var rname = "_";
-                        if (this.matchT("IDENTIFIER")) rname = this.previous().lexeme;
-                        rest_name = rname;
+                        rest_name = this.parseRestName();
                         break;
                     }
                     elems.append(this.parseListPatternElem());

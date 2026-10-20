@@ -187,8 +187,6 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(679, 'different message text'),
     'Expect method name.':
         Deferred(641, 'the bootstrap omits a second error'),
-    "Expect name after '...' in sequence pattern.":
-        Deferred(746, 'the bootstrap accepts the unnamed rest pattern'),
     'Expect parameter name.':
         Deferred(641, 'the bootstrap omits a second error'),
     'Expect superclass method name.':
