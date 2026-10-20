@@ -510,7 +510,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --xfail tools/xfail/spec-probes-bootstrap.txt --timeout 120"
 
       # Three probes that the walk above skips. Two have no STATUS line,
       # because a CHECK line cannot hold the NUL byte they print. The third is

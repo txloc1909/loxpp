@@ -293,8 +293,8 @@ test.
 - `E.A(x, y)` lists one name for each field of `A`, in declaration order. A
   list with more or fewer names than `A` has fields is a compile error. The
   name `_` binds nothing.
-- `E.A{f, g}` binds the named fields. Each name must be a field of `A`; it
-  may list a subset of the fields.
+- `E.A{f, g}` binds the named fields. It may list a subset of the fields.
+  A name that is not a field of `A` is a compile error.
 
 **Alternatives:** the alternatives of an arm are separated by `or`, and an
 alternative can be any pattern, a literal included. All alternatives must
