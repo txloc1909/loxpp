@@ -1,7 +1,7 @@
 # Enum constructors live in the namespace of their enum
 
-**Status:** proposal. Waits for the owner's approval. On acceptance it moves
-to `docs/decisions/` and names its tracking issue.
+**Status:** accepted. The owner approved it in #768 (2026-10-21). Tracking
+issue: #771.
 
 ## Owner decisions
 
@@ -222,7 +222,7 @@ request green:
 Step 1 alone is correct for every program that uses only one form, because
 the qualified form resolves to the same constructor as the bare form. Step 3
 exists to remove the bare form, so it is a separate node with its own probes.
-On acceptance this is a mission with a tracking issue.
+The mission tracking issue #771 holds the DAG.
 
 ## Alternatives
 
