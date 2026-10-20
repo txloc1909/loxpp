@@ -269,6 +269,8 @@ See `armPats` / `armPat` / `identArmPat` in the main EBNF.
 
 When the pattern name resolves to a known constructor, the arm performs a tag
 check rather than a binding. Unknown identifiers continue to act as bindings.
+`_` is the wildcard unless it is followed by `(` or `{`; with either, it is the
+pattern's name and resolves like any other name.
 
 **Or-patterns:** multiple identifier-starting alternatives may be separated by
 `or`. All alternatives must bind the same names in the same order; a mismatch
@@ -290,6 +292,9 @@ from enum `E`, the compiler verifies that every constructor of `E` appears as
 an arm (across all alternatives in or-patterns), or that an unguarded
 `_`/binding wildcard is present. A missing constructor is a compile error
 listing the absent names.
+
+An arm that follows an unguarded catch-all arm (`case _` or a plain binding)
+is unreachable and is a compile error.
 
 ### Function call arguments
 

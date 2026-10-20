@@ -161,6 +161,8 @@ class MatchArm {
         this.chain     = nil;
         // Line of the arm's first pattern, for the resolver's arm-level errors.
         this.line      = 0;
+        // Line of the arm's `case` token, for errors about the arm itself.
+        this.caseLine  = 0;
     }
 }
 
@@ -1043,6 +1045,7 @@ class Parser {
                 break;
             }
             if (this.panicMode) break;
+            var caseLine = this.previous().line;
             var patLine = this.peek().line;
             var pats = this.parseMatchArmPatterns();
             var chain = this.armChain;
@@ -1053,6 +1056,7 @@ class Parser {
             var arm = this.matchArmBody(pats, guard);
             arm.chain = chain;
             arm.line = patLine;
+            arm.caseLine = caseLine;
             arms.append(arm);
         }
         var closeTok = this.expect("RIGHT_BRACE", "Expect '}' after match arms.");
@@ -1132,7 +1136,11 @@ class Parser {
     }
 
     parsePattern() {
-        if (this.check("IDENTIFIER") and this.peek().lexeme == "_") {
+        // A bare "_" is the wildcard. With "(" or "{" it is the head of a
+        // structural pattern, so it may name a constructor or class.
+        if (this.check("IDENTIFIER") and this.peek().lexeme == "_" and
+            !this.checkAhead(1, "LEFT_PAREN") and
+            !this.checkAhead(1, "LEFT_BRACE")) {
             this.advance();
             return WildPat();
         }
@@ -1630,11 +1638,10 @@ class Resolver {
 
     classifyAtPat(pat, at_name, subpat, line) {
         // The sub-pattern of an @-binding may name a constructor or a class.
-        // A name that resolves to neither is a plain binding; "_" is a
-        // wildcard unless a constructor or class with that name is declared.
+        // A name that resolves to neither is a plain binding. A bare "_" is
+        // the wildcard, so it is not a structural sub-pattern.
         var sub = match subpat {
             case BindPat{name} => this.classifyBareName(subpat, name)
-            case WildPat       => this.classifyBareName(subpat, "_")
             case _             => subpat
         };
         if (this.isLiteralPattern(sub)) {
@@ -1897,9 +1904,17 @@ class Resolver {
         this.resolveExpr(subject);
         var seen = {};
         var catchAll = false;
+        var reportedUnreachable = false;
         var i = 0;
         while (i < len(arms)) {
             var arm = arms[i];
+            // One report per match. The number of compile reports is
+            // implementation-defined (spec/README.md, Conformance); native
+            // enters panic mode after the first.
+            if (catchAll and !reportedUnreachable) {
+                this.resError("case", arm.caseLine, "Unreachable arm after catch-all.");
+                reportedUnreachable = true;
+            }
             this.beginScope();
             // A comma chain of literals is not an or-chain, and neither is a
             // literal-first arm. Every other arm with more than one pattern
