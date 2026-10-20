@@ -1177,11 +1177,11 @@ class Parser {
     }
 
     // A field slot of a constructor or class pattern holds one name and no
-    // nested pattern (spec/02-syntax.md, identArmPat).
+    // nested pattern (spec/02-syntax.md, identArmPat). The name "_" is a
+    // field name here, not a wildcard.
     parseFieldPattern(msg) {
         if (this.check("IDENTIFIER")) {
             var tok = this.advance();
-            if (tok.lexeme == "_") return WildPat();
             return BindPat(tok.lexeme);
         }
         this.parseError(this.peek(), msg);
