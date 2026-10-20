@@ -3,6 +3,17 @@
 **Status:** proposal. Waits for the owner's approval. On acceptance it moves
 to `docs/decisions/` and names its tracking issue.
 
+## Owner decisions
+
+The owner answered three of the four open questions on 2026-10-21.
+
+| Question | Decision |
+|---|---|
+| Strict qualification, or bare names when unique | Strict. A pattern and an expression always write `E.A`. |
+| `str` shows the enum name | No. `str` gives `<A>` and `A(1)`, as today. |
+| `E` alone is a value | No. The import mission can change this if module access needs it. |
+| Remove the literal comma chain | Open. See "Open question: the comma chain". |
+
 ## Summary
 
 An `enum` declaration binds its enum name, not its constructor names. A
@@ -142,7 +153,7 @@ patterns of two enums checks each enum.
 - Equality of constructors and of enum values is identity, as today.
 - The rules for sending an enum value between workers do not change.
 - `str` of a constructor and of an enum value does not change (`<A>` and
-  `A(1)`). Open question 2 asks if they show the enum name.
+  `A(1)`).
 
 ## How the four issues become trivial
 
@@ -227,19 +238,97 @@ On acceptance this is a mission with a tracking issue.
   static type on the subject. Lox++ is dynamically typed
   (`docs/decisions/dynamic-functional-programming.md`), so it is not possible.
 
-## Open questions for the owner
+## Open question: the comma chain
 
-1. Strict qualification (this proposal) or bare names when unique? The
-   recommendation is strict qualification. It is the only form that removes
-   the typing-error problem.
-2. Do `str(E.A)` and `str(E.A(1))` show the enum name (`<E.A>`, `E.A(1)`)?
-   The recommendation is no. Display text does not need it, and many
-   expected outputs would change.
-3. Is `E` alone a value now, for example a namespace object that `fields` can
-   list? The recommendation is no. The import mission can make it a value if
-   module access needs `m.E.A`.
-4. Remove the comma chain (pattern rule 8)? The recommendation is yes: one
-   alternative operator, and one program to rewrite.
+Pattern rule 8 removes `case 1, 2 =>`. The comma chain is not a bug, and it
+does not give a wrong result alone. The case for its removal is simplicity,
+not safety.
+
+### What the comma chain costs today
+
+- **Two arm forms.** The grammar has a literal arm, joined by `,`, and an
+  identifier arm, joined by `or`. Every parser must choose the form from the
+  first token. Four parsers do this: native, the bootstrap, the tree-sitter
+  grammar, and each editor syntax that highlights patterns.
+- **The split caused #756.** Native parses a literal arm as an expression at
+  `or` precedence (`src/compiler.cpp`, the literal branch of the arm parser),
+  then compares it with the subject. So `case 1 or 2` compiles as
+  `subject == (1 or 2)`, which is `subject == 1`. The bootstrap reads two
+  literal alternatives. Each parser made a reasonable guess about a form that
+  the grammar left out.
+- **Two spellings for one idea.** "Match any of these alternatives" has one
+  operator for literals and another for every other pattern. A program
+  cannot write `case 0 or E.A =>`, because the two forms do not mix.
+- **The spec keeps it "for backward compatibility".** `AGENTS.md` says that a
+  language change rewrites every affected program, with no deprecation
+  period. One program uses the comma chain (`examples/match_http_status.lox`,
+  line 7).
+
+### Options
+
+| Option | `case 1, 2` | `case 1 or 2` | Arm forms | #756 |
+|---|---|---|---|---|
+| A. Remove the comma chain (recommended) | static error | matches 1 and 2 | one | fixed by the grammar |
+| B. Keep the comma, reject `or` after a literal | matches 1 and 2 | static error | two | fixed by a parser check |
+| C. Keep both | matches 1 and 2 | matches 1 and 2 | one, with two spellings | fixed by the grammar |
+| D. Use `,` for every alternative | matches 1 and 2 | static error | one | fixed by the grammar |
+
+- **A** gives one operator and one arm form. The cost is one rewritten line,
+  and `or` is longer to type than `,`.
+- **B** is the original deliverable of #756. It keeps every program valid,
+  but it keeps the two arm forms and the first-token choice.
+- **C** keeps two spellings that each parser and the spec must describe.
+- **D** is not good with this proposal: `case E.A(x, y), E.B(x, y)` puts
+  commas at two levels in one arm, and `or` already joins identifier
+  alternatives in 10 programs.
+
+The recommendation is A. If the owner prefers B, #756 is still a one-line
+rule, and the rest of this proposal does not change.
+
+## Relation to the import system
+
+`docs/decisions/import-system.md` is accepted, and its mission has not
+started. The two changes are independent: neither one blocks the other. This
+proposal should land first, for three reasons:
+
+- It is smaller, and it closes four open issues.
+- It fixes the shape `name.member` in patterns before the import mission adds
+  a second kind of name before the `.`.
+- The bootstrap gets the new pattern forms while it is still one file. The
+  import decision names the multi-file bootstrap as its largest per-backend
+  cost (residual edge 2), so it is better not to do both at once.
+
+### What the import mission inherits
+
+- **One syntax for qualified names.** The import decision binds a module as
+  an object, with members read through `.` (Axis 2). A constructor of an
+  imported enum is then `shapes.Shape.Circle(1)`. The import mission extends
+  `ctorPat` from `IDENTIFIER "." IDENTIFIER` to a path,
+  `IDENTIFIER ( "." IDENTIFIER )+`. The last segment is the constructor, and
+  the segment before it is the enum.
+- **Static resolution.** Imports resolve at compile time and exports are
+  explicit, so the compiler knows every enum that a module exports. A pattern
+  such as `case shapes.Shape.Circle(r)` resolves statically, and the
+  exhaustiveness check and the field-count rule work across modules with no
+  run-time lookup. For the same reason `E` does not have to be a value
+  (owner decision 3): the compiler resolves the whole path. The import
+  mission decides if `shapes.Shape` alone is a value.
+- **A short name.** Three segments are long. The import decision names
+  selective import (`from m import f`) as an increment. If the mission adds
+  it, `from shapes import Shape` binds the enum name, and a program writes
+  `Shape.Circle` again. The mission chooses if it adds selective import.
+- **Name rules.** Declaration rule 4 reserves an enum name against every
+  other global name and every local. A module name must follow the same rule,
+  so that the first segment of a path has one meaning.
+- **Hidden globals.** Source inclusion composes all modules into one program.
+  Two modules may each declare an enum `Shape`, so the hidden global of a
+  constructor must include the module in its name, not only `Shape.Circle`.
+  The tag of each constructor stays unique in the composed program, and the
+  native limit of 256 constructors applies to the program with all its
+  imports.
+- **Combinator modules.** The import decision makes `Option` and `Result`
+  modules. Under this proposal such a module exports the enum, and its
+  functions use `Option.Some` inside the module, as every other program does.
 
 ## Non-goals
 
@@ -248,4 +337,5 @@ On acceptance this is a mission with a tracking issue.
 - **Methods on enums.** `docs/decisions/design-tensions-2026-10-08.md`
   decided on pipes and modules instead.
 - **Import syntax.** How a module exports an enum, and how an importer names
-  it, belongs to the import mission.
+  it, belongs to the import mission. "Relation to the import system" lists
+  what that mission inherits.
