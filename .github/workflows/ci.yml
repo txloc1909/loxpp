@@ -626,6 +626,18 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapMatchArmBreak --output-on-failure --no-tests=error"
 
+      # BootstrapMapIteration self-skips on debug (SKIP_RETURN_CODE 125), so
+      # this release leg is the one place the entry runs. --no-tests=error
+      # fails the step if the name stops being registered.
+      - name: Run bootstrap Map-iteration check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapMapIteration --output-on-failure --no-tests=error"
+
       # BootstrapListMethodRead self-skips on debug (SKIP_RETURN_CODE 125), so
       # this release leg is the one place the entry runs. --no-tests=error
       # fails the step if the name stops being registered.

@@ -307,6 +307,18 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Issue #720: a net-zero Map change during for-in (delete plus insert)
+    # must halt. The spec binds the structural version, not the size. The
+    # pre-body check cannot catch it at run time, so this runs both net-zero
+    # orders and a change on the last iteration. Same trace-noise constraint
+    # as BootstrapOperatorOverload above.
+    add_test(NAME BootstrapMapIteration
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_map_iteration.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapMapIteration PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issues #674, #707: a property read of a List method that is not a direct
     # call is a halting fault on every consumer. Probes 118 and 119 pin it in
     # the shared spec-probe gate; this runs the same differential comparison
