@@ -80,7 +80,6 @@ REVIEWED_NON_TABLE_KINDS = {
     "ReflectionUnsupportedError",
     "ReflectionArityError",
     "LengthTypeError",
-    "InvalidDestructureReceiverError",
     "ReflectionNotCallableError",
     "ReflectionNativeArityError",
 }
@@ -179,7 +178,6 @@ EXPECTED_CALLS = [
     ('InvalidReceiverError', '"Method called on invalid receiver."', JUDGED),
     ('NotIndexableError', '"Sequence destructuring requires a List."', RECORDED),
     ('IndexOutOfBoundsError', '"Not enough elements for sequence destructuring."', RECORDED),
-    ('InvalidDestructureReceiverError', '"Object destructuring requires an instance."', JUDGED),
     ('MatchError', '"No matching arm in match expression."', RECORDED),
 ]
 

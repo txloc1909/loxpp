@@ -1,0 +1,12 @@
+// A Map is in Property Get steps 2-5, so a name that is not a Map method is
+// the Map's own halting fault (spec/04-semantics.md, Destructuring
+// Declaration and Property Get step 2).
+var m = {"a": 1};
+var {keys} = m;
+print keys();
+
+var {bogus} = m;
+print "unreachable";
+
+// STATUS: error
+// CHECK: [a]

@@ -324,6 +324,27 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Issue #748: a class pattern and object destructuring read properties
+    # through GET_PROPERTY, so a name that is neither a field nor a method is a
+    # halting fault. Probes 120-123 pin it in the shared spec-probe gate; this
+    # runs the same differential comparison in ctest. Same trace-noise
+    # constraint as BootstrapListMethodRead above.
+    add_test(NAME BootstrapInstancePropertyRead
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
+                $<TARGET_FILE:loxpp>
+                ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/121_class_pattern_missing_field.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/122_destructure_property_reads.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/123_destructure_missing_field.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/124_destructure_non_instance_faults.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/125_map_destructure_missing_name.lox
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/126_math_property_missing_name.lox
+                --skip-on-trace
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapInstancePropertyRead PROPERTIES
+        ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issue #642: every compile message native can report has a case in
     # test/compile-errors/ or a recorded reason. The checker reads the message
     # templates from src/parser.cpp, src/compiler.cpp, and src/scanner.cpp, so

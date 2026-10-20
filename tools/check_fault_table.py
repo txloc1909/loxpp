@@ -398,6 +398,46 @@ FATAL_ROWS = [
         "fatal",
         "class C {} var c = C(); c.bogus;",
     ),
+    # Issue #748: the math object is an Instance with fixed fields, and the
+    # bootstrap used to return a function for any name.
+    Row(
+        "undefined_property_on_math",
+        "fatal",
+        "math.bogus;",
+    ),
+    # Issue #748: native compiles a class pattern's braced name as
+    # GET_PROPERTY, so the same spec row applies inside a class pattern.
+    Row(
+        "undefined_property_in_class_pattern",
+        "fatal",
+        "match C() { case C{bogus} => 1 case _ => 0 };",
+        setup="class C {}\n",
+    ),
+    # Issue #748: native compiles object destructuring as GET_PROPERTY too,
+    # so a missing name is the same halting fault (spec/04-semantics.md,
+    # Destructuring Declaration).
+    Row(
+        "undefined_property_in_destructure",
+        "fatal",
+        "var {bogus} = C();",
+        setup="class C {}\n",
+    ),
+    # Issue #748: a Map is in Property Get steps 2-5, so destructuring a
+    # missing Map method is the Map's own halting fault.
+    Row(
+        "undefined_property_in_map_destructure",
+        "fatal",
+        "var {bogus} = m;",
+        setup="var m = {};\n",
+    ),
+    # Issue #748: a non-instance destructuring source is a property read on a
+    # non-Instance. This row checks that the fault occurs. The table accepts a
+    # catchable fault, so probe 122 checks that it is not catchable.
+    Row(
+        "destructure_non_instance",
+        "fatal",
+        "var {x} = 42;",
+    ),
     # Fused site (issue #348): bootstrap's tree-walker used to give this
     # the same catchable kind it gives `42.foo()` (a call), because it could
     # not tell a plain property-get apart from a call target. Now it
@@ -784,6 +824,15 @@ FATAL_REGRESSION_ROWS = {
     # row on a List method, once as a plain read and once as a defer callee.
     "list_method_read",
     "list_method_read_defer",
+    # Issue #748: a class pattern and an object destructuring both read a
+    # property through GET_PROPERTY, so they share the spec rows of
+    # undefined_property_on_instance and property_get_non_instance. The math
+    # object is an Instance on native, so its row shares the same spec row.
+    "undefined_property_on_math",
+    "undefined_property_in_class_pattern",
+    "undefined_property_in_destructure",
+    "undefined_property_in_map_destructure",
+    "destructure_non_instance",
 }
 
 

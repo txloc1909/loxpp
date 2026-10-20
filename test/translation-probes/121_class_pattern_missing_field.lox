@@ -1,0 +1,27 @@
+// A name in the braces of a class pattern is a property read of the matched
+// instance (spec/04-semantics.md, match Expression, "Class patterns", and
+// Property Get). A nil-valued field binds nil, a method name binds a bound
+// method, and a name that is neither a field nor a method is a halting fault.
+class Box {
+    init() { this.value = 7; this.empty = nil; }
+    label() { return "box"; }
+}
+
+fun read(v) {
+    return match v {
+        case Box{value, empty} => str(value) + " " + str(empty)
+        case _ => "no match"
+    };
+}
+
+print read(Box());
+print match Box() { case Box{label} => label() case _ => "no match" };
+print "before the fault";
+
+print match Box() { case Box{bogus} => "matched" case _ => "no match" };
+print "unreachable";
+
+// STATUS: error
+// CHECK: 7 nil
+// CHECK: box
+// CHECK: before the fault

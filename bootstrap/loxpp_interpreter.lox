@@ -2239,13 +2239,6 @@ class LoxInstance {
         this.loxTag = "instance";
     }
 
-    instGet(name, line) {
-        if (this.fields.has(name)) return this.fields[name];
-        var method = this.klass.findMethod(name);
-        if (method != nil) return method.bind(this);
-        return nil;
-    }
-
     instSet(name, value) {
         this.fields[name] = value;
     }
@@ -2450,7 +2443,7 @@ fun reflectCallMethod(interp, args) {
     }
     if (tag == "function") {
         // A method resolved from the class is unbound; bind `this` to the
-        // instance, exactly as instGet() does for an ordinary method call. A
+        // instance, exactly as getProperty() does for an ordinary method call. A
         // function value stored in a field is called as-is (native's Op::CALL
         // of a field closure binds slot 0 to the closure, not the instance).
         if (!viaField) callee = callee.bind(instance);
@@ -2634,20 +2627,28 @@ class InterpMathFn {
     }
     call(interp, args) {
         var a = args[0];
-        if (this.name == "sqrt")  return math.sqrt(a);
-        if (this.name == "floor") return math.floor(a);
-        if (this.name == "ceil")  return math.ceil(a);
         if (this.name == "abs")   return math.abs(a);
+        if (this.name == "ceil")  return math.ceil(a);
+        if (this.name == "floor") return math.floor(a);
+        if (this.name == "round") return math.round(a);
+        if (this.name == "sqrt")  return math.sqrt(a);
+        if (this.name == "cbrt")  return math.cbrt(a);
+        if (this.name == "exp")   return math.exp(a);
         if (this.name == "log")   return math.log(a);
+        if (this.name == "log2")  return math.log2(a);
+        if (this.name == "log10") return math.log10(a);
         if (this.name == "sin")   return math.sin(a);
         if (this.name == "cos")   return math.cos(a);
         if (this.name == "tan")   return math.tan(a);
+        if (this.name == "asin")  return math.asin(a);
+        if (this.name == "acos")  return math.acos(a);
+        if (this.name == "atan")  return math.atan(a);
         var b = args[1];
         if (this.name == "pow")   return math.pow(a, b);
-        if (this.name == "min")   return math.min(a, b);
-        if (this.name == "max")   return math.max(a, b);
         if (this.name == "atan2") return math.atan2(a, b);
         if (this.name == "hypot") return math.hypot(a, b);
+        if (this.name == "min")   return math.min(a, b);
+        if (this.name == "max")   return math.max(a, b);
         return nil;
     }
     toString() { return "<native fn>"; }
@@ -4845,23 +4846,39 @@ class Interpreter {
         return callee.call(this, args);
     }
 
-    // Undefined-member faults below are fatal: native's are always-fatal
-    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
-    // The table's "UndefinedPropertyError" is reserved for a narrower cause,
-    // an undefined property read on a caught Error value itself (the "error"
-    // branch below).
+    // The math object's function fields, from src/math.cpp's kMathFunctions.
+    isMathFnName(name) {
+        return name == "abs"   or name == "ceil"  or name == "floor" or
+               name == "round" or name == "sqrt"  or name == "cbrt"  or
+               name == "exp"   or name == "log"   or name == "log2"  or
+               name == "log10" or name == "sin"   or name == "cos"   or
+               name == "tan"   or name == "asin"  or name == "acos"  or
+               name == "atan"  or name == "pow"   or name == "atan2" or
+               name == "hypot" or name == "min"   or name == "max";
+    }
+
+    // A property read, as native's GET_PROPERTY does (spec/04-semantics.md,
+    // Property Get). An Instance takes a field, then a bound method, then a
+    // fatal fault. A bare field lookup returns nil for both a nil-valued
+    // field and a missing member, so it cannot tell those cases apart. An
+    // Error takes kind or message, and a missing name there is the one
+    // catchable case.
     //
-    // Receive isCallTarget to distinguish plain property reads from method calls
-    // on non-instances. See evalCall's syntactic dispatch.
-    evalGet(objectExpr, name, line, env, isCallTarget) {
-        var object = this.evalExpr(objectExpr, env);
-        if (this.throwFlag) return nil;
+    // Undefined-member faults here are fatal: native's are always-fatal
+    // RAISE_ERROR sites (src/vm.cpp Op::GET_PROPERTY) with no catchable kind.
+    // The table's "UndefinedPropertyError" is reserved for the Error branch.
+    //
+    // Receive isCallTarget to distinguish plain property reads from method
+    // calls on non-instances. See evalCall's syntactic dispatch.
+    getProperty(object, name, line, isCallTarget) {
         if (loxTag(object) == "math") {
             if (name == "pi")  return math.pi;
             if (name == "e")   return math.e;
             if (name == "inf") return math.inf;
             if (name == "nan") return math.nan;
-            return InterpMathFn(name);
+            if (this.isMathFnName(name)) return InterpMathFn(name);
+            this.fatalError("Undefined property '" + name + "'.");
+            return nil;
         }
         if (loxTag(object) == "list") {
             // A List is not in Property Get's bound-method set (steps 2-5),
@@ -4937,18 +4954,28 @@ class Interpreter {
             this.setError("InvalidReceiverError", "Method called on invalid receiver.", line);
             return nil;
         }
-        var val = object.instGet(name, 0);
-        if (val == nil and !object.fields.has(name) and object.klass.findMethod(name) == nil) {
+        if (object.fields.has(name)) {
+            var val = object.fields[name];
+            // Calling a non-callable field value is fatal on native. Check
+            // before checking for basic non-callables.
+            if (isCallTarget and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
+                this.fatalError("Can only call functions, classes and enums.");
+                return nil;
+            }
+            return val;
+        }
+        var method = object.klass.findMethod(name);
+        if (method == nil) {
             this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
-        // Calling a non-callable field value is fatal on native. Check before
-        // checking for basic non-callables.
-        if (isCallTarget and object.fields.has(name) and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
-            this.fatalError("Can only call functions, classes and enums.");
-            return nil;
-        }
-        return val;
+        return method.bind(object);
+    }
+
+    evalGet(objectExpr, name, line, env, isCallTarget) {
+        var object = this.evalExpr(objectExpr, env);
+        if (this.throwFlag) return nil;
+        return this.getProperty(object, name, line, isCallTarget);
     }
 
     // Native's Op::SET_PROPERTY raises this fatally with its own message,
@@ -5101,23 +5128,17 @@ class Interpreter {
     }
 
     // Destructuring a field reads it exactly the way `source.fieldName`
-    // does (spec/04-semantics.md, Destructuring Declaration), so a
-    // non-instance source hits the same fault evalGet's own non-instance,
-    // non-call check hits: native's always-fatal "Only instances have
-    // properties." (src/vm.cpp Op::GET_PROPERTY), not the catchable
-    // "InvalidReceiverError" row, whose one documented cause is a method
-    // call on a non-instance (`42.foo()`) -- destructuring is never a call,
-    // so it needs its own kind, not that one's.
+    // does (spec/04-semantics.md, Destructuring Declaration), so it goes
+    // through the same property read as any other Get. A source that is not
+    // in Property Get steps 2-5 hits native's fatal "Only instances have
+    // properties." (src/vm.cpp Op::GET_PROPERTY).
     execObjDestructure(names, line, initializer, env) {
         var val = this.evalExpr(initializer, env);
         if (this.throwFlag) return;
-        if (loxTag(val) != "instance") {
-            this.setError("InvalidDestructureReceiverError", "Object destructuring requires an instance.", line);
-            return;
-        }
         var i = 0;
         while (i < len(names)) {
-            var field = val.instGet(names[i], line);
+            var field = this.getProperty(val, names[i], line, false);
+            if (this.throwFlag) return;
             env.define(names[i], field);
             i = i + 1;
         }
@@ -5295,7 +5316,7 @@ class Interpreter {
         while (i < len(subpats)) {
             var subpat = subpats[i];
             var fieldVal = match subpat {
-                case BindPat{name} => subject.instGet(name, 0)
+                case BindPat{name} => this.getProperty(subject, name, 0, false)
                 case WildPat       => nil
                 case _             => nil
             };

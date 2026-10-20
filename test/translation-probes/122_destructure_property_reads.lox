@@ -1,0 +1,29 @@
+// A destructuring declaration reads each name as a property read of the
+// source object (spec/04-semantics.md, Destructuring Declaration). A Map
+// gives a bound method and an Error gives kind or message, as in Property
+// Get. A missing name on an Error is the catchable UndefinedPropertyError.
+class Box {
+    init() { this.value = 7; }
+}
+
+var b = Box();
+var {value} = b;
+print value;
+
+var m = {"a": 1};
+var {has, keys} = m;
+print has("a");
+print keys();
+
+try { [][0]; } catch (e) {
+    var {kind} = e;
+    print kind;
+    try { var {bogus} = e; print bogus; } catch (e2) { print e2.kind; }
+}
+
+// STATUS: ok
+// CHECK: 7
+// CHECK: true
+// CHECK: [a]
+// CHECK: IndexOutOfBoundsError
+// CHECK: UndefinedPropertyError
