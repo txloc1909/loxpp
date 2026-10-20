@@ -319,3 +319,62 @@ fun f(xs) {
             (sequence_pattern
               (identifier_pattern))
             (number)))))))
+
+================================================================================
+Qualified constructor patterns and literal or-alternatives
+================================================================================
+
+var a = match t {
+  case 1 or 2 => "small"
+  case 0 or E.A => "zero or A"
+  case E.B(x, _) => x
+  case E.C{f} => f
+  case w @ E.D => w
+  case _ => nil
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (literal_pattern
+          (number))
+        (literal_pattern
+          (number))
+        (string
+          (string_content)))
+      (match_arm
+        (literal_pattern
+          (number))
+        (constructor_tag_pattern
+          (identifier)
+          (identifier))
+        (string
+          (string_content)))
+      (match_arm
+        (constructor_pattern
+          (identifier)
+          (identifier)
+          (identifier)
+          (identifier))
+        (identifier))
+      (match_arm
+        (record_pattern
+          (identifier)
+          (identifier)
+          (identifier))
+        (identifier))
+      (match_arm
+        (binding_pattern
+          (identifier)
+          (constructor_tag_pattern
+            (identifier)
+            (identifier)))
+        (identifier))
+      (match_arm
+        (identifier_pattern)
+        (nil)))))
