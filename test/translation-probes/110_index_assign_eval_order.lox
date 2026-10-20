@@ -1,14 +1,23 @@
 // An index assignment evaluates the collection, the index and the value, in
-// this order, before it checks the target or the index. A List, an invalid
-// map key and a non-indexable target raise a catchable fault after the value
-// has run. Assignment to a String is a halting fault (spec/04-semantics.md,
-// Halting Faults), so it is last: the program prints INDEX and VALUE, then
-// halts. The effects before every fault bind (spec/README.md, Conformance).
+// this order, before it checks the target or the index. The first case puts
+// an effect in the collection expression, so its COLL line comes before the
+// index's INDEX line: a consumer that evaluates the index first prints them
+// in the other order and fails. A List, an invalid map key and a
+// non-indexable target raise a catchable fault after the value has run.
+// Assignment to a String is a halting fault (spec/04-semantics.md, Halting
+// Faults), so it is last: the program prints INDEX and VALUE, then halts.
+// The effects before every fault bind (spec/README.md, Conformance).
 fun badIndex() { print "INDEX"; return 99; }
 fun badKey() { print "KEY"; return [1]; }
 fun v() { print "VALUE"; return "x"; }
 
 var l = [1, 2, 3];
+
+// The collection expression runs before the index, so its effect comes first
+// even when the index faults.
+fun coll() { print "COLL"; return l; }
+try { coll()[badIndex()] = v(); } catch (e) { print e.kind; }
+
 try { l[badIndex()] = v(); } catch (e) { print e.kind; }
 
 // The List checks run after the value, so a value that grows the list can
@@ -28,6 +37,10 @@ s[badIndex()] = v();
 print "after";
 
 // STATUS: error
+// CHECK: COLL
+// CHECK: INDEX
+// CHECK: VALUE
+// CHECK: IndexOutOfBoundsError
 // CHECK: INDEX
 // CHECK: VALUE
 // CHECK: IndexOutOfBoundsError
