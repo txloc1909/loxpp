@@ -1102,9 +1102,14 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 Token subTok = m_parser->m_current;
                 m_parser->advance();
                 std::string subName(subTok.lexeme);
-                // "_" is the wildcard, never a constructor or class name.
+                // A bare "_" is the wildcard. With "(" or "{" it is the head
+                // of a structural pattern, so it may name a constructor or
+                // class.
+                bool isWildcardSub = subName == "_" &&
+                                     !m_parser->check(TokenType::LEFT_BRACE) &&
+                                     !m_parser->check(TokenType::LEFT_PAREN);
                 const ConstructorInfo* subInfo =
-                    subName == "_" ? nullptr : findConstructor(subName);
+                    isWildcardSub ? nullptr : findConstructor(subName);
                 if (subInfo != nullptr) {
                     subCtorName = subName;
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
@@ -1120,7 +1125,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                     addLocal(atTok);
                     markInitialized();
-                } else if (subName != "_" && findClass(subName)) {
+                } else if (!isWildcardSub && findClass(subName)) {
                     ObjString* cn = m_mm->makeString(subTok.lexeme);
                     m_mm->pushTempRoot(cn);
                     uint16_t cnConst =
@@ -1164,9 +1169,12 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         int localsBefore = m_localCount;
         std::string ctorName;
 
-        // "_" is the wildcard pattern (spec/02-syntax.md, armPat), even when
-        // a constructor or class has that name.
-        bool isWildcard = patName == "_";
+        // A bare "_" is the wildcard pattern (spec/02-syntax.md, armPat). A
+        // "_" followed by "(" or "{" is the head of a structural pattern, so
+        // it may name a constructor or class.
+        bool isWildcard = patName == "_" &&
+                          !m_parser->check(TokenType::LEFT_BRACE) &&
+                          !m_parser->check(TokenType::LEFT_PAREN);
         const ConstructorInfo* info =
             isWildcard ? nullptr : findConstructor(patName);
         if (info != nullptr) {
@@ -1640,8 +1648,10 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
         std::string ctorName(m_parser->m_current.lexeme);
         m_parser->advance();
 
-        // A wildcard arm is not a tag arm, so the jump table is not eligible.
-        if (ctorName == "_") {
+        // A bare wildcard arm is not a tag arm, so the jump table is not
+        // eligible. "_" with "(" or "{" is a structural pattern head.
+        if (ctorName == "_" && !m_parser->check(TokenType::LEFT_PAREN) &&
+            !m_parser->check(TokenType::LEFT_BRACE)) {
             ok = false;
             break;
         }

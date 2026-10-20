@@ -1136,7 +1136,11 @@ class Parser {
     }
 
     parsePattern() {
-        if (this.check("IDENTIFIER") and this.peek().lexeme == "_") {
+        // A bare "_" is the wildcard. With "(" or "{" it is the head of a
+        // structural pattern, so it may name a constructor or class.
+        if (this.check("IDENTIFIER") and this.peek().lexeme == "_" and
+            !this.checkAhead(1, "LEFT_PAREN") and
+            !this.checkAhead(1, "LEFT_BRACE")) {
             this.advance();
             return WildPat();
         }

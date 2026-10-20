@@ -455,3 +455,28 @@ TEST_F(MatchExpressionTest, UnderscoreIsWildcardOverClassName) {
     expect_num(*h.getGlobal("r"), 1);
     expect_num(*h.getGlobal("s"), 2);
 }
+
+// A "_" with "(" or "{" is a structural pattern head, not the wildcard, so
+// it may name a constructor with fields (spec/02-syntax.md, armPat).
+TEST_F(MatchExpressionTest, UnderscoreConstructorStructuralPatterns) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { _(x) B }
+        var a = match _(9) { case _(y) => y case B => 0 };
+        var b = match _(3) { case _{x} => x case B => 0 };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("a"), 9);
+    expect_num(*h.getGlobal("b"), 3);
+}
+
+// The same rule applies to a class named "_".
+TEST_F(MatchExpressionTest, UnderscoreClassStructuralPattern) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        class _ { init(x) { this.x = x; } }
+        var a = match _(5) { case _{x} => x };
+    )"),
+              InterpretResult::OK);
+    expect_num(*h.getGlobal("a"), 5);
+}
