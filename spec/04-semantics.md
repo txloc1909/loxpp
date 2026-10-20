@@ -514,6 +514,8 @@ statement).
 
 **Class patterns.** A bare name in a pattern is a class test only as a whole arm pattern (alone or in an `or`-chain) or as the sub-pattern of an @-binding, and only when a global class with that name is declared earlier in the source than the match. A class name in any other place in a pattern is a binding, including a name in braces, parentheses or brackets. A class name is also a binding when no global class of that name is declared earlier in the source than the match; this includes a class that is not global. The class test reads the global with that name when it runs; if that global does not hold a class at that time, the test matches no value.
 
+Each name in the braces of a class pattern is a property read of the matched instance, as in [Property Get](#property-get), and the arm binds the result. A name that is neither a field nor a method of the instance is a runtime error.
+
 **Constructor patterns.** A bare name in a pattern is a constructor tag test only as a whole arm pattern (alone or in an `or`-chain) or as the sub-pattern of an @-binding, and only when an enum constructor with that name is declared earlier in the source than the match. This holds for a constructor with any number of fields: the arm makes the same test as the constructor pattern with that name, and binds no field. A constructor name in any other place in a pattern is a binding, including a name in braces, parentheses or brackets. A constructor name is also a binding when no enum constructor of that name is declared earlier in the source than the match. When an enum constructor and a global class with the same name are both declared earlier in the source than the match, the bare name is a constructor tag test.
 
 
