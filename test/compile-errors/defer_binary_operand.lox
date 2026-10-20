@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect a call expression after 'defer'.
+// Compile error: the operand of defer is a larger expression that ends in a call.
+fun f() {}
+fun g() { defer f() or f(); }

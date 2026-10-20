@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect a call expression after 'defer'.
+// Compile error: a parenthesised call is not shaped like a call.
+fun f() {}
+fun g() { defer (f()); }
