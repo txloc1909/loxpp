@@ -269,8 +269,8 @@ See `armPats` / `armPat` / `identArmPat` in the main EBNF.
 
 When the pattern name resolves to a known constructor, the arm performs a tag
 check rather than a binding. Unknown identifiers continue to act as bindings.
-`_` is the wildcard only when it is the whole pattern; followed by `(` or `{`,
-it is the pattern's name and resolves like any other name.
+`_` is the wildcard unless it is followed by `(` or `{`; with either, it is the
+pattern's name and resolves like any other name.
 
 **Or-patterns:** multiple identifier-starting alternatives may be separated by
 `or`. All alternatives must bind the same names in the same order; a mismatch

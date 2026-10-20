@@ -1638,7 +1638,7 @@ class Resolver {
 
     classifyAtPat(pat, at_name, subpat, line) {
         // The sub-pattern of an @-binding may name a constructor or a class.
-        // A name that resolves to neither is a plain binding. "_" is always
+        // A name that resolves to neither is a plain binding. A bare "_" is
         // the wildcard, so it is not a structural sub-pattern.
         var sub = match subpat {
             case BindPat{name} => this.classifyBareName(subpat, name)
