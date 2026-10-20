@@ -5,14 +5,11 @@ Differential check: a net-zero Map change during the bootstrap's for-in
 
 The bootstrap compares the Map's structural version with a snapshot taken
 before the loop, not its size, so an erase plus an insert that restores the
-net size still faults. The review of #719 found that no automatic check ran
-this case on the bootstrap, and that the pre-body check cannot fire at run
-time: the post-body check runs after every body that does not leave the
-loop, and no user code runs between it and the next pre-body check.
+net size still faults.
 
 CASES below cover both net-zero orders, a net-zero change on the last
-iteration (the post-body check alone catches it), and two permitted
-operations that are not structural changes. Every case runs on native and on
+iteration, and two permitted operations that are not structural changes.
+Every case runs on native and on
 the bootstrap. A halting case must be non-zero on both, and its stdout must
 match; the exact status and the message are implementation-defined
 (spec/README.md, Conformance). A permitted case must be zero on both.
