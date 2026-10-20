@@ -1620,19 +1620,28 @@ class Resolver {
     // brackets is always a binding. The parser cannot tell the two apart,
     // so the resolver rewrites the pattern here, before the interpreter
     // runs it.
-    classifyArmPat(pat) {
+    classifyArmPat(pat, line) {
         return match pat {
             case BindPat{name}          => this.classifyBareName(pat, name)
-            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat)
+            case AtPat{at_name, subpat} => this.classifyAtPat(pat, at_name, subpat, line)
             case _                      => pat
         };
     }
 
-    classifyAtPat(pat, at_name, subpat) {
+    classifyAtPat(pat, at_name, subpat, line) {
+        // The sub-pattern of an @-binding may name a constructor or a class.
+        // A name that resolves to neither is a plain binding; "_" is a
+        // wildcard unless a constructor or class with that name is declared.
         var sub = match subpat {
             case BindPat{name} => this.classifyBareName(subpat, name)
+            case WildPat       => this.classifyBareName(subpat, "_")
             case _             => subpat
         };
+        if (this.isLiteralPattern(sub)) {
+            this.resError("@", line, "Expected a structural pattern (constructor, class, or '[') after '@'.");
+        } else if (this.isBarePattern(sub) or this.isAtPattern(sub)) {
+            this.resError("@", line, "Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.");
+        }
         return AtPat(at_name, sub);
     }
 
@@ -1748,6 +1757,13 @@ class Resolver {
         return match pat {
             case ListPat{elems, rest_name} => true
             case _                         => false
+        };
+    }
+
+    isAtPattern(pat) {
+        return match pat {
+            case AtPat{at_name, subpat} => true
+            case _                      => false
         };
     }
 
@@ -1895,7 +1911,7 @@ class Resolver {
             var orOpen = true;
             var j = 0;
             while (j < len(arm.pats)) {
-                arm.pats[j] = this.classifyArmPat(arm.pats[j]);
+                arm.pats[j] = this.classifyArmPat(arm.pats[j], arm.line);
                 if (arm.chain != nil and arm.chain[2] == j) this.reportArmChain(arm.chain, arm.pats[j]);
                 if (orArm and orOpen) {
                     var pat = arm.pats[j];

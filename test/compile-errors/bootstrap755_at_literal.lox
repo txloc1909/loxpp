@@ -1,0 +1,3 @@
+// DIAGNOSTIC: Expected a structural pattern (constructor, class, or '[') after '@'.
+// Compile error: a literal is the sub-pattern of an @-binding.
+print str(match 1 { case p @ 1 => 1 case _ => 0 });

@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.
+// Compile error: a wildcard is the sub-pattern of an @-binding.
+var r = match 3 { case x @ _ => 1 case _ => 0 };
+print "after";
