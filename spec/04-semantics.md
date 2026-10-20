@@ -1192,11 +1192,20 @@ collection[key]
    d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error**.
    e. For a List, the expression evaluates to `collection[i]`. For a String,
       it evaluates to the one-character String at position `i`.
-5. If `collection` is an **Instance** whose class defines `__index_get__`,
+5. If `collection` is an **Enum** value:
+   a. If `key` is not a Number, this is a **halting fault** (see [Halting
+      Faults](#halting-faults)).
+   b. If `key` is not integer-valued (i.e., `key ≠ floor(key)`), this is a
+      **halting fault**.
+   c. Let `i` be the integer value of `key`.
+   d. If `i < 0` or `i ≥` the number of fields of the Enum value, this is a
+      **halting fault**.
+   e. The expression evaluates to the field at position `i`.
+6. If `collection` is an **Instance** whose class defines `__index_get__`,
    call it with `key` (see [Operator
    Overloading](#operator-overloading)); the expression evaluates to the
    method's return value.
-6. Otherwise, this is a **runtime error**.
+7. Otherwise, this is a **runtime error**.
 
 Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
 identical — both are the same Number value used as index 1.
@@ -1806,6 +1815,7 @@ run before the program ends is implementation-defined, as for every halt.
 | `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` |
 | `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` |
 | Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` |
+| Enum field indexed with a fractional index | `enum E { A(x) } var v = A(1); v[0.5];` |
 | Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` |
 | Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) |
 | `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` |
