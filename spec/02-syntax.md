@@ -300,6 +300,7 @@ never a constructor pattern: it is the wildcard `_`, a binding, or a class
 test.
 `_` alone is the wildcard. `_` followed by `{` is the name of a class pattern
 and resolves like any other name.
+A class pattern whose name is an enum name (`E{x}`) is a compile error.
 
 - `E.A` tests the constructor and binds no field.
 - `E.A(x, y)` lists one name for each field of `A`, in declaration order. A

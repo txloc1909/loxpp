@@ -7,14 +7,16 @@ class C {
         return "method";
     }
 }
+class D {}
 
 var v = E.E(5);
 print v;
 print match v { case E.E(x) => x case E.F => 0 };
 var c = C();
 print c.E();
-c.F = "property";
-print c.F;
+var d = D();
+d.E = "property";
+print d.E;
 
 // STATUS: ok
 // CHECK: E(5)
