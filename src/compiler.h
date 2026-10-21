@@ -70,6 +70,7 @@ struct LoopContext {
 
 struct ConstructorInfo {
     std::string enumName;
+    std::string name;
     uint8_t tag;
     uint8_t arity;
     std::vector<std::string> fieldNames;
@@ -179,6 +180,9 @@ class Compiler {
     uint16_t identifierConstant(const Token& name);
     void emitConstantOp(Op op, uint16_t idx);
     void namedVariable(const Token& name, bool canAssign);
+    // A use of an enum name: `E.A` reads the constructor A of the enum E
+    // from its hidden global. Every other use is a compile error.
+    void enumReference(Token enumTok, bool canAssign);
     // Clears the parse-time assignment flag after an operator expression,
     // whose value is never an assignment target.
     void markNotAssignable();
@@ -186,11 +190,28 @@ class Compiler {
     // Walks the enclosing chain to the root compiler.
     Compiler* findRootCompiler();
     const ConstructorInfo* findConstructor(const std::string& name) const;
+    // True for the name of an enum declared anywhere in the program, also
+    // before its declaration: the name means the enum in the whole program.
+    bool isEnumName(std::string_view name) const;
+    // True once the declaration of the enum has compiled.
+    bool isDeclaredEnum(const std::string& name) const;
+    // A variable of any binding form must not have the name of an enum.
+    void rejectEnumName(const Token& name);
+    // After `E` and `.`: consumes the constructor name and returns the
+    // constructor of E, or reports an error and returns nullptr.
+    const ConstructorInfo* qualifiedConstructor(const Token& enumTok);
+    // The constructor that a pattern head names: `E.A` (consumes `.A`), or
+    // a bare constructor name. Returns nullptr for any other head; `failed`
+    // is set when an error was reported.
+    const ConstructorInfo* patternHeadConstructor(const Token& headTok,
+                                                  bool& failed);
+    // The constant that holds the name of the hidden global of a
+    // constructor. No identifier can spell it, because it holds a '.'.
+    uint16_t constructorGlobalConstant(const ConstructorInfo& info);
     bool findClass(const std::string& name) const;
     // Emit GET_INDEX bindings for a constructor pattern.
     // Returns the number of locals bound.
-    int compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
-                           const Token& patTok);
+    int compileCtorPattern(int subjectSlot, const ConstructorInfo& info);
     // Emit GET_PROPERTY bindings for a class pattern (named-field only).
     // Returns the number of locals bound.
     int compileClassPattern(int subjectSlot, const Token& patTok);
@@ -282,6 +303,12 @@ class Compiler {
     std::unordered_map<std::string, ConstructorInfo> m_constructors;
     // enumName → ordered list of ctor names, for exhaustiveness checking.
     std::unordered_map<std::string, std::vector<std::string>> m_enumCtors;
+    // Root compiler only: the name of every enum the source declares,
+    // collected by a scan of the tokens before compilation starts.
+    std::set<std::string, std::less<>> m_programEnumNames;
+    // Root compiler only: the next constructor tag. Tags are unique in the
+    // program, so one tag test checks the enum and the constructor.
+    int m_nextTag{0};
     // Class name table — only meaningfully populated on the root compiler.
     std::set<std::string> m_classNames;
     // Root compiler only: the next ObjFunction::topLevelOrdinal, and the

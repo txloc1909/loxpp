@@ -58,7 +58,7 @@ TEST_F(EnumDeclarationTest, ConstructorWithFields) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Pair { Pair(first, second) }
-        var p = Pair(10, 20);
+        var p = Pair.Pair(10, 20);
     )"),
               InterpretResult::OK);
     auto pv = h.getGlobal("p");
@@ -123,11 +123,11 @@ TEST_F(MatchEnumTest, NamedFieldBinding) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Point { Point(x, y) }
-        var p = Point(3, 4);
+        var p = Point.Point(3, 4);
         var px = 0;
         var py = 0;
         match p {
-            case Point{x, y} => { px = x; py = y }
+            case Point.Point{x, y} => { px = x; py = y }
         };
     )"),
               InterpretResult::OK);

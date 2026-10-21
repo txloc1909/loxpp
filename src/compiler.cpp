@@ -3,6 +3,7 @@
 #include "escape.h"
 #include "memory_manager.h"
 #include "objects.h"
+#include "scanner.h"
 #include "utility.h"
 
 #include <algorithm>
@@ -18,6 +19,27 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm,
     return compile(source, mm, sink, CompileOptions{});
 }
 
+namespace {
+
+// The name after each `enum` keyword. An enum name means the enum in the
+// whole program (spec/02-syntax.md, enum declaration), also in the code
+// before its declaration, so a single pass cannot learn the names as it goes.
+std::set<std::string, std::less<>> scanEnumNames(const std::string& source) {
+    std::set<std::string, std::less<>> names;
+    Scanner scanner(source);
+    bool afterEnum = false;
+    for (Token t = scanner.scanOneToken(); t.type != TokenType::EOF_;
+         t = scanner.scanOneToken()) {
+        if (afterEnum && t.type == TokenType::IDENTIFIER) {
+            names.emplace(t.lexeme);
+        }
+        afterEnum = t.type == TokenType::ENUM;
+    }
+    return names;
+}
+
+} // namespace
+
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink, const CompileOptions& options) {
     ObjFunction* fn = mm->create<ObjFunction>();
@@ -25,6 +47,7 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm,
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
     compiler->m_sourceId = options.sourceId;
+    compiler->m_programEnumNames = scanEnumNames(source);
 
     while (!parser->check(TokenType::EOF_)) {
         bool keep =
@@ -260,6 +283,10 @@ void Compiler::string() {
 }
 
 void Compiler::variable() {
+    if (isEnumName(m_parser->m_previous.lexeme)) {
+        enumReference(m_parser->m_previous, m_parser->m_canAssign);
+        return;
+    }
     namedVariable(m_parser->m_previous, m_parser->m_canAssign);
 }
 
@@ -370,6 +397,7 @@ void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
     emitConstantOp(Op::DEFINE_GLOBAL, hiddenIdx);
 
     for (const Token& field : fields) {
+        rejectEnumName(field);
         emitConstantOp(Op::GET_GLOBAL, hiddenIdx);
         emitConstantOp(Op::GET_PROPERTY, identifierConstant(field));
         emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(field));
@@ -457,6 +485,7 @@ void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
         if (names[i].lexeme == "_") {
             emitByte(Op::POP);
         } else {
+            rejectEnumName(names[i]);
             emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
         }
     }
@@ -487,6 +516,7 @@ void Compiler::varDeclaration() {
     if (m_scopeDepth > 0) {
         markInitialized();
     } else {
+        rejectEnumName(name);
         uint16_t nameConst = identifierConstant(name);
         emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
     }
@@ -516,6 +546,7 @@ void Compiler::endScope() {
 }
 
 void Compiler::addLocal(const Token& name) {
+    rejectEnumName(name);
     if (m_localCount == UINT8_COUNT) {
         m_parser->error("Too many local variables in function.");
         return;
@@ -953,17 +984,19 @@ void Compiler::compileMatchBody() {
         m_stackHeight = m_localCount;
         int armLocalBase_iter = m_localCount;
 
-        if (jtc.eligible) {
-            // Record arm start before compiling so we can patch the table.
-            const ConstructorInfo* peekInfo =
-                findConstructor(std::string(m_parser->m_current.lexeme));
-            jtArmStarts[peekInfo->tag] =
-                static_cast<int>(getCurrentChunk()->size());
-        }
+        // With a jump table the arm emits no tag test, so its code starts
+        // here, where the table entry for its constructor points.
+        int armStart = static_cast<int>(getCurrentChunk()->size());
 
         auto arm =
             compileMatchArm(subjectSlot, armLocalBase_iter, m_openHandlerCount,
                             resultSlot, jtc.eligible);
+        if (jtc.eligible && !arm.ctorNames.empty()) {
+            if (const ConstructorInfo* info =
+                    findConstructor(arm.ctorNames.front())) {
+                jtArmStarts[info->tag] = armStart;
+            }
+        }
         if (arm.isUnguardedCatchAll) {
             hasUnguardedCatchAll = true;
         }
@@ -1086,7 +1119,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             if (patName == "_") {
                 m_parser->error("'_' cannot be used as an @-binding name.");
             }
-            Token atTok{TokenType::IDENTIFIER, patTok.lexeme, patTok.line};
+            Token atTok = patTok;
             int localsBefore = m_localCount;
             int subMissJump = -1;
             std::string subCtorName;
@@ -1108,10 +1141,15 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 bool isWildcardSub = subName == "_" &&
                                      !m_parser->check(TokenType::LEFT_BRACE) &&
                                      !m_parser->check(TokenType::LEFT_PAREN);
+                bool subHeadFailed = false;
                 const ConstructorInfo* subInfo =
-                    isWildcardSub ? nullptr : findConstructor(subName);
-                if (subInfo != nullptr) {
-                    subCtorName = subName;
+                    isWildcardSub
+                        ? nullptr
+                        : patternHeadConstructor(subTok, subHeadFailed);
+                if (subHeadFailed) {
+                    // The head already reported its error.
+                } else if (subInfo != nullptr) {
+                    subCtorName = subInfo->name;
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                     emitByte(Op::GET_TAG);
                     emitConstantOp(
@@ -1120,7 +1158,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                     emitByte(Op::EQUAL);
                     subMissJump = emitJump(Op::JUMP_IF_FALSE);
                     emitByte(Op::POP);
-                    compileCtorPattern(subjectSlot, *subInfo, subTok);
+                    compileCtorPattern(subjectSlot, *subInfo);
                     // Tag check passed: bind @-name to the whole subject.
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                     addLocal(atTok);
@@ -1175,10 +1213,13 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         bool isWildcard = patName == "_" &&
                           !m_parser->check(TokenType::LEFT_BRACE) &&
                           !m_parser->check(TokenType::LEFT_PAREN);
+        bool headFailed = false;
         const ConstructorInfo* info =
-            isWildcard ? nullptr : findConstructor(patName);
-        if (info != nullptr) {
-            ctorName = patName;
+            isWildcard ? nullptr : patternHeadConstructor(patTok, headFailed);
+        if (headFailed) {
+            // The head already reported its error.
+        } else if (info != nullptr) {
+            ctorName = info->name;
             if (!skipPatternCheck) {
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                 emitByte(Op::GET_TAG);
@@ -1189,7 +1230,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 missJump = emitJump(Op::JUMP_IF_FALSE);
                 emitByte(Op::POP);
             }
-            compileCtorPattern(subjectSlot, *info, patTok);
+            compileCtorPattern(subjectSlot, *info);
         } else if (!isWildcard && findClass(patName)) {
             ObjString* classNameStr = m_mm->makeString(patTok.lexeme);
             m_mm->pushTempRoot(classNameStr);
@@ -1214,8 +1255,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             }
             if (patName != "_") {
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-                Token bindTok{TokenType::IDENTIFIER, patTok.lexeme,
-                              patTok.line};
+                Token bindTok = patTok;
                 addLocal(bindTok);
                 markInitialized();
             }
@@ -1446,6 +1486,121 @@ Compiler::findConstructor(const std::string& name) const {
     return nullptr;
 }
 
+bool Compiler::isEnumName(std::string_view name) const {
+    const Compiler* root = this;
+    while (root->m_enclosing != nullptr) {
+        root = root->m_enclosing;
+    }
+    return root->m_programEnumNames.find(name) !=
+           root->m_programEnumNames.end();
+}
+
+bool Compiler::isDeclaredEnum(const std::string& name) const {
+    const Compiler* root = this;
+    while (root->m_enclosing != nullptr) {
+        root = root->m_enclosing;
+    }
+    return root->m_enumCtors.count(name) != 0U;
+}
+
+void Compiler::rejectEnumName(const Token& name) {
+    if (isEnumName(name.lexeme)) {
+        m_parser->errorAt(name,
+                          ("A variable can't have the name of the enum '" +
+                           std::string(name.lexeme) + "'.")
+                              .c_str());
+    }
+}
+
+const ConstructorInfo* Compiler::qualifiedConstructor(const Token& enumTok) {
+    m_parser->consume(TokenType::IDENTIFIER,
+                      "Expect constructor name after '.'.");
+    if (m_parser->m_previous.type != TokenType::IDENTIFIER) {
+        return nullptr;
+    }
+    std::string enumName(enumTok.lexeme);
+    std::string ctorName(m_parser->m_previous.lexeme);
+    const ConstructorInfo* info = findConstructor(ctorName);
+    if (info == nullptr || info->enumName != enumName) {
+        m_parser->error(
+            ("Enum '" + enumName + "' has no constructor '" + ctorName + "'.")
+                .c_str());
+        return nullptr;
+    }
+    return info;
+}
+
+const ConstructorInfo* Compiler::patternHeadConstructor(const Token& headTok,
+                                                        bool& failed) {
+    failed = false;
+    std::string name(headTok.lexeme);
+    if (!isEnumName(name)) {
+        return findConstructor(name);
+    }
+    if (!isDeclaredEnum(name)) {
+        m_parser->error(
+            ("Can't use the enum '" + name + "' before its declaration.")
+                .c_str());
+        failed = true;
+        return nullptr;
+    }
+    if (m_parser->match(TokenType::DOT)) {
+        const ConstructorInfo* info = qualifiedConstructor(headTok);
+        failed = info == nullptr;
+        return info;
+    }
+    if (m_parser->check(TokenType::LEFT_PAREN) ||
+        m_parser->check(TokenType::LEFT_BRACE)) {
+        m_parser->errorAtCurrent(
+            ("Expect '.' and a constructor name after the enum '" + name + "'.")
+                .c_str());
+        failed = true;
+    }
+    // Otherwise the head is a binding, which addLocal rejects.
+    return nullptr;
+}
+
+uint16_t Compiler::constructorGlobalConstant(const ConstructorInfo& info) {
+    ObjString* s = m_mm->makeString(info.enumName + "." + info.name);
+    m_mm->pushTempRoot(s);
+    uint16_t idx = makeConstant(Value{static_cast<Obj*>(s)});
+    m_mm->popTempRoot();
+    return idx;
+}
+
+void Compiler::enumReference(Token enumTok, bool canAssign) {
+    std::string enumName(enumTok.lexeme);
+    if (!isDeclaredEnum(enumName)) {
+        m_parser->error(
+            ("Can't use the enum '" + enumName + "' before its declaration.")
+                .c_str());
+        return;
+    }
+    if (!m_parser->match(TokenType::DOT)) {
+        if (canAssign && m_parser->check(TokenType::EQUAL)) {
+            m_parser->error(
+                ("Can't assign to the enum '" + enumName + "'.").c_str());
+        } else {
+            m_parser->error(("The enum '" + enumName +
+                             "' is not a value; name a constructor, as in '" +
+                             enumName + ".A'.")
+                                .c_str());
+        }
+        return;
+    }
+    const ConstructorInfo* info = qualifiedConstructor(enumTok);
+    if (info == nullptr) {
+        return;
+    }
+    if (canAssign && m_parser->check(TokenType::EQUAL)) {
+        m_parser->error(("Can't assign to the constructor '" + enumName + "." +
+                         info->name + "'.")
+                            .c_str());
+        return;
+    }
+    emitConstantOp(Op::GET_GLOBAL, constructorGlobalConstant(*info));
+}
+
 bool Compiler::findClass(const std::string& name) const {
     const Compiler* found = walkChain<Compiler>(
         this,
@@ -1502,8 +1657,8 @@ void Compiler::enumDeclaration() {
     }
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before enum body.");
+    root->m_enumCtors[enumName]; // declared, also with no constructor
 
-    uint8_t tag = 0;
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
         m_parser->consume(TokenType::IDENTIFIER, "Expect constructor name.");
@@ -1529,6 +1684,11 @@ void Compiler::enumDeclaration() {
         }
 
         auto arity = static_cast<uint8_t>(fieldNames.size());
+        if (root->m_nextTag > UINT8_MAX) {
+            m_parser->error("Too many enum constructors in one program.");
+            return;
+        }
+        auto tag = static_cast<uint8_t>(root->m_nextTag++);
 
         ObjString* ctorNameStr = m_mm->makeString(ctorTok.lexeme);
         m_mm->pushTempRoot(ctorNameStr);
@@ -1543,20 +1703,24 @@ void Compiler::enumDeclaration() {
         m_mm->popTempRoot(); // enumNameStr
         m_mm->popTempRoot(); // ctorNameStr
 
-        uint16_t nameConst = identifierConstant(ctorTok);
+        ConstructorInfo info{enumName, ctorName, tag, arity, fieldNames};
         emitConstantOp(Op::CONSTANT, ctorConst);
-        emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
+        emitConstantOp(Op::DEFINE_GLOBAL, constructorGlobalConstant(info));
+        // The bare name stays a global too, unless it is an enum name, which
+        // means the enum.
+        if (!isEnumName(ctorName)) {
+            emitConstantOp(Op::CONSTANT, ctorConst);
+            emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(ctorTok));
+        }
 
-        root->m_constructors[ctorName] = {enumName, tag, arity, fieldNames};
+        root->m_constructors[ctorName] = std::move(info);
         root->m_enumCtors[enumName].push_back(ctorName);
-        tag++;
     }
 
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after enum body.");
 }
 
-int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
-                                 const Token& patTok) {
+int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info) {
     int bindingCount = 0;
     bool namedFields = m_parser->check(TokenType::LEFT_BRACE) &&
                        !m_parser->check(TokenType::FAT_ARROW) &&
@@ -1574,7 +1738,7 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info,
                                     info.fieldNames.end(), fieldName);
                 if (it == info.fieldNames.end()) {
                     m_parser->error(("Unknown field '" + fieldName + "' for '" +
-                                     std::string(patTok.lexeme) + "'.")
+                                     info.name + "'.")
                                         .c_str());
                     break;
                 }
@@ -1654,6 +1818,23 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
             !m_parser->check(TokenType::LEFT_BRACE)) {
             ok = false;
             break;
+        }
+
+        if (isEnumName(ctorName)) {
+            // A qualified head `E.A`.
+            if (!isDeclaredEnum(ctorName) || !m_parser->match(TokenType::DOT) ||
+                !m_parser->check(TokenType::IDENTIFIER)) {
+                ok = false;
+                break;
+            }
+            std::string enumName = std::move(ctorName);
+            ctorName = std::string(m_parser->m_current.lexeme);
+            m_parser->advance();
+            const ConstructorInfo* q = findConstructor(ctorName);
+            if (q == nullptr || q->enumName != enumName) {
+                ok = false;
+                break;
+            }
         }
 
         const ConstructorInfo* info = findConstructor(ctorName);
@@ -1756,7 +1937,8 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
     m_parser->m_hadError = savedHadError;
     m_parser->m_panicMode = savedPanicMode;
 
-    if (!ok || tags.empty()) {
+    // JUMP_TABLE holds its count in one byte.
+    if (!ok || tags.empty() || tags.size() > UINT8_MAX) {
         return result;
     }
 
@@ -1819,6 +2001,7 @@ void Compiler::funDeclaration() {
         declareVariable();
         markInitialized(); // allow recursion inside the body
     } else {
+        rejectEnumName(name);
         nameConst = identifierConstant(name);
     }
 
@@ -1854,6 +2037,8 @@ void Compiler::classDeclaration() {
 
     if (m_scopeDepth > 0) {
         declareVariable();
+    } else {
+        rejectEnumName(className);
     }
 
     emitConstantOp(Op::CLASS, nameConst);
@@ -1874,7 +2059,11 @@ void Compiler::classDeclaration() {
         if (m_parser->m_previous.lexeme == className.lexeme) {
             m_parser->error("A class can't inherit from itself.");
         }
-        namedVariable(m_parser->m_previous, false); // push superclass
+        if (isEnumName(m_parser->m_previous.lexeme)) {
+            enumReference(m_parser->m_previous, false);
+        } else {
+            namedVariable(m_parser->m_previous, false); // push superclass
+        }
 
         // Introduce "super" as a local so method closures can capture it.
         beginScope();

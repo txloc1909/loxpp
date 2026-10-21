@@ -205,6 +205,16 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap accepts the program'),
     'Unterminated string.':
         Deferred(641, 'different line and a second error'),
+    "A variable can't have the name of the enum '<...>'.":
+        Deferred(775, 'the bootstrap accepts the program'),
+    "Can't assign to the constructor '<...>.<...>'.":
+        Deferred(775, 'the bootstrap faults at run time'),
+    "Can't assign to the enum '<...>'.":
+        Deferred(775, 'the bootstrap faults at run time'),
+    "Enum '<...>' has no constructor '<...>'.":
+        Deferred(775, 'the bootstrap faults at run time'),
+    "The enum '<...>' is not a value; name a constructor, as in '<...>.A'.":
+        Deferred(775, 'the bootstrap faults at run time'),
 }
 
 GENERATED: dict[str, Generated] = {
@@ -214,6 +224,8 @@ GENERATED: dict[str, Generated] = {
         Generated('too_much_code_to_jump_over', 681, 'an if body over 65,535 bytes of bytecode; the bootstrap accepts it'),
     'Loop body too large.':
         Generated('loop_body_too_large', 681, 'a loop body over 65,535 bytes of bytecode; the bootstrap accepts it'),
+    'Too many enum constructors in one program.':
+        Generated('too_many_enum_constructors', None, '257 constructors; the limit is implementation-defined, and the bootstrap has none'),
 }
 
 UNREACHABLE: dict[str, Unreachable] = {
@@ -487,10 +499,17 @@ def build_loop_body_too_large() -> str:
     return f"fun f() {{\nwhile (true) {{\n{statements}\n}}\n}}\n"
 
 
+def build_too_many_enum_constructors() -> str:
+    """One more constructor than the 256 tags that native has in a program."""
+    ctors = " ".join(f"C{i}" for i in range(257))
+    return f"enum E {{ {ctors} }}\n"
+
+
 BUILDERS = {
     "too_many_constants": build_too_many_constants,
     "too_much_code_to_jump_over": build_too_much_code_to_jump_over,
     "loop_body_too_large": build_loop_body_too_large,
+    "too_many_enum_constructors": build_too_many_enum_constructors,
 }
 
 

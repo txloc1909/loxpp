@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect constructor name after '.'.
+// Compile error: an enum name and '.' with no constructor name after it.
+enum E { A }
+E.;
