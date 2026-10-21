@@ -276,3 +276,45 @@ TEST_F(EnumClassCompositionTest, ClassPatternNoExhaustivenessError) {
     )"),
               InterpretResult::OK);
 }
+
+// ---------------------------------------------------------------------------
+// ReplClassPatternTest — one VM and one h.run() per REPL line. A class
+// declaration on an earlier line must still name a class pattern later.
+// ---------------------------------------------------------------------------
+
+class ReplClassPatternTest : public ::testing::Test {};
+
+TEST_F(ReplClassPatternTest, NamedFieldPatternOnALaterLine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("class Point { init(x, y) { this.x = x; this.y = y; } }"),
+              InterpretResult::OK);
+    ASSERT_EQ(h.run("var p = Point(3, 4);"), InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var got = match p {
+        case Point{x, y} => x + y
+        case _           => 0
+    };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("got");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 7.0);
+}
+
+TEST_F(ReplClassPatternTest, ClassTestOnALaterLine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("class Sentinel { init() {} }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var got = match Sentinel() { case Sentinel => 1 case _ "
+                    "=> 2 };"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("got");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 1.0);
+}
+
+TEST_F(ReplClassPatternTest, AFailedLineLeavesNoClass) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("class Q { init() {} } var 1 = 2;"),
+              InterpretResult::COMPILE_ERROR);
+    // Q was declared only by the failed line, so this is not a class pattern.
+    EXPECT_EQ(h.run("var got = match 1 { case Q{x} => 1 case _ => 2 };"),
+              InterpretResult::COMPILE_ERROR);
+}

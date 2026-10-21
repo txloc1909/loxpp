@@ -42,12 +42,24 @@ std::set<std::string, std::less<>> scanEnumNames(const std::string& source) {
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
                      DiagnosticSink* sink, const CompileOptions& options) {
+    // Continue the caller's declarations when it supplies them (a REPL line),
+    // and keep them local otherwise. The work happens on a copy, so a compile
+    // that fails leaves the session as it was: a line that fails never ran its
+    // declarations, and must not make a later line a duplicate.
+    ProgramDeclarations localDeclarations;
+    ProgramDeclarations* const session = options.declarations != nullptr
+                                             ? options.declarations
+                                             : &localDeclarations;
+    ProgramDeclarations declarations = *session;
+    std::set<std::string, std::less<>> scannedNames = scanEnumNames(source);
+    declarations.enumNames.insert(scannedNames.begin(), scannedNames.end());
+
     ObjFunction* fn = mm->create<ObjFunction>();
     auto parser = std::make_unique<Parser>(source, sink);
     auto compiler = std::make_unique<Compiler>(fn, parser.get(), mm,
                                                FunctionType::SCRIPT, nullptr);
     compiler->m_sourceId = options.sourceId;
-    compiler->m_programEnumNames = scanEnumNames(source);
+    compiler->m_declarations = &declarations;
 
     while (!parser->check(TokenType::EOF_)) {
         bool keep =
@@ -67,6 +79,7 @@ ObjFunction* compile(const std::string& source, MemoryManager* mm,
     if (parser->m_hadError) {
         return nullptr;
     }
+    *session = std::move(declarations);
     return fn;
 }
 
@@ -92,6 +105,7 @@ Compiler::Compiler(ObjFunction* function, Parser* parser, MemoryManager* mm,
     // methods) can still resolve 'this'.
     if (m_enclosing != nullptr) {
         m_currentClass = m_enclosing->m_currentClass;
+        m_declarations = m_enclosing->m_declarations;
     }
 
     m_mm->setCurrentCompiler(this);
@@ -398,6 +412,7 @@ void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
 
     for (const Token& field : fields) {
         rejectEnumName(field);
+        m_declarations->globalNames.insert(std::string(field.lexeme));
         emitConstantOp(Op::GET_GLOBAL, hiddenIdx);
         emitConstantOp(Op::GET_PROPERTY, identifierConstant(field));
         emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(field));
@@ -486,6 +501,7 @@ void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
             emitByte(Op::POP);
         } else {
             rejectEnumName(names[i]);
+            m_declarations->globalNames.insert(std::string(names[i].lexeme));
             emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
         }
     }
@@ -517,6 +533,7 @@ void Compiler::varDeclaration() {
         markInitialized();
     } else {
         rejectEnumName(name);
+        m_declarations->globalNames.insert(std::string(name.lexeme));
         uint16_t nameConst = identifierConstant(name);
         emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
     }
@@ -1481,42 +1498,19 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             std::move(allCtorNames)};
 }
 
-Compiler* Compiler::findRootCompiler() {
-    Compiler* c = this;
-    while (c->m_enclosing != nullptr) {
-        c = c->m_enclosing;
-    }
-    return c;
-}
-
 const ConstructorInfo*
 Compiler::findConstructor(const std::string& name) const {
-    const Compiler* c = this;
-    while (c != nullptr) {
-        auto it = c->m_constructors.find(name);
-        if (it != c->m_constructors.end()) {
-            return &it->second;
-        }
-        c = c->m_enclosing;
-    }
-    return nullptr;
+    auto it = m_declarations->constructors.find(name);
+    return it == m_declarations->constructors.end() ? nullptr : &it->second;
 }
 
 bool Compiler::isEnumName(std::string_view name) const {
-    const Compiler* root = this;
-    while (root->m_enclosing != nullptr) {
-        root = root->m_enclosing;
-    }
-    return root->m_programEnumNames.find(name) !=
-           root->m_programEnumNames.end();
+    return m_declarations->enumNames.find(name) !=
+           m_declarations->enumNames.end();
 }
 
 bool Compiler::isDeclaredEnum(const std::string& name) const {
-    const Compiler* root = this;
-    while (root->m_enclosing != nullptr) {
-        root = root->m_enclosing;
-    }
-    return root->m_enumCtors.contains(name);
+    return m_declarations->enumCtors.contains(name);
 }
 
 void Compiler::rejectEnumName(const Token& name) {
@@ -1618,13 +1612,7 @@ void Compiler::enumReference(Token enumTok, bool canAssign) {
 }
 
 bool Compiler::findClass(const std::string& name) const {
-    const Compiler* found = walkChain<Compiler>(
-        this,
-        [&name](const Compiler* c) {
-            return c->m_classNames.count(name) != 0U;
-        },
-        [](const Compiler* c) { return c->m_enclosing; });
-    return found != nullptr;
+    return m_declarations->classNames.count(name) != 0U;
 }
 
 int Compiler::compileClassPattern(int subjectSlot, const Token& patTok) {
@@ -1666,14 +1654,23 @@ void Compiler::enumDeclaration() {
     Token enumTok = m_parser->m_previous;
     std::string enumName(enumTok.lexeme);
 
-    Compiler* root = findRootCompiler();
-    if (root->m_enumCtors.count(enumName) != 0U) {
+    ProgramDeclarations* declarations = m_declarations;
+    if (declarations->enumCtors.count(enumName) != 0U) {
         m_parser->error("Duplicate enum name.");
+        return;
+    }
+    // An enum name means the enum in the whole program, so an earlier line's
+    // global variable, function, or class cannot keep the name.
+    if (declarations->globalNames.count(enumName) != 0U) {
+        m_parser->errorAt(
+            enumTok,
+            ("A variable can't have the name of the enum '" + enumName + "'.")
+                .c_str());
         return;
     }
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before enum body.");
-    root->m_enumCtors[enumName]; // declared, also with no constructor
+    declarations->enumCtors[enumName]; // declared, also with no constructor
 
     while (!m_parser->check(TokenType::RIGHT_BRACE) &&
            !m_parser->check(TokenType::EOF_)) {
@@ -1682,7 +1679,7 @@ void Compiler::enumDeclaration() {
         std::string ctorName(ctorTok.lexeme);
 
         std::string qualifiedName = enumName + "." + ctorName;
-        if (root->m_constructors.count(qualifiedName) != 0U) {
+        if (declarations->constructors.count(qualifiedName) != 0U) {
             m_parser->error("Duplicate constructor name.");
             return;
         }
@@ -1701,11 +1698,11 @@ void Compiler::enumDeclaration() {
         }
 
         auto arity = static_cast<uint8_t>(fieldNames.size());
-        if (root->m_nextTag > UINT8_MAX) {
+        if (declarations->nextTag > UINT8_MAX) {
             m_parser->error("Too many enum constructors in one program.");
             return;
         }
-        auto tag = static_cast<uint8_t>(root->m_nextTag++);
+        auto tag = static_cast<uint8_t>(declarations->nextTag++);
 
         ObjString* ctorNameStr = m_mm->makeString(ctorTok.lexeme);
         m_mm->pushTempRoot(ctorNameStr);
@@ -1725,8 +1722,8 @@ void Compiler::enumDeclaration() {
         emitConstantOp(Op::CONSTANT, ctorConst);
         emitConstantOp(Op::DEFINE_GLOBAL, hiddenConst);
 
-        root->m_constructors[qualifiedName] = std::move(info);
-        root->m_enumCtors[enumName].push_back(ctorName);
+        declarations->constructors[qualifiedName] = std::move(info);
+        declarations->enumCtors[enumName].push_back(ctorName);
     }
 
     m_parser->consume(TokenType::RIGHT_BRACE, "Expect '}' after enum body.");
@@ -1976,9 +1973,8 @@ void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
         }
         checkedEnums.insert(info->enumName);
 
-        Compiler* root = findRootCompiler();
-        auto enumIt = root->m_enumCtors.find(info->enumName);
-        if (enumIt == root->m_enumCtors.end()) {
+        auto enumIt = m_declarations->enumCtors.find(info->enumName);
+        if (enumIt == m_declarations->enumCtors.end()) {
             continue;
         }
         std::vector<std::string> missing;
@@ -2012,6 +2008,7 @@ void Compiler::funDeclaration() {
         markInitialized(); // allow recursion inside the body
     } else {
         rejectEnumName(name);
+        m_declarations->globalNames.insert(std::string(name.lexeme));
         nameConst = identifierConstant(name);
     }
 
@@ -2057,7 +2054,8 @@ void Compiler::classDeclaration() {
         markInitialized();
     } else {
         emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
-        findRootCompiler()->m_classNames.insert(std::string(className.lexeme));
+        m_declarations->classNames.insert(std::string(className.lexeme));
+        m_declarations->globalNames.insert(std::string(className.lexeme));
     }
 
     ClassCompiler classCompiler;

@@ -65,13 +65,35 @@ void Runtime::predeclareGlobalSlots() {
     }
 }
 
+namespace {
+
+// True when the script declares a top-level `fun` of this source: only such a
+// source can be a worker entry (task.spawn_worker step 1).
+bool sourceHasTopLevelFunction(const ObjFunction* script, int sourceId) {
+    const ValueArray& constants = script->chunk.constants();
+    for (std::uint16_t i = 0; i < constants.size(); i++) {
+        Value c = constants.at(i);
+        if (!isFunction(c)) {
+            continue;
+        }
+        const auto* f = static_cast<const ObjFunction*>(as<Obj*>(c));
+        if (f->topLevelOrdinal >= 0 && f->sourceId == sourceId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
     return loadProgram(source, sink, false);
 }
 
 ObjClosure* Runtime::loadProgram(const std::string& source,
-                                 DiagnosticSink* sink, bool declarationsOnly) {
+                                 DiagnosticSink* sink, bool declarationsOnly,
+                                 int sourceId) {
     // Guard against dangling class pointers from a prior loadSource() call
     // on this same Runtime (a REPL line, or a second rt_startup() on a
     // process that already ran one program). GC can fire inside compile(),
@@ -88,18 +110,48 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     m_yieldedValue = Value{};
     CompileOptions options;
     options.declarationsOnly = declarationsOnly;
+    std::shared_ptr<const ProgramDeclarations> sourceDeclarations;
     if (declarationsOnly) {
-        // A new worker compiles a source it already has, under its own id.
-        for (std::size_t i = 0; i < m_sources.size(); i++) {
-            if (*m_sources[i] == source) {
-                options.sourceId = static_cast<int>(i);
-            }
-        }
+        // A new worker compiles a source it already has, under the id of the
+        // entry function's source. Do not search m_sources for the text: two
+        // lines can have the same text, and a failed line leaves its source
+        // behind with no declaration tables.
+        options.sourceId = sourceId;
     } else {
         options.sourceId = static_cast<int>(m_sources.size());
+        if (!m_declarations) {
+            m_declarations = std::make_unique<ProgramDeclarations>();
+        }
+        // The tables before this source. A worker that recompiles this source
+        // alone (runWorker) starts from them, so the constructor tags it
+        // assigns to this source's declarations match the ones this compile
+        // assigns, and its compile-time checks see the same declarations.
+        auto snapshot = std::make_shared<ProgramDeclarations>(*m_declarations);
+        // This runtime already accepted the source with these tables, so the
+        // enum check against earlier global names cannot fire again. Drop
+        // them: they are the table that grows with every line, and a session
+        // with many functions would keep one growing copy per line.
+        snapshot->globalNames.clear();
+        sourceDeclarations = std::move(snapshot);
         m_sources.push_back(std::make_shared<const std::string>(source));
     }
+    // A compile continues this Runtime's session: a REPL line sees every
+    // declaration an earlier line made.
+    if (!m_declarations) {
+        m_declarations = std::make_unique<ProgramDeclarations>();
+    }
+    options.declarations = m_declarations.get();
     ObjFunction* fn = compile(source, &m_mm, sink, options);
+    if (!declarationsOnly) {
+        // Only a source with a top-level `fun` can be a worker entry. Keep no
+        // tables for the other lines: a session of N lines would then hold
+        // N growing copies. The slot stays parallel to m_sources, also after
+        // a failed compile.
+        bool hasEntry =
+            fn != nullptr && sourceHasTopLevelFunction(fn, options.sourceId);
+        m_sourceDeclarations.push_back(hasEntry ? std::move(sourceDeclarations)
+                                                : nullptr);
+    }
     if (fn == nullptr) {
         return nullptr;
     }
@@ -1437,6 +1489,7 @@ struct WorkerStart {
     std::shared_ptr<WorkerGroup> group;
     MemoryManager* heap;
     std::vector<std::shared_ptr<const std::string>> sources;
+    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations;
     std::vector<std::string> args;
     int sourceId;
     int ordinal;
@@ -1457,7 +1510,8 @@ void workerMain(WorkerStart start) {
     rt.setCodeAttacher(std::move(start.attachCode));
     rt.setGlobalSlotNames(std::move(start.globalSlotNames));
     InterpretResult result =
-        rt.runWorker(start.group, std::move(start.sources), start.sourceId,
+        rt.runWorker(start.group, std::move(start.sources),
+                     std::move(start.sourceDeclarations), start.sourceId,
                      start.ordinal, start.task, start.msg);
     if (result != InterpretResult::OK) {
         // spec/04-semantics.md, Ending: an uncaught fault in any task ends
@@ -1493,6 +1547,7 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     WorkerStart start{m_group,
                       heap,
                       m_sources,
+                      m_sourceDeclarations,
                       m_stdlibCtx.args,
                       entry->function->sourceId,
                       entry->function->topLevelOrdinal,
@@ -1509,14 +1564,26 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     return task;
 }
 
-InterpretResult
-Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
-                   std::vector<std::shared_ptr<const std::string>> sources,
-                   int sourceId, int ordinal, ObjTask* task, Value msg) {
+InterpretResult Runtime::runWorker(
+    std::shared_ptr<WorkerGroup> group,
+    std::vector<std::shared_ptr<const std::string>> sources,
+    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations,
+    int sourceId, int ordinal, ObjTask* task, Value msg) {
     m_group = std::move(group);
     m_isMainWorker = false;
     m_sources = std::move(sources);
+    m_sourceDeclarations = std::move(sourceDeclarations);
     m_mainTask = task;
+    // The worker recompiles only its own source. It starts from the session
+    // tables that the main runtime had just before it compiled that source,
+    // so this source's declarations get the same constructor tags, and the
+    // compile-time checks see the same declarations, as on the main worker.
+    if (sourceId >= 0 &&
+        static_cast<std::size_t>(sourceId) < m_sourceDeclarations.size() &&
+        m_sourceDeclarations[static_cast<std::size_t>(sourceId)]) {
+        m_declarations = std::make_unique<ProgramDeclarations>(
+            *m_sourceDeclarations[static_cast<std::size_t>(sourceId)]);
+    }
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
     task->startArg = m_mm.receiveMessage(msg);
@@ -1524,7 +1591,8 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
 
     // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
     // class, and enum declaration, in source order, and nothing else.
-    ObjClosure* script = loadProgram(*m_sources[sourceId], nullptr, true);
+    ObjClosure* script =
+        loadProgram(*m_sources[sourceId], nullptr, true, sourceId);
     if (script == nullptr) {
         return InterpretResult::RUNTIME_ERROR;
     }
@@ -1578,6 +1646,28 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
 #endif
     endTasks();
     return result;
+}
+
+Runtime::Runtime() : Runtime(new MemoryManager(0)) {}
+
+Runtime::Runtime(MemoryManager* heap)
+    : m_heapOwner{heap}, m_mm(*heap), m_globals(VmAllocator<Entry>{heap}) {
+    resetStack();
+    m_mm.setMarkRootsCallback([this]() { markRoots(); });
+#ifdef LOXPP_PROFILE
+    m_mm.setProfilerData(&m_profilerData);
+#endif
+    // m_mm's address is fixed for this object's lifetime, so this is a
+    // one-time invariant, not something VM::interpret() needs to redo on
+    // every REPL line — unlike setActiveContext(&m_stdlibCtx), which
+    // VM::interpret() still sets on every call, since that points a
+    // global/thread-local at whichever VM is currently active.
+    m_stdlibCtx.mm = &m_mm;
+    m_stdlibCtx.rt = this;
+    {
+        std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
+        m_mm.inbox().runtime = this;
+    }
 }
 
 Runtime::~Runtime() {
