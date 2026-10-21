@@ -757,6 +757,44 @@ TEST(ToolingParserMatch, SliceOnAssignLeftIsRecordedNotRejected) {
     EXPECT_EQ(assign->target->kind, ExprKind::Slice);
 }
 
+TEST(ToolingParserMatch, QualifiedConstructorHeads) {
+    const std::string src = "var r = match e {\n"
+                            "    case E.A(x) => x\n"
+                            "    case E.B{y} => y\n"
+                            "    case w @ E.C => w\n"
+                            "};\n";
+    const Program prog = parse(src);
+    const auto* v = dynamic_cast<const VarDecl*>(prog.body[0].get());
+    ASSERT_NE(v, nullptr);
+    const auto* m = dynamic_cast<const MatchExpr*>(v->initializer.get());
+    ASSERT_NE(m, nullptr);
+    ASSERT_EQ(m->arms.size(), 3U);
+
+    const auto* a = dynamic_cast<const CtorPat*>(m->arms[0].patterns[0].get());
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->enum_name.text, "E");
+    EXPECT_EQ(a->enum_name.offset, src.find("E.A"));
+    EXPECT_EQ(a->name, "A");
+    EXPECT_EQ(a->name_offset, src.find("A(x)"));
+    EXPECT_EQ(src.substr(a->offset, a->length), "E.A(x)");
+    ASSERT_EQ(a->fields.size(), 1U);
+
+    const auto* b = dynamic_cast<const ClassPat*>(m->arms[1].patterns[0].get());
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(b->enum_name.text, "E");
+    EXPECT_EQ(b->name, "B");
+    EXPECT_EQ(src.substr(b->offset, b->length), "E.B{y}");
+
+    const auto* at =
+        dynamic_cast<const AtBindingPat*>(m->arms[2].patterns[0].get());
+    ASSERT_NE(at, nullptr);
+    const auto* c = dynamic_cast<const BindingPat*>(at->sub.get());
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->enum_name.text, "E");
+    EXPECT_EQ(c->name, "C");
+    EXPECT_EQ(src.substr(c->offset, c->length), "E.C");
+}
+
 TEST(ToolingParserEnum, MisplacedEnumStillParses) {
     const std::string src = "fun f() { enum E { A B } }";
     const Program prog = parse(src);

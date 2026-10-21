@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect '.' and a constructor name after the enum '<...>'.
+// Compile error: a constructor pattern with the enum name and no constructor name.
+enum E { A(x) }
+var v = match E.A(1) { case E(x) => x };

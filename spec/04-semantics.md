@@ -1854,17 +1854,18 @@ lists. A program reads the constructor `A` of the enum `E` as `E.A`
 ([§02-syntax](02-syntax.md#enum-declaration)). A constructor is callable:
 calling it with as many arguments as it has fields creates and returns a new
 enum value. Calling it with another number of arguments is the catchable
-`ConstructorArityError`. A constructor stringifies as `<A>`, with the
-constructor name only.
+`ConstructorArityError`. The constructor `A` of the enum `E` stringifies as
+`<ctor E::A>`.
 
 ### Enum values
 
 An enum value holds the constructor that made it and one field for each
 field of that constructor, in declaration order. Its fields do not change.
-An enum value stringifies as `A(f1, f2, ...)`, with each field in its
-canonical string form, or as `A` for a constructor with no fields. The
-string form names the constructor only, so values of two enums whose
-constructors have the same name stringify the same way.
+An enum value that the constructor `A` of the enum `E` made stringifies as
+`E::A(f1, f2, ...)`, with each field in its canonical string form, or as
+`E::A` for a constructor with no fields. The string form names the enum, so
+values of two enums whose constructors have the same name have different
+string forms.
 
 ### Exhaustiveness at compile time
 

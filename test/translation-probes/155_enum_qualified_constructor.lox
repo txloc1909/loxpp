@@ -2,7 +2,8 @@
 // and in a pattern (spec/02-syntax.md, enum declaration and Extended match
 // arm patterns; spec/04-semantics.md, Constructor Reference and match
 // Expression, "Constructor patterns"). A constructor is a value, and its
-// string forms name the constructor only (spec/04-semantics.md, Enum Types).
+// string forms name the enum and the constructor (spec/04-semantics.md, Enum
+// Types).
 enum Opt { Some(v) None }
 enum Pair { P(a, b) }
 
@@ -33,17 +34,17 @@ print match s { case whole @ Opt.Some(v) => str(whole) + " holds " + str(v) case
 print match s { case Opt.Some => "tag only" case Opt.None => "none" };
 
 // STATUS: ok
-// CHECK: Some(7)
-// CHECK: None
-// CHECK: <Some>
+// CHECK: Opt::Some(7)
+// CHECK: Opt::None
+// CHECK: <ctor Opt::Some>
 // CHECK: EnumConstructor
 // CHECK: Enum
-// CHECK: Some(8)
+// CHECK: Opt::Some(8)
 // CHECK: true
 // CHECK: false
 // CHECK: some 7
 // CHECK: none
 // CHECK: 2
 // CHECK: 1
-// CHECK: Some(7) holds 7
+// CHECK: Opt::Some(7) holds 7
 // CHECK: tag only

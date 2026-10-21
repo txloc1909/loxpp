@@ -1214,24 +1214,40 @@ class Parser {
             spanTo(*node, nameTok.offset);
             return node;
         }
+        return headPattern(nameTok);
+    }
+
+    // The rest of a pattern after its head identifier: `E.A` (a qualified
+    // constructor), then `{...}`, `(...)`, or nothing.
+    PatternPtr headPattern(Token nameTok) {
+        const std::size_t start = nameTok.offset;
+        Name enumName;
+        if (match(TokenType::DOT)) {
+            if (!check(TokenType::IDENTIFIER)) {
+                error();
+                return nullptr;
+            }
+            enumName = nameFrom(nameTok);
+            nameTok = advance();
+        }
         if (check(TokenType::LEFT_BRACE)) {
-            return classPattern(nameTok);
+            return classPattern(nameTok, enumName, start);
         }
         if (check(TokenType::LEFT_PAREN)) {
-            return ctorPattern(nameTok);
+            return ctorPattern(nameTok, enumName, start);
         }
-        if (tokenText(nameTok) == "_") {
+        if (enumName.text.empty() && tokenText(nameTok) == "_") {
             auto node = std::make_unique<WildcardPat>();
             node->offset = nameTok.offset;
             node->length = nameTok.length;
             return node;
         }
         auto node = std::make_unique<BindingPat>();
+        node->enum_name = enumName;
         node->name = tokenText(nameTok);
         node->name_offset = nameTok.offset;
         node->name_length = nameTok.length;
-        node->offset = nameTok.offset;
-        node->length = nameTok.length;
+        spanTo(*node, start);
         return node;
     }
 
@@ -1246,43 +1262,35 @@ class Parser {
             error();
             return nullptr;
         }
-        Token nameTok = advance();
-        if (check(TokenType::LEFT_BRACE)) {
-            return classPattern(nameTok);
-        }
-        if (check(TokenType::LEFT_PAREN)) {
-            return ctorPattern(nameTok);
-        }
         // A bare identifier here is a zero-field constructor or a class type
-        // check; recorded as a BindingPat for the resolver to classify.
-        auto node = std::make_unique<BindingPat>();
-        node->name = tokenText(nameTok);
-        node->name_offset = nameTok.offset;
-        node->name_length = nameTok.length;
-        node->offset = nameTok.offset;
-        node->length = nameTok.length;
-        return node;
+        // check; headPattern records it as a BindingPat for the resolver to
+        // classify.
+        return headPattern(advance());
     }
 
-    PatternPtr classPattern(const Token& nameTok) {
+    PatternPtr classPattern(const Token& nameTok, Name enumName,
+                            std::size_t start) {
         advance(); // {
         auto node = std::make_unique<ClassPat>();
+        node->enum_name = enumName;
         node->name = tokenText(nameTok);
         node->name_offset = nameTok.offset;
         node->name_length = nameTok.length;
         parsePatternFieldList(node->fields, TokenType::RIGHT_BRACE);
-        spanTo(*node, nameTok.offset);
+        spanTo(*node, start);
         return node;
     }
 
-    PatternPtr ctorPattern(const Token& nameTok) {
+    PatternPtr ctorPattern(const Token& nameTok, Name enumName,
+                           std::size_t start) {
         advance(); // (
         auto node = std::make_unique<CtorPat>();
+        node->enum_name = enumName;
         node->name = tokenText(nameTok);
         node->name_offset = nameTok.offset;
         node->name_length = nameTok.length;
         parsePatternFieldList(node->fields, TokenType::RIGHT_PAREN);
-        spanTo(*node, nameTok.offset);
+        spanTo(*node, start);
         return node;
     }
 

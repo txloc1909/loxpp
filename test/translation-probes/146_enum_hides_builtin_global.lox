@@ -8,6 +8,6 @@ print match type.B() { case type.A => "A" case type.B => "B" };
 print str(1) + "!";
 
 // STATUS: ok
-// CHECK: <A>
+// CHECK: <ctor type::A>
 // CHECK: B
 // CHECK: 1!

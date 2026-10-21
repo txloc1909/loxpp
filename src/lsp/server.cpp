@@ -175,7 +175,9 @@ std::vector<const Symbol*> visibleSymbols(const DocumentModel& model,
 }
 
 std::string renderUserSymbol(const DocumentModel& model, const Symbol& sym) {
-    std::string out = symbolKindWord(kindOf(sym)) + " `" + sym.name + "`";
+    std::string out =
+        (sym.isEnum ? std::string("enum") : symbolKindWord(kindOf(sym))) +
+        " `" + sym.name + "`";
     if (sym.kind == SymbolKind::Function || sym.kind == SymbolKind::Method) {
         const std::vector<std::string> params = functionParamNames(sym);
         out += "\n\n```lox\nfun " + sym.name + "(";
@@ -520,6 +522,14 @@ json Server::onHover(const json& params) {
         const Range wr = spanToRange(model, Span{ws, wl});
 
         if (const auto recv = receiverBeforeDot(text, ws)) {
+            // The resolver links a name after a '.' only for `E.A`, the
+            // constructor A of the enum E.
+            if (const Symbol* sym = model.symbolAt(off)) {
+                result = Hover{
+                    MarkupContent{"markdown", renderUserSymbol(model, *sym)},
+                    wr};
+                return;
+            }
             const StdlibEntry* e = receiverMemberDoc(*recv, word);
             if (e == nullptr) {
                 e = methodDoc(word); // Map / File method (names are unique)

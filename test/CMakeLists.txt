@@ -166,6 +166,7 @@ target_link_libraries(test_tooling_parser PRIVATE loxpp_core)
 loxpp_add_test(test_tooling_resolver test_tooling_resolver.cpp CORE loxpp_tooling PROBE)
 target_link_libraries(test_tooling_resolver PRIVATE loxpp_core)
 loxpp_add_test(test_check_diagnostics test_check_diagnostics.cpp CORE loxpp_test_core)
+loxpp_add_test(test_enum_names      test_enum_names.cpp      CORE loxpp_test_core)
 loxpp_add_test(test_backend_rt_capi test_backend_rt_capi.cpp CORE loxpp_test_core)
 loxpp_add_test(test_backend_qbe_emitter test_backend_qbe_emitter.cpp
                                                             CORE loxpp_test_core)
@@ -404,7 +405,7 @@ set(LOXPP_GTEST_TARGETS
     test_handler_stack_leak_gc test_handler_depth_invariant test_jvm_emit
     test_backend_native_pops
     test_stringify_depth_guard
-    test_check_diagnostics test_tooling_parser test_tooling_resolver
+    test_check_diagnostics test_enum_names test_tooling_parser test_tooling_resolver
     test_backend_rt_capi test_backend_qbe_emitter)
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)

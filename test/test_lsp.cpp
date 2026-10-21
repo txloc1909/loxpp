@@ -485,7 +485,7 @@ TEST(LspCodeAction, MatchFixInsertsMissingArm) {
                                "\n"
                                "fun label(r) {\n"
                                "    return match r {\n"
-                               "        case Ok(v) => \"ok\"\n"
+                               "        case Result.Ok(v) => \"ok\"\n"
                                "    };\n"
                                "}\n";
     ASSERT_TRUE(hasExhaustivenessError(source));
@@ -511,7 +511,7 @@ TEST(LspCodeAction, MatchFixInsertsMissingArm) {
     const std::vector<loxpp::lsp::QuickFix> fixes =
         loxpp::lsp::matchExhaustivenessFixes(model, 0, context);
     ASSERT_EQ(fixes.size(), 1U);
-    EXPECT_EQ(fixes[0].title, "Add missing match arm: Err");
+    EXPECT_EQ(fixes[0].title, "Add missing match arm: Result.Err");
     ASSERT_TRUE(fixes[0].diagnosticIndex.has_value());
     EXPECT_EQ(*fixes[0].diagnosticIndex, 0U);
     ASSERT_EQ(fixes[0].edits.size(), 1U);
@@ -523,7 +523,7 @@ TEST(LspCodeAction, MatchFixInsertsMissingArm) {
 
     const std::string fixed = applySourceEdits(source, fixes[0].edits);
     EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;
-    EXPECT_TRUE(fixed.find("case Err => nil") != std::string::npos);
+    EXPECT_TRUE(fixed.find("case Result.Err => nil") != std::string::npos);
     EXPECT_FALSE(hasWhitespaceOnlyLine(fixed)) << "fixed source:\n" << fixed;
 }
 
@@ -532,7 +532,7 @@ TEST(LspCodeAction, MatchFixDedupesRepeatedDiagnostic) {
                                "\n"
                                "fun label(r) {\n"
                                "    return match r {\n"
-                               "        case Ok(v) => \"ok\"\n"
+                               "        case Result.Ok(v) => \"ok\"\n"
                                "    };\n"
                                "}\n";
     loxpp::tooling::DocumentModel model(source);
@@ -557,14 +557,14 @@ TEST(LspCodeAction, MatchFixDedupesRepeatedDiagnostic) {
     const std::vector<loxpp::lsp::QuickFix> fixes =
         loxpp::lsp::matchExhaustivenessFixes(model, 0, repeated);
     ASSERT_EQ(fixes.size(), 1U);
-    EXPECT_EQ(fixes[0].title, "Add missing match arm: Err");
+    EXPECT_EQ(fixes[0].title, "Add missing match arm: Result.Err");
 }
 
 TEST(LspCodeAction, MatchFixInsertsSeveralArms) {
     const std::string source = "enum Light { Red Amber Green }\n"
                                "fun go(l) {\n"
                                "    return match l {\n"
-                               "        case Red => 1\n"
+                               "        case Light.Red => 1\n"
                                "    };\n"
                                "}\n";
     ASSERT_TRUE(hasExhaustivenessError(source));
@@ -588,7 +588,8 @@ TEST(LspCodeAction, MatchFixInsertsSeveralArms) {
     const std::vector<loxpp::lsp::QuickFix> fixes =
         loxpp::lsp::matchExhaustivenessFixes(model, 0, context);
     ASSERT_EQ(fixes.size(), 1U);
-    EXPECT_EQ(fixes[0].title, "Add missing match arms: Amber, Green");
+    EXPECT_EQ(fixes[0].title,
+              "Add missing match arms: Light.Amber, Light.Green");
 
     const std::string fixed = applySourceEdits(source, fixes[0].edits);
     EXPECT_FALSE(hasExhaustivenessError(fixed)) << "fixed source:\n" << fixed;

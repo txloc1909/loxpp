@@ -49,7 +49,7 @@ enum Result { Ok(value) Err(msg) }
 
 fun label(r) {
     return match r {
-        case Ok(v) => "ok"
+        case Result.Ok(v) => "ok"
     };
 }
 """
@@ -58,8 +58,8 @@ RENAME_MATCH_SOURCE = """\
 enum E { Move(x) Teleport(x) Quit }
 fun go(e) {
     return match e {
-        case Move(x) or Teleport(x) => x
-        case Quit => 0
+        case E.Move(x) or E.Teleport(x) => x
+        case E.Quit => 0
     };
 }
 """
@@ -426,6 +426,26 @@ def main():
             check(still == [],
                   "fixed source has no exhaustiveness error (got %s)"
                   % ([d.get("message") for d in fixed_diags],))
+
+        # -- hover and definition on a qualified constructor E.A ----
+        ql, qc = line_char(MATCH_SOURCE, "Result.Ok(v)")
+        ctor_pos = {"line": ql, "character": qc + len("Result.")}
+        ctor_hover = client.request("textDocument/hover", {
+            "textDocument": {"uri": MATCH_URI}, "position": ctor_pos})
+        ctor_text = ""
+        if ctor_hover and isinstance(ctor_hover.get("contents"), dict):
+            ctor_text = ctor_hover["contents"].get("value", "")
+        check("enum constructor `Ok`" in ctor_text,
+              "hover on 'Ok' of 'Result.Ok' names the constructor (got %r)"
+              % ctor_text[:60])
+        ctor_def = client.request("textDocument/definition", {
+            "textDocument": {"uri": MATCH_URI}, "position": ctor_pos})
+        dl, dc = line_char(MATCH_SOURCE, "Ok(value)")
+        check(isinstance(ctor_def, dict)
+              and ctor_def.get("range", {}).get("start")
+              == {"line": dl, "character": dc},
+              "definition of 'Ok' of 'Result.Ok' is its declaration (got %s)"
+              % (ctor_def,))
 
         # -- codeAction: wrap a '+' operand in str() ----------------
         pl, pc = line_char(CLEAN_SOURCE, "+ name")

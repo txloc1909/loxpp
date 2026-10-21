@@ -2,7 +2,8 @@
 // enum declaration). A constructor pattern matches only a value that the
 // constructor of its own enum made, even when a constructor of another enum
 // has the same name or the same position in its declaration
-// (spec/04-semantics.md, match Expression, "Constructor patterns").
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). Their
+// values have different string forms (spec/04-semantics.md, Enum Types).
 enum Opt { Some(v) None }
 enum Res { Ok(v) Err(e) }
 enum Shape { Circle(r) None }
@@ -24,8 +25,8 @@ print match Shape.None() { case Opt.None => "opt" case Shape.None => "shape" cas
 print match Res.Ok(1) { case Opt.Some => "some" case _ => "other" };
 
 // STATUS: ok
-// CHECK: None
-// CHECK: None
+// CHECK: Opt::None
+// CHECK: Shape::None
 // CHECK: opt none
 // CHECK: not opt
 // CHECK: not opt

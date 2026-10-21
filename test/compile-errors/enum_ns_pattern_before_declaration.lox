@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Can't use the enum '<...>' before its declaration.
+// Compile error: a constructor pattern of an enum before the enum declaration.
+fun f(x) { return match x { case E.A => 1 case _ => 0 }; }
+enum E { A }

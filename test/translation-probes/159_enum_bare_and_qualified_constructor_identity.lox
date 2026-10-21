@@ -1,0 +1,9 @@
+// The bare constructor name and E.A hold the same constructor object on
+// every backend: equality of constructors is identity (spec/03-types.md,
+// equality).
+enum Option { Some(v) None }
+print Option.Some == Some;
+var f = Some;
+print f == Option.Some;
+print Option.None == None;
+print Option.Some == Option.None;

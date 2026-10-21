@@ -19,7 +19,7 @@ d.E = "property";
 print d.E;
 
 // STATUS: ok
-// CHECK: E(5)
+// CHECK: E::E(5)
 // CHECK: 5
 // CHECK: method
 // CHECK: property
