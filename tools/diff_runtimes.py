@@ -62,9 +62,9 @@ outcomes:
                code 1: the backend passes it now, so its line must be
                deleted.
 
---oracle-xfail <file> is native's own expected-failure list
-(tools/xfail/spec-probes-native.txt). A listed spec probe that the other
-runner passes and native does not reports one more outcome:
+--oracle-xfail <file> is native's own expected-failure list, in the
+same form. A listed spec probe that the other runner passes and native
+does not reports one more outcome:
   AHEAD        the other runner passes the probe before native does. Not a
                divergence: native's own gate shows its gap. A listed probe
                that native passes, or that the other runner fails, is
@@ -361,7 +361,7 @@ def main() -> None:
         "--oracle-xfail",
         type=Path,
         default=None,
-        help="native's expected-failure list of spec probes (tools/xfail/spec-probes-native.txt)",
+        help="native's expected-failure list of spec probes, in the form tools/check_spec_probes.py reads",
     )
     parser.add_argument(
         "--consumer",

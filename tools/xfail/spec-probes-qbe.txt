@@ -1,3 +1,0 @@
-# Spec probes that the QBE backend does not pass yet (tools/check_spec_probes.py
-# --xfail). One line per probe: the file name, then the reason. Delete a line
-# when the probe passes: the gate reports it as XPASS and fails.
