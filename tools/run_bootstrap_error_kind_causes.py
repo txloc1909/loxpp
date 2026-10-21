@@ -213,7 +213,7 @@ PROBES = [
      "try { try { [][0]; } catch (e) { e.foo; } } catch (e2) { print e2.kind; }",
      CATCHABLE, "UndefinedPropertyError", '"Undefined property on error."'),
     ("enum constructor called with wrong arity",
-     "enum E { A(x) } try { A(1, 2); } catch (e) { print e.kind; }",
+     "enum E { A(x) } try { E.A(1, 2); } catch (e) { print e.kind; }",
      CATCHABLE, "ConstructorArityError", '"Constructor called with wrong arity."'),
     ("class with no init() called with a nonzero argument count",
      "class C {} try { C(1, 2); } catch (e) { print e.kind; }",

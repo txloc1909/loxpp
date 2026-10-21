@@ -5,18 +5,18 @@
 enum Msg { Box(v) Reply(from, payload) }
 
 var main = task.self();
-var original = Box(Box("x"));
+var original = Msg.Box(Msg.Box("x"));
 
 fun echo() {
     var m = task.receive();
-    task.send(m[0], Reply(task.self(), m[1]));
+    task.send(m[0], Msg.Reply(task.self(), m[1]));
 }
 
 var e = task.spawn(echo);
-task.send(e, Reply(main, original));
+task.send(e, Msg.Reply(main, original));
 var back = task.receive();
 print back[1] == original;
-print back[1] == Box(Box("x"));
+print back[1] == Msg.Box(Msg.Box("x"));
 print back[0] == e;
 print back[0] == main;
 print str(back[0]);

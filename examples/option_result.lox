@@ -16,8 +16,8 @@ enum Result { Ok(value) Err(msg) }
 // Return the contained value, or a fallback when the Option is empty.
 fun unwrapOr(opt, fallback) {
     return match opt {
-        case Some(v) => v
-        case None    => fallback
+        case Option.Some(v) => v
+        case Option.None    => fallback
     };
 }
 
@@ -25,16 +25,16 @@ fun unwrapOr(opt, fallback) {
 // monadic bind, so chained lookups stop at the first None.
 fun andThen(opt, f) {
     return match opt {
-        case Some(v) => f(v)
-        case None    => None()
+        case Option.Some(v) => f(v)
+        case Option.None    => Option.None()
     };
 }
 
 // Apply f to the contained value and re-wrap it, leaving None untouched.
 fun map(opt, f) {
     return match opt {
-        case Some(v) => Some(f(v))
-        case None    => None()
+        case Option.Some(v) => Option.Some(f(v))
+        case Option.None    => Option.None()
     };
 }
 
@@ -48,51 +48,51 @@ fun double(x) { return x * 2; }
 // the result goes through a helper, which every backend compiles.
 fun showOpt(o) {
     return match o {
-        case Some(v) => "Some(" + str(v) + ")"
-        case None    => "None"
+        case Option.Some(v) => "Some(" + str(v) + ")"
+        case Option.None    => "None"
     };
 }
 
 // CHECK: unwrapOr(Some(7), 0) = 7
-print "unwrapOr(Some(7), 0) = " + str(unwrapOr(Some(7), 0));
+print "unwrapOr(Some(7), 0) = " + str(unwrapOr(Option.Some(7), 0));
 // CHECK: unwrapOr(None, 0) = 0
-print "unwrapOr(None, 0) = " + str(unwrapOr(None(), 0));
+print "unwrapOr(None, 0) = " + str(unwrapOr(Option.None(), 0));
 
 // CHECK: map(double, Some(21)) = Some(42)
-print "map(double, Some(21)) = " + showOpt(map(Some(21), double));
+print "map(double, Some(21)) = " + showOpt(map(Option.Some(21), double));
 // CHECK: map(double, None) = None
-print "map(double, None) = " + showOpt(map(None(), double));
+print "map(double, None) = " + showOpt(map(Option.None(), double));
 
 // andThen short-circuits on None: halve only succeeds on an even number.
 fun halveEven(x) {
-    if (x % 2 == 0) return Some(x / 2);
-    return None();
+    if (x % 2 == 0) return Option.Some(x / 2);
+    return Option.None();
 }
 
 // CHECK: andThen(Some(8), halveEven) = 4
-print "andThen(Some(8), halveEven) = " + str(unwrapOr(andThen(Some(8), halveEven), -1));
+print "andThen(Some(8), halveEven) = " + str(unwrapOr(andThen(Option.Some(8), halveEven), -1));
 // CHECK: andThen(Some(7), halveEven) = -1
-print "andThen(Some(7), halveEven) = " + str(unwrapOr(andThen(Some(7), halveEven), -1));
+print "andThen(Some(7), halveEven) = " + str(unwrapOr(andThen(Option.Some(7), halveEven), -1));
 
 // --- Result, and a bridge from Result to Option -------------------------
 
 // Parse a decimal String into a positive Number, or report why it failed.
 fun parsePositive(s) {
-    if (len(s) == 0) return Err("empty");
+    if (len(s) == 0) return Result.Err("empty");
     var n = 0;
     for (var c in s) {
         var code = ord(c);
-        if (code < ord("0") or code > ord("9")) return Err("not a digit: " + c);
+        if (code < ord("0") or code > ord("9")) return Result.Err("not a digit: " + c);
         n = n * 10 + (code - ord("0"));
     }
-    if (n == 0) return Err("not positive");
-    return Ok(n);
+    if (n == 0) return Result.Err("not positive");
+    return Result.Ok(n);
 }
 
 fun describe(r) {
     return match r {
-        case Ok(value) => "ok " + str(value)
-        case Err(msg)  => "err " + msg
+        case Result.Ok(value) => "ok " + str(value)
+        case Result.Err(msg)  => "err " + msg
     };
 }
 
@@ -108,8 +108,8 @@ print "parse '0' -> " + describe(parsePositive("0"));
 // Drop the error detail: a successful Result becomes Some, a failure None.
 fun resultToOption(r) {
     return match r {
-        case Ok(value) => Some(value)
-        case Err(_)    => None()
+        case Result.Ok(value) => Option.Some(value)
+        case Result.Err(_)    => Option.None()
     };
 }
 

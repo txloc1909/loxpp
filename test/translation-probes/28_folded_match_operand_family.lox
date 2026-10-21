@@ -57,7 +57,7 @@ print (match 1 { case 1 => 2 case _ => 3 }) in [1, 2, 3];
 // Nested match subject: the outer match's own GET_TAG operand is the inner
 // match's own folded result.
 enum E { A B }
-print match (match A() { case A => A() case B => B() }) {
-    case A => 1
-    case B => 2
+print match (match E.A() { case E.A => E.A() case E.B => E.B() }) {
+    case E.A => 1
+    case E.B => 2
 };

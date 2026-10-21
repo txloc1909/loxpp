@@ -20,7 +20,7 @@ enum A { X Y }
 enum B { P Q R }
 
 print "before";
-print match R() {
-    case X => "x"
-    case Y => "y"
+print match B.R() {
+    case A.X => "x"
+    case A.Y => "y"
 };

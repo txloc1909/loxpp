@@ -40,7 +40,7 @@ enum Box { Of(v) }
 fun entry(main) {
     var junk = [];
     for (var i = 0; i < 100; i = i + 1) junk.append(str(i) + "x");
-    task.send(main, Of("kept" + "!"));
+    task.send(main, Box.Of("kept" + "!"));
 }
 fun exitCollected(path) {
     if (!exists(path)) return false;

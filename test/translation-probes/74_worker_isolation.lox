@@ -28,7 +28,7 @@ fun shared_name() {}
 
 fun entry(m) {
     var answer = match m {
-        case Ask(from, n, payload) => Answer(Doubler().run(n), payload)
+        case Msg.Ask(from, n, payload) => Msg.Answer(Doubler().run(n), payload)
         case _ => nil
     };
     var from = m[0];
@@ -41,13 +41,13 @@ fun entry(m) {
     task.send(from, task.receive());
 }
 
-var payload = Answer(0, "p");
-var ask = Ask(task.self(), 21, payload);
+var payload = Msg.Answer(0, "p");
+var ask = Msg.Ask(task.self(), 21, payload);
 var w = task.spawn_worker(entry, ask);
 print type(w);
 var answer = task.receive();
 print match answer {
-    case Answer(n, p) => n
+    case Msg.Answer(n, p) => n
     case _ => "no match"
 };
 print answer[1] == payload;
@@ -56,7 +56,7 @@ print task.receive();
 print task.receive();
 print type(shared_name);
 print read_counter();
-var sent = Answer(1, "q");
+var sent = Msg.Answer(1, "q");
 task.send(w, sent);
 print task.receive() == ask;
 print task.receive() == sent;

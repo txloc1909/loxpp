@@ -22,4 +22,4 @@ class Twice < Inc {}
 print Holder(Twice()).c(41);
 
 enum E { A(n) }
-print Holder(A).c(3);
+print Holder(E.A).c(3);

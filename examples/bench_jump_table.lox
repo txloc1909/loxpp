@@ -10,17 +10,17 @@ enum Op { Add Sub Mul Div Mod }
 
 fun apply(op, a, b) {
     return match op {
-        case Add => a + b
-        case Sub => a - b
-        case Mul => a * b
-        case Div => a / b
-        case Mod => a - b * math.floor(a / b)
+        case Op.Add => a + b
+        case Op.Sub => a - b
+        case Op.Mul => a * b
+        case Op.Div => a / b
+        case Op.Mod => a - b * math.floor(a / b)
     };
 }
 
 var N = 5000000;
-var ops = [Add(), Sub(), Mul(), Div(), Mod(),
-           Mul(), Add(), Div(), Sub(), Mod()];
+var ops = [Op.Add(), Op.Sub(), Op.Mul(), Op.Div(), Op.Mod(),
+           Op.Mul(), Op.Add(), Op.Div(), Op.Sub(), Op.Mod()];
 var nops = 10;
 
 var acc = 0;

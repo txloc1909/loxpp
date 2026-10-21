@@ -5,7 +5,7 @@
 enum Result { Ok(value) Err(msg) }
 
 try {
-    var r = Ok(1, 2);
+    var r = Result.Ok(1, 2);
 } catch (e) {
     print "caught: " + e.kind;
 }

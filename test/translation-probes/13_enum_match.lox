@@ -1,9 +1,9 @@
 enum Color { Red Green Blue Yellow }
-var c = Green();
+var c = Color.Green();
 var n = match c {
-  case Red => 0
-  case Green => 1
-  case Blue => 2
-  case Yellow => 3
+  case Color.Red => 0
+  case Color.Green => 1
+  case Color.Blue => 2
+  case Color.Yellow => 3
 };
 print n;
