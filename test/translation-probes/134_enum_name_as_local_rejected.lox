@@ -1,0 +1,20 @@
+// A local variable must not have the name of an enum (spec/02-syntax.md,
+// enum declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A }
+fun f() {
+    var E = 1;
+    return E;
+}
+try {
+    print f();
+} catch (e) {
+    print e.kind;
+}
+
+// STATIC-ERROR
+// STATUS: error

@@ -1,0 +1,13 @@
+// An enum name may be the name of a built-in global. The enum hides the
+// built-in in the whole program: the name means the enum (spec/02-syntax.md,
+// enum declaration). Probe 156 checks that a use of the built-in before the
+// declaration is a compile error.
+enum type { A B }
+print type.A;
+print match type.B() { case type.A => "A" case type.B => "B" };
+print str(1) + "!";
+
+// STATUS: ok
+// CHECK: <A>
+// CHECK: B
+// CHECK: 1!

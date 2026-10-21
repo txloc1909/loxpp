@@ -298,8 +298,7 @@ void accumulateOpCounts(const fs::path& path, std::map<Op, int>& counts) {
 } // namespace
 
 TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
-    std::vector<fs::path> probes =
-        listLoxFiles(projectRoot() / "test" / "translation-probes");
+    std::vector<fs::path> probes = loxpp_test::compiledTranslationProbes();
     ASSERT_FALSE(probes.empty()) << "no translation probes found";
     for (const fs::path& probe : probes) {
         checkFile(probe);
@@ -312,6 +311,29 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
     for (const fs::path& probe : coroutineProbes) {
         checkFile(probe);
     }
+}
+
+// The bytecode sweeps leave out every probe marked `// STATIC-ERROR`, so a
+// marker on a probe that native compiles would hide that probe from them.
+// A marked probe on native's expected-failure list is left out here too:
+// native does not implement its rule yet.
+TEST(ChunkDecoderTest, StaticErrorProbesDoNotCompile) {
+    const std::set<std::string> expectedFailures =
+        loxpp_test::nativeExpectedFailureProbes();
+    int checked = 0;
+    for (const fs::path& probe :
+         listLoxFiles(projectRoot() / "test" / "translation-probes")) {
+        if (!loxpp_test::hasStaticErrorMarker(probe) ||
+            expectedFailures.count(probe.filename().string()) != 0U) {
+            continue;
+        }
+        MemoryManager mm;
+        EXPECT_EQ(compile(readFile(probe), &mm), nullptr)
+            << probe.filename().string()
+            << " carries // STATIC-ERROR, but native compiles it";
+        checked++;
+    }
+    EXPECT_GT(checked, 0) << "no static-error probe is checked";
 }
 
 TEST(ChunkDecoderTest, MatchesOracleOnExamples) {
@@ -354,8 +376,7 @@ TEST(ChunkDecoderTest, AssignsStableDeterministicIdentity) {
 TEST(ChunkDecoderTest, DecodesEveryOpcodeAtLeastOnce) {
     std::map<Op, int> counts;
 
-    for (const fs::path& probe :
-         listLoxFiles(projectRoot() / "test" / "translation-probes")) {
+    for (const fs::path& probe : loxpp_test::compiledTranslationProbes()) {
         accumulateOpCounts(probe, counts);
     }
     for (const fs::path& probe :

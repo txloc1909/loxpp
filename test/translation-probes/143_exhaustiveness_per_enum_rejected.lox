@@ -1,0 +1,23 @@
+// A match with constructor patterns of two enums checks exhaustiveness for
+// each enum: every constructor of E has an arm, but F.D has none, so the
+// match is a compile error (spec/02-syntax.md, Extended match arm patterns,
+// "Exhaustiveness"). The enum that is complete comes first, so a check of
+// only the first enum accepts the match and fails this probe.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A }
+enum F { C D }
+fun f(v) {
+    return match v { case E.A => 1 case F.C => 2 };
+}
+try {
+    print f(E.A());
+} catch (e) {
+    print e.kind;
+}
+
+// STATIC-ERROR
+// STATUS: error

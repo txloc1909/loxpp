@@ -115,6 +115,18 @@ value.
 Evaluating an identifier looks up the variable's current value in the scope
 chain.
 
+### Constructor Reference
+
+```
+E.A
+```
+
+When `E` is the name of an enum, `E.A` is not a property get. It evaluates to
+the constructor `A` of `E`, and it cannot fault at run time. The compiler
+resolves it: an `E.A` that names no constructor of `E`, or that comes before
+the declaration of `E`, is a compile error
+([§02-syntax](02-syntax.md#enum-declaration)).
+
 ### Grouping
 
 `( expr )` evaluates `expr` and returns its value; parentheses only affect
@@ -494,7 +506,7 @@ match subject { matchArm* }
 
 1. Evaluate `subject` exactly once and store it internally (not user-accessible).
 2. Arms are tested in source order. For each arm:
-   a. Evaluate the pattern against the stored subject (tag check, literal equality, or wildcard).
+   a. Evaluate the pattern against the stored subject (constructor test, literal equality, class test, or wildcard). The alternatives of an arm are tried from left to right, and the first that matches is used.
    b. If the pattern does not match, proceed to the next arm.
    c. If the pattern matches and a guard (`if expr`) is present, evaluate the guard. If the guard is falsy, proceed to the next arm.
    d. If the pattern matches (and the guard, if present, is truthy), evaluate the arm's body **expression** and return its value as the result of the `match` expression.
@@ -518,7 +530,7 @@ statement).
 
 Each name in the braces of a class pattern is a property read of the matched instance, as in [Property Get](#property-get), and the arm binds the result. A name that is neither a field nor a method of the instance is a runtime error.
 
-**Constructor patterns.** A bare name in a pattern is a constructor tag test only as a whole arm pattern (alone or in an `or`-chain) or as the sub-pattern of an @-binding, and only when an enum constructor with that name is declared earlier in the source than the match. This holds for a constructor with any number of fields: the arm makes the same test as the constructor pattern with that name, and binds no field. A constructor name in any other place in a pattern is a binding, including a name in braces, parentheses or brackets. A constructor name is also a binding when no enum constructor of that name is declared earlier in the source than the match. When an enum constructor and a global class with the same name are both declared earlier in the source than the match, the bare name is a constructor tag test.
+**Constructor patterns.** A pattern of the form `E.A`, `E.A(...)` or `E.A{...}` is a constructor pattern ([§02-syntax](02-syntax.md#extended-match-arm-patterns) states which forms are compile errors). It matches a value only when the constructor `A` of the declaration of `E` made that value. A value that a constructor of another enum made does not match, even when that constructor has the same name or the same position in its declaration. A value that is not an enum value does not match either; the test never faults. When the pattern matches, `E.A(x, y)` binds each name to the field at its position, and `E.A{f}` binds each name to the field of that name; `_` binds nothing. A bare name is never a constructor pattern, even when a constructor of that name exists: a bare name is the wildcard `_`, a binding, or a class test.
 
 
 ---
@@ -1760,7 +1772,7 @@ whose text is implementation-defined.
 | Object without `__hash__`/`__eq__` used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
-| Constructor called with wrong arity | `ok(1, 2)` when `ok` takes one field | `"ConstructorArityError"` |
+| Constructor called with wrong arity | `Result.Ok(1, 2)` when `Ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
 | Operator method returned a non-Number | `class C { __len__() { return "x"; } } len(C())` or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
@@ -1788,7 +1800,6 @@ run before the program ends is implementation-defined, as for every halt.
 
 | Cause | Example |
 |---|---|
-| A constructor pattern is matched against a value that is not an enum value | `enum Result { Ok(v) Err(m) } match 1 { case Ok(v) => v case Err(m) => -1 };` |
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
 | A native function is called with an argument count other than its arity | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
@@ -1816,9 +1827,9 @@ run before the program ends is implementation-defined, as for every halt.
 | Undefined method invoked on a Map | `var m = {}; m.bogus();` |
 | `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` |
 | `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` |
-| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = A(1); v["a"];` |
-| Enum field indexed with a fractional index | `enum E { A(x) } var v = A(1); v[0.5];` |
-| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = A(1); v[3];` |
+| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = E.A(1); v["a"];` |
+| Enum field indexed with a fractional index | `enum E { A(x) } var v = E.A(1); v[0.5];` |
+| Enum field indexed with an out-of-range index | `enum E { A(x) } var v = E.A(1); v[3];` |
 | Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) |
 | `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` |
 | `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2];` |
@@ -1836,34 +1847,32 @@ run before the program ends is implementation-defined, as for every halt.
 
 ## Enum Types
 
-### `ObjEnumCtor` — constructor object
+### Enum constructors
 
-Produced by an `enum` declaration. Each constructor in the declaration becomes
-a globally-scoped `ObjEnumCtor` value. It is callable: calling it with
-`arity` arguments creates and returns an `ObjEnum` value.
+An `enum` declaration makes one constructor value for each constructor that it
+lists. A program reads the constructor `A` of the enum `E` as `E.A`
+([§02-syntax](02-syntax.md#enum-declaration)). A constructor is callable:
+calling it with as many arguments as it has fields creates and returns a new
+enum value. Calling it with another number of arguments is the catchable
+`ConstructorArityError`. A constructor stringifies as `<A>`, with the
+constructor name only.
 
-Fields: `tag` (0-based index in declaration order), `arity`, `ctorName`,
-`enumName`. Stringifies as `<ctor name>`.
+### Enum values
 
-### `ObjEnum` — enum value
-
-Produced by calling an `ObjEnumCtor`. Fields are stored in a positional array;
-named access is resolved at compile time (the compiler emits the index).
-
-Stringifies as `ctorName(f1, f2, ...)` with fields expanded, or just
-`ctorName` for zero-field constructors.
-
-### `GET_TAG` opcode
-
-Pops an `ObjEnum` value and pushes its constructor's tag as a Number. Used by
-constructor pattern arms in `match` for dispatch. Applying `GET_TAG` to a
-non-enum value is a runtime error.
+An enum value holds the constructor that made it and one field for each
+field of that constructor, in declaration order. Its fields do not change.
+An enum value stringifies as `A(f1, f2, ...)`, with each field in its
+canonical string form, or as `A` for a constructor with no fields. The
+string form names the constructor only, so values of two enums whose
+constructors have the same name stringify the same way.
 
 ### Exhaustiveness at compile time
 
-When a match expression contains at least one constructor-pattern arm for enum
+When a match expression contains at least one constructor pattern of enum
 `E`, the compiler checks that:
-1. Every constructor of `E` appears as a pattern arm, **or**
+1. Every constructor of `E` appears in an arm, across all alternatives, **or**
 2. An unguarded catch-all arm (`case _` or an unguarded binding) is present.
 
-A violation is a **compile error** listing the missing constructor names.
+A violation is a **compile error** listing the missing constructor names. A
+match with constructor patterns of more than one enum makes this check for
+each enum.

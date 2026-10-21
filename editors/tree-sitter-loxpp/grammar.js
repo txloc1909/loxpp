@@ -366,9 +366,14 @@ module.exports = grammar({
     guard: $ => seq("if", $._expression),
 
     _arm_patterns: $ => choice(
-      seq($.literal_pattern, repeat(seq(",", $.literal_pattern))),
+      seq($.literal_pattern, repeat1(seq(",", $.literal_pattern))),
       $.sequence_pattern,
-      seq($._ident_arm_pattern, repeat(seq("or", $._ident_arm_pattern))),
+      seq($._arm_alternative, repeat(seq("or", $._arm_alternative))),
+    ),
+
+    _arm_alternative: $ => choice(
+      $.literal_pattern,
+      $._ident_arm_pattern,
     ),
 
     literal_pattern: $ => choice(
@@ -379,14 +384,23 @@ module.exports = grammar({
       $.nil,
     ),
 
-    // An `or` alternative is an identifier-starting pattern only. The compiler
-    // rejects `or` on a sequence pattern (`[a] or [b]`, `Foo(x) or [a, b]`), so
-    // a bare sequence pattern is a standalone arm pattern, never an `or` term.
+    // An `or` alternative is a literal or an identifier-starting pattern. The
+    // compiler rejects `or` on a sequence pattern (`[a] or [b]`,
+    // `E.A(x) or [a, b]`), so a bare sequence pattern is a standalone arm
+    // pattern, never an `or` term.
     _ident_arm_pattern: $ => choice(
       $.binding_pattern,
       $.constructor_pattern,
       $.record_pattern,
+      $.constructor_tag_pattern,
       $._arm_pattern_ident,
+    ),
+
+    // `E.A`: a test of the constructor `A` of the enum `E` that binds no field.
+    constructor_tag_pattern: $ => seq(
+      field("enum", $.identifier),
+      ".",
+      field("name", $.identifier),
     ),
 
     // A bare identifier pattern: the match wildcard `_`, a value binding, or a
@@ -401,6 +415,7 @@ module.exports = grammar({
     ),
 
     constructor_pattern: $ => seq(
+      optional(seq(field("enum", $.identifier), ".")),
       field("name", $.identifier),
       "(",
       field("binding", $.identifier),
@@ -409,6 +424,7 @@ module.exports = grammar({
     ),
 
     record_pattern: $ => seq(
+      optional(seq(field("enum", $.identifier), ".")),
       field("name", $.identifier),
       "{",
       field("binding", $.identifier),
@@ -432,6 +448,7 @@ module.exports = grammar({
     _sub_pattern: $ => choice(
       $.constructor_pattern,
       $.record_pattern,
+      $.constructor_tag_pattern,
       $.sequence_pattern,
       alias($.identifier, $.identifier_pattern),
     ),

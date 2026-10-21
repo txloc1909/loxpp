@@ -1,0 +1,17 @@
+// The enum name must not be the name of another global declaration
+// (spec/02-syntax.md, enum declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A }
+var E = 1;
+try {
+    print E;
+} catch (e) {
+    print e.kind;
+}
+
+// STATIC-ERROR
+// STATUS: error

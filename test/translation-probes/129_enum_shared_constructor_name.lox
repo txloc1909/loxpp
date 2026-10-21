@@ -1,0 +1,33 @@
+// Constructors of different enums may have the same name (spec/02-syntax.md,
+// enum declaration). A constructor pattern matches only a value that the
+// constructor of its own enum made, even when a constructor of another enum
+// has the same name or the same position in its declaration
+// (spec/04-semantics.md, match Expression, "Constructor patterns").
+enum Opt { Some(v) None }
+enum Res { Ok(v) Err(e) }
+enum Shape { Circle(r) None }
+
+print Opt.None();
+print Shape.None();
+
+fun opt_name(x) {
+    return match x {
+        case Opt.Some(v) => "some"
+        case Opt.None    => "opt none"
+        case _           => "not opt"
+    };
+}
+print opt_name(Opt.None());
+print opt_name(Shape.None());
+print opt_name(Res.Ok(1));
+print match Shape.None() { case Opt.None => "opt" case Shape.None => "shape" case _ => "other" };
+print match Res.Ok(1) { case Opt.Some => "some" case _ => "other" };
+
+// STATUS: ok
+// CHECK: None
+// CHECK: None
+// CHECK: opt none
+// CHECK: not opt
+// CHECK: not opt
+// CHECK: shape
+// CHECK: other

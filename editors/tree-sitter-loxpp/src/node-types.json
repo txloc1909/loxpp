@@ -351,6 +351,10 @@
             "named": true
           },
           {
+            "type": "constructor_tag_pattern",
+            "named": true
+          },
+          {
             "type": "identifier_pattern",
             "named": true
           },
@@ -488,6 +492,42 @@
     "fields": {
       "binding": {
         "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "enum": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "constructor_tag_pattern",
+    "named": true,
+    "fields": {
+      "enum": {
+        "multiple": false,
         "required": true,
         "types": [
           {
@@ -904,6 +944,10 @@
             "named": true
           },
           {
+            "type": "constructor_tag_pattern",
+            "named": true
+          },
+          {
             "type": "identifier_pattern",
             "named": true
           },
@@ -1082,6 +1126,16 @@
       "binding": {
         "multiple": true,
         "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "enum": {
+        "multiple": false,
+        "required": false,
         "types": [
           {
             "type": "identifier",

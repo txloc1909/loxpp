@@ -1,0 +1,42 @@
+// The alternatives of an arm are separated by `or`, and an alternative can be
+// any pattern, a literal included (spec/02-syntax.md, Extended match arm
+// patterns, "Alternatives").
+enum E { A B }
+
+fun size(n) {
+    return match n {
+        case 1 or 2 or 3 => "small"
+        case "x" or "y"  => "letter"
+        case nil or true => "nil or true"
+        case _           => "other"
+    };
+}
+print size(2);
+print size(3);
+print size(4);
+print size("y");
+print size(nil);
+print size(true);
+print size(false);
+
+fun kind(v) {
+    return match v {
+        case 0 or E.A => "zero or A"
+        case _        => "other"
+    };
+}
+print kind(0);
+print kind(E.A());
+print kind(E.B());
+
+// STATUS: ok
+// CHECK: small
+// CHECK: small
+// CHECK: other
+// CHECK: letter
+// CHECK: nil or true
+// CHECK: nil or true
+// CHECK: other
+// CHECK: zero or A
+// CHECK: zero or A
+// CHECK: other

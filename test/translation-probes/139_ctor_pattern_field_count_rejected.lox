@@ -1,0 +1,17 @@
+// A positional constructor pattern lists one name for each field of the
+// constructor; fewer names is a compile error (spec/02-syntax.md, Extended
+// match arm patterns).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+enum E { A(x, y) }
+try {
+    print match E.A(1, 2) { case E.A(q) => q case _ => 0 };
+} catch (e) {
+    print e.kind;
+}
+
+// STATIC-ERROR
+// STATUS: error

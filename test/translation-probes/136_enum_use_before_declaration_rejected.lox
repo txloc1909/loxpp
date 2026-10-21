@@ -1,0 +1,20 @@
+// A use of E.A that comes before the declaration of E in the source is a
+// compile error, also inside a function that runs after the declaration
+// (spec/02-syntax.md, enum declaration).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The try makes a
+// run-time fault print, so an implementation that runs the program fails
+// this probe.
+fun f() {
+    try {
+        return E.A;
+    } catch (e) {
+        return e.kind;
+    }
+}
+enum E { A }
+print f();
+
+// STATIC-ERROR
+// STATUS: error
