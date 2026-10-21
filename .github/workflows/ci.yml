@@ -100,7 +100,10 @@ jobs:
               set -e
               tree-sitter generate
               tree-sitter test
-              files=$(ls ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox)
+              # Probes 141 and 142 hold an arm that the grammar rejects on
+              # purpose (the comma chain, and a constructor pattern with no
+              # enum name), so they are not in the parse.
+              files=$(ls ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox | grep -v -e 141_match_comma_chain_rejected -e 142_bare_positional_pattern_rejected)
               n=$(echo $files | wc -w)
               echo "Parsing $n corpus files ..."
               set +e
