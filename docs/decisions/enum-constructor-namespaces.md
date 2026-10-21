@@ -14,8 +14,8 @@ The owner answered the four open questions on 2026-10-21.
 | `E` alone is a value | No. The import mission can change this if module access needs it. |
 | Remove the literal comma chain | Yes, option A. `or` joins every alternative. See "The comma chain". |
 | A constructor pattern tested against a value that is not an enum value (review of #780) | It does not match, and the match goes on. The halting fault is removed. Alternatives are tried from left to right. |
-| Other declarations with the enum name (review of #780) | No declaration of the program may have the enum name, at any scope and anywhere in the source (declaration rule 4). |
-| An enum with the name of a built-in global (review of #780) | Allowed. The enum hides the built-in in the whole program. #781 tracks how the import mission protects built-ins. |
+| Other declarations with the enum name (review of #780) | No variable that the program declares may have the enum name, at any scope and anywhere in the source. A member name (a constructor, a field, a method, a property) may have it (declaration rule 4). Confirmed by the owner on 2026-10-21. |
+| An enum with the name of a built-in global (review of #780) | Allowed. The enum name means the enum in the whole program, so it hides the built-in everywhere (declaration rule 5). Confirmed by the owner on 2026-10-21. #781 tracks how the import mission protects built-ins. |
 
 ## Summary
 
