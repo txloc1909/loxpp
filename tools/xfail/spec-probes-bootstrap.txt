@@ -4,29 +4,8 @@
 #
 # Mission #771 (docs/decisions/enum-constructor-namespaces.md): the spec
 # states the final rules before the consumers implement them.
-155_enum_qualified_constructor.lox #775 (N3): E.A in expressions and patterns
 129_enum_shared_constructor_name.lox #778 (N7): shared constructor names and the enum test
-130_match_or_literal_alternatives.lox #778 (N7): or between literal patterns
 131_enum_bare_constructor_name.lox #778 (N7): a constructor name alone is not a constructor
-132_enum_name_alone_rejected.lox #775 (N3): the enum name alone is a compile error
-133_enum_unknown_constructor_rejected.lox #775 (N3): E.B with no constructor B is a compile error
-134_enum_name_as_local_rejected.lox #775 (N3): an enum name as a local is a compile error
-135_enum_name_global_collision_rejected.lox #775 (N3): an enum name as another global is a compile error
-136_enum_use_before_declaration_rejected.lox #775 (N3): E.A before the declaration of E is a compile error
-137_enum_name_assignment_rejected.lox #775 (N3): an assignment to E is a compile error
-138_enum_constructor_assignment_rejected.lox #775 (N3): an assignment to E.A is a compile error
 141_match_comma_chain_rejected.lox #778 (N7): the comma chain is a parse error
 142_bare_positional_pattern_rejected.lox #778 (N7): A(x) with no enum name is a compile error
 145_ctor_pattern_non_enum_no_match.lox #778 (N7): a constructor pattern does not match a value that is not an enum value
-146_enum_hides_builtin_global.lox #775 (N3): an enum name hides a built-in global
-147_enum_name_as_parameter_rejected.lox #775 (N3): the enum name may not be declared again
-148_enum_name_as_pattern_binding_rejected.lox #775 (N3): the enum name may not be declared again
-149_enum_name_as_catch_variable_rejected.lox #775 (N3): the enum name may not be declared again
-150_enum_name_as_for_in_variable_rejected.lox #775 (N3): the enum name may not be declared again
-151_enum_name_as_local_function_rejected.lox #775 (N3): the enum name may not be declared again
-152_enum_name_in_destructuring_rejected.lox #775 (N3): the enum name may not be declared again
-153_enum_name_as_at_binding_rejected.lox #775 (N3): the enum name may not be declared again
-154_enum_name_as_local_class_rejected.lox #775 (N3): the enum name may not be declared again
-156_builtin_before_enum_declaration_rejected.lox #775 (N3): the enum hides a built-in in the whole program
-157_enum_name_before_declaration_rejected.lox #775 (N3): the enum name before its declaration is a compile error
-158_enum_name_as_member_name.lox #778 (N7): a constructor may have the name of its enum

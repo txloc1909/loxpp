@@ -1,0 +1,7 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a bare enum name in a pattern, where E is also the name of
+// a constructor of another enum.
+enum E { A }
+enum F { E }
+print "before";
+print match F.E() { case E => 1 case _ => 0 };

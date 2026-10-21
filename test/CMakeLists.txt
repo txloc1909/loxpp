@@ -358,6 +358,21 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Probe 159 has no STATUS line, so the bootstrap's spec-probe walk skips
+    # it. It checks that the bare constructor name and E.A hold the same
+    # constructor object. Same trace-noise constraint as
+    # BootstrapListMethodRead above.
+    add_test(NAME BootstrapEnumConstructorIdentity
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
+                $<TARGET_FILE:loxpp>
+                ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/159_enum_bare_and_qualified_constructor_identity.lox
+                --skip-on-trace
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapEnumConstructorIdentity PROPERTIES
+        ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issue #642: every compile message native can report has a case in
     # test/compile-errors/ or a recorded reason. The checker reads the message
     # templates from src/parser.cpp, src/compiler.cpp, and src/scanner.cpp, so

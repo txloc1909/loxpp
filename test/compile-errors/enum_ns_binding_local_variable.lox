@@ -1,0 +1,6 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a local variable with the name of an enum.
+enum E { A(x) }
+print "before";
+fun f() { var E = 1; return 2; }
+print f();

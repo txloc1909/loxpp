@@ -1,0 +1,5 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a map destructuring name with the name of an enum.
+enum E { A(x) }
+print "before";
+var {E} = {"E": 1};

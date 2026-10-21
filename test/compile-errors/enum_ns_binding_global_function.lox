@@ -1,0 +1,5 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a global function with the name of an enum.
+enum E { A(x) }
+print "before";
+fun E() { return 1; }

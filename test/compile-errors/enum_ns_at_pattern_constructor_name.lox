@@ -1,0 +1,7 @@
+// DIAGNOSTIC: Sub-pattern after '@' must be a structural pattern (constructor or class), not a plain binding.
+// Compile error: a bare enum name after '@', where E is also the name of a
+// constructor of another enum.
+enum E { A }
+enum F { E }
+print "before";
+print match F.E() { case w @ E => w case _ => 0 };

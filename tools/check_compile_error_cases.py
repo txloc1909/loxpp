@@ -197,26 +197,12 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(681, 'the bootstrap has a different limit'),
     'Too many elements in sequence pattern.':
         Deferred(681, 'the bootstrap has a different limit'),
-    'Too many fields in constructor pattern.':
-        Deferred(681, 'the bootstrap accepts the program'),
     'Too many fields in destructuring pattern.':
         Deferred(681, 'the bootstrap has a different limit'),
     'Too many local variables in function.':
         Deferred(681, 'the bootstrap accepts the program'),
     'Unterminated string.':
         Deferred(641, 'different line and a second error'),
-    "A variable can't have the name of the enum '<...>'.":
-        Deferred(775, 'the bootstrap accepts the program'),
-    "Can't assign to the constructor '<...>.<...>'.":
-        Deferred(775, 'the bootstrap faults at run time'),
-    "Can't assign to the enum '<...>'.":
-        Deferred(775, 'the bootstrap faults at run time'),
-    "Enum '<...>' has no constructor '<...>'.":
-        Deferred(775, 'the bootstrap faults at run time'),
-    "The enum '<...>' is not a value; name a constructor, as in '<...>.A'.":
-        Deferred(775, 'the bootstrap faults at run time'),
-    'Too few fields in constructor pattern.':
-        Deferred(778, 'the bootstrap keeps the prefix rule'),
 }
 
 GENERATED: dict[str, Generated] = {

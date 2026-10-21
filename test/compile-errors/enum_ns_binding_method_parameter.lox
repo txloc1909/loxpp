@@ -1,0 +1,6 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a method parameter with the name of an enum.
+enum E { A(x) }
+print "before";
+class C { m(E) { return 1; } }
+print C().m(2);

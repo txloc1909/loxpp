@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Enum '<...>' has no constructor '<...>'.
+// Compile error: a constructor pattern that names a constructor of another enum.
+enum E { A }
+enum F { B(x) }
+var v = match F.B(1) { case E.B(x) => x case _ => 0 };

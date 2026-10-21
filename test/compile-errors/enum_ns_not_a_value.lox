@@ -1,0 +1,5 @@
+// DIAGNOSTIC: The enum '<...>' is not a value; name a constructor, as in '<...>.A'.
+// Compile error: an enum name alone in an expression.
+enum E { A }
+print "before";
+var x = E;

@@ -109,6 +109,9 @@ enum Expr {
     IndexSetExpr(object, index, line, value)
     MatchExpr(subject, arms, end_line)
     YieldExpr(value, line)
+    // E.A: the constructor A of the enum E. qname is "E.A", the name of the
+    // global that holds the constructor.
+    EnumRef(id, enum_name, ctor_name, qname, line)
 }
 
 // ClassDecl(name, super_id, super_name, methods) — super_id/super_name are nil
@@ -139,11 +142,12 @@ enum Pattern {
     WildPat
     LitPat(v)
     BindPat(name)
-    CtorPat(cname, subpats, named, line)
+    // enum_name is E for the head E.A, and nil for a bare constructor name.
+    CtorPat(cname, subpats, named, line, enum_name)
     ListPat(elems, rest_name)
     AtPat(at_name, subpat)
     ClassPat(cname)
-    TagPat(cname)
+    TagPat(cname, enum_name, line)
 }
 
 // bodyStmts is the arm's leading declarations/statements (possibly ending in
@@ -374,6 +378,16 @@ class Parser {
         this.hadError   = false;
         this.panicMode  = false;
         this.armChain   = nil;
+        // An enum name means the enum in the whole program, also before its
+        // declaration, so the names are known before the parse starts.
+        this.enumNames  = {};
+        var i = 0;
+        while (i + 1 < len(tokens)) {
+            if (tokens[i].type == "ENUM" and tokens[i + 1].type == "IDENTIFIER") {
+                this.enumNames[tokens[i + 1].lexeme] = true;
+            }
+            i = i + 1;
+        }
     }
 
     allocId() {
@@ -771,6 +785,7 @@ class Parser {
                 case IndexSetExpr{object, index, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
                 case MatchExpr{subject, arms}                 => { this.parseError(equals, "Invalid assignment target."); expr }
                 case YieldExpr{value, line}                   => { this.parseError(equals, "Invalid assignment target."); expr }
+                case EnumRef{enum_name, ctor_name}            => { this.parseError(equals, "Can't assign to the constructor '" + enum_name + "." + ctor_name + "'."); expr }
             };
         }
         return expr;
@@ -923,6 +938,11 @@ class Parser {
 
         if (this.matchT("IDENTIFIER")) {
             var tok = this.previous();
+            if (this.enumNames.has(tok.lexeme) and this.matchT("DOT")) {
+                var ctorTok = this.expect("IDENTIFIER", "Expect constructor name after '.'.");
+                return EnumRef(this.allocId(), tok.lexeme, ctorTok.lexeme,
+                               tok.lexeme + "." + ctorTok.lexeme, tok.line);
+            }
             return Variable(this.allocId(), tok.lexeme, tok.line);
         }
 
@@ -1156,6 +1176,19 @@ class Parser {
                 var subpat = this.parsePattern();
                 return AtPat(nameTok.lexeme, subpat);
             }
+            // The head E.A names the constructor A of the enum E. The enum
+            // name alone stays a binding, which the resolver rejects.
+            var enumName = nil;
+            var line = nameTok.line;
+            if (this.enumNames.has(nameTok.lexeme)) {
+                if (this.matchT("DOT")) {
+                    enumName = nameTok.lexeme;
+                    nameTok = this.expect("IDENTIFIER", "Expect constructor name after '.'.");
+                } else if (this.check("LEFT_PAREN") or this.check("LEFT_BRACE")) {
+                    this.parseError(this.peek(), "Expect '.' and a constructor name after the enum '" + nameTok.lexeme + "'.");
+                    return WildPat();
+                }
+            }
             if (this.matchT("LEFT_PAREN")) {
                 var subpats = [];
                 if (!this.check("RIGHT_PAREN")) {
@@ -1165,7 +1198,7 @@ class Parser {
                     }
                 }
                 this.expect("RIGHT_PAREN", "Expect ')' after field pattern.");
-                return CtorPat(nameTok.lexeme, subpats, false, nameTok.line);
+                return CtorPat(nameTok.lexeme, subpats, false, line, enumName);
             }
             if (this.matchT("LEFT_BRACE")) {
                 var subpats = [];
@@ -1176,8 +1209,9 @@ class Parser {
                     }
                 }
                 this.expect("RIGHT_BRACE", "Expect '}' after field pattern.");
-                return CtorPat(nameTok.lexeme, subpats, true, nameTok.line);
+                return CtorPat(nameTok.lexeme, subpats, true, line, enumName);
             }
+            if (enumName != nil) return TagPat(nameTok.lexeme, enumName, line);
             return BindPat(nameTok.lexeme);
         }
         this.parseError(this.peek(), "Expect pattern.");
@@ -1262,6 +1296,11 @@ class Resolver {
         // Global classes declared so far, in source order. With enumCtors,
         // this set decides the pattern names that classifyArmPat changes.
         this.classNames      = {};
+        // Every enum name of the program (the parser's scan), the enums
+        // declared so far, and "E.A" for each constructor A of a declared E.
+        this.enumNames       = {};
+        this.declaredEnums   = {};
+        this.qualifiedCtors  = {};
     }
 
     resError(name, line, msg) {
@@ -1272,7 +1311,11 @@ class Resolver {
     beginScope() { this.scopes.append({}); }
     endScope()   { this.scopes.pop(); }
 
+    // A variable of any kind, global or local, may not have an enum name.
     declare(name, line) {
+        if (this.enumNames.has(name)) {
+            this.resError(name, line, "A variable can't have the name of the enum '" + name + "'.");
+        }
         if (len(this.scopes) == 0) return;
         var scope = this.scopes[len(this.scopes) - 1];
         if (scope.has(name)) {
@@ -1313,7 +1356,7 @@ class Resolver {
     resolveStmt(stmt) {
         match stmt {
             case Block{statements}                               => this.resolveBlock(statements)
-            case ClassDecl{name, super_id, super_name, super_line, methods} => this.resolveClass(name, super_id, super_name, methods)
+            case ClassDecl{name, super_id, super_name, super_line, methods} => this.resolveClass(name, super_id, super_name, super_line, methods)
             case ExpressionStmt{expr}                            => this.resolveExpr(expr)
             case FunDecl{name, line, params, body}               => this.resolveFunDecl(name, line, params, body)
             case IfStmt{condition, then_branch, else_branch}     => this.resolveIf(condition, then_branch, else_branch)
@@ -1398,7 +1441,7 @@ class Resolver {
         this.currentFunction = enclosing;
     }
 
-    resolveClass(name, super_id, super_name, methods) {
+    resolveClass(name, super_id, super_name, super_line, methods) {
         var enclosingClass = this.currentClass;
         this.currentClass = "CLASS";
         if (len(this.scopes) == 0) this.classNames[name] = true;
@@ -1407,6 +1450,7 @@ class Resolver {
 
         if (super_id != nil) {
             this.currentClass = "SUBCLASS";
+            if (this.enumNames.has(super_name)) this.reportEnumValue(super_name, super_line);
             this.resolveLocal(super_id, super_name);
             this.beginScope();
             var superScope = this.scopes[len(this.scopes) - 1];
@@ -1499,7 +1543,7 @@ class Resolver {
         match expr {
             case Literal{v}                    => nil
             case Variable{id, name, line}      => this.resolveVariable(id, name, line)
-            case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
+            case Assign{id, name, line, value} => this.resolveAssign(id, name, line, value)
             case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
             case Unary{op, right}              => this.resolveExpr(right)
             case LenExpr{argument}             => this.resolveExpr(argument)
@@ -1518,7 +1562,39 @@ class Resolver {
             case IndexSetExpr{object, index, line, value}  => { this.resolveExpr(object); this.resolveExpr(index); this.resolveExpr(value) }
             case MatchExpr{subject, arms, end_line}        => this.resolveMatchExpr(subject, arms, end_line)
             case YieldExpr{value, line}                    => this.resolveYield(value)
+            case EnumRef{id, enum_name, ctor_name, qname, line} => this.checkQualifiedCtor(enum_name, ctor_name, line)
         };
+    }
+
+    resolveAssign(id, name, line, value) {
+        if (this.enumNames.has(name) and this.checkEnumDeclared(name, line)) {
+            this.resError(name, line, "Can't assign to the enum '" + name + "'.");
+        }
+        this.resolveExpr(value);
+        this.resolveLocal(id, name);
+    }
+
+    // An enum name alone is not a value. The name means the enum in the
+    // whole program, so this holds also where a variable of that name would
+    // be in scope.
+    reportEnumValue(name, line) {
+        if (this.checkEnumDeclared(name, line)) {
+            this.resError(name, line, "The enum '" + name + "' is not a value; name a constructor, as in '" + name + ".A'.");
+        }
+    }
+
+    checkEnumDeclared(name, line) {
+        if (this.declaredEnums.has(name)) return true;
+        this.resError(name, line, "Can't use the enum '" + name + "' before its declaration.");
+        return false;
+    }
+
+    // E.A names the constructor A of the enum E. Returns whether it does.
+    checkQualifiedCtor(enumName, ctorName, line) {
+        if (!this.checkEnumDeclared(enumName, line)) return false;
+        if (this.qualifiedCtors.has(enumName + "." + ctorName)) return true;
+        this.resError(ctorName, line, "Enum '" + enumName + "' has no constructor '" + ctorName + "'.");
+        return false;
     }
 
     resolveYield(value) {
@@ -1526,6 +1602,10 @@ class Resolver {
     }
 
     resolveVariable(id, name, line) {
+        if (this.enumNames.has(name)) {
+            this.reportEnumValue(name, line);
+            return;
+        }
         if (len(this.scopes) > 0) {
             var scope = this.scopes[len(this.scopes) - 1];
             if (scope.has(name) and !scope[name]) {
@@ -1583,6 +1663,7 @@ class Resolver {
             this.resError(name, name_line, "Duplicate enum name.");
             return;
         }
+        this.declaredEnums[name] = true;
         var i = 0;
         while (i < len(ctor_names)) {
             var cname = ctor_names[i];
@@ -1591,6 +1672,7 @@ class Resolver {
                 return;
             }
             this.enumCtors[cname] = name;
+            this.qualifiedCtors[name + "." + cname] = true;
             this.enumCtorFields[cname] = ctor_fields_list[i];
             if (!this.enumDecls.has(name)) this.enumDecls[name] = [];
             this.enumDecls[name].append(cname);
@@ -1613,11 +1695,11 @@ class Resolver {
             case WildPat                   => nil
             case LitPat{v}                 => nil
             case BindPat{name}             => this.resolveBindPat(name)
-            case CtorPat{cname, subpats, named, line} => this.resolveCtorPat(cname, subpats, named, line)
+            case CtorPat{cname, subpats, named, line, enum_name} => this.resolveCtorPat(cname, subpats, named, line, enum_name)
             case ListPat{elems, rest_name} => this.resolveListPat(elems, rest_name)
             case AtPat{at_name, subpat}    => this.resolveAtPat(at_name, subpat)
             case ClassPat{cname}           => nil
-            case TagPat{cname}             => nil
+            case TagPat{cname, enum_name, line} => this.resolveTagPat(cname, enum_name, line)
         };
     }
 
@@ -1653,8 +1735,11 @@ class Resolver {
     }
 
     classifyBareName(pat, name) {
-        // A constructor wins over a class of the same name.
-        if (this.enumCtors.has(name)) return TagPat(name);
+        // An enum name stays a binding, which declare rejects, also where a
+        // constructor has that name. A constructor wins over a class of the
+        // same name.
+        if (this.enumNames.has(name)) return pat;
+        if (this.enumCtors.has(name)) return TagPat(name, nil, 0);
         if (this.classNames.has(name)) return ClassPat(name);
         return pat;
     }
@@ -1701,8 +1786,18 @@ class Resolver {
     // and class declarations that precede the match are known. A named-field
     // pattern of a constructor names declared fields; a class has no fixed
     // field set, so its names are bindings.
-    resolveCtorPat(cname, subpats, named, line) {
+    resolveCtorPat(cname, subpats, named, line, enum_name) {
+        if (enum_name != nil and !this.checkQualifiedCtor(enum_name, cname, line)) return;
         if (this.enumCtors.has(cname)) {
+            var arity = len(this.enumCtorFields[cname]);
+            if (!named and len(subpats) > arity) {
+                this.resError(cname, line, "Too many fields in constructor pattern.");
+                return;
+            }
+            if (!named and len(subpats) < arity) {
+                this.resError(cname, line, "Too few fields in constructor pattern.");
+                return;
+            }
             if (named) {
                 var fields = this.enumCtorFields[cname];
                 var i = 0;
@@ -1727,6 +1822,10 @@ class Resolver {
         } else {
             this.resError(cname, line, "Unknown constructor or class '" + cname + "'.");
         }
+    }
+
+    resolveTagPat(cname, enum_name, line) {
+        if (enum_name != nil) this.checkQualifiedCtor(enum_name, cname, line);
     }
 
     hasName(names, name) {
@@ -3112,7 +3211,7 @@ class LoxEnumCtor {
     }
     arity() { return len(this.fields); }
     call(interp, args) { return LoxEnumValue(this.enumName, this.tag, args); }
-    toString() { return "<enum ctor " + this.tag + ">"; }
+    toString() { return "<ctor " + this.enumName + "::" + this.tag + ">"; }
 }
 
 // spec/03-types.md, Messages. An enum value's own bit is computed once, when
@@ -4442,6 +4541,7 @@ class Interpreter {
             case IndexSetExpr{object, index, line, value}  => this.evalIndexSet(object, index, line, value, env)
             case MatchExpr{subject, arms}                  => this.evalMatchExpr(subject, arms, env)
             case YieldExpr{value, line}                    => this.evalYield(value, line, env)
+            case EnumRef{id, qname, line}                  => this.lookupVariable(id, qname, line, env)
         };
     }
 
@@ -5131,13 +5231,15 @@ class Interpreter {
         return s + ")";
     }
 
-    // An enum declaration defines its constructors, never the type name: a
-    // reference to the type name is an undefined global read
-    // (spec/02-syntax.md, `enum` declaration).
+    // An enum declaration defines its constructors, never the type name.
+    // Each constructor is the global "E.A", which E.A reads, and the global
+    // with its bare name. Both hold the same object, as constructors compare
+    // by identity.
     execEnumDecl(name, ctor_names, ctor_fields_list, env) {
         var i = 0;
         while (i < len(ctor_names)) {
             var ctor = LoxEnumCtor(name, ctor_names[i], ctor_fields_list[i]);
+            env.define(name + "." + ctor_names[i], ctor);
             env.define(ctor_names[i], ctor);
             i = i + 1;
         }
@@ -5452,6 +5554,7 @@ try {
     stmts = parser.parse();
     if (!scanner.hadError and !parser.hadError) {
         var resolver = Resolver();
+        resolver.enumNames = parser.enumNames;
         resolver.resolve(stmts);
         if (!resolver.hadError) {
             interpreter = Interpreter(resolver.locals);
