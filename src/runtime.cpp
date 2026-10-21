@@ -65,27 +65,6 @@ void Runtime::predeclareGlobalSlots() {
     }
 }
 
-namespace {
-
-// True when the script declares a top-level `fun` of this source: only such a
-// source can be a worker entry (task.spawn_worker step 1).
-bool sourceHasTopLevelFunction(const ObjFunction* script, int sourceId) {
-    const ValueArray& constants = script->chunk.constants();
-    for (std::uint16_t i = 0; i < constants.size(); i++) {
-        Value c = constants.at(i);
-        if (!isFunction(c)) {
-            continue;
-        }
-        const auto* f = static_cast<const ObjFunction*>(as<Obj*>(c));
-        if (f->topLevelOrdinal >= 0 && f->sourceId == sourceId) {
-            return true;
-        }
-    }
-    return false;
-}
-
-} // namespace
-
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
     return loadProgram(source, sink, false);
@@ -110,30 +89,13 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     m_yieldedValue = Value{};
     CompileOptions options;
     options.declarationsOnly = declarationsOnly;
-    std::shared_ptr<const ProgramDeclarations> sourceDeclarations;
     if (declarationsOnly) {
-        // A new worker compiles a source it already has, under the id of the
-        // entry function's source. Do not search m_sources for the text: two
-        // lines can have the same text, and a failed line leaves its source
-        // behind with no declaration tables.
+        // A new worker replays the sources it was given, under the id each one
+        // had on the worker that spawned it. Do not search m_sources for the
+        // text: two lines can have the same text.
         options.sourceId = sourceId;
     } else {
         options.sourceId = static_cast<int>(m_sources.size());
-        if (!m_declarations) {
-            m_declarations = std::make_unique<ProgramDeclarations>();
-        }
-        // The tables before this source. A worker that recompiles this source
-        // alone (runWorker) starts from them, so the constructor tags it
-        // assigns to this source's declarations match the ones this compile
-        // assigns, and its compile-time checks see the same declarations.
-        auto snapshot = std::make_shared<ProgramDeclarations>(*m_declarations);
-        // This runtime already accepted the source with these tables, so the
-        // enum check against earlier global names cannot fire again. Drop
-        // them: they are the table that grows with every line, and a session
-        // with many functions would keep one growing copy per line.
-        snapshot->globalNames.clear();
-        sourceDeclarations = std::move(snapshot);
-        m_sources.push_back(std::make_shared<const std::string>(source));
     }
     // A compile continues this Runtime's session: a REPL line sees every
     // declaration an earlier line made.
@@ -142,18 +104,15 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     }
     options.declarations = m_declarations.get();
     ObjFunction* fn = compile(source, &m_mm, sink, options);
-    if (!declarationsOnly) {
-        // Only a source with a top-level `fun` can be a worker entry. Keep no
-        // tables for the other lines: a session of N lines would then hold
-        // N growing copies. The slot stays parallel to m_sources, also after
-        // a failed compile.
-        bool hasEntry =
-            fn != nullptr && sourceHasTopLevelFunction(fn, options.sourceId);
-        m_sourceDeclarations.push_back(hasEntry ? std::move(sourceDeclarations)
-                                                : nullptr);
-    }
     if (fn == nullptr) {
         return nullptr;
+    }
+    if (!declarationsOnly) {
+        // The source this run compiled, so that a worker spawned later can
+        // define its declarations again. Only a source that compiled is here:
+        // a line that did not compile made no declaration, and the next line
+        // takes its source id.
+        m_sources.push_back(std::make_shared<const std::string>(source));
     }
     // Root fn on the stack before any allocation (defineNatives,
     // create<ObjClosure>) can trigger GC. Without this, fn is unreachable
@@ -1489,7 +1448,6 @@ struct WorkerStart {
     std::shared_ptr<WorkerGroup> group;
     MemoryManager* heap;
     std::vector<std::shared_ptr<const std::string>> sources;
-    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations;
     std::vector<std::string> args;
     int sourceId;
     int ordinal;
@@ -1510,8 +1468,7 @@ void workerMain(WorkerStart start) {
     rt.setCodeAttacher(std::move(start.attachCode));
     rt.setGlobalSlotNames(std::move(start.globalSlotNames));
     InterpretResult result =
-        rt.runWorker(start.group, std::move(start.sources),
-                     std::move(start.sourceDeclarations), start.sourceId,
+        rt.runWorker(start.group, std::move(start.sources), start.sourceId,
                      start.ordinal, start.task, start.msg);
     if (result != InterpretResult::OK) {
         // spec/04-semantics.md, Ending: an uncaught fault in any task ends
@@ -1547,7 +1504,6 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     WorkerStart start{m_group,
                       heap,
                       m_sources,
-                      m_sourceDeclarations,
                       m_stdlibCtx.args,
                       entry->function->sourceId,
                       entry->function->topLevelOrdinal,
@@ -1564,44 +1520,52 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     return task;
 }
 
-InterpretResult Runtime::runWorker(
-    std::shared_ptr<WorkerGroup> group,
-    std::vector<std::shared_ptr<const std::string>> sources,
-    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations,
-    int sourceId, int ordinal, ObjTask* task, Value msg) {
+InterpretResult
+Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
+                   std::vector<std::shared_ptr<const std::string>> sources,
+                   int sourceId, int ordinal, ObjTask* task, Value msg) {
     m_group = std::move(group);
     m_isMainWorker = false;
     m_sources = std::move(sources);
-    m_sourceDeclarations = std::move(sourceDeclarations);
     m_mainTask = task;
-    // The worker recompiles only its own source. It starts from the session
-    // tables that the main runtime had just before it compiled that source,
-    // so this source's declarations get the same constructor tags, and the
-    // compile-time checks see the same declarations, as on the main worker.
-    if (sourceId >= 0 &&
-        static_cast<std::size_t>(sourceId) < m_sourceDeclarations.size() &&
-        m_sourceDeclarations[static_cast<std::size_t>(sourceId)]) {
-        m_declarations = std::make_unique<ProgramDeclarations>(
-            *m_sourceDeclarations[static_cast<std::size_t>(sourceId)]);
-    }
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
     task->startArg = m_mm.receiveMessage(msg);
     task->hasStartArg = true;
 
     // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
-    // class, and enum declaration, in source order, and nothing else.
-    ObjClosure* script =
-        loadProgram(*m_sources[sourceId], nullptr, true, sourceId);
-    if (script == nullptr) {
-        return InterpretResult::RUNTIME_ERROR;
-    }
-    m_mm.pushTempRoot(script);
-    if (m_attachCode && !m_attachCode(script->function)) {
-        return InterpretResult::RUNTIME_ERROR;
-    }
-    if (call(script, 0) == ThrowOutcome::Uncaught || !runNestedLoop(0)) {
-        return InterpretResult::RUNTIME_ERROR;
+    // class, and enum declaration of the program, in source order, and
+    // nothing else. In a session the program is every line entered so far, so
+    // replay the sources before the entry's own as well: their declarations
+    // are the ones its entry can name, and the constructor tags they assign
+    // are the tags the main worker assigned. The running table starts empty
+    // and each source extends it, so a worker needs no copy of the session's
+    // tables and no source keeps a snapshot of them.
+    m_declarations = std::make_unique<ProgramDeclarations>();
+    ObjClosure* script = nullptr;
+    for (int id = 0; id <= sourceId; id++) {
+        ObjClosure* declarations = loadProgram(
+            *m_sources[static_cast<std::size_t>(id)], nullptr, true, id);
+        if (declarations == nullptr) {
+            // Every source here compiled on the worker that spawned this one,
+            // with the same tables, so this compile cannot fail.
+            runtimeError("BUG: a worker could not compile its program.");
+            return InterpretResult::RUNTIME_ERROR;
+        }
+        m_mm.pushTempRoot(declarations);
+        if (m_attachCode && !m_attachCode(declarations->function)) {
+            return InterpretResult::RUNTIME_ERROR;
+        }
+        if (call(declarations, 0) == ThrowOutcome::Uncaught ||
+            !runNestedLoop(0)) {
+            return InterpretResult::RUNTIME_ERROR;
+        }
+        if (id == sourceId) {
+            // The entry function is a constant of its own source's script.
+            script = declarations;
+        } else {
+            m_mm.popTempRoot();
+        }
     }
     ObjFunction* entryFn = nullptr;
     const ValueArray& constants = script->function->chunk.constants();
