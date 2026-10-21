@@ -167,14 +167,20 @@ class Resolver {
             }
             case StmtKind::EnumDecl: {
                 const auto& e = static_cast<const EnumDecl&>(*stmt);
+                // The constructors first: a later declaration wins a lookup,
+                // and the enum name means the enum also when a constructor
+                // has the same name.
+                std::vector<Symbol*> ctors;
+                ctors.reserve(e.ctors.size());
+                for (const EnumCtorDecl& ctor : e.ctors) {
+                    ctors.push_back(declareIn(
+                        g, ctor.name.text, SymbolKind::EnumCtor,
+                        nameSpan(ctor.name), {ctor.offset, ctor.length}));
+                }
                 Symbol* enumSym = declareIn(g, e.name.text, SymbolKind::Class,
                                             nameSpan(e.name), stmtSpan(e));
-                for (const EnumCtorDecl& ctor : e.ctors) {
-                    Symbol* cs = declareIn(
-                        g, ctor.name.text, SymbolKind::EnumCtor,
-                        nameSpan(ctor.name), {ctor.offset, ctor.length});
-                    enumSym->members.push_back(cs);
-                }
+                enumSym->isEnum = true;
+                enumSym->members = std::move(ctors);
                 break;
             }
             default:
@@ -448,6 +454,7 @@ class Resolver {
                 declareIn(m_current, e.name.text, SymbolKind::Class,
                           nameSpan(e.name), stmtSpan(e));
             enumSym->implicit = true;
+            enumSym->isEnum = true;
             for (const EnumCtorDecl& ctor : e.ctors) {
                 Symbol* cs =
                     declareIn(m_current, ctor.name.text, SymbolKind::EnumCtor,
@@ -461,11 +468,13 @@ class Resolver {
         if (enumSym != nullptr) {
             m_out.references.add({nameSpan(e.name), enumSym, true, false});
         }
-        for (const EnumCtorDecl& ctor : e.ctors) {
-            Symbol* cs = m_current->findLocal(ctor.name.text);
-            if (cs != nullptr) {
-                m_out.references.add({nameSpan(ctor.name), cs, true, false});
-            }
+        if (enumSym == nullptr) {
+            return;
+        }
+        for (std::size_t i = 0;
+             i < e.ctors.size() && i < enumSym->members.size(); ++i) {
+            m_out.references.add(
+                {nameSpan(e.ctors[i].name), enumSym->members[i], true, false});
         }
     }
 
@@ -587,12 +596,23 @@ class Resolver {
             }
             break;
         }
-        case ExprKind::Get:
+        case ExprKind::Get: {
             // `obj.name` -- `name` is a member and is resolved dynamically at
-            // run time; the tooling does not link it to a class member. Only
-            // the object sub-expression is resolved.
-            visitExpr(static_cast<const GetExpr&>(*expr).object.get());
+            // run time; the tooling does not link it to a class member. The
+            // one exception is `E.A`, which names the constructor A of the
+            // enum E statically.
+            const auto& e = static_cast<const GetExpr&>(*expr);
+            visitExpr(e.object.get());
+            if (e.object != nullptr && e.object->kind == ExprKind::Identifier) {
+                const auto& obj = static_cast<const IdentifierExpr&>(*e.object);
+                Symbol* sym = lookup(obj.name, m_current);
+                if (sym != nullptr && sym->isEnum) {
+                    resolveEnumMember(sym, e.name,
+                                      {e.name_offset, e.name_length});
+                }
+            }
             break;
+        }
         case ExprKind::Index: {
             const auto& e = static_cast<const IndexExpr&>(*expr);
             visitExpr(e.object.get());
@@ -707,6 +727,42 @@ class Resolver {
         warn(span, "unknown name '" + std::string(name) + "'");
     }
 
+    // The constructor `name` of the enum symbol `enumSym`.
+    void resolveEnumMember(Symbol* enumSym, std::string_view name, Span span) {
+        for (Symbol* ctor : enumSym->members) {
+            if (ctor->name == name) {
+                ctor->uses.push_back(span);
+                m_out.references.add({span, ctor, false, false});
+                return;
+            }
+        }
+        warn(span, "enum '" + enumSym->name + "' has no constructor '" +
+                       std::string(name) + "'");
+    }
+
+    // The head `E.A` of a pattern: a use of E and of its constructor A.
+    void resolveQualifiedCtor(const Name& enumName, std::string_view name,
+                              Span span, Scope* armScope) {
+        Symbol* sym = lookup(enumName.text, armScope);
+        if (sym == nullptr || !sym->isEnum) {
+            warn(nameSpan(enumName),
+                 "'" + std::string(enumName.text) + "' is not an enum");
+            return;
+        }
+        sym->uses.push_back(nameSpan(enumName));
+        m_out.references.add({nameSpan(enumName), sym, false, false});
+        resolveEnumMember(sym, name, span);
+    }
+
+    void resolvePatternHead(const Name& enumName, std::string_view name,
+                            Span span, Scope* armScope) {
+        if (enumName.text.empty()) {
+            resolveCtorName(name, span, armScope);
+        } else {
+            resolveQualifiedCtor(enumName, name, span, armScope);
+        }
+    }
+
     void bindPattern(const Pattern* pat, Scope* armScope) {
         if (pat == nullptr) {
             return;
@@ -717,12 +773,18 @@ class Resolver {
             break;
         case PatternKind::Binding: {
             const auto& p = static_cast<const BindingPat&>(*pat);
+            if (!p.enum_name.text.empty()) {
+                resolveQualifiedCtor(p.enum_name, p.name,
+                                     {p.name_offset, p.name_length}, armScope);
+                break;
+            }
             bindPatternHead(p.name, {p.name_offset, p.name_length}, armScope);
             break;
         }
         case PatternKind::Ctor: {
             const auto& p = static_cast<const CtorPat&>(*pat);
-            resolveCtorName(p.name, {p.name_offset, p.name_length}, armScope);
+            resolvePatternHead(p.enum_name, p.name,
+                               {p.name_offset, p.name_length}, armScope);
             for (const Name& f : p.fields) {
                 declareMatchBinding(armScope, f.text, nameSpan(f));
             }
@@ -730,7 +792,8 @@ class Resolver {
         }
         case PatternKind::Class: {
             const auto& p = static_cast<const ClassPat&>(*pat);
-            resolveCtorName(p.name, {p.name_offset, p.name_length}, armScope);
+            resolvePatternHead(p.enum_name, p.name,
+                               {p.name_offset, p.name_length}, armScope);
             for (const Name& f : p.fields) {
                 declareMatchBinding(armScope, f.text, nameSpan(f));
             }
@@ -779,7 +842,8 @@ class Resolver {
             break;
         case PatternKind::Binding: {
             const auto& p = static_cast<const BindingPat&>(*pat);
-            if (!isConstructorSymbol(lookup(p.name, armScope))) {
+            if (p.enum_name.text.empty() &&
+                !isConstructorSymbol(lookup(p.name, armScope))) {
                 keep(p.name);
             }
             break;

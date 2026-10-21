@@ -240,8 +240,11 @@ struct WildcardPat : Pattern {
     WildcardPat() : Pattern(PatternKind::Wildcard) {}
 };
 
+// `enum_name` holds `E` of a qualified head `E.A`, and is empty for a bare
+// head. A qualified head always names a constructor, never a binding.
 struct BindingPat : Pattern {
     BindingPat() : Pattern(PatternKind::Binding) {}
+    Name enum_name;
     std::string_view name;
     std::size_t name_offset = 0;
     std::size_t name_length = 0;
@@ -249,6 +252,7 @@ struct BindingPat : Pattern {
 
 struct CtorPat : Pattern {
     CtorPat() : Pattern(PatternKind::Ctor) {}
+    Name enum_name;
     std::string_view name;
     std::size_t name_offset = 0;
     std::size_t name_length = 0;
@@ -257,6 +261,7 @@ struct CtorPat : Pattern {
 
 struct ClassPat : Pattern {
     ClassPat() : Pattern(PatternKind::Class) {}
+    Name enum_name; // `E.A{...}` is a constructor pattern with named fields
     std::string_view name;
     std::size_t name_offset = 0;
     std::size_t name_length = 0;

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -274,6 +275,70 @@ fun unwrap(o) {
     auto ctorDef = model.definitionAt(ctorUse);
     ASSERT_TRUE(ctorDef);
     EXPECT_EQ(ctorDef->offset, offsetOf(src, "Some(v)"));
+}
+
+TEST(ToolingResolver, QualifiedConstructorResolvesToItsEnum) {
+    const std::string src = R"(enum Opt { Some(v) None }
+var s = Opt.Some(1);
+print match s {
+  case Opt.Some(v) => v
+  case Opt.None => 0
+};
+)";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty())
+        << "first warning: " << warningMessages(model).front();
+
+    const std::size_t someDecl = offsetOf(src, "Some(v)");
+    const std::size_t noneDecl = offsetOf(src, "None");
+    const std::size_t enumDecl = offsetOf(src, "Opt");
+
+    auto exprCtor = model.definitionAt(offsetOf(src, "Opt.Some(1)") + 4);
+    ASSERT_TRUE(exprCtor);
+    EXPECT_EQ(exprCtor->offset, someDecl);
+
+    auto exprEnum = model.definitionAt(offsetOf(src, "Opt.Some(1)"));
+    ASSERT_TRUE(exprEnum);
+    EXPECT_EQ(exprEnum->offset, enumDecl);
+
+    auto patCtor = model.definitionAt(offsetOf(src, "Opt.Some(v)") + 4);
+    ASSERT_TRUE(patCtor);
+    EXPECT_EQ(patCtor->offset, someDecl);
+
+    auto tagCtor = model.definitionAt(offsetOf(src, "Opt.None") + 4);
+    ASSERT_TRUE(tagCtor);
+    EXPECT_EQ(tagCtor->offset, noneDecl);
+
+    // The field name binds, and the arm body reads that binding.
+    auto use = model.definitionAt(offsetOf(src, "=> v") + 3);
+    ASSERT_TRUE(use);
+    EXPECT_EQ(use->offset, offsetOf(src, "Opt.Some(v)") + 9);
+}
+
+TEST(ToolingResolver, QualifiedUnknownConstructorWarns) {
+    const std::string src = R"(enum E { A }
+var x = E.B;
+print match x { case E.C => 1 case _ => 0 };
+)";
+    DocumentModel model(src);
+    const std::vector<std::string> w = warningMessages(model);
+    EXPECT_NE(std::ranges::find(w, "enum 'E' has no constructor 'B'"), w.end());
+    EXPECT_NE(std::ranges::find(w, "enum 'E' has no constructor 'C'"), w.end());
+}
+
+TEST(ToolingResolver, EnumNameWinsOverConstructorWithTheSameName) {
+    const std::string src = R"(enum E { E(x) F }
+var v = E.E(5);
+)";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty());
+    const std::size_t use = offsetOf(src, "E.E(5)");
+    auto enumDef = model.definitionAt(use);
+    ASSERT_TRUE(enumDef);
+    EXPECT_EQ(enumDef->offset, offsetOf(src, "E {"));
+    auto ctorDef = model.definitionAt(use + 2);
+    ASSERT_TRUE(ctorDef);
+    EXPECT_EQ(ctorDef->offset, offsetOf(src, "E(x)"));
 }
 
 TEST(ToolingResolver, OrPatternBindsSameName) {
@@ -651,13 +716,15 @@ TEST(ToolingResolver, RebuildReplacesState) {
 // ---------------------------------------------------------------------------
 
 // Filenames known to warn. Each entry is an understood, intentional warning:
-// a deliberate undefined-name trigger, or an unused local that the program
-// never reads (some bind the result of a throwing call, some declare a helper
-// the rest of the file does not use). A clean file that starts warning is not
-// in this set and fails the test; a new file that warns must be added here on
-// purpose.
+// a deliberate undefined-name or unknown-constructor trigger, or an unused
+// local that the program never reads (some bind the result of a throwing
+// call, some declare a helper the rest of the file does not use). A clean file
+// that starts warning is not in this set and fails the test; a new file that
+// warns must be added here on purpose.
 const std::set<std::string> kExpectedWarnedFiles = {
     "06_shared_upvalue.lox",
+    "133_enum_unknown_constructor_rejected.lox",
+    "140_ctor_pattern_unknown_constructor_rejected.lox",
     "test_enum_arity_try.lox",
     "test_error_kind_message.lox",
     "test_invalid_map_key_try.lox",

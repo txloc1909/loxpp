@@ -85,6 +85,9 @@ struct Symbol {
     // enum was declared in, listed here for the document outline).
     std::vector<Symbol*> members;
 
+    // True for the symbol of an enum name. Its kind is Class.
+    bool isEnum = false;
+
     // True for a symbol the user did not write as a plain binding: implicit
     // `this` / `super`, `_`, and the fallback symbol of a misplaced local enum
     // (already diagnosed on its own). Such symbols are never reported unused

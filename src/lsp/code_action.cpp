@@ -657,16 +657,20 @@ std::vector<QuickFix> matchExhaustivenessFixes(const DocumentModel& model,
         if (editLen == 0 && insert > 0 && text[insert - 1] != '\n') {
             edit += "\n";
         }
+        // A pattern names a constructor with its enum: `E.A`.
+        const std::string qualifier = parsed->enumName + ".";
         for (const std::string& name : parsed->missing) {
-            edit += indent + "case " + name + " => nil\n";
+            edit.append(indent).append("case ").append(qualifier);
+            edit.append(name).append(" => nil\n");
         }
         edit += braceIndent;
-        std::string title = parsed->missing.size() == 1
-                                ? "Add missing match arm: " + parsed->missing[0]
-                                : "Add missing match arms: ";
+        std::string title =
+            parsed->missing.size() == 1
+                ? "Add missing match arm: " + qualifier + parsed->missing[0]
+                : "Add missing match arms: ";
         if (parsed->missing.size() > 1) {
             for (std::size_t k = 0; k < parsed->missing.size(); ++k) {
-                title += parsed->missing[k];
+                title += qualifier + parsed->missing[k];
                 if (k + 1 < parsed->missing.size()) {
                     title += ", ";
                 }
