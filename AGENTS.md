@@ -82,6 +82,10 @@ these things:
    in `VISION.md`. Every backend owes the spec as `spec/README.md`,
    "Conformance", defines it. A language change updates the bootstrap
    interpreter in the same PR, but only as much as CI requires.
+   When the change runs in phases (add the new form, rewrite the programs,
+   remove the old form), give each consumer a node or a line for every
+   phase. A consumer that accepts the old form owes a removal step, not
+   only the additive one.
    A consumer found later, after CI turns red, means the plan was incomplete.
 2. **Use a table when the spec lists a set.** If the spec names a set that can
    be counted (fault kinds, opcodes, exit paths, suspend points), write it as

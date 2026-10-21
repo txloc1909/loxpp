@@ -1,7 +1,7 @@
 # Enum constructors live in the namespace of their enum
 
-**Status:** accepted. The owner approved it in #768 (2026-10-21). Tracking
-issue: #771.
+**Status:** accepted. The owner approved it in #768 (2026-10-21). Implemented
+under mission #771; see "Shipped".
 
 ## Owner decisions
 
@@ -347,3 +347,57 @@ proposal should land first, for three reasons:
 - **Import syntax.** How a module exports an enum, and how an importer names
   it, belongs to the import mission. "Relation to the import system" lists
   what that mission inherits.
+
+## Shipped
+
+**Mission #771.** Every consumer implements the final rules: native, the JVM
+and QBE (which share native's compiler), the bootstrap interpreter, the LSP
+tooling, the tree-sitter grammar and the editor syntaxes. Every program in
+the repository writes `E.A`.
+
+| Node | Issue | PR |
+|---|---|---|
+| N1 spec, probes, and the tree-sitter parse rule for `E.A` | #773 | #780 |
+| N2 native and the LSP accept `E.A` | #774 | #783 |
+| N3 the bootstrap accepts `E.A` | #775 | #790 |
+| N5 every program writes `E.A` | #776 | #791 |
+| N6 native implements the final rules | #777 | #796 |
+| N7 the bootstrap implements the final rules | #778 | #799 |
+| N8 the LSP tooling implements the final rules (added late) | #795 | #800 |
+| N4 editor tooling | #779 | #811 |
+
+The four issues of "How the four issues become trivial" are closed: #691
+(N1), #696 (N6), #747 and #756 (N7).
+
+**Changes to the plan during the mission.**
+
+- The string form stays `<ctor E::A>` and `E::A(1)` (owner, in N2). The first
+  answer rested on a wrong statement about today's form; see "Owner
+  decisions".
+- The field-count rule moved from N6 and N7 into N2 and N3. Without it, probe
+  139 diverged between native and the bootstrap as soon as both parsed
+  `E.A(q)`.
+- N8 was added on 2026-10-22. The plan gave the LSP only the additive work of
+  N2, and no node removed the bare form from it.
+- The rewrite script of N5 is not in the repository (owner): it did the work
+  of that node only. Its text is in PR #791.
+- The expected-failure lists under `tools/xfail/` were deleted when they
+  became empty (owner). `--xfail` and the new `--oracle-xfail` stay in the
+  tools for a later mission.
+
+**Bug classes for the remaining work** (rule 4 of "Plans for a language
+change" in `AGENTS.md`):
+
+- *A static-error probe passes on a halt.* `tools/diff_runtimes.py` counts a
+  run with no stdout and a non-zero exit as a rejection, so a consumer that
+  faults at run time passes a compile-error case. Shared layer: the
+  compile-error corpus. Each case prints a line before the bad statement.
+- *A consumer passes a probe before native.* The probe gate wants the
+  consumer's expected-failure line removed, and the differential gate
+  reports a divergence from native. Shared layer: `tools/diff_runtimes.py`,
+  which reports such a probe as AHEAD when `--oracle-xfail` names it.
+
+**Follow-ups:** #797 (`_` in a constructor field binds a local), #786 (QBE:
+a match inside `str()` in a for-in loop), #781 (how the import mission
+protects built-in globals). #784 (REPL enums) closed with #785. The
+retrospective is `docs/records/enum-constructor-namespaces-retro.md`.
