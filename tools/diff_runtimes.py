@@ -62,6 +62,14 @@ outcomes:
                code 1: the backend passes it now, so its line must be
                deleted.
 
+--oracle-xfail <file> is native's own expected-failure list
+(tools/xfail/spec-probes-native.txt). A listed spec probe that the other
+runner passes and native does not reports one more outcome:
+  AHEAD        the other runner passes the probe before native does. Not a
+               divergence: native's own gate shows its gap. A listed probe
+               that native passes, or that the other runner fails, is
+               compared as usual.
+
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
 EXEMPT and is not run: the probe depends on implementation-defined behavior
@@ -91,7 +99,7 @@ this script's default. State that trade-off, do not hide it.
 
 Usage:
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner> <path>...
-        [--exclude <file>] [--xfail <file>] [--consumer <name>]
+        [--exclude <file>] [--xfail <file>] [--oracle-xfail <file>] [--consumer <name>]
         [--only-spec-probes] [--compile-errors] [--timeout <seconds>]
         [--skip-on-trace]
     python3 tools/diff_runtimes.py <native-loxpp> <other-runner>
@@ -350,6 +358,12 @@ def main() -> None:
         help="the consumer's expected-failure list of spec probes, in the form tools/check_spec_probes.py reads",
     )
     parser.add_argument(
+        "--oracle-xfail",
+        type=Path,
+        default=None,
+        help="native's expected-failure list of spec probes (tools/xfail/spec-probes-native.txt)",
+    )
+    parser.add_argument(
         "--consumer",
         default=None,
         help="the consumer the other runner is, for the NOT-BINDING lines of spec probes",
@@ -396,6 +410,7 @@ def main() -> None:
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
     xfail = parse_xfail_file(args.xfail) if args.xfail else {}
+    oracle_xfail = parse_xfail_file(args.oracle_xfail) if args.oracle_xfail else {}
 
     if args.only_excluded is not None:
         if not args.exclude:
@@ -419,7 +434,7 @@ def main() -> None:
         )
         sys.exit(2)
 
-    matched = permuted = diverged = staled = xfailed = xpassed = exempted = 0
+    matched = permuted = diverged = staled = xfailed = xpassed = exempted = ahead = 0
 
     for lox_file in programs:
         if args.consumer is not None:
@@ -458,6 +473,17 @@ def main() -> None:
                 print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
                 xfailed += 1
             continue
+
+        if lox_file.name in oracle_xfail:
+            probe = parse_probe(lox_file)
+            if (
+                probe is not None
+                and passes(probe, other_out, other_status)
+                and not passes(probe, native_out, native_status)
+            ):
+                print(f"AHEAD       {lox_file}  (native: {oracle_xfail[lox_file.name]})")
+                ahead += 1
+                continue
 
         native_rejects = native_status == NATIVE_REJECT_STATUS and native_out == ""
         if args.compile_errors and not native_rejects:
@@ -558,7 +584,7 @@ def main() -> None:
     print(
         f"{matched} matched, {staled} stale, {permuted} permutation-excused, {diverged} diverged, "
         f"{xfailed} expected to fail, {xpassed} passing but listed as expected to fail, "
-        f"{exempted} exempt"
+        f"{exempted} exempt, {ahead} ahead of native"
     )
     sys.exit(1 if (diverged or staled or xpassed) else 0)
 
