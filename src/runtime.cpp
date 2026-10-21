@@ -65,6 +65,27 @@ void Runtime::predeclareGlobalSlots() {
     }
 }
 
+namespace {
+
+// True when the script declares a top-level `fun` of this source: only such a
+// source can be a worker entry (task.spawn_worker step 1).
+bool sourceHasTopLevelFunction(const ObjFunction* script, int sourceId) {
+    const ValueArray& constants = script->chunk.constants();
+    for (std::uint16_t i = 0; i < constants.size(); i++) {
+        Value c = constants.at(i);
+        if (!isFunction(c)) {
+            continue;
+        }
+        const auto* f = static_cast<const ObjFunction*>(as<Obj*>(c));
+        if (f->topLevelOrdinal >= 0 && f->sourceId == sourceId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 ObjClosure* Runtime::loadSource(const std::string& source,
                                 DiagnosticSink* sink) {
     return loadProgram(source, sink, false);
@@ -88,6 +109,7 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     m_yieldedValue = Value{};
     CompileOptions options;
     options.declarationsOnly = declarationsOnly;
+    std::shared_ptr<const ProgramDeclarations> sourceDeclarations;
     if (declarationsOnly) {
         // A new worker compiles a source it already has, under its own id.
         for (std::size_t i = 0; i < m_sources.size(); i++) {
@@ -97,15 +119,15 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
         }
     } else {
         options.sourceId = static_cast<int>(m_sources.size());
+        if (!m_declarations) {
+            m_declarations = std::make_unique<ProgramDeclarations>();
+        }
         // The tables before this source. A worker that recompiles this source
         // alone (runWorker) starts from them, so the constructor tags it
         // assigns to this source's declarations match the ones this compile
         // assigns, and its compile-time checks see the same declarations.
-        if (!m_declarations) {
-            m_declarations = std::make_unique<ProgramDeclarations>();
-        }
-        m_sourceDeclarations.push_back(
-            std::make_shared<const ProgramDeclarations>(*m_declarations));
+        sourceDeclarations =
+            std::make_shared<const ProgramDeclarations>(*m_declarations);
         m_sources.push_back(std::make_shared<const std::string>(source));
     }
     // A compile continues this Runtime's session: a REPL line sees every
@@ -115,6 +137,16 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     }
     options.declarations = m_declarations.get();
     ObjFunction* fn = compile(source, &m_mm, sink, options);
+    if (!declarationsOnly) {
+        // Only a source with a top-level `fun` can be a worker entry. Keep no
+        // tables for the other lines: a session of N lines would then hold
+        // N growing copies. The slot stays parallel to m_sources, also after
+        // a failed compile.
+        bool hasEntry =
+            fn != nullptr && sourceHasTopLevelFunction(fn, options.sourceId);
+        m_sourceDeclarations.push_back(hasEntry ? std::move(sourceDeclarations)
+                                                : nullptr);
+    }
     if (fn == nullptr) {
         return nullptr;
     }

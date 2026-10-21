@@ -101,7 +101,8 @@ struct ProgramDeclarations {
     std::set<std::string> classNames;
     // Every name the session declares as a global variable (a top-level
     // `var`, `fun`, or `class`). An enum declared on a later line must not
-    // reuse one, because no variable may have an enum's name.
+    // reuse one, because no variable may have an enum's name. A local of an
+    // earlier line does not outlive that line, so it cannot conflict.
     std::set<std::string> globalNames;
     // The next constructor tag. Tags are unique in the program, so one tag
     // test checks the enum and the constructor.
