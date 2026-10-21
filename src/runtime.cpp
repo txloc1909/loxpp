@@ -92,7 +92,8 @@ ObjClosure* Runtime::loadSource(const std::string& source,
 }
 
 ObjClosure* Runtime::loadProgram(const std::string& source,
-                                 DiagnosticSink* sink, bool declarationsOnly) {
+                                 DiagnosticSink* sink, bool declarationsOnly,
+                                 int sourceId) {
     // Guard against dangling class pointers from a prior loadSource() call
     // on this same Runtime (a REPL line, or a second rt_startup() on a
     // process that already ran one program). GC can fire inside compile(),
@@ -111,12 +112,11 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
     options.declarationsOnly = declarationsOnly;
     std::shared_ptr<const ProgramDeclarations> sourceDeclarations;
     if (declarationsOnly) {
-        // A new worker compiles a source it already has, under its own id.
-        for (std::size_t i = 0; i < m_sources.size(); i++) {
-            if (*m_sources[i] == source) {
-                options.sourceId = static_cast<int>(i);
-            }
-        }
+        // A new worker compiles a source it already has, under the id of the
+        // entry function's source. Do not search m_sources for the text: two
+        // lines can have the same text, and a failed line leaves its source
+        // behind with no declaration tables.
+        options.sourceId = sourceId;
     } else {
         options.sourceId = static_cast<int>(m_sources.size());
         if (!m_declarations) {
@@ -1591,7 +1591,8 @@ InterpretResult Runtime::runWorker(
 
     // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
     // class, and enum declaration, in source order, and nothing else.
-    ObjClosure* script = loadProgram(*m_sources[sourceId], nullptr, true);
+    ObjClosure* script =
+        loadProgram(*m_sources[sourceId], nullptr, true, sourceId);
     if (script == nullptr) {
         return InterpretResult::RUNTIME_ERROR;
     }

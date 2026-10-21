@@ -445,6 +445,29 @@ TEST_F(ReplEnumTest, WorkerAssignsTheSameConstructorTags) {
     expect_num(*v, 2.0);
 }
 
+TEST_F(ReplEnumTest, NestedWorkerUsesTheEntrySourceTables) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum A { X }"), InterpretResult::OK);
+    const std::string workerLine = R"(enum B { Y Z }
+        fun inner(main) { task.send(main, B.Z()); }
+        fun outer(main) { task.spawn_worker(inner, main); })";
+    ASSERT_EQ(h.run(workerLine), InterpretResult::OK);
+    // The same text fails, and its source stays in the runtime. A nested
+    // worker must still use the tables of its entry's real source.
+    EXPECT_EQ(h.run(workerLine), InterpretResult::COMPILE_ERROR);
+    ASSERT_EQ(h.run(R"(task.spawn_worker(outer, task.self());
+        var got = task.receive();
+        var r = match got {
+            case B.Y => 1
+            case B.Z => 2
+            case _   => 3
+        };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("r");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2.0);
+}
+
 TEST_F(ReplEnumTest, EnumNameMustNotReuseAnEarlierGlobal) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var TakenVar = 1; class TakenClass {} fun takenFun() {}"),

@@ -935,8 +935,10 @@ class Runtime {
     // A task of this worker ended or was abandoned.
     void markTaskDead(ObjTask* task);
     // Compiles `source` with `options`, then as loadSource().
+    // `sourceId` names the source in a declarations-only compile (a worker);
+    // loadSource() ignores it and appends a new source.
     ObjClosure* loadProgram(const std::string& source, DiagnosticSink* sink,
-                            bool declarationsOnly);
+                            bool declarationsOnly, int sourceId = -1);
 
     // Abandons every task but the main task: the run of the program ended.
     void endTasks();
