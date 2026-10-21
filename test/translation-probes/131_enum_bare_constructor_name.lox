@@ -19,5 +19,5 @@ print B;
 
 // STATUS: ok
 // CHECK: UndefinedVariableError
-// CHECK: bound B
+// CHECK: bound E::B
 // CHECK: a variable

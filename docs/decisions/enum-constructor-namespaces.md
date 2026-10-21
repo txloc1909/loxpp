@@ -10,7 +10,7 @@ The owner answered the four open questions on 2026-10-21.
 | Question | Decision |
 |---|---|
 | Strict qualification, or bare names when unique | Strict. A pattern and an expression always write `E.A`. |
-| `str` shows the enum name | No. `str` gives `<A>` and `A(1)`, as today. |
+| `str` shows the enum name | It does, as today: `str` gives `<ctor E::A>` and `E::A(1)`. The first answer ("no", with `<A>` and `A(1)`) rested on a wrong statement that this was today's form. Every consumer prints the enum name. The owner chose to keep today's form on 2026-10-21, in N2 (#774). |
 | `E` alone is a value | No. The import mission can change this if module access needs it. |
 | Remove the literal comma chain | Yes, option A. `or` joins every alternative. See "The comma chain". |
 | A constructor pattern tested against a value that is not an enum value (review of #780) | It does not match, and the match goes on. The halting fault is removed. Alternatives are tried from left to right. |
@@ -160,8 +160,9 @@ patterns of two enums checks each enum.
 - `type(E.A)` is `"EnumConstructor"`, and `type(E.A(1))` is `"Enum"`.
 - Equality of constructors and of enum values is identity, as today.
 - The rules for sending an enum value between workers do not change.
-- `str` of a constructor and of an enum value does not change (`<A>` and
-  `A(1)`).
+- `str` of a constructor and of an enum value does not change
+  (`<ctor E::A>` and `E::A(1)`). Values of two enums that share a
+  constructor name have different string forms.
 
 ## How the four issues become trivial
 

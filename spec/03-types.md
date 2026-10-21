@@ -476,6 +476,8 @@ Every value has a canonical string form, produced by `print` and by the
 | Socket | `<socket>` |
 | Server | `<server>` |
 | Process | `<process>` |
+| EnumConstructor | `<ctor E::A>` for the constructor `A` of the enum `E` — see [§04-semantics](04-semantics.md#enum-types) |
+| Enum | `E::A(f1, f2, ...)` — each field in its canonical string form, comma-space separated — or `E::A` for a constructor with no fields |
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. |
 | Coroutine | `<coroutine>` |
 | Task | `<task>` |
