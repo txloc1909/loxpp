@@ -3112,7 +3112,7 @@ class LoxEnumCtor {
     }
     arity() { return len(this.fields); }
     call(interp, args) { return LoxEnumValue(this.enumName, this.tag, args); }
-    toString() { return "<enum ctor " + this.tag + ">"; }
+    toString() { return "<ctor " + this.enumName + "::" + this.tag + ">"; }
 }
 
 // spec/03-types.md, Messages. An enum value's own bit is computed once, when
