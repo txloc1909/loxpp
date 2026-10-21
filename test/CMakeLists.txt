@@ -372,6 +372,16 @@ if(LOXPP_PYTHON3)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(CompileDiagnosticCases PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}")
+
+    # Issues #787 and #788: a REPL session is one program, so a worker that an
+    # earlier line spawned answers on a later line, and a worker defines the
+    # declarations of the earlier lines. This runs the real REPL, so it covers
+    # src/main.cpp's own wiring of a session as well as the runtime. The
+    # checker accepts extra stdout lines, so a trace build passes too.
+    add_test(NAME ReplSession
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_repl_session.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC
