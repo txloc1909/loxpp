@@ -64,6 +64,15 @@ const GATE_COMMANDS: Record<"native" | "backend", string[]> = {
   ],
 };
 
+// Runs the debug gate inside loxpp-dev-env when the host has no cmake. Uses a
+// fresh build dir so a host-built `build/` with host paths cannot poison the
+// configure. Keep the flags in sync with the `debug` preset in CMakePresets.json.
+const NATIVE_CONTAINER_GATE = `set -e
+cd /workspace
+cmake -S . -B /tmp/loxpp-gate-build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined -fuse-ld=lld" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DLOXPP_DEBUG_LOG_GC=OFF
+cmake --build /tmp/loxpp-gate-build
+ctest --test-dir /tmp/loxpp-gate-build --output-on-failure -j$(nproc)`;
+
 // The exact template forms multi-agent-playbook.md requires. Plain `gh issue
 // view` hides comment hazards; `--comments` drops the body. The tool hardcodes
 // the correct form so the model cannot get either one wrong.
@@ -165,6 +174,26 @@ function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefined) {
   return collect(spawn(argv[0], argv.slice(1), { cwd }), signal);
 }
 
+async function hasCmake(cwd: string): Promise<boolean> {
+  const r = await runShell("command -v cmake >/dev/null 2>&1", cwd, undefined);
+  return r.code === 0;
+}
+
+async function runNativeGateInContainer(
+  cwd: string,
+  signal: AbortSignal | undefined,
+): Promise<{ passed: boolean; output: string }> {
+  const argv = [
+    "podman", "run", "--rm",
+    "-v", `${cwd}:/workspace:z`,
+    "-v", "loxpp-ccache:/ccache",
+    "loxpp-dev-env",
+    "bash", "-lc", NATIVE_CONTAINER_GATE,
+  ];
+  const r = await runArgv(argv, cwd, signal);
+  return { passed: r.code === 0, output: tail(r.output, GATE_OUTPUT_CAP) };
+}
+
 function issueArgs(number: string, repo: string): string[] {
   return ["gh", "issue", "view", number, "--repo", repo, "--json", "title,body,comments", "--template", ISSUE_TPL];
 }
@@ -238,6 +267,15 @@ export default function loxppModes(pi: ExtensionAPI): void {
   }
 
   async function runGate(scope: "native" | "backend", cwd: string, signal: AbortSignal | undefined) {
+    if (!(await hasCmake(cwd))) {
+      if (scope === "backend") {
+        return {
+          passed: false,
+          output: "The backend gate needs the managed toolchain. Run pi inside loxpp-dev-env-managed and call loxpp_gate there.",
+        };
+      }
+      return runNativeGateInContainer(cwd, signal);
+    }
     let all = "";
     let failed = false;
     for (const cmd of GATE_COMMANDS[scope]) {
