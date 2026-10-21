@@ -30,11 +30,10 @@ Today a Number is an IEEE 754 double (`spec/03-types.md`, "Number"). An integer
 above 2^53 loses precision, and the language has no bit operation.
 
 The proposal serves the *memory* control under "No high-level facility removes
-low-level control" in `VISION.md`, in the text of PR #798: the program "can
-hold a 64-bit pattern as one numeric value with every bit exact and apply a
-bit operation to it in one step". Under "What counts as a language gap", a
-listed control is a capability by definition, so the litmus test does not
-apply to this control. This proposal cannot be accepted before #798 merges.
+low-level control" in `VISION.md`: the program "can hold a 64-bit pattern as
+one numeric value with every bit exact and apply a bit operation to it in one
+step". Under "What counts as a language gap", a listed control is a
+capability by definition, so the litmus test does not apply to this control.
 
 No value does this today:
 
