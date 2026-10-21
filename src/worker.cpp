@@ -103,6 +103,17 @@ bool WorkerGroup::goIdle(Inbox& inbox) {
     return true;
 }
 
+void WorkerGroup::beginLine(Inbox& inbox) {
+    // The only way the count reaches zero is the deadlock report, which the
+    // earlier line ended with; every other worker was idle at that point, so
+    // the main worker is the only one to count again.
+    if (deadlock.exchange(false)) {
+        busy.fetch_add(1);
+    }
+    std::lock_guard<std::mutex> lock(inbox.mutex);
+    inbox.idle = false;
+}
+
 bool WorkerGroup::leave(Inbox& inbox) {
     bool wasIdle = false;
     {

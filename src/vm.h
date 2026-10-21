@@ -79,6 +79,13 @@ class VM {
         m_rt.setArgs(std::move(args));
     }
 
+    // One program, entered as a sequence of lines (the REPL): every interpret()
+    // call after the first continues the same session, so its workers and its
+    // main task outlive the line that made them. See Runtime::setSessionMode().
+    void setSessionMode(bool on) { m_rt.setSessionMode(on); }
+    // Wakes the session's workers after its last line, so that each one ends.
+    void endSession() { m_rt.endSession(); }
+
 #ifdef LOXPP_PROFILE
     const ProfilerData& profilerData() const { return m_rt.profilerData(); }
 #endif

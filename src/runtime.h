@@ -358,24 +358,24 @@ class Runtime {
 
     // Runs `script` as the main task, and every task it spawns, until the
     // main task ends. Tasks still in the run queue then are abandoned, and
-    // so is every worker of the run. loadSource() left `script` at stack
-    // slot 0.
+    // every worker of the run ends with it — except in a session (see
+    // setSessionMode()), where the group and the main task outlive the line.
+    // loadSource() left `script` at stack slot 0.
     InterpretResult runTasks(ObjClosure* script);
 
     // The body of a worker that task.spawn_worker made, on its own thread:
-    // defines the top-level declarations of source `sourceId`, then runs
-    // `task` as this worker's first task, which calls the function of the
-    // top-level `fun` declaration `ordinal` with `msg` (one hold raised for
-    // this worker). `sourceDeclarations[i]` is the session's declaration
-    // tables just before source `i` compiled, so a source compiled alone
-    // assigns the same constructor tags as the main worker did. Returns when
-    // every task of the worker ended, or the program ended; RUNTIME_ERROR
-    // after an uncaught fault (reported).
+    // defines the top-level declarations of every source up to and including
+    // `sourceId`, in source order, then runs `task` as this worker's first
+    // task, which calls the function of the top-level `fun` declaration
+    // `ordinal` of source `sourceId` with `msg` (one hold raised for this
+    // worker). It replays the sources instead of starting from the session's
+    // tables, so it needs no copy of them and its constructor tags match the
+    // ones the main worker assigned (spec/04-semantics.md, A Session).
+    // Returns when every task of the worker ended, or the program ended;
+    // RUNTIME_ERROR after an uncaught fault (reported).
     InterpretResult
     runWorker(std::shared_ptr<WorkerGroup> group,
               std::vector<std::shared_ptr<const std::string>> sources,
-              std::vector<std::shared_ptr<const ProgramDeclarations>>
-                  sourceDeclarations,
               int sourceId, int ordinal, ObjTask* task, Value msg);
 
     // task.spawn_worker after its checks passed: makes the heap and the
@@ -882,6 +882,17 @@ class Runtime {
         m_stdlibCtx.args = std::move(args);
     }
 
+    // Set by the REPL: one program, entered as a sequence of lines. A session
+    // keeps one worker group and one main task across its lines, so a worker
+    // that an earlier line spawned keeps its tasks and mailboxes, and a task
+    // can send to the main task between two lines (spec/04-semantics.md, A
+    // Session). Unset, every run is a whole program that it ends as it does.
+    void setSessionMode(bool on) { m_sessionMode = on; }
+    // Ends a session after its last line: wakes its workers so that each one
+    // leaves at its next scheduling point. A one-shot run does this itself at
+    // the end of runTasks().
+    void endSession();
+
     // Q1/Q3 (docs/decisions/qbe-backend.md): compiled code
     // (backend/rt_capi.cpp) writes its own frame's local/temporary slots
     // directly at base + 8h, bypassing push()'s own STACK_MAX check entirely.
@@ -934,6 +945,9 @@ class Runtime {
     void describeWaitingTasks(std::vector<std::string>& out) const;
     // A task of this worker ended or was abandoned.
     void markTaskDead(ObjTask* task);
+    // markTaskDead, unless `task` is the main task of a session: the end of a
+    // line ends its script, not the task (spec/04-semantics.md, A Session).
+    void endTaskOrLine(ObjTask* task);
     // Compiles `source` with `options`, then as loadSource().
     // `sourceId` names the source in a declarations-only compile (a worker);
     // loadSource() ignores it and appends a new source.
@@ -1231,6 +1245,10 @@ class Runtime {
     // Workers and tasks (see runTasks()). m_mainTask lives as long as this
     // Runtime, so its handle stays valid from one REPL line to the next.
     ObjTask* m_mainTask{nullptr};
+    // Set when the script of one session line ended (a return, a yield to the
+    // end, or an uncaught fault). The scheduler leaves the line with OK then,
+    // while the main task itself stays alive for the next line.
+    bool m_mainLineDone{false};
     ObjTask* m_currentTask{nullptr};
     std::deque<ObjTask*> m_runQueue;
     // Counts the runs of runTasks(). A task whose epoch is older has ended.
@@ -1266,14 +1284,12 @@ class Runtime {
             m_globalSlots[static_cast<std::size_t>(slot)] = value;
         }
     }
-    // Every source this Runtime compiled, by ObjFunction::sourceId. A new
-    // worker gets the list, so it compiles the same source again.
+    // Every source this Runtime compiled and ran, by ObjFunction::sourceId. A
+    // new worker gets the list, so it defines the declarations of all of them
+    // again. A source that did not compile is not here: it made no declaration.
     std::vector<std::shared_ptr<const std::string>> m_sources;
-    // Parallel to m_sources: the declaration tables just before each source
-    // compiled. A worker compiles only its own source, so it starts from its
-    // entry here to assign the same constructor tags.
-    std::vector<std::shared_ptr<const ProgramDeclarations>>
-        m_sourceDeclarations;
+    // See setSessionMode().
+    bool m_sessionMode{false};
     // Number of natives running now (callNative), innermost included.
     int m_nativeDepth{0};
     // m_nativeDepth at which the frames of m_currentCoroutine run, while the

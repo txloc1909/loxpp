@@ -105,6 +105,13 @@ class WorkerGroup {
     void addWorker(Inbox* inbox);
     void removeWorker(Inbox* inbox);
 
+    // A new line of a session starts on the group of the earlier lines. The
+    // main worker stayed in the group, but a line that ended in the deadlock
+    // report left no busy worker (every task waited, and the count reached
+    // zero), so count the main worker again and clear the report for the new
+    // line. Called with `inbox` being the main worker's.
+    void beginLine(Inbox& inbox);
+
     // Called with `inbox.mutex` held and `inbox.queue` empty. Marks the
     // worker idle. Returns true when it was the last busy worker: then the
     // program is in deadlock, `deadlock` is set, and the main worker is

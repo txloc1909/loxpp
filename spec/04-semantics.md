@@ -1502,7 +1502,8 @@ returns the handle of that task. The caller continues at once.
    top-level statement runs on the new worker. A top-level `var`
    declaration does not run there, so a read of its name on the new worker
    is an undefined-variable read (`UndefinedVariableError`) until that
-   worker assigns it.
+   worker assigns it. In a session, the program is every line entered so far
+   (see [A Session](#a-session)).
 4. The new task then calls the function of the same top-level `fun`
    declaration that made `fn`, with `msg` as its one argument, exactly as an
    ordinary call.
@@ -1666,7 +1667,8 @@ main worker ends when every task on it has ended.
 The program ends when the main task ends, at the end of the top-level code.
 Every other task on every worker is then abandoned, as an [abandoned
 coroutine](#abandoned-coroutines) is: its pending deferred calls do not
-run.
+run. In a session the end of a line is not the end of the program, and the
+main task does not end with it: see [A Session](#a-session).
 
 A call of `exit(code)` in any task ends the program at once, with that exit
 code. A throw that no `try` statement in its task catches is uncaught: it
@@ -1727,6 +1729,42 @@ rule, and then two full channels can wait on each other. A task between two
 ranks holds two ends, so its mailbox gets the items of one channel and the
 credits of the other. The library in `examples/credit_channel.lox` lets a
 task hold one end only.
+
+---
+
+## A Session
+
+A **session** is one program that a reader gives to the REPL one line at a
+time. Each line compiles alone and runs at once, in order, and the program is
+every line entered so far.
+
+1. A line compiles in the program that the earlier lines made: a `fun`,
+   `class`, or `enum` declaration of an earlier line is a declaration that
+   the line can name, and a constructor tag never repeats in a session. A
+   line that does not compile changes nothing.
+2. The main task of a session is one task. It runs the top-level code of each
+   line in turn, and the end of a line does not end it. Between two lines it
+   runs nothing, and a message that a task sends to it waits in its mailbox.
+3. A worker keeps its tasks and their mailboxes after the line that spawned
+   it ends, and a task on it runs as soon as it can. The worker ends when
+   every task on it has ended (see [Ending](#ending)).
+4. A task that `task.spawn` made on the main worker does not outlive its line:
+   the end of the line abandons it, as the end of a program abandons every
+   task.
+5. A fault of the main task that no `try` statement catches, and a deadlock,
+   end the line. The session then runs the next line, and the main task is
+   not dead, so a later line can receive a message that a worker sends after
+   the line ended. A fault of a task on a worker ends the program, as
+   [Ending](#ending) says.
+
+The program that a new worker defines is the program of its line: a worker
+that a later line spawns defines the declarations of every line up to and
+including that line, in source order, as
+[`task.spawn_worker`](#task.spawn_worker) step 3 requires. In a session that
+program is every line entered so far.
+
+A program that runs from a file is one run, and these rules do not change
+it. `spec/README.md`, Conformance, binds both a session and a file alike.
 
 ---
 

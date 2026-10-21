@@ -66,6 +66,9 @@ static void repl(VM& vm) {
     std::string history_path = xdg_history_path();
     ic_set_history(history_path.c_str(), 1000);
     ic_set_default_completer(lox_completer, nullptr);
+    // A session is one program: a worker that a line spawns keeps running, and
+    // the main task keeps its mailbox (spec/04-semantics.md, A Session).
+    vm.setSessionMode(true);
 
     for (;;) {
         char* raw = ic_readline("> ");
@@ -77,6 +80,7 @@ static void repl(VM& vm) {
         free(raw);
         vm.interpret(line);
     }
+    vm.endSession();
 }
 
 static std::string readFile(const std::string& path) {
