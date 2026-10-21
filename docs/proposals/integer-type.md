@@ -27,22 +27,45 @@ set, a bitboard, a Bloom filter, a hash mix, or a packed field with exact bits.
 A signed 64-bit integer is the familiar and basic tool for this.
 
 Today a Number is an IEEE 754 double (`spec/03-types.md`, "Number"). An integer
-above 2^53 loses precision, and the language has no bit operation. A program
-cannot get exact 64-bit patterns from doubles by composition, so this is a
-capability gap, not tedium.
+above 2^53 loses precision, and the language has no bit operation.
 
-The proposal serves these goals in `VISION.md`:
+The proposal serves the *memory* control under "No high-level facility removes
+low-level control" in `VISION.md`: the program "can hold a 64-bit pattern as
+one value with every bit exact". No value can do this today. Under "What
+counts as a language gap", a listed control is a capability by definition, so
+the litmus test does not apply to this control.
 
-- **"No high-level facility removes low-level control"**, the *memory*
-  control: a program "can reach native code and raw bytes through an explicit
-  interface". Exact 64-bit patterns are the base for bytes, masks and packed
-  data.
-- **"What counts as a language gap"**: bit-exact int64 work cannot be built
-  from the primitives that the language has.
-- The *cost* control: each bit operator is one opcode with a cost that the
-  programmer can predict. It is not a native call.
-- **"Performance"**: the native VM gets an Int fast path. Indices and loop
-  counters do not go through a double.
+A program can emulate a 64-bit pattern today with two 32-bit halves. The
+review of this proposal (PR #792) gave a pure Lox++ library that agrees with a
+Python oracle. That emulation is not one value: a List compares by identity
+and is not a map key, so a user must wrap it in a class with `__eq__` and
+`__hash__`. It is also slow (see "Performance").
+
+### Performance
+
+`VISION.md` puts performance on its own axis, so these numbers do not make the
+case. They show the cost of the emulation that programs use today. Each row is
+2000 rounds of xorshift64 (six bit operations a round) on a native `release`
+build:
+
+| Form | µs per round |
+|---|---|
+| Two 32-bit halves, one bit at a time (`floor`, `%`, `*`) | 118 |
+| Two 32-bit halves, an 8-bit xor table | 22 |
+| Plain Number arithmetic, three multiply-add-modulo steps | 0.45 |
+
+Inline caches and a JIT do not remove this cost, because it is in the
+algorithm: each bit operation is a loop. With the Int type, each bit
+operation is one opcode. "Native layout" below gives the cost when the result
+needs a box.
+
+### FFI
+
+The FFI (roadmap item 6) will pass `int64_t` and `uint64_t` values to C. A
+Number cannot carry them exactly above 2^53. The FFI decision chooses its own
+carrier. LuaJIT, for example, keeps a boxed 64-bit value in its FFI and no
+integer kind in the core language. If this proposal is accepted first, the FFI
+can use Int.
 
 ## Vision tensions
 
@@ -55,11 +78,47 @@ The proposal serves these goals in `VISION.md`:
 - **"Simple".** Two numeric kinds and seven operators add surface. One
   mixed-kind table holds all the arithmetic rules, so a reader finds them in
   one place.
-- **Cost of large Ints in the native VM.** A NaN-boxed Value has about 50 free
-  payload bits (`src/value.h`), so an int64 does not fit inline. If the native
-  VM boxes the Ints that do not fit, an operation on a mask with high bits
-  can allocate. Bit masks often use the high bits. The decision stage must
-  choose the native layout with this cost in view (see "Open questions").
+- **Cost of large Ints in the native VM.** An int64 does not fit inline in a
+  NaN-boxed Value, so an operation whose result has high bits allocates (see
+  "Native layout"). The *cost* control asks for a cost that the programmer
+  can predict. The rule is simple: a result inside the inline range costs no
+  allocation, and a result outside it costs one. This is the same kind of
+  rule as for `+` on two Strings, which always allocates.
+
+## Native layout
+
+This section answers the question of how the native VM holds an int64.
+
+A Value is 64 bits. Every double and every int64 cannot both fit inline in 64
+bits, so one of the two kinds needs a box for some values.
+
+**Recommendation: a small Int inline, and a box for the rest.**
+
+- The positive quiet-NaN space has 50 payload bits, and only the values 1 to 4
+  are in use (`src/value.h`). An inline Int takes one tag bit of that space and
+  a signed payload of 48 bits (−2^47 to 2^47 − 1).
+- An Int outside that range is a heap object that holds one `int64_t`. It
+  is immutable. Equality, hashing and printing use the value, never the
+  address, so a program cannot see if an Int is inline or boxed.
+- The spec binds int64 only. The inline width is implementation-defined, and
+  the JVM backend uses `long` with no such split.
+- Doubles do not change. Float code keeps its speed.
+
+**Cost of a box.** On the same `release` build, one allocation of a small
+object adds about 60 ns to a loop step (205 ns becomes 265 ns, three runs).
+A round of xorshift64 on 64-bit values can box each of its six results, so the
+worst case adds about 0.4 µs. The fastest emulation takes 22 µs a round.
+
+**Alternatives and why they are not recommended:**
+
+| Alternative | Reason |
+|---|---|
+| A 128-bit Value (tag plus payload) | Every stack slot, List element and map entry doubles in size. Every consumer that knows the NaN-box layout changes, QBE too. |
+| Inline 63-bit Ints, boxed Floats | Float code allocates. It still does not hold 64 bits. |
+| Every Int boxed | Indices and loop counters allocate. |
+
+A later JIT can keep Ints in registers with no box. This proposal does not
+depend on it.
 
 ## Semantics (draft spec text)
 
@@ -161,7 +220,7 @@ Each consumer and what it owes under the backend roles in `VISION.md`.
 
 | Consumer | Obligation | What changes |
 |---|---|---|
-| Native VM | The full spec | `src/value.h` (an Int representation), `src/value.cpp` (equality, `hashValue`, `ValueHash`, `stringify`), `src/chunk.h` (new opcodes), `src/vm.cpp` (fast paths), `src/runtime.cpp` (slow paths, `checkSequenceIndex`, `opModulo`), `src/scanner.cpp`, `src/parser.cpp`, `src/compiler.cpp` (`number()`, `binary()`, the stack-height table), `src/math.cpp`, `src/stdlib/globals.cpp`, `src/stdlib/reflect_api.cpp`, and the os, net, process and task natives |
+| Native VM | The full spec | `src/value.h` (the inline Int tag and the boxed Int, see "Native layout"), `src/value.cpp` (equality, `hashValue`, `ValueHash`, `stringify`), `src/chunk.h` (new opcodes), `src/vm.cpp` (fast paths), `src/runtime.cpp` (slow paths, `checkSequenceIndex`, `opModulo`), `src/scanner.cpp`, `src/parser.cpp`, `src/compiler.cpp` (`number()`, `binary()`, the stack-height table), `src/math.cpp`, `src/stdlib/globals.cpp`, `src/stdlib/reflect_api.cpp`, and the os, net, process and task natives |
 | JVM backend | The spec, as the semantic oracle | `java.lang.Long` beside `Double` in `runtime/jvm/src/lox/LoxOps.java`, and new emission in `src/backend/jvm_emitter.cpp`. Java `long` already wraps and has `>>>` |
 | QBE backend | What its experiment needs | It writes NaN-box bit patterns into its output (`src/backend/qbe_emitter.cpp`, `src/backend/rt_capi.cpp`). The new representation must not break it. Expected-failure entries are permitted |
 | Bootstrap interpreter | The spec | `parseNumber`, `isLoxNum`, `reflectTypeName`, the index checks, the scanner, the parser precedence, and the new operators in `bootstrap/loxpp_interpreter.lox`. It can use host Ints and host bit operators after the native VM has them |
@@ -205,9 +264,8 @@ set, a bitboard) as probes of the purpose.
 4. `math.floor(1e300)`: a Float result, or a fault?
 5. `int(x)` and `float(x)`, and where `idiv` lives (globals or `math`).
 6. Dunders for the new operators. Recommendation: yes.
-7. The native Value layout for the full int64 range: an inline small Int plus
-   a heap box, or a different scheme. The choice sets the cost of masks with
-   high bits.
+
+The question of the native Value layout has an answer in "Native layout".
 
 ## Mission sketch
 
