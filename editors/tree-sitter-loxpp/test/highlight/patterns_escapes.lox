@@ -32,6 +32,11 @@ fun size(t) {
 //            ^ constructor
     case Point => 0
 //       ^ type
+    case Point{x} => x
+//       ^ type
+    case Tree.Node{l} => l
+//       ^ type
+//            ^ constructor
     case _ => 0
 //       ^ variable.builtin
   };
