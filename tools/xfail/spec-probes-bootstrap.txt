@@ -10,3 +10,4 @@
 142_bare_positional_pattern_rejected.lox #778 (N7): A(x) with no enum name is a compile error
 145_ctor_pattern_non_enum_no_match.lox #778 (N7): a constructor pattern does not match a value that is not an enum value
 109_bare_name_class_over_constructor.lox #778 (N7): a bare pattern name is a class test, not a constructor test
+160_dense_match_non_enum_subject.lox #778 (N7): a constructor pattern does not match a value that is not an enum value
