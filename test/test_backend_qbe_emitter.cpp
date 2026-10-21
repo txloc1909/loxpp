@@ -485,9 +485,9 @@ TEST(QbeEmitter, JumpTableLowersToACompareChain) {
     // P8 (bytecode-translation-problems.md, hazard Q8): QBE has no switch
     // and no indirect jump — each arm becomes its own `ceqw`/`jnz` pair
     // rather than one dispatch instruction.
-    std::string ssa = emitScriptFrom(
-        "enum E { A B } var e = A(); var n = match e { case A => 0 case B "
-        "=> 1 }; print n;");
+    std::string ssa = emitScriptFrom("enum E { A B } var e = E.A(); var n = "
+                                     "match e { case E.A => 0 case E.B "
+                                     "=> 1 }; print n;");
     EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
     EXPECT_NE(ssa.find("ceqw"), std::string::npos);
     // No QBE switch/jump-table construct exists to accidentally emit.
@@ -499,11 +499,14 @@ TEST(QbeEmitter, DenseMatchFusesGetTagIntoJumpTable) {
     // by JUMP_TABLE, so the pair lowers as one dispatch that reads the tag
     // as a word (rt_get_tag_word) — no boxed Number, so no `d cast` +
     // `dtosi` round trip back to a word at the branch.
-    std::string ssa = emitScriptFrom(
-        "enum E { A B C D } var e = C(); var n = match e { case A => 0 case "
-        "B => 1 case C => 2 case D => 3 }; print n;");
+    std::string ssa =
+        emitScriptFrom("enum E { A B C D } var e = E.C(); var n = match e { "
+                       "case E.A => 0 case "
+                       "E.B => 1 case E.C => 2 case E.D => 3 }; print n;");
     EXPECT_NE(ssa.find("call $rt_get_tag_word(l %rt, l"), std::string::npos);
-    EXPECT_NE(ssa.find("csltw"), std::string::npos);
+    // A subject that is not an enum value has no tag of the table, so the
+    // dispatch takes its default; the tag read has no fatal branch.
+    EXPECT_EQ(ssa.find("_tagfatal"), std::string::npos);
     EXPECT_EQ(ssa.find("call $rt_op_get_tag"), std::string::npos);
     EXPECT_EQ(ssa.find("dtosi"), std::string::npos);
 }
@@ -514,9 +517,9 @@ TEST(QbeEmitter, SparseMatchKeepsTheUnfusedGetTag) {
     // CONSTANT / EQUAL chain still reads the boxed Number via
     // rt_op_get_tag. Proves the fusion check cannot fire on a lone
     // GET_TAG.
-    std::string ssa = emitScriptFrom(
-        "enum E { A B C D } var e = D(); var n = match e { case A => 1 case "
-        "D => 4 case _ => 0 }; print n;");
+    std::string ssa = emitScriptFrom("enum E { A B C D } var e = E.D(); var n "
+                                     "= match e { case E.A => 1 case "
+                                     "E.D => 4 case _ => 0 }; print n;");
     EXPECT_EQ(ssa.find("rt_get_tag_word"), std::string::npos);
     EXPECT_NE(ssa.find("call $rt_op_get_tag"), std::string::npos);
 }

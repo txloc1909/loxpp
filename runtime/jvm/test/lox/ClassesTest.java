@@ -116,10 +116,10 @@ public final class ClassesTest {
         checkThrows(() -> LoxOps.invoke(h, "f", new Object[0]), LoxError.class,
                 "invoke() rejects a non-callable shadowing field");
 
-        // PR #97: codegen-facing guards for INHERIT and GET_TAG.
+        // PR #97: codegen-facing guard for INHERIT, and the GET_TAG read.
         checkThrows(() -> LoxOps.inherit(1.0), LoxError.class, "inherit() rejects a non-class value");
         check(LoxOps.inherit(animal) == animal, "inherit() returns the validated superclass");
-        checkThrows(() -> LoxOps.getTag(1.0), LoxError.class, "getTag() rejects a non-enum value");
+        checkEquals(-1.0, LoxOps.getTag(1.0), "getTag() gives a non-enum value the tag -1, which no constructor has");
         checkEquals(1.0, LoxOps.getTag(a), "getTag() reads the constructor's tag as a Lox number");
         LoxOps.checkMapKey("k"); // public for BUILD_MAP — must not throw for a valid key
         checkThrows(() -> LoxOps.checkMapKey(Double.NaN), LoxError.class, "checkMapKey() rejects NaN");

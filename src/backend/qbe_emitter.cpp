@@ -1431,30 +1431,12 @@ class Emitter {
                              int jumpTableOffset) {
         const auto& [before, after] = stateOf(ins.offset);
         (void)after;
-        std::string topAddr = addr(before.height);
         std::string slotAddr = addr(before.height - 1);
-        // Keep the frame offset current (Q4) so a non-enum subject's fatal
-        // stack trace names the match's own line, exactly as the unfused
-        // rt_op_get_tag call site does.
-        m_body << "\tcall $rt_set_top(l %rt, l " << topAddr << ")\n";
-        m_body << "\tcall $rt_set_frame_offset(l %rt, w " << ins.offset
-               << ")\n";
+        // A subject that is not an enum value gives -1, which equals no
+        // entry of the table, so the dispatch takes its default.
         std::string tag = newTemp();
         m_body << "\t" << tag << " =w call $rt_get_tag_word(l %rt, l "
                << slotAddr << ")\n";
-        // -1 is the helper's non-enum sentinel (rt_capi.h); every real tag
-        // is a non-negative ObjEnumCtor::tag, so a signed less-than test
-        // catches it and mirrors opGetTag's own fatal error exactly.
-        std::string bad = newTemp();
-        m_body << "\t" << bad << " =w csltw " << tag << ", 0\n";
-        std::string fatalLabel =
-            "@" + m_symbol + "_tagfatal" + std::to_string(m_tempCounter);
-        std::string okLabel =
-            "@" + m_symbol + "_tagok" + std::to_string(m_tempCounter);
-        m_body << "\tjnz " << bad << ", " << fatalLabel << ", " << okLabel
-               << "\n";
-        m_body << fatalLabel << "\n\tret " << kRtFatal << "\n";
-        m_body << okLabel << "\n";
         m_fusedTagWordByJumpOffset[jumpTableOffset] = tag;
     }
 
