@@ -61,6 +61,7 @@ struct ObjCoroutine;  // container_objects.h; only a pointer is needed here.
 struct ObjTask;       // container_objects.h; only a pointer is needed here.
 struct ObjIterator;   // container_objects.h; only a pointer is needed here.
 class DiagnosticSink; // diagnostic.h; only a pointer is needed here.
+struct ProgramDeclarations; // compiler.h; only a pointer is needed here.
 
 struct HandlerRecord {
     int frameCount;                // number of frames at push time
@@ -115,28 +116,10 @@ class Runtime {
         loxpp::kStackOverflowStackReserve;
 
     // A Runtime of its own heap: the main worker, a test, or the QBE entry.
-    Runtime() : Runtime(new MemoryManager(0)) {}
+    Runtime();
     // A Runtime over `heap`, which it then owns (see m_heapOwner): the
     // Runtime of a worker that task.spawn_worker made.
-    explicit Runtime(MemoryManager* heap)
-        : m_heapOwner{heap}, m_mm(*heap), m_globals(VmAllocator<Entry>{heap}) {
-        resetStack();
-        m_mm.setMarkRootsCallback([this]() { markRoots(); });
-#ifdef LOXPP_PROFILE
-        m_mm.setProfilerData(&m_profilerData);
-#endif
-        // m_mm's address is fixed for this object's lifetime, so this is a
-        // one-time invariant, not something VM::interpret() needs to redo on
-        // every REPL line — unlike setActiveContext(&m_stdlibCtx), which
-        // VM::interpret() still sets on every call, since that points a
-        // global/thread-local at whichever VM is currently active.
-        m_stdlibCtx.mm = &m_mm;
-        m_stdlibCtx.rt = this;
-        {
-            std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
-            m_mm.inbox().runtime = this;
-        }
-    }
+    explicit Runtime(MemoryManager* heap);
 
     // The worker ends: retires the heap (MemoryManager::retire). The heap
     // itself is freed by m_heapOwner, after every other member.
@@ -1258,6 +1241,11 @@ class Runtime {
     // Tasks of this run that have not ended, the main task included.
     int m_liveTasks{0};
     std::uint64_t m_nextTaskSerial{0};
+    // The declaration tables of this session's compiles. A REPL line can use
+    // an enum or a class that an earlier line declared, and a constructor tag
+    // never repeats. Created on the first compile. It holds only strings and
+    // integers, so a GC cannot invalidate it.
+    std::unique_ptr<ProgramDeclarations> m_declarations;
     // The workers of the current run (one per runTasks() on the main
     // worker), and whether this Runtime is the main worker.
     std::shared_ptr<WorkerGroup> m_group;

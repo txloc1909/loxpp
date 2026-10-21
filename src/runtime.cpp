@@ -99,6 +99,12 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
         options.sourceId = static_cast<int>(m_sources.size());
         m_sources.push_back(std::make_shared<const std::string>(source));
     }
+    // A compile continues this Runtime's session: a REPL line sees every
+    // declaration an earlier line made.
+    if (!m_declarations) {
+        m_declarations = std::make_unique<ProgramDeclarations>();
+    }
+    options.declarations = m_declarations.get();
     ObjFunction* fn = compile(source, &m_mm, sink, options);
     if (fn == nullptr) {
         return nullptr;
@@ -1578,6 +1584,28 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
 #endif
     endTasks();
     return result;
+}
+
+Runtime::Runtime() : Runtime(new MemoryManager(0)) {}
+
+Runtime::Runtime(MemoryManager* heap)
+    : m_heapOwner{heap}, m_mm(*heap), m_globals(VmAllocator<Entry>{heap}) {
+    resetStack();
+    m_mm.setMarkRootsCallback([this]() { markRoots(); });
+#ifdef LOXPP_PROFILE
+    m_mm.setProfilerData(&m_profilerData);
+#endif
+    // m_mm's address is fixed for this object's lifetime, so this is a
+    // one-time invariant, not something VM::interpret() needs to redo on
+    // every REPL line — unlike setActiveContext(&m_stdlibCtx), which
+    // VM::interpret() still sets on every call, since that points a
+    // global/thread-local at whichever VM is currently active.
+    m_stdlibCtx.mm = &m_mm;
+    m_stdlibCtx.rt = this;
+    {
+        std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
+        m_mm.inbox().runtime = this;
+    }
 }
 
 Runtime::~Runtime() {
