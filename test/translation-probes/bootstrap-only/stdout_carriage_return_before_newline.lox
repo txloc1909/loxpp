@@ -1,0 +1,7 @@
+// A program prints a carriage return (byte 13) directly before a newline:
+// stdout is the bytes a, CR, LF. The text-mode gates turn CR LF into one
+// newline, so a wrapper that drops this CR still looks equal there, and only
+// tools/check_cr_bytes.py, which compares the raw stdout bytes with native,
+// catches it. There is no STATUS line, because a CHECK line cannot hold a CR
+// byte.
+print "a" + chr(13);
