@@ -13,6 +13,7 @@
 class MemoryManager;
 class Compiler;
 class DiagnosticSink;
+struct ProgramDeclarations;
 
 static constexpr int UINT8_COUNT = 256;
 
@@ -31,6 +32,11 @@ struct CompileOptions {
     bool declarationsOnly{false};
     // Written into ObjFunction::sourceId of each top-level `fun`.
     int sourceId{0};
+    // The declaration tables of the session that this compile continues (a
+    // REPL line): the enum and class declarations of earlier lines still
+    // apply. nullptr compiles a program on its own. The tables change only
+    // when the compile succeeds.
+    ProgramDeclarations* declarations{nullptr};
 };
 
 ObjFunction* compile(const std::string& source, MemoryManager* mm,
@@ -74,6 +80,33 @@ struct ConstructorInfo {
     uint8_t tag;
     uint8_t arity;
     std::vector<std::string> fieldNames;
+};
+
+// Compile-time declaration tables that outlive one compile. A REPL line
+// compiles alone, but a declaration on an earlier line still applies: the
+// program is the whole session. Runtime owns one and passes it through
+// CompileOptions; a compile given nullptr keeps its tables local.
+struct ProgramDeclarations {
+    // The name of every enum the session declares, collected by a token scan
+    // before compilation, because an enum name means the enum in the whole
+    // program, also before its declaration.
+    std::set<std::string, std::less<>> enumNames;
+    // Constructor name → its enum, tag, arity, and field names. A constructor
+    // name is unique across one program, as the flat namespace rule requires
+    // until the final phase of the enum mission.
+    std::unordered_map<std::string, ConstructorInfo> constructors;
+    // enumName → ordered list of ctor names, for exhaustiveness checking.
+    std::unordered_map<std::string, std::vector<std::string>> enumCtors;
+    // Every class the session declares, for a class pattern.
+    std::set<std::string> classNames;
+    // Every name the session declares as a global variable (a top-level
+    // `var`, `fun`, or `class`). An enum declared on a later line must not
+    // reuse one, because no variable may have an enum's name. A local of an
+    // earlier line does not outlive that line, so it cannot conflict.
+    std::set<std::string> globalNames;
+    // The next constructor tag. Tags are unique in the program, so one tag
+    // test checks the enum and the constructor.
+    int nextTag{0};
 };
 
 class Compiler {
@@ -186,9 +219,7 @@ class Compiler {
     // Clears the parse-time assignment flag after an operator expression,
     // whose value is never an assignment target.
     void markNotAssignable();
-
-    // Walks the enclosing chain to the root compiler.
-    Compiler* findRootCompiler();
+    // Returns the constructor of the program with this name, or nullptr.
     const ConstructorInfo* findConstructor(const std::string& name) const;
     // True for the name of an enum declared anywhere in the program, also
     // before its declaration: the name means the enum in the whole program.
@@ -299,18 +330,11 @@ class Compiler {
     // Compiler and never reaches the runtime Chunk.
     std::unordered_map<Value, uint16_t, ValueHash> m_constantIndex;
 
-    // Constructor table — only meaningfully populated on the root compiler.
-    std::unordered_map<std::string, ConstructorInfo> m_constructors;
-    // enumName → ordered list of ctor names, for exhaustiveness checking.
-    std::unordered_map<std::string, std::vector<std::string>> m_enumCtors;
-    // Root compiler only: the name of every enum the source declares,
-    // collected by a scan of the tokens before compilation starts.
-    std::set<std::string, std::less<>> m_programEnumNames;
-    // Root compiler only: the next constructor tag. Tags are unique in the
-    // program, so one tag test checks the enum and the constructor.
-    int m_nextTag{0};
-    // Class name table — only meaningfully populated on the root compiler.
-    std::set<std::string> m_classNames;
+    // Points at the program's declaration tables: the caller's session state
+    // when CompileOptions supplies one, else m_ownDeclarations. Inner
+    // compilers share the root's pointer, so a method body sees the program.
+    ProgramDeclarations m_ownDeclarations;
+    ProgramDeclarations* m_declarations{&m_ownDeclarations};
     // Root compiler only: the next ObjFunction::topLevelOrdinal, and the
     // source id written next to it.
     int m_topLevelFunCount{0};

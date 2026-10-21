@@ -333,3 +333,146 @@ TEST_F(MatchEnumTest, MatchOverAllTagsDoesNotUseAJumpTable) {
     expect_num(*last, 255.0);
     expect_num(*first, 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// ReplEnumTest — one VM and one h.run() per REPL line. A declaration on an
+// earlier line must mean the same declaration on a later line.
+// ---------------------------------------------------------------------------
+
+class ReplEnumTest : public ::testing::Test {};
+
+TEST_F(ReplEnumTest, ConstructorExpressionOnALaterLine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum Opt { Some(v) None }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = Opt.Some(1);"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var n = Opt.None();"), InterpretResult::OK);
+
+    auto x = h.getGlobal("x");
+    ASSERT_TRUE(x.has_value());
+    ASSERT_TRUE(isEnumValue(*x));
+    ObjEnum* some = asObjEnum(as<Obj*>(*x));
+    EXPECT_EQ(some->ctor->tag, 0);
+    ASSERT_EQ(some->fields.size(), 1u);
+    expect_num(some->fields[0], 1.0);
+
+    auto n = h.getGlobal("n");
+    ASSERT_TRUE(n.has_value());
+    ASSERT_TRUE(isEnumValue(*n));
+    EXPECT_EQ(asObjEnum(as<Obj*>(*n))->ctor->tag, 1);
+}
+
+TEST_F(ReplEnumTest, ConstructorPatternOnALaterLine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum Opt { Some(v) None }"), InterpretResult::OK);
+    ASSERT_EQ(h.run(R"(var got = match Opt.Some(7) {
+        case Opt.Some(v) => v
+        case Opt.None    => 0
+    };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("got");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 7.0);
+}
+
+TEST_F(ReplEnumTest, ExhaustivenessCheckSpansLines) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum Opt { Some(v) None }"), InterpretResult::OK);
+    EXPECT_EQ(h.run("match Opt.Some(1) { case Opt.Some(v) => v };"),
+              InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(ReplEnumTest, ConstructorTagsStayUniqueAcrossLines) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum A { X }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("enum B { Y }"), InterpretResult::OK);
+    // A.X made the value. B.Y must not match it, even though its declaration
+    // comes from a later line.
+    ASSERT_EQ(h.run("var got = match A.X() { case B.Y => 1 case A.X => 2 "
+                    "case _ => 3 };"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("got");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2.0);
+}
+
+TEST_F(ReplEnumTest, EnumNameRulesSpanLines) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum Opt { Some(v) None }"), InterpretResult::OK);
+    EXPECT_EQ(h.run("Opt;"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("var Opt = 1;"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("class Opt {}"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("var z = Opt.Missing();"), InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(ReplEnumTest, DuplicateEnumNameSpansLines) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum Opt { Some(v) None }"), InterpretResult::OK);
+    EXPECT_EQ(h.run("enum Opt { None }"), InterpretResult::COMPILE_ERROR);
+}
+
+TEST_F(ReplEnumTest, AFailedLineLeavesNoDeclaration) {
+    VMTestHarness h;
+    // The scan of this line already finds `E`, so `var E` is an error and the
+    // line never runs. Its declaration must not reach the next line.
+    EXPECT_EQ(h.run("enum E { A } var E = 1;"), InterpretResult::COMPILE_ERROR);
+    ASSERT_EQ(h.run("enum E { A }"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var x = E.A();"), InterpretResult::OK);
+    auto v = h.getGlobal("x");
+    ASSERT_TRUE(v.has_value());
+    ASSERT_TRUE(isEnumValue(*v));
+    EXPECT_EQ(asObjEnum(as<Obj*>(*v))->ctor->tag, 0);
+}
+
+TEST_F(ReplEnumTest, WorkerAssignsTheSameConstructorTags) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum A { X }"), InterpretResult::OK);
+    // The worker recompiles this line alone. It must assign B.Y and B.Z the
+    // same tags that the main runtime did, or the B.Z value matches B.Y.
+    ASSERT_EQ(h.run(R"(enum B { Y Z }
+        fun entry(main) {
+            task.send(main, B.Z());
+        }
+        var t = task.spawn_worker(entry, task.self());
+        var got = task.receive();
+        var r = match got {
+            case B.Y => 1
+            case B.Z => 2
+            case _   => 3
+        };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("r");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2.0);
+}
+
+TEST_F(ReplEnumTest, NestedWorkerUsesTheEntrySourceTables) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum A { X }"), InterpretResult::OK);
+    const std::string workerLine = R"(enum B { Y Z }
+        fun inner(main) { task.send(main, B.Z()); }
+        fun outer(main) { task.spawn_worker(inner, main); })";
+    ASSERT_EQ(h.run(workerLine), InterpretResult::OK);
+    // The same text fails, and its source stays in the runtime. A nested
+    // worker must still use the tables of its entry's real source.
+    EXPECT_EQ(h.run(workerLine), InterpretResult::COMPILE_ERROR);
+    ASSERT_EQ(h.run(R"(task.spawn_worker(outer, task.self());
+        var got = task.receive();
+        var r = match got {
+            case B.Y => 1
+            case B.Z => 2
+            case _   => 3
+        };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("r");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2.0);
+}
+
+TEST_F(ReplEnumTest, EnumNameMustNotReuseAnEarlierGlobal) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var TakenVar = 1; class TakenClass {} fun takenFun() {}"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.run("enum TakenVar { A }"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("enum TakenClass { A }"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("enum takenFun { A }"), InterpretResult::COMPILE_ERROR);
+}
