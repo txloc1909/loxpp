@@ -1,10 +1,13 @@
-// test_repl.cpp — a worker that a REPL line spawns (issues #787 and #789).
+// test_repl.cpp — a REPL session (spec/04-semantics.md, A Session).
 //
-// The REPL compiles each line alone, and a worker recompiles the sources of
-// its program. A worker of a later line must define the declarations of the
-// earlier lines, and it must assign the same constructor tags, without a copy
-// of the session's declaration tables for each source. These tests drive a VM
-// the way main.cpp's repl() does: one run() per line.
+// A session is one program that a reader enters one line at a time: one VM and
+// one run per line, and the declarations, the main task, and the workers
+// outlive the line that made them. These tests drive a VM the way main.cpp's
+// repl() does. They cover #787 (a worker defines the declarations of an earlier
+// line) and #788 (a worker outlives the line that spawned it), and they
+// exercise the worker replay of #789: a worker compiles every earlier source
+// again, which is what lets a session keep no per-line copy of its declaration
+// tables.
 
 #include "objects.h"
 #include "test_harness.h"
@@ -22,10 +25,11 @@ void expect_num(Value v, double n) {
     EXPECT_DOUBLE_EQ(as<Number>(v), n);
 }
 
-// One run() per line, as the REPL does it.
+// One run() per line, in session mode, as the REPL does it.
 class Session {
   public:
-    Session() = default;
+    Session() { m_h.setSession(true); }
+    ~Session() { m_h.endSession(); }
 
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -99,6 +103,63 @@ TEST_F(ReplSessionTest, WorkerReplaysEarlierConstructorTagsInOrder) {
     auto got = s.global("got");
     ASSERT_TRUE(got.has_value());
     expect_num(*got, 2.0);
+}
+
+// #788: the worker waits for a message that no line has sent when the line
+// that spawned it ends. It must still be there when a later line sends it.
+TEST_F(ReplSessionTest, WorkerOutlivesTheLineThatSpawnedIt) {
+    Session s;
+    ASSERT_EQ(s.line("fun entry(main) { var m = task.receive(); "
+                     "task.send(main, m + 1); }"),
+              InterpretResult::OK);
+    ASSERT_EQ(s.line("var w = task.spawn_worker(entry, task.self());"),
+              InterpretResult::OK);
+    ASSERT_EQ(s.line("task.send(w, 41);"), InterpretResult::OK);
+    ASSERT_EQ(s.line("var got = task.receive();"), InterpretResult::OK);
+    auto got = s.global("got");
+    ASSERT_TRUE(got.has_value());
+    expect_num(*got, 42.0);
+}
+
+// #788: a deadlock report ends the line, not the session. The worker that
+// waits when the line ends is still there for the next one, and the main task
+// is not dead, so a send to it still succeeds.
+TEST_F(ReplSessionTest, SessionContinuesAfterADeadlock) {
+    Session s;
+    ASSERT_EQ(s.line("fun entry(main) { var m = task.receive(); "
+                     "task.send(main, m + 1); }"),
+              InterpretResult::OK);
+    ASSERT_EQ(s.line("var w = task.spawn_worker(entry, task.self());"),
+              InterpretResult::OK);
+    // Only the main task can send to the worker, and it waits instead.
+    EXPECT_EQ(s.line("var got = task.receive();"),
+              InterpretResult::RUNTIME_ERROR);
+    ASSERT_EQ(s.line("task.send(w, 5);"), InterpretResult::OK);
+    ASSERT_EQ(s.line("var got = task.receive();"), InterpretResult::OK);
+    auto got = s.global("got");
+    ASSERT_TRUE(got.has_value());
+    expect_num(*got, 6.0);
+}
+
+// #788: a task that `task.spawn` made on the main worker does not outlive its
+// line (spec/04-semantics.md, A Session). A send to it from a later line is a
+// DeadTaskError, caught here.
+TEST_F(ReplSessionTest, AMainWorkerTaskDoesNotOutliveItsLine) {
+    Session s;
+    ASSERT_EQ(s.line("fun wait() { task.receive(); }"), InterpretResult::OK);
+    ASSERT_EQ(s.line("var t = task.spawn(wait);"), InterpretResult::OK);
+    ASSERT_EQ(s.line("var r = nil;"), InterpretResult::OK);
+    ASSERT_EQ(s.line(R"(
+        try { task.send(t, 1); }
+        catch (e) { r = e.kind; }
+    )"),
+              InterpretResult::OK);
+    auto r = s.global("r");
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(is<Obj*>(*r));
+    ASSERT_EQ(as<Obj*>(*r)->type, ObjType::STRING);
+    EXPECT_EQ(asObjString(as<Obj*>(*r))->chars.c_str(),
+              std::string("DeadTaskError"));
 }
 
 // #789: a long session of declarations still starts a worker correctly. The

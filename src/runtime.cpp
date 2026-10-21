@@ -1105,6 +1105,19 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->ended.store(true, std::memory_order_release);
 }
 
+void Runtime::endTaskOrLine(ObjTask* task) {
+    if (m_sessionMode && m_isMainWorker && task == m_mainTask) {
+        // The line's script ended, but the session's main task did not: it
+        // keeps its handle and its mailbox for the next line
+        // (spec/04-semantics.md, A Session).
+        m_mainLineDone = true;
+        task->state = TaskState::READY;
+        task->receiving = false;
+        return;
+    }
+    markTaskDead(task);
+}
+
 void Runtime::deliverMessage(ObjTask* task, Value msg) {
     // The mailbox is heap storage of this worker, so a push can pass the
     // collection threshold and collect. The target is reachable from this
@@ -1199,7 +1212,7 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_currentTask = nullptr;
 
     if (!ok) {
-        markTaskDead(task);
+        endTaskOrLine(task);
         if (outcome != OpResult::Fatal) {
             // No frame lies below a task, so no handler outside it can catch.
             runtimeError("BUG: a task ended through a handler outside it.");
@@ -1210,7 +1223,7 @@ bool Runtime::resumeTask(ObjTask* task) {
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
-        markTaskDead(task);
+        endTaskOrLine(task);
         return true;
     }
     if (m_taskSwitchPending) {
@@ -1362,8 +1375,11 @@ void Runtime::reportDeadlock() {
 
 InterpretResult Runtime::schedule() {
     for (;;) {
-        if (m_isMainWorker ? m_mainTask->state == TaskState::DEAD
-                           : m_liveTasks == 0) {
+        // A session line is over when the main task's script ended, which
+        // leaves the task itself alive for the next line.
+        const bool mainTaskDone =
+            m_mainTask->state == TaskState::DEAD || m_mainLineDone;
+        if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
             return InterpretResult::OK;
         }
         if (!m_isMainWorker && m_group->ended.load(std::memory_order_relaxed)) {
@@ -1390,16 +1406,20 @@ InterpretResult Runtime::schedule() {
 }
 
 InterpretResult Runtime::runTasks(ObjClosure* script) {
-    // One group per run: a worker of an earlier run (an earlier REPL line)
-    // keeps its own group, which that run's end already ended.
-    m_group = std::make_shared<WorkerGroup>();
     Inbox& inbox = m_mm.inbox();
-    m_group->mainInbox = &inbox;
-    m_group->addWorker(&inbox);
-    {
+    // A session keeps one group and one main task for all its lines: a worker
+    // that an earlier line spawned is still in the group, and the main task is
+    // still alive, so a later line can reach both (spec/04-semantics.md, A
+    // Session). Every other run makes its own group, which it ends below.
+    if (!m_sessionMode || m_group == nullptr) {
+        m_group = std::make_shared<WorkerGroup>();
+        m_group->mainInbox = &inbox;
+        m_group->addWorker(&inbox);
         std::lock_guard<std::mutex> lock(inbox.mutex);
         inbox.group = m_group;
         inbox.idle = false;
+    } else {
+        m_group->beginLine(inbox);
     }
 
     // The script closure stays rooted on the stack until the main task's
@@ -1418,19 +1438,37 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     m_mainTask->receiving = false;
     m_mainTask->epoch = m_taskEpoch;
     m_mainTask->ended.store(false, std::memory_order_relaxed);
+    m_mainLineDone = false;
     pop();
 
     m_runQueue.clear();
     m_runQueue.push_back(m_mainTask);
     m_liveTasks = 1;
     InterpretResult result = schedule();
-    m_mainTask->state = TaskState::DEAD;
+    if (!m_sessionMode) {
+        m_mainTask->state = TaskState::DEAD;
+        m_mainTask->ended.store(true, std::memory_order_release);
+    } else {
+        // Between two lines the main task is alive but runs nothing: a message
+        // that arrives now waits in its mailbox for the next line.
+        m_mainTask->state = TaskState::READY;
+        m_mainTask->receiving = false;
+    }
+    // Every line's script is its own coroutine, and the session makes the next
+    // one. Kept here, it would root this line's script for the whole session.
     m_mainTask->co = nullptr;
-    m_mainTask->ended.store(true, std::memory_order_release);
     endTasks();
-    m_group->removeWorker(&inbox);
-    m_group->end();
+    if (!m_sessionMode) {
+        m_group->removeWorker(&inbox);
+        m_group->end();
+    }
     return result;
+}
+
+void Runtime::endSession() {
+    if (m_group != nullptr) {
+        m_group->end();
+    }
 }
 
 bool Runtime::isTopLevelFunction(const Value& fn) const {

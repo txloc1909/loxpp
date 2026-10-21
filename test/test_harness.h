@@ -91,6 +91,12 @@ class VMTestHarness {
         m_vm.setArgs(std::move(args));
     }
 
+    // A REPL session: every run() after this one continues the same program,
+    // so workers and the main task outlive the line that made them. Call
+    // endSession() after the last line, as main.cpp's repl() does.
+    void setSession(bool on) { m_vm.setSessionMode(on); }
+    void endSession() { m_vm.endSession(); }
+
   private:
     VM m_vm;
 };
