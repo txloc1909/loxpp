@@ -1776,6 +1776,9 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info) {
                 i++;
             } while (m_parser->match(TokenType::COMMA));
         }
+        if (i < static_cast<int>(info.arity)) {
+            m_parser->errorAtCurrent("Too few fields in constructor pattern.");
+        }
         m_parser->consume(TokenType::RIGHT_PAREN,
                           "Expect ')' after field pattern.");
     }

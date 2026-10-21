@@ -215,6 +215,8 @@ DEFERRED: dict[str, Deferred] = {
         Deferred(775, 'the bootstrap faults at run time'),
     "The enum '<...>' is not a value; name a constructor, as in '<...>.A'.":
         Deferred(775, 'the bootstrap faults at run time'),
+    'Too few fields in constructor pattern.':
+        Deferred(778, 'the bootstrap keeps the prefix rule'),
 }
 
 GENERATED: dict[str, Generated] = {
