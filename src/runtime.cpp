@@ -126,8 +126,13 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
         // alone (runWorker) starts from them, so the constructor tags it
         // assigns to this source's declarations match the ones this compile
         // assigns, and its compile-time checks see the same declarations.
-        sourceDeclarations =
-            std::make_shared<const ProgramDeclarations>(*m_declarations);
+        auto snapshot = std::make_shared<ProgramDeclarations>(*m_declarations);
+        // This runtime already accepted the source with these tables, so the
+        // enum check against earlier global names cannot fire again. Drop
+        // them: they are the table that grows with every line, and a session
+        // with many functions would keep one growing copy per line.
+        snapshot->globalNames.clear();
+        sourceDeclarations = std::move(snapshot);
         m_sources.push_back(std::make_shared<const std::string>(source));
     }
     // A compile continues this Runtime's session: a REPL line sees every
