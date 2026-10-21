@@ -1500,7 +1500,7 @@ bool Compiler::isDeclaredEnum(const std::string& name) const {
     while (root->m_enclosing != nullptr) {
         root = root->m_enclosing;
     }
-    return root->m_enumCtors.count(name) != 0U;
+    return root->m_enumCtors.contains(name);
 }
 
 void Compiler::rejectEnumName(const Token& name) {
