@@ -20,15 +20,15 @@ TEST_F(AtBindingTest, ConstructorPositional) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(value) Err(msg) }
-        var subject = Ok(42);
+        var subject = Result.Ok(42);
         var field_val = match subject {
-            case n @ Ok(v) => v
+            case n @ Result.Ok(v) => v
             case _         => 0
         };
         // Re-match on the bound @-name to verify it is the whole Ok value.
         var at_val = match subject {
-            case n @ Ok(v) => match n {
-                case Ok(v2) => v2
+            case n @ Result.Ok(v) => match n {
+                case Result.Ok(v2) => v2
                 case _      => -1
             }
             case _ => -1
@@ -94,13 +94,13 @@ TEST_F(AtBindingTest, ZeroFieldConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Option { Some(v) None }
-        var a = match Some(7) {
-            case n @ Some(v) => v
-            case n @ None    => -1
+        var a = match Option.Some(7) {
+            case n @ Option.Some(v) => v
+            case n @ Option.None    => -1
         };
-        var b = match None() {
-            case n @ Some(v) => v
-            case n @ None    => 0
+        var b = match Option.None() {
+            case n @ Option.Some(v) => v
+            case n @ Option.None    => 0
         };
     )"),
               InterpretResult::OK);
@@ -118,11 +118,11 @@ TEST_F(AtBindingTest, OrPatternSameBindings) {
         enum Result { Ok(value) Err(msg) }
         fun tag_val(r) {
             return match r {
-                case v @ Ok(x) or v @ Err(x) => x
+                case v @ Result.Ok(x) or v @ Result.Err(x) => x
             };
         }
-        var a = tag_val(Ok(1));
-        var b = tag_val(Err(2));
+        var a = tag_val(Result.Ok(1));
+        var b = tag_val(Result.Err(2));
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("a"), 1);
@@ -137,14 +137,14 @@ TEST_F(AtBindingTest, GuardRefsBothBindings) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(value) Err(msg) }
-        var x = match Ok(5) {
-            case n @ Ok(v) if v > 3 => 1
-            case n @ Ok(v)          => 2
+        var x = match Result.Ok(5) {
+            case n @ Result.Ok(v) if v > 3 => 1
+            case n @ Result.Ok(v)          => 2
             case _                  => 3
         };
-        var y = match Ok(1) {
-            case n @ Ok(v) if v > 3 => 1
-            case n @ Ok(v)          => 2
+        var y = match Result.Ok(1) {
+            case n @ Result.Ok(v) if v > 3 => 1
+            case n @ Result.Ok(v)          => 2
             case _                  => 3
         };
     )"),
@@ -166,8 +166,8 @@ TEST_F(AtBindingTest, StackNeutralInLoop) {
         var total = 0;
         var i = 0;
         while (i < 3) {
-            var r = match Val(i) {
-                case w @ Val(v) => v
+            var r = match Wrap.Val(i) {
+                case w @ Wrap.Val(v) => v
                 case _          => 0
             };
             total = total + r;
@@ -187,12 +187,12 @@ TEST_F(AtBindingTest, ScopeIsolation) {
     // 'n' from the first arm must not bleed into a second match.
     ASSERT_EQ(h.run(R"(
         enum Box { B(x) }
-        var r1 = match B(1) {
-            case n @ B(x) => x
+        var r1 = match Box.B(1) {
+            case n @ Box.B(x) => x
             case _        => 0
         };
-        var r2 = match B(2) {
-            case n @ B(x) => x
+        var r2 = match Box.B(2) {
+            case n @ Box.B(x) => x
             case _        => 0
         };
     )"),
@@ -209,8 +209,8 @@ TEST_F(AtBindingTest, ErrorWildcardAtName) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Box { B(x) }
-        var r = match B(1) {
-            case _ @ B(x) => x
+        var r = match Box.B(1) {
+            case _ @ Box.B(x) => x
             case _        => 0
         };
     )"),
@@ -225,7 +225,7 @@ TEST_F(AtBindingTest, ErrorPlainBindingSubPat) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Box { B(x) }
-        var r = match B(1) {
+        var r = match Box.B(1) {
             case a @ b => 0
         };
     )"),

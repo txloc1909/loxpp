@@ -4,7 +4,7 @@ fun classify(status) {
     print match status {
         case 200           => "OK"
         case 201           => "Created"
-        case 301, 302      => "Redirect"
+        case 301 or 302    => "Redirect"
         case 400           => "Bad Request"
         case 401           => "Unauthorized"
         case 403           => "Forbidden"

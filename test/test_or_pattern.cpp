@@ -19,17 +19,17 @@ TEST_F(OrPatternTest, ZeroBindingTwoAlts) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Msg { Quit Pause Resume }
-        var a = match Quit() {
-            case Quit or Pause => 1
-            case Resume        => 2
+        var a = match Msg.Quit() {
+            case Msg.Quit or Msg.Pause => 1
+            case Msg.Resume        => 2
         };
-        var b = match Pause() {
-            case Quit or Pause => 1
-            case Resume        => 2
+        var b = match Msg.Pause() {
+            case Msg.Quit or Msg.Pause => 1
+            case Msg.Resume        => 2
         };
-        var c = match Resume() {
-            case Quit or Pause => 1
-            case Resume        => 2
+        var c = match Msg.Resume() {
+            case Msg.Quit or Msg.Pause => 1
+            case Msg.Resume        => 2
         };
     )"),
               InterpretResult::OK);
@@ -43,17 +43,17 @@ TEST_F(OrPatternTest, BindingTwoAlts) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Ev { Move(x) Teleport(x) Stop }
-        var a = match Move(10) {
-            case Move(x) or Teleport(x) => x
-            case Stop                   => 0
+        var a = match Ev.Move(10) {
+            case Ev.Move(x) or Ev.Teleport(x) => x
+            case Ev.Stop                   => 0
         };
-        var b = match Teleport(42) {
-            case Move(x) or Teleport(x) => x
-            case Stop                   => 0
+        var b = match Ev.Teleport(42) {
+            case Ev.Move(x) or Ev.Teleport(x) => x
+            case Ev.Stop                   => 0
         };
-        var c = match Stop() {
-            case Move(x) or Teleport(x) => x
-            case Stop                   => 0
+        var c = match Ev.Stop() {
+            case Ev.Move(x) or Ev.Teleport(x) => x
+            case Ev.Stop                   => 0
         };
     )"),
               InterpretResult::OK);
@@ -67,21 +67,21 @@ TEST_F(OrPatternTest, ThreeAlts) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Color { Red Green Blue Alpha }
-        var a = match Red() {
-            case Red or Green or Blue => 1
-            case Alpha                => 2
+        var a = match Color.Red() {
+            case Color.Red or Color.Green or Color.Blue => 1
+            case Color.Alpha                => 2
         };
-        var b = match Green() {
-            case Red or Green or Blue => 1
-            case Alpha                => 2
+        var b = match Color.Green() {
+            case Color.Red or Color.Green or Color.Blue => 1
+            case Color.Alpha                => 2
         };
-        var c = match Blue() {
-            case Red or Green or Blue => 1
-            case Alpha                => 2
+        var c = match Color.Blue() {
+            case Color.Red or Color.Green or Color.Blue => 1
+            case Color.Alpha                => 2
         };
-        var d = match Alpha() {
-            case Red or Green or Blue => 1
-            case Alpha                => 2
+        var d = match Color.Alpha() {
+            case Color.Red or Color.Green or Color.Blue => 1
+            case Color.Alpha                => 2
         };
     )"),
               InterpretResult::OK);
@@ -96,15 +96,15 @@ TEST_F(OrPatternTest, WithGuard) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Ev { Move(x) Teleport(x) Stop }
-        var a = match Move(5) {
-            case Move(x) or Teleport(x) if x > 3 => 1
-            case Move(x) or Teleport(x)           => 2
-            case Stop                              => 3
+        var a = match Ev.Move(5) {
+            case Ev.Move(x) or Ev.Teleport(x) if x > 3 => 1
+            case Ev.Move(x) or Ev.Teleport(x)           => 2
+            case Ev.Stop                              => 3
         };
-        var b = match Teleport(1) {
-            case Move(x) or Teleport(x) if x > 3 => 1
-            case Move(x) or Teleport(x)           => 2
-            case Stop                              => 3
+        var b = match Ev.Teleport(1) {
+            case Ev.Move(x) or Ev.Teleport(x) if x > 3 => 1
+            case Ev.Move(x) or Ev.Teleport(x)           => 2
+            case Ev.Stop                              => 3
         };
     )"),
               InterpretResult::OK);
@@ -118,9 +118,9 @@ TEST_F(OrPatternTest, ExhaustivenessViaOrPattern) {
     // Two arms, one with or-pattern, covering all three constructors.
     ASSERT_EQ(h.run(R"(
         enum Shape { Circle Rect Triangle }
-        var x = match Circle() {
-            case Circle or Rect => 1
-            case Triangle       => 2
+        var x = match Shape.Circle() {
+            case Shape.Circle or Shape.Rect => 1
+            case Shape.Triangle       => 2
         };
     )"),
               InterpretResult::OK);
@@ -132,13 +132,13 @@ TEST_F(OrPatternTest, NamedFieldBinding) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Shape { Circle(r) Square(r) Rect(w) }
-        var a = match Circle(7) {
-            case Circle{r} or Square{r} => r
-            case Rect{w}                => w
+        var a = match Shape.Circle(7) {
+            case Shape.Circle{r} or Shape.Square{r} => r
+            case Shape.Rect{w}                => w
         };
-        var b = match Square(3) {
-            case Circle{r} or Square{r} => r
-            case Rect{w}                => w
+        var b = match Shape.Square(3) {
+            case Shape.Circle{r} or Shape.Square{r} => r
+            case Shape.Rect{w}                => w
         };
     )"),
               InterpretResult::OK);
@@ -175,8 +175,8 @@ TEST_F(OrPatternErrorTest, MismatchedBindingNames) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum AB { A(x) B(z) }
-        match A(1) {
-            case A(x) or B(z) => x
+        match AB.A(1) {
+            case AB.A(x) or AB.B(z) => x
             case _            => 0
         };
     )"),
@@ -188,8 +188,8 @@ TEST_F(OrPatternErrorTest, BindingPatternInOr) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum AB { A(x) }
-        match A(1) {
-            case v or A(x) => 0
+        match AB.A(1) {
+            case v or AB.A(x) => 0
             case _         => 0
         };
     )"),
@@ -201,8 +201,8 @@ TEST_F(OrPatternErrorTest, WildcardInOr) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum AB { A(x) }
-        match A(1) {
-            case _ or A(x) => 0
+        match AB.A(1) {
+            case _ or AB.A(x) => 0
         };
     )"),
               InterpretResult::COMPILE_ERROR);

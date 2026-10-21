@@ -53,11 +53,11 @@ TEST(StringifyDepthGuard, NestedEnumTripsGuard) {
     VMTestHarness h;
     std::string source = R"(
         enum Node { Cons(value) End }
-        var x = End();
+        var x = Node.End();
         var N = 250;  // Deep enough to trip the guard at 200
         var i = 0;
         while (i < N) {
-            x = Cons(x);
+            x = Node.Cons(x);
             i = i + 1;
         }
         print x;

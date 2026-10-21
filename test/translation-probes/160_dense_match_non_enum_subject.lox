@@ -1,0 +1,30 @@
+// A match whose arms test every constructor of one enum, with no other arm,
+// does not match a value that is not an enum value: the constructor tests
+// miss, and no arm matches, so the match raises the catchable MatchError
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). Such a
+// match can compile to one dispatch on the tag, so this checks that path.
+enum E { A B C }
+
+fun f(v) {
+    return match v {
+        case E.A => "A"
+        case E.B => "B"
+        case E.C => "C"
+    };
+}
+try {
+    print f(1);
+} catch (e) {
+    print e.kind;
+}
+try {
+    print f(nil);
+} catch (e) {
+    print e.kind;
+}
+print f(E.B());
+
+// STATUS: ok
+// CHECK: MatchError
+// CHECK: MatchError
+// CHECK: B

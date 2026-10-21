@@ -247,13 +247,13 @@ TEST_F(EnumClassCompositionTest, EnumWrapsClassValue) {
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(v) Err(m) }
         class NetworkError { init(code) { this.code = code; } }
-        var r = Ok(NetworkError(404));
+        var r = Result.Ok(NetworkError(404));
         var got = match r {
-            case Ok(v) => match v {
+            case Result.Ok(v) => match v {
                 case NetworkError{code} => code
                 case _                 => -1
             }
-            case Err(m) => -2
+            case Result.Err(m) => -2
         };
     )"),
               InterpretResult::OK);

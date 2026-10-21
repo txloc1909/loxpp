@@ -3544,13 +3544,15 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
     return OpResult::OK;
 }
 
+// A value that is not an enum value has the tag -1, which no constructor
+// has, so a constructor pattern does not match it (spec/04-semantics.md,
+// "Constructor patterns").
 Runtime::OpResult Runtime::opGetTag() {
     Value val = pop();
-    if (!isEnumValue(val)) {
-        runtimeError("GET_TAG: expected an enum value.");
-        return OpResult::Fatal;
+    double tag = -1;
+    if (isEnumValue(val)) {
+        tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
     }
-    auto tag = static_cast<double>(asObjEnum(as<Obj*>(val))->ctor->tag);
     push(Value{tag});
     return OpResult::OK;
 }

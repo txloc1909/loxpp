@@ -1030,12 +1030,12 @@ public final class LoxOps {
     }
 
     /**
-     * The GET_TAG opcode's guard — same ClassCastException problem as {@link
-     * #inherit}.
+     * The GET_TAG opcode. A value that is not an enum value has the tag -1,
+     * which no constructor has, so a constructor pattern does not match it.
      */
     public static double getTag(Object v) {
         if (!(v instanceof LoxEnum)) {
-            throw new LoxError("GET_TAG: expected an enum value.");
+            return -1;
         }
         return ((LoxEnum)v).ctor.tag;
     }

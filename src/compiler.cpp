@@ -1166,7 +1166,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 if (subHeadFailed) {
                     // The head already reported its error.
                 } else if (subInfo != nullptr) {
-                    subCtorName = subInfo->name;
+                    subCtorName = subInfo->enumName + "." + subInfo->name;
                     emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                     emitByte(Op::GET_TAG);
                     emitConstantOp(
@@ -1236,7 +1236,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         if (headFailed) {
             // The head already reported its error.
         } else if (info != nullptr) {
-            ctorName = info->name;
+            ctorName = info->enumName + "." + info->name;
             if (!skipPatternCheck) {
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                 emitByte(Op::GET_TAG);
@@ -1288,6 +1288,46 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         return {missJump, bindCount, std::move(names), std::move(ctorName)};
     };
 
+    // A literal alternative: the subject equals the literal.
+    auto compileOneLiteralPat = [&]() -> OnePatResult {
+        emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
+        m_parser->advance();
+        switch (m_parser->m_previous.type) {
+        case TokenType::NUMBER:
+            number();
+            break;
+        case TokenType::STRING:
+            string();
+            break;
+        default:
+            literal();
+            break;
+        }
+        emitByte(Op::EQUAL);
+        int missJump = emitJump(Op::JUMP_IF_FALSE);
+        emitByte(Op::POP);
+        return {missJump, 0, {}, ""};
+    };
+
+    auto isLiteralStart = [&]() {
+        return m_parser->check(TokenType::NUMBER) ||
+               m_parser->check(TokenType::STRING) ||
+               m_parser->check(TokenType::TRUE) ||
+               m_parser->check(TokenType::FALSE) ||
+               m_parser->check(TokenType::NIL);
+    };
+
+    auto compileOneAlt = [&]() -> OnePatResult {
+        if (isLiteralStart()) {
+            return compileOneLiteralPat();
+        }
+        if (m_parser->check(TokenType::IDENTIFIER)) {
+            return compileOneIdentPat();
+        }
+        m_parser->errorAtCurrent("Expect pattern.");
+        return {-1, 0, {}, ""};
+    };
+
     bool isIdentPat = m_parser->check(TokenType::IDENTIFIER);
     bool isListPat = m_parser->check(TokenType::LEFT_BRACKET);
     int lastMiss = -1;
@@ -1303,8 +1343,8 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             m_parser->error(
                 "Or-patterns are not supported for sequence patterns.");
         }
-    } else if (isIdentPat) {
-        auto first = compileOneIdentPat();
+    } else {
+        auto first = compileOneAlt();
         lastMiss = first.missJump;
         bindingCount = first.bindingCount;
         if (!first.ctorName.empty()) {
@@ -1317,7 +1357,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             // errors, but do not patch any jumps.
             while (m_parser->match(TokenType::OR)) {
                 m_localCount = armLocalBase;
-                compileOneIdentPat();
+                compileOneAlt();
             }
         } else if (m_parser->check(TokenType::OR)) {
             // Or-pattern: compile additional alternatives.
@@ -1333,7 +1373,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 // Reset so the next alternative's addLocal calls land at the
                 // same slots as the first alternative's bindings.
                 m_localCount = armLocalBase;
-                auto next = compileOneIdentPat();
+                auto next = compileOneAlt();
 
                 if (next.bindNames != first.bindNames) {
                     m_parser->error(
@@ -1365,30 +1405,6 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
             // All alternatives push the same number of bindings; restore count
             // so the guard and body see the correct locals.
             m_localCount = armLocalBase + bindingCount;
-        }
-    } else {
-        // Literal pattern(s): equality chain (comma-separated).
-        std::vector<int> hitJumps;
-        std::vector<int> bodyJumps;
-
-        do {
-            emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
-            m_parser->parsePrecedence(Precedence::OR, this);
-            emitByte(Op::EQUAL);
-
-            if (m_parser->check(TokenType::COMMA)) {
-                hitJumps.push_back(emitJump(Op::JUMP_IF_FALSE));
-                emitByte(Op::POP);
-                bodyJumps.push_back(emitJump(Op::JUMP));
-                patchJump(hitJumps.back());
-                emitByte(Op::POP);
-            }
-        } while (m_parser->match(TokenType::COMMA));
-
-        lastMiss = emitJump(Op::JUMP_IF_FALSE);
-        emitByte(Op::POP);
-        for (int j : bodyJumps) {
-            patchJump(j);
         }
     }
 
@@ -1514,8 +1530,8 @@ const ConstructorInfo* Compiler::qualifiedConstructor(const Token& enumTok) {
     }
     std::string enumName(enumTok.lexeme);
     std::string ctorName(m_parser->m_previous.lexeme);
-    const ConstructorInfo* info = findConstructor(ctorName);
-    if (info == nullptr || info->enumName != enumName) {
+    const ConstructorInfo* info = findConstructor(enumName + "." + ctorName);
+    if (info == nullptr) {
         m_parser->error(
             ("Enum '" + enumName + "' has no constructor '" + ctorName + "'.")
                 .c_str());
@@ -1529,7 +1545,7 @@ const ConstructorInfo* Compiler::patternHeadConstructor(const Token& headTok,
     failed = false;
     std::string name(headTok.lexeme);
     if (!isEnumName(name)) {
-        return findConstructor(name);
+        return nullptr; // A bare name is never a constructor test.
     }
     if (!isDeclaredEnum(name)) {
         m_parser->error(
@@ -1662,7 +1678,8 @@ void Compiler::enumDeclaration() {
         Token ctorTok = m_parser->m_previous;
         std::string ctorName(ctorTok.lexeme);
 
-        if (declarations->constructors.count(ctorName) != 0U) {
+        std::string qualifiedName = enumName + "." + ctorName;
+        if (declarations->constructors.count(qualifiedName) != 0U) {
             m_parser->error("Duplicate constructor name.");
             return;
         }
@@ -1704,16 +1721,8 @@ void Compiler::enumDeclaration() {
         uint16_t hiddenConst = constructorGlobalConstant(info);
         emitConstantOp(Op::CONSTANT, ctorConst);
         emitConstantOp(Op::DEFINE_GLOBAL, hiddenConst);
-        // The bare name stays a global too, unless it is an enum name, which
-        // means the enum. It reads the hidden global and does not load the
-        // constant again: the JVM backend makes a new constructor object for
-        // each load of the constant, and the two names must hold one object.
-        if (!isEnumName(ctorName)) {
-            emitConstantOp(Op::GET_GLOBAL, hiddenConst);
-            emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(ctorTok));
-        }
 
-        declarations->constructors[ctorName] = std::move(info);
+        declarations->constructors[qualifiedName] = std::move(info);
         declarations->enumCtors[enumName].push_back(ctorName);
     }
 
@@ -1823,24 +1832,19 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
             break;
         }
 
-        if (isEnumName(ctorName)) {
-            // A qualified head `E.A`.
-            if (!isDeclaredEnum(ctorName) || !m_parser->match(TokenType::DOT) ||
-                !m_parser->check(TokenType::IDENTIFIER)) {
-                ok = false;
-                break;
-            }
-            std::string enumName = std::move(ctorName);
-            ctorName = std::string(m_parser->m_current.lexeme);
-            m_parser->advance();
-            const ConstructorInfo* q = findConstructor(ctorName);
-            if (q == nullptr || q->enumName != enumName) {
-                ok = false;
-                break;
-            }
+        // Only a qualified head `E.A` is a constructor test.
+        if (!isEnumName(ctorName) || !isDeclaredEnum(ctorName) ||
+            !m_parser->match(TokenType::DOT) ||
+            !m_parser->check(TokenType::IDENTIFIER)) {
+            ok = false;
+            break;
         }
+        std::string enumName = std::move(ctorName);
+        ctorName = std::string(m_parser->m_current.lexeme);
+        m_parser->advance();
 
-        const ConstructorInfo* info = findConstructor(ctorName);
+        const ConstructorInfo* info =
+            findConstructor(enumName + "." + ctorName);
         if (info == nullptr) {
             ok = false;
             break;
@@ -1959,8 +1963,8 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
 
 void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
     std::set<std::string> checkedEnums;
-    for (const auto& ctorName : seenCtors) {
-        const ConstructorInfo* info = findConstructor(ctorName);
+    for (const auto& qualifiedName : seenCtors) {
+        const ConstructorInfo* info = findConstructor(qualifiedName);
         if (info == nullptr) {
             continue;
         }
@@ -1975,7 +1979,7 @@ void Compiler::checkEnumExhaustiveness(const std::set<std::string>& seenCtors) {
         }
         std::vector<std::string> missing;
         for (const auto& c : enumIt->second) {
-            if (seenCtors.count(c) == 0U) {
+            if (seenCtors.count(info->enumName + "." + c) == 0U) {
                 missing.push_back(c);
             }
         }

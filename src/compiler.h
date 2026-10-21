@@ -91,9 +91,8 @@ struct ProgramDeclarations {
     // before compilation, because an enum name means the enum in the whole
     // program, also before its declaration.
     std::set<std::string, std::less<>> enumNames;
-    // Constructor name → its enum, tag, arity, and field names. A constructor
-    // name is unique across one program, as the flat namespace rule requires
-    // until the final phase of the enum mission.
+    // The qualified name "E.A" → the enum, tag, arity, and field names of the
+    // constructor A of E. Constructors of different enums may share a name.
     std::unordered_map<std::string, ConstructorInfo> constructors;
     // enumName → ordered list of ctor names, for exhaustiveness checking.
     std::unordered_map<std::string, std::vector<std::string>> enumCtors;
@@ -154,7 +153,7 @@ class Compiler {
         int guardMiss;    // patch offset for guard fail  (-1 = no guard)
         int bindingCount; // locals pushed by the pattern
         bool isUnguardedCatchAll;           // true → suppress MATCH_ERROR
-        std::vector<std::string> ctorNames; // constructors matched by this arm
+        std::vector<std::string> ctorNames; // "E.A" of each constructor tested
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
                                    int armHandlerBase, int resultSlot,
@@ -231,9 +230,9 @@ class Compiler {
     // After `E` and `.`: consumes the constructor name and returns the
     // constructor of E, or reports an error and returns nullptr.
     const ConstructorInfo* qualifiedConstructor(const Token& enumTok);
-    // The constructor that a pattern head names: `E.A` (consumes `.A`), or
-    // a bare constructor name. Returns nullptr for any other head; `failed`
-    // is set when an error was reported.
+    // The constructor that a pattern head names: `E.A` (consumes `.A`).
+    // Returns nullptr for any other head, a bare name included; `failed` is
+    // set when an error was reported.
     const ConstructorInfo* patternHeadConstructor(const Token& headTok,
                                                   bool& failed);
     // The constant that holds the name of the hidden global of a

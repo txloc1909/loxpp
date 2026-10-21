@@ -288,8 +288,8 @@ TEST_F(TaskTest, SendableBitFollowsTheFields) {
                 return "no";
             }
         }
-        var log = sendable(Box(Box(Box(me)))) + sendable(Pair(None(), "s")) +
-            sendable(Box(Box(Box({})))) + sendable(Pair(1, Box(f)));
+        var log = sendable(E.Box(E.Box(E.Box(me)))) + sendable(E.Pair(E.None(), "s")) +
+            sendable(E.Box(E.Box(E.Box({})))) + sendable(E.Pair(1, E.Box(f)));
     )"),
               InterpretResult::OK);
     expect_string(h, "log", "yesyesnono");

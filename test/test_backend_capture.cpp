@@ -461,10 +461,10 @@ TEST(CaptureAnalysisTest,
         enum Result { Ok(value) Err(msg) }
         fun make() {
             var box = [nil, nil];
-            var r = Ok(7);
+            var r = Result.Ok(7);
             var g = match r {
-                case Ok(v) => { fun f() { return v; } box[0] = f; 1 }
-                case Err(m) => 0
+                case Result.Ok(v) => { fun f() { return v; } box[0] = f; 1 }
+                case Result.Err(m) => 0
             };
             {
                 var w = 9;

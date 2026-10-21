@@ -199,10 +199,9 @@ int rt_op_get_tag(Runtime* rt) noexcept;
 // a word, WITHOUT touching the operand stack — unlike rt_op_get_tag above,
 // which replaces the top with a boxed Number. A dense enum match lowers the
 // pair as one dispatch, so the Number (and the JUMP_TABLE's own `d cast` +
-// `dtosi` back to a word) never needs to exist. Returns -1 after
-// runtimeError() when *slot is not an enum, the same fatal error
-// Runtime::opGetTag raises; every real enum tag is a non-negative
-// ObjEnumCtor::tag.
+// `dtosi` back to a word) never needs to exist. Returns -1 when *slot is
+// not an enum value, the tag Runtime::opGetTag gives it; every real enum
+// tag is a non-negative ObjEnumCtor::tag.
 int rt_get_tag_word(Runtime* rt, Value* slot) noexcept;
 int rt_op_match_error(Runtime* rt, int stopAtFrameCount) noexcept;
 

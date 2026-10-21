@@ -323,7 +323,6 @@ int rt_get_tag_word(Runtime* rt, Value* slot) noexcept {
     return rtGuard(rt, [&] {
         Value val = *slot;
         if (!isEnumValue(val)) {
-            rt->runtimeError("GET_TAG: expected an enum value.");
             return -1;
         }
         return static_cast<int>(asObjEnum(as<Obj*>(val))->ctor->tag);

@@ -63,8 +63,8 @@ TEST(CheckDiagnostics, OperatorExpressionIsNotAnAssignmentTarget) {
 
 TEST(CheckDiagnostics, NonExhaustiveMatchOnEnum) {
     expectOne("enum Coin { Heads Tails }\n"
-              "var r = match Heads() { case Heads => 1 };\n",
-              2, 41, "Non-exhaustive match on enum 'Coin'");
+              "var r = match Coin.Heads() { case Coin.Heads => 1 };\n",
+              2, 51, "Non-exhaustive match on enum 'Coin'");
 }
 
 TEST(CheckDiagnostics, MissingExpressionAtEnd) {
@@ -85,10 +85,11 @@ TEST(CheckDiagnostics, CleanSourceHasNoDiagnostics) {
 TEST(CheckDiagnostics, ExhaustiveEnumMatchHasNoPhantom) {
     // A dense, JUMP_TABLE-eligible match drives previewEnumArms, which forces
     // panic mode during its speculative scan. No diagnostic must leak.
-    EXPECT_TRUE(analyze("enum Dir { N S E W }\n"
-                        "var r = match N() { case N => 1 case S => 2 "
-                        "case E => 3 case W => 4 };\n")
-                    .empty());
+    EXPECT_TRUE(
+        analyze("enum Dir { N S E W }\n"
+                "var r = match Dir.N() { case Dir.N => 1 case Dir.S => 2 "
+                "case Dir.E => 3 case Dir.W => 4 };\n")
+            .empty());
 }
 
 TEST(CheckDiagnostics, PanicModeCollapsesToOneDiagnostic) {

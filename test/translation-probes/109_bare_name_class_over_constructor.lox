@@ -1,0 +1,22 @@
+// A bare pattern name is never a constructor test. When an enum constructor
+// and a global class have the same name, the bare name is a class test, and
+// E.Foo is the constructor test (spec/04-semantics.md, match Expression,
+// "Constructor patterns").
+enum E { Foo Bar }
+class Foo {}
+
+fun kind(v) {
+    return match v {
+        case Foo   => "class Foo"
+        case E.Foo => "constructor Foo"
+        case _     => "other"
+    };
+}
+print kind(Foo());
+print kind(E.Foo());
+print kind(E.Bar());
+
+// STATUS: ok
+// CHECK: class Foo
+// CHECK: constructor Foo
+// CHECK: other

@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <map>
-#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -315,16 +314,11 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
 
 // The bytecode sweeps leave out every probe marked `// STATIC-ERROR`, so a
 // marker on a probe that native compiles would hide that probe from them.
-// A marked probe on native's expected-failure list is left out here too:
-// native does not implement its rule yet.
 TEST(ChunkDecoderTest, StaticErrorProbesDoNotCompile) {
-    const std::set<std::string> expectedFailures =
-        loxpp_test::nativeExpectedFailureProbes();
     int checked = 0;
     for (const fs::path& probe :
          listLoxFiles(projectRoot() / "test" / "translation-probes")) {
-        if (!loxpp_test::hasStaticErrorMarker(probe) ||
-            expectedFailures.count(probe.filename().string()) != 0U) {
+        if (!loxpp_test::hasStaticErrorMarker(probe)) {
             continue;
         }
         MemoryManager mm;
