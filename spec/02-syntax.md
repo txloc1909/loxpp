@@ -258,7 +258,7 @@ enum Shape { Circle(r) None }      // a second None is valid
 var r = Result.Ok(42);
 var n = Option.None();
 var c = Option.Some;               // a constructor is a value
-print c(1);                        // Some(1)
+print c(1);                        // Option::Some(1)
 ```
 
 - Enum declarations are only permitted at global scope.

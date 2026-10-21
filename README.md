@@ -36,8 +36,8 @@ destructuring, collections, file I/O, and a self-hosted bootstrap interpreter.
 enum Result { Ok(value)  Err(msg) }
 
 fun safe_div(a, b) {
-    if (b == 0) return Err("division by zero");
-    return Ok(a / b);
+    if (b == 0) return Result.Err("division by zero");
+    return Result.Ok(a / b);
 }
 
 // Closures as first-class values
@@ -58,8 +58,8 @@ for (n in nums) {
 // Pattern match on enum variants
 for (n in evens) {
     print match safe_div(60, n) {
-        case Ok(v)  => str(60) + " / " + str(n) + " = " + str(v)
-        case Err(m) => "error: " + m
+        case Result.Ok(v)  => str(60) + " / " + str(n) + " = " + str(v)
+        case Result.Err(m) => "error: " + m
     };
 }
 // 60 / 4 = 15

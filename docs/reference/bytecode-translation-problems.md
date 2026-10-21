@@ -696,18 +696,18 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     two disagree at THIS join, so it refuses rather than guess. Four repros,
     each `enum E { A B }` then one line, all correct on `build/loxpp`:
     ```lox
-    print [match A() { case A => 1 case B => 2 }, (true and 5)];
-    print [match A() { case A => 1 case B => 2 }, (true or 5)];
-    print (match A() { case A => 1 case B => 2 }) + (true and 5);
+    print [match E.A() { case E.A => 1 case E.B => 2 }, (true and 5)];
+    print [match E.A() { case E.A => 1 case E.B => 2 }, (true or 5)];
+    print (match E.A() { case E.A => 1 case E.B => 2 }) + (true and 5);
     class K { init(v) { this.v = v; } }
     var k = K(3);
-    (match A() { case A => k case B => k }).v = (true and 8);
+    (match E.A() { case E.A => k case E.B => k }).v = (true and 8);
     ```
     Each throws `jvm_emitter: offset <n> is a CFG merge; localCount - 1 (1)
     disagrees with the forward-walk tracker (2)` instead of matching
     `build/loxpp`. Adding a THIRD, later sibling operand moves the join off
-    the consumer's own offset, and the program then works (`[match A() {
-    case A => 1 case B => 2 }, (false or 5), 9]` matches `build/loxpp`
+    the consumer's own offset, and the program then works (`[match E.A() {
+    case E.A => 1 case E.B => 2 }, (false or 5), 9]` matches `build/loxpp`
     exactly). No required gate reaches this shape — `check_jvm_probes.sh`
     (44 probes), `check_examples.py` (56 examples), and
     `bootstrap/loxpp_interpreter.lox` all stay green. The failure is loud,
