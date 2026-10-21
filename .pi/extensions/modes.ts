@@ -30,6 +30,7 @@
  */
 
 import { spawn } from "node:child_process";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -143,17 +144,18 @@ function tail(text: string, cap: number): string {
 function collect(
   proc: ReturnType<typeof spawn>,
   signal: AbortSignal | undefined,
-): Promise<{ code: number; output: string }> {
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    let output = "";
+    let stdout = "";
+    let stderr = "";
     proc.stdout.on("data", (d) => {
-      output += d.toString();
+      stdout += d.toString();
     });
     proc.stderr.on("data", (d) => {
-      output += d.toString();
+      stderr += d.toString();
     });
-    proc.on("close", (code) => resolve({ code: code ?? 1, output }));
-    proc.on("error", (err) => resolve({ code: 1, output: String(err) }));
+    proc.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    proc.on("error", (err) => resolve({ code: 1, stdout, stderr: String(err) }));
     if (signal) {
       const abort = () => proc.kill("SIGTERM");
       if (signal.aborted) abort();
@@ -163,9 +165,11 @@ function collect(
 }
 
 // argv spawn (no shell) for gh and python: model-supplied values stay arguments,
-// so they cannot be interpreted as shell syntax.
-function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefined) {
-  return collect(spawn(argv[0], argv.slice(1), { cwd }), signal);
+// so they cannot be interpreted as shell syntax. stdout and stderr are kept
+// separate so callers that parse JSON read only stdout.
+async function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefined) {
+  const r = await collect(spawn(argv[0], argv.slice(1), { cwd }), signal);
+  return { ...r, output: r.stdout + r.stderr };
 }
 
 // The agent runs on the host; program execution runs inside the dev container
@@ -177,35 +181,41 @@ async function runGate(
 ): Promise<{ passed: boolean; output: string }> {
   const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
   const script = scope === "backend" ? BACKEND_CONTAINER_GATE : NATIVE_CONTAINER_GATE;
+  // podman -v needs an absolute host path; a relative one becomes a named volume.
+  const absCwd = path.resolve(cwd);
   const argv = [
     "podman", "run", "--rm",
-    "-v", `${cwd}:/workspace:z`,
+    "-v", `${absCwd}:/workspace:z`,
     "-v", "loxpp-ccache:/ccache",
     image,
     "bash", "-lc", script,
   ];
-  const r = await runArgv(argv, cwd, signal);
+  const r = await runArgv(argv, absCwd, signal);
   return { passed: r.code === 0, output: tail(r.output, GATE_OUTPUT_CAP) };
 }
 
 async function ciGreen(
   pr: string,
+  repo: string,
   cwd: string,
   signal: AbortSignal | undefined,
-): Promise<{ ok: boolean; output: string }> {
-  const r = await runArgv(["gh", "pr", "checks", pr, "--repo", REPO], cwd, signal);
-  return { ok: r.code === 0, output: r.output };
+): Promise<{ ok: boolean; state: "green" | "pending" | "failed"; output: string }> {
+  const r = await runArgv(["gh", "pr", "checks", pr, "--repo", repo], cwd, signal);
+  if (r.code === 0) return { ok: true, state: "green", output: r.output };
+  const state = /pending/i.test(r.stdout) ? "pending" : "failed";
+  return { ok: false, state, output: r.output };
 }
 
 async function reviewApproved(
   pr: string,
+  repo: string,
   cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ ok: boolean; output: string }> {
-  const r = await runArgv(["gh", "pr", "view", pr, "--repo", REPO, "--json", "reviews,comments"], cwd, signal);
+  const r = await runArgv(["gh", "pr", "view", pr, "--repo", repo, "--json", "reviews,comments"], cwd, signal);
   if (r.code !== 0) return { ok: false, output: r.output };
   try {
-    const data = JSON.parse(r.output);
+    const data = JSON.parse(r.stdout);
     const bodies: string[] = [
       ...(((data.reviews as { body?: string }[]) ?? []).map((x) => x.body ?? "")),
       ...(((data.comments as { body?: string }[]) ?? []).map((x) => x.body ?? "")),
@@ -311,7 +321,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const scope: "native" | "backend" = params.scope ?? "native";
-      const cwd = params.cwd ?? ctx.cwd;
+      const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
       const r = await runGate(scope, cwd, signal);
       autonomy.lastGatePassed = r.passed;
       autonomy.lastScope = scope;
@@ -338,6 +348,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
     parameters: Type.Object({
       summary: Type.String({ description: "What was done and what changed." }),
       pr: Type.Optional(Type.String({ description: "PR number, required when criteria includes ci or review." })),
+      repo: Type.Optional(Type.String({ description: `Repo, default ${REPO}.` })),
       scope: Type.Optional(
         StringEnum(["native", "backend"] as const, {
           description: "Gate scope to re-run. Default the scope of the last loxpp_gate call.",
@@ -355,7 +366,8 @@ export default function loxppModes(pi: ExtensionAPI): void {
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const scope: "native" | "backend" = params.scope ?? autonomy.lastScope ?? "native";
-      const cwd = params.cwd ?? autonomy.lastCwd ?? ctx.cwd;
+      const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : (autonomy.lastCwd ?? ctx.cwd);
+      const repo = params.repo ?? REPO;
       const criteria: Array<"ci" | "review"> = params.criteria ?? [];
       const pr = params.pr?.trim();
 
@@ -373,11 +385,17 @@ export default function loxppModes(pi: ExtensionAPI): void {
         failures.push(`gate not green:\n${r.output}`);
       } else {
         if (criteria.includes("ci")) {
-          const ci = await ciGreen(pr!, cwd, signal);
-          if (!ci.ok) failures.push(`CI not green:\n${ci.output}`);
+          const ci = await ciGreen(pr!, repo, cwd, signal);
+          if (!ci.ok) {
+            failures.push(
+              ci.state === "pending"
+                ? "CI still running. Wait for it to finish, then call loxpp_done again."
+                : `CI not green:\n${ci.output}`,
+            );
+          }
         }
         if (criteria.includes("review")) {
-          const rv = await reviewApproved(pr!, cwd, signal);
+          const rv = await reviewApproved(pr!, repo, cwd, signal);
           if (!rv.ok) failures.push(`review not approved: ${rv.output}`);
         }
       }
