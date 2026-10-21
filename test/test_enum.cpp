@@ -444,3 +444,12 @@ TEST_F(ReplEnumTest, WorkerAssignsTheSameConstructorTags) {
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 2.0);
 }
+
+TEST_F(ReplEnumTest, EnumNameMustNotReuseAnEarlierGlobal) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var TakenVar = 1; class TakenClass {} fun takenFun() {}"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.run("enum TakenVar { A }"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("enum TakenClass { A }"), InterpretResult::COMPILE_ERROR);
+    EXPECT_EQ(h.run("enum takenFun { A }"), InterpretResult::COMPILE_ERROR);
+}

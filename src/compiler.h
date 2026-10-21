@@ -99,6 +99,10 @@ struct ProgramDeclarations {
     std::unordered_map<std::string, std::vector<std::string>> enumCtors;
     // Every class the session declares, for a class pattern.
     std::set<std::string> classNames;
+    // Every name the session declares as a global variable (a top-level
+    // `var`, `fun`, or `class`). An enum declared on a later line must not
+    // reuse one, because no variable may have an enum's name.
+    std::set<std::string> globalNames;
     // The next constructor tag. Tags are unique in the program, so one tag
     // test checks the enum and the constructor.
     int nextTag{0};

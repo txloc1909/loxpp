@@ -412,6 +412,7 @@ void Compiler::emitDestructureGlobal(const std::vector<Token>& fields) {
 
     for (const Token& field : fields) {
         rejectEnumName(field);
+        m_declarations->globalNames.insert(std::string(field.lexeme));
         emitConstantOp(Op::GET_GLOBAL, hiddenIdx);
         emitConstantOp(Op::GET_PROPERTY, identifierConstant(field));
         emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(field));
@@ -500,6 +501,7 @@ void Compiler::emitDestructureSeqGlobal(const std::vector<Token>& names) {
             emitByte(Op::POP);
         } else {
             rejectEnumName(names[i]);
+            m_declarations->globalNames.insert(std::string(names[i].lexeme));
             emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(names[i]));
         }
     }
@@ -531,6 +533,7 @@ void Compiler::varDeclaration() {
         markInitialized();
     } else {
         rejectEnumName(name);
+        m_declarations->globalNames.insert(std::string(name.lexeme));
         uint16_t nameConst = identifierConstant(name);
         emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
     }
@@ -1640,6 +1643,15 @@ void Compiler::enumDeclaration() {
         m_parser->error("Duplicate enum name.");
         return;
     }
+    // An enum name means the enum in the whole program, so an earlier line's
+    // global variable, function, or class cannot keep the name.
+    if (declarations->globalNames.count(enumName) != 0U) {
+        m_parser->errorAt(
+            enumTok,
+            ("A variable can't have the name of the enum '" + enumName + "'.")
+                .c_str());
+        return;
+    }
 
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' before enum body.");
     declarations->enumCtors[enumName]; // declared, also with no constructor
@@ -1992,6 +2004,7 @@ void Compiler::funDeclaration() {
         markInitialized(); // allow recursion inside the body
     } else {
         rejectEnumName(name);
+        m_declarations->globalNames.insert(std::string(name.lexeme));
         nameConst = identifierConstant(name);
     }
 
@@ -2038,6 +2051,7 @@ void Compiler::classDeclaration() {
     } else {
         emitConstantOp(Op::DEFINE_GLOBAL, nameConst);
         m_declarations->classNames.insert(std::string(className.lexeme));
+        m_declarations->globalNames.insert(std::string(className.lexeme));
     }
 
     ClassCompiler classCompiler;
