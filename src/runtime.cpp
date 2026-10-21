@@ -97,6 +97,15 @@ ObjClosure* Runtime::loadProgram(const std::string& source,
         }
     } else {
         options.sourceId = static_cast<int>(m_sources.size());
+        // The tables before this source. A worker that recompiles this source
+        // alone (runWorker) starts from them, so the constructor tags it
+        // assigns to this source's declarations match the ones this compile
+        // assigns, and its compile-time checks see the same declarations.
+        if (!m_declarations) {
+            m_declarations = std::make_unique<ProgramDeclarations>();
+        }
+        m_sourceDeclarations.push_back(
+            std::make_shared<const ProgramDeclarations>(*m_declarations));
         m_sources.push_back(std::make_shared<const std::string>(source));
     }
     // A compile continues this Runtime's session: a REPL line sees every
@@ -1443,6 +1452,7 @@ struct WorkerStart {
     std::shared_ptr<WorkerGroup> group;
     MemoryManager* heap;
     std::vector<std::shared_ptr<const std::string>> sources;
+    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations;
     std::vector<std::string> args;
     int sourceId;
     int ordinal;
@@ -1463,7 +1473,8 @@ void workerMain(WorkerStart start) {
     rt.setCodeAttacher(std::move(start.attachCode));
     rt.setGlobalSlotNames(std::move(start.globalSlotNames));
     InterpretResult result =
-        rt.runWorker(start.group, std::move(start.sources), start.sourceId,
+        rt.runWorker(start.group, std::move(start.sources),
+                     std::move(start.sourceDeclarations), start.sourceId,
                      start.ordinal, start.task, start.msg);
     if (result != InterpretResult::OK) {
         // spec/04-semantics.md, Ending: an uncaught fault in any task ends
@@ -1499,6 +1510,7 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     WorkerStart start{m_group,
                       heap,
                       m_sources,
+                      m_sourceDeclarations,
                       m_stdlibCtx.args,
                       entry->function->sourceId,
                       entry->function->topLevelOrdinal,
@@ -1515,14 +1527,26 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     return task;
 }
 
-InterpretResult
-Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
-                   std::vector<std::shared_ptr<const std::string>> sources,
-                   int sourceId, int ordinal, ObjTask* task, Value msg) {
+InterpretResult Runtime::runWorker(
+    std::shared_ptr<WorkerGroup> group,
+    std::vector<std::shared_ptr<const std::string>> sources,
+    std::vector<std::shared_ptr<const ProgramDeclarations>> sourceDeclarations,
+    int sourceId, int ordinal, ObjTask* task, Value msg) {
     m_group = std::move(group);
     m_isMainWorker = false;
     m_sources = std::move(sources);
+    m_sourceDeclarations = std::move(sourceDeclarations);
     m_mainTask = task;
+    // The worker recompiles only its own source. It starts from the session
+    // tables that the main runtime had just before it compiled that source,
+    // so this source's declarations get the same constructor tags, and the
+    // compile-time checks see the same declarations, as on the main worker.
+    if (sourceId >= 0 &&
+        static_cast<std::size_t>(sourceId) < m_sourceDeclarations.size() &&
+        m_sourceDeclarations[static_cast<std::size_t>(sourceId)]) {
+        m_declarations = std::make_unique<ProgramDeclarations>(
+            *m_sourceDeclarations[static_cast<std::size_t>(sourceId)]);
+    }
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
     task->startArg = m_mm.receiveMessage(msg);

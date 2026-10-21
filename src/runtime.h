@@ -366,11 +366,16 @@ class Runtime {
     // defines the top-level declarations of source `sourceId`, then runs
     // `task` as this worker's first task, which calls the function of the
     // top-level `fun` declaration `ordinal` with `msg` (one hold raised for
-    // this worker). Returns when every task of the worker ended, or the
-    // program ended; RUNTIME_ERROR after an uncaught fault (reported).
+    // this worker). `sourceDeclarations[i]` is the session's declaration
+    // tables just before source `i` compiled, so a source compiled alone
+    // assigns the same constructor tags as the main worker did. Returns when
+    // every task of the worker ended, or the program ended; RUNTIME_ERROR
+    // after an uncaught fault (reported).
     InterpretResult
     runWorker(std::shared_ptr<WorkerGroup> group,
               std::vector<std::shared_ptr<const std::string>> sources,
+              std::vector<std::shared_ptr<const ProgramDeclarations>>
+                  sourceDeclarations,
               int sourceId, int ordinal, ObjTask* task, Value msg);
 
     // task.spawn_worker after its checks passed: makes the heap and the
@@ -1262,6 +1267,11 @@ class Runtime {
     // Every source this Runtime compiled, by ObjFunction::sourceId. A new
     // worker gets the list, so it compiles the same source again.
     std::vector<std::shared_ptr<const std::string>> m_sources;
+    // Parallel to m_sources: the declaration tables just before each source
+    // compiled. A worker compiles only its own source, so it starts from its
+    // entry here to assign the same constructor tags.
+    std::vector<std::shared_ptr<const ProgramDeclarations>>
+        m_sourceDeclarations;
     // Number of natives running now (callNative), innermost included.
     int m_nativeDepth{0};
     // m_nativeDepth at which the frames of m_currentCoroutine run, while the

@@ -422,3 +422,25 @@ TEST_F(ReplEnumTest, AFailedLineLeavesNoDeclaration) {
     ASSERT_TRUE(isEnumValue(*v));
     EXPECT_EQ(asObjEnum(as<Obj*>(*v))->ctor->tag, 0);
 }
+
+TEST_F(ReplEnumTest, WorkerAssignsTheSameConstructorTags) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum A { X }"), InterpretResult::OK);
+    // The worker recompiles this line alone. It must assign B.Y and B.Z the
+    // same tags that the main runtime did, or the B.Z value matches B.Y.
+    ASSERT_EQ(h.run(R"(enum B { Y Z }
+        fun entry(main) {
+            task.send(main, B.Z());
+        }
+        var t = task.spawn_worker(entry, task.self());
+        var got = task.receive();
+        var r = match got {
+            case B.Y => 1
+            case B.Z => 2
+            case _   => 3
+        };)"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("r");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 2.0);
+}
