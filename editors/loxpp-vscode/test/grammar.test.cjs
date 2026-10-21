@@ -327,11 +327,20 @@ test('compound operators prefer the longer match', async () => {
 
 test('pattern operators @ and ... scope to keyword.operator.pattern', async () => {
   const g = await getGrammar();
-  const { tokens } = tokenize('case v @ Cons(h, t) or ...rest => v', g);
+  const { tokens } = tokenize('case v @ L.Cons(h, t) or ...rest => v', g);
   const pat = tokens.filter((t) => flat(t.scopes).includes('keyword.operator.pattern.lox'));
   assert.deepStrictEqual(pat.map((t) => t.text), ['@', '...']);
   const fat = tokens.filter((t) => flat(t.scopes).includes('keyword.operator.lox'));
   assert.deepStrictEqual(fat.map((t) => t.text), ['=>']);
+});
+
+test('E.A scopes the enum as a type and A as a constructor', async () => {
+  const g = await getGrammar();
+  const { tokens } = tokenize('var o = Option.Some(1); case Option.None => 0', g);
+  const enums = tokens.filter((t) => flat(t.scopes).includes('entity.name.type.enum.lox'));
+  assert.deepStrictEqual(enums.map((t) => t.text), ['Option', 'Option']);
+  const ctors = tokens.filter((t) => flat(t.scopes).includes('entity.name.function.constructor.lox'));
+  assert.deepStrictEqual(ctors.map((t) => t.text), ['Some', 'None']);
 });
 
 test('punctuation scopes', async () => {
@@ -524,7 +533,7 @@ test('no token text is empty and spans never overlap', async () => {
     'class A < B { m(x) { return this.x; } }',
     'var {a, b} = pair;',
     'var [c, d] = list;',
-    'match (v) { case 1, 2 => "low", case n @ Some(x) if n > 0 => n, case _ => nil }',
+    'match (v) { case 1 or 2 => "low" case n @ Opt.Some(x) if n > 0 => n case _ => nil }',
     'for (var e in items) { continue; } break;',
     'try { throw "e"; } catch (err) { defer done(); }'
   ].join('\n');

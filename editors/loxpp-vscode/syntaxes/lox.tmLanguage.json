@@ -159,6 +159,20 @@
           }
         },
         {
+          "captures": {
+            "1": {
+              "name": "entity.name.type.enum.lox"
+            },
+            "2": {
+              "name": "punctuation.separator.dot.lox"
+            },
+            "3": {
+              "name": "entity.name.function.constructor.lox"
+            }
+          },
+          "match": "\\b([A-Z]\\w*)\\s*(\\.)\\s*([A-Z]\\w*)\\b"
+        },
+        {
           "match": "\\b(?!if\\b|else\\b|for\\b|while\\b|return\\b|print\\b|catch\\b|case\\b|var\\b|fun\\b|class\\b|enum\\b|try\\b|defer\\b|throw\\b|yield\\b|match\\b|this\\b|super\\b|default\\b|and\\b|or\\b|in\\b|true\\b|false\\b|nil\\b|break\\b|continue\\b)([a-zA-Z_]\\w*)(?=\\s*\\()",
           "captures": {
             "1": {
