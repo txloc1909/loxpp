@@ -1468,6 +1468,10 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
 void Runtime::endSession() {
     if (m_group != nullptr) {
         m_group->end();
+        // Drop it here, so a caller that runs another line after the end of the
+        // session makes a new group. The workers hold their own references, so
+        // the group lives until the last of them leaves.
+        m_group = nullptr;
     }
 }
 
