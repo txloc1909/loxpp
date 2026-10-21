@@ -15,8 +15,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <optional>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -115,6 +117,26 @@ TEST_F(ReplSessionTest, WorkerOutlivesTheLineThatSpawnedIt) {
     ASSERT_EQ(s.line("var w = task.spawn_worker(entry, task.self());"),
               InterpretResult::OK);
     ASSERT_EQ(s.line("task.send(w, 41);"), InterpretResult::OK);
+    ASSERT_EQ(s.line("var got = task.receive();"), InterpretResult::OK);
+    auto got = s.global("got");
+    ASSERT_TRUE(got.has_value());
+    expect_num(*got, 42.0);
+}
+
+// #788: the worker sends its reply while no line runs, so the main task must
+// still be alive between two lines, and the message must wait in its mailbox.
+TEST_F(ReplSessionTest, MessageArrivesBetweenLines) {
+    Session s;
+    ASSERT_EQ(s.line("fun entry(main) { var m = task.receive(); "
+                     "sleep(0.005); task.send(main, m + 1); }"),
+              InterpretResult::OK);
+    ASSERT_EQ(s.line("var w = task.spawn_worker(entry, task.self());"),
+              InterpretResult::OK);
+    ASSERT_EQ(s.line("task.send(w, 41);"), InterpretResult::OK);
+    // The worker replies well inside this gap. No line runs here, so a main
+    // task that the end of a line marked dead would make that reply a
+    // DeadTaskError, and that fault of the worker would end the program.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     ASSERT_EQ(s.line("var got = task.receive();"), InterpretResult::OK);
     auto got = s.global("got");
     ASSERT_TRUE(got.has_value());
