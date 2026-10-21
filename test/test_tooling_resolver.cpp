@@ -314,6 +314,25 @@ fun f(o) {
     EXPECT_EQ(def->offset, head);
 }
 
+// A head with a field list and no enum name can name only a class. A head
+// that names an enum or a function is a compile error, so the tooling links
+// it to nothing.
+TEST(ToolingResolver, BareFieldListHeadNamesOnlyAClass) {
+    const std::string src = R"(enum Option { Some(v) None }
+fun Pick(a) { return a; }
+class Point {}
+fun f(o) {
+  return match o { case Option(v) => v case Pick(a) => a case Point{x} => x case _ => 0 };
+}
+)";
+    DocumentModel model(src);
+    EXPECT_FALSE(model.definitionAt(offsetOf(src, "case Option(v)") + 5));
+    EXPECT_FALSE(model.definitionAt(offsetOf(src, "case Pick(a)") + 5));
+    auto classDef = model.definitionAt(offsetOf(src, "case Point{x}") + 5);
+    ASSERT_TRUE(classDef);
+    EXPECT_EQ(classDef->offset, offsetOf(src, "Point {}"));
+}
+
 TEST(ToolingResolver, QualifiedConstructorResolvesToItsEnum) {
     const std::string src = R"(enum Opt { Some(v) None }
 var s = Opt.Some(1);
