@@ -1,7 +1,7 @@
 # An Int type and bit operators
 
-**Status:** proposal. Waits for the owner's acceptance. On acceptance it moves
-to `docs/decisions/` and a mission tracking issue opens.
+**Status:** accepted. The owner approved it in #792 (2026-10-22). Tracking
+issue: #810.
 
 ## Owner decisions
 
@@ -115,7 +115,8 @@ bits, so one of the two kinds needs a box for some values.
   bit, so the tags 1 to 4 stay different from the inline Ints 0 to 4. One
   payload bit stays free.
 - An Int outside that range is a heap object that holds one `int64_t`. It
-  is immutable. Equality, hashing and printing use the value, never the
+  is immutable. The native VM must not box an Int that fits the inline range,
+  so the cost rule stays "inside the range, no allocation". Equality, hashing and printing use the value, never the
   address, so a program cannot see if an Int is inline or boxed.
 - The spec binds int64 only. The inline width is implementation-defined, so a
   change of the width, or a JIT that keeps Ints in registers, is not a
@@ -323,7 +324,7 @@ set, a bitboard) as probes of the purpose.
 
 ## Mission sketch
 
-This is not a node list. The DAG goes in the tracking issue after acceptance.
+This is not a node list. The DAG is in the tracking issue, #810.
 
 1. Spec, the Float print format table, shared probes, and expected-failure
    files. The probes cover compile-time behavior (the literal rejections and
