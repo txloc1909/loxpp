@@ -200,9 +200,9 @@ class Compiler {
     // After `E` and `.`: consumes the constructor name and returns the
     // constructor of E, or reports an error and returns nullptr.
     const ConstructorInfo* qualifiedConstructor(const Token& enumTok);
-    // The constructor that a pattern head names: `E.A` (consumes `.A`), or
-    // a bare constructor name. Returns nullptr for any other head; `failed`
-    // is set when an error was reported.
+    // The constructor that a pattern head names: `E.A` (consumes `.A`).
+    // Returns nullptr for any other head, a bare name included; `failed` is
+    // set when an error was reported.
     const ConstructorInfo* patternHeadConstructor(const Token& headTok,
                                                   bool& failed);
     // The constant that holds the name of the hidden global of a
