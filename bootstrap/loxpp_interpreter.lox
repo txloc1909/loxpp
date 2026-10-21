@@ -1735,7 +1735,10 @@ class Resolver {
     }
 
     classifyBareName(pat, name) {
-        // A constructor wins over a class of the same name.
+        // An enum name stays a binding, which declare rejects, also where a
+        // constructor has that name. A constructor wins over a class of the
+        // same name.
+        if (this.enumNames.has(name)) return pat;
         if (this.enumCtors.has(name)) return TagPat(name, nil, 0);
         if (this.classNames.has(name)) return ClassPat(name);
         return pat;
