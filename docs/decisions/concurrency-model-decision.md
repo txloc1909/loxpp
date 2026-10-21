@@ -457,6 +457,33 @@ makes every function re-enterable. The spec must word the table so that
 such a mode adds points under a flag without a change of rule. The mode
 itself is a later decision with a measurement.
 
+### A session
+
+The REPL enters one program as a sequence of lines, so a session is one run
+(`spec/04-semantics.md`, A Session). Two rules follow from that:
+
+- **The main task is one task for the whole session.** Each line is the
+  coroutine that the main task runs next, and the end of a line ends that
+  coroutine, not the task: the task keeps its handle and its mailbox, and a
+  message that arrives between two lines waits for the next one. Without
+  this rule a later line could not receive the reply of a worker that an
+  earlier line spawned, because the task handle would name a dead task.
+- **A worker outlives the line that spawned it.** The session holds one
+  worker group, so a worker of an earlier line keeps its tasks and mailboxes
+  and answers on a later line. It ends when every task on it has ended, as
+  any worker does. A task that `task.spawn` made on the main worker still
+  belongs to one line: the end of that line abandons it, because nothing
+  would run the line's own run queue again.
+
+A worker that starts on a later line defines the declarations of every line
+up to its own (issue #787), and it holds no copy of the session's declaration
+tables: it compiles each earlier source in order, so the constructor tags it
+assigns are the tags the main worker assigned. The earlier approach kept the
+tables that existed before each source for that replay, which made a session
+with many declarations grow quadratically (about 163 MB at 4000 lines; issue
+#789). The replay removed the copies: the same session now takes 11 MB, and
+the tables of a session exist once.
+
 ### Per backend, by role
 
 | Backend | What it owes | Feasibility |
