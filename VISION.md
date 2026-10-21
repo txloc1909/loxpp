@@ -42,8 +42,9 @@ Lox++ interpreter is written in Lox++ (`bootstrap/loxpp_interpreter.lox`).
   - *failure*: a fault is a value that the program can catch or let end the
     program;
   - *memory*: the program can observe and bound the memory it uses, can hold
-    a 64-bit pattern as one value with every bit exact, and can reach native
-    code and raw bytes through an explicit interface;
+    a 64-bit pattern as one numeric value with every bit exact and apply a bit
+    operation to it in one step, and can reach native code and raw bytes
+    through an explicit interface;
   - *cost*: a construct has a cost that the programmer can predict. No
     construct runs user code or adds work at a site that does not name it.
 
