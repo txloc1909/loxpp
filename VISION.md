@@ -41,8 +41,9 @@ Lox++ interpreter is written in Lox++ (`bootstrap/loxpp_interpreter.lox`).
   - *suspension*: a program pays for suspension only where it uses it;
   - *failure*: a fault is a value that the program can catch or let end the
     program;
-  - *memory*: the program can observe and bound the memory it uses, and can
-    reach native code and raw bytes through an explicit interface;
+  - *memory*: the program can observe and bound the memory it uses, can hold
+    a 64-bit pattern as one value with every bit exact, and can reach native
+    code and raw bytes through an explicit interface;
   - *cost*: a construct has a cost that the programmer can predict. No
     construct runs user code or adds work at a site that does not name it.
 
@@ -55,6 +56,10 @@ Lox++ interpreter is written in Lox++ (`bootstrap/loxpp_interpreter.lox`).
 
 Tedium is not the axis. Capability is. The capability list and its order are
 in `docs/decisions/expressiveness-roadmap.md`.
+
+A low-level control named above is a capability by definition. A construct
+that a control names is a gap when the language does not have it, also when a
+library can emulate it. This exception covers the listed controls only.
 
 ## The direction: dynamic functional programming
 
