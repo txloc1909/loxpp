@@ -118,13 +118,15 @@ TEST(ReflectApi, Type_Map) {
 
 TEST(ReflectApi, Type_Enum) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("enum Msg { Ping } type(Ping());"), InterpretResult::OK);
+    ASSERT_EQ(h.run("enum Msg { Ping } type(Msg.Ping());"),
+              InterpretResult::OK);
     EXPECT_EQ(asObjString(as<Obj*>(h.lastResult()))->chars, "Enum");
 }
 
 TEST(ReflectApi, Type_EnumConstructor) {
     VMTestHarness h;
-    ASSERT_EQ(h.run("enum Opt { Some(x) } type(Some);"), InterpretResult::OK);
+    ASSERT_EQ(h.run("enum Opt { Some(x) } type(Opt.Some);"),
+              InterpretResult::OK);
     EXPECT_EQ(asObjString(as<Obj*>(h.lastResult()))->chars, "EnumConstructor");
 }
 
@@ -355,7 +357,7 @@ TEST(ReflectApi, CallMethod_ClassFieldValue_RuntimeError) {
 TEST(ReflectApi, CallMethod_EnumCtorFieldValue_RuntimeError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("enum Opt { Some(x) } class Foo {} var f = Foo(); "
-                    "f.c = Some; callMethod(f, \"c\", 1);"),
+                    "f.c = Opt.Some; callMethod(f, \"c\", 1);"),
               InterpretResult::RUNTIME_ERROR);
 }
 

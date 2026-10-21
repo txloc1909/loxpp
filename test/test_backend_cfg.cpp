@@ -297,11 +297,11 @@ TEST(BackendCfgTest, MatchErrorEndsBlockWithNoFallThroughSuccessor) {
     MemoryManager mm;
     ObjFunction* script = compile(R"(
         enum Color { Red Green Blue }
-        var c = Green;
+        var c = Color.Green;
         var n = match c {
-          case Red => 0
-          case Green => 1
-          case Blue => 2
+          case Color.Red => 0
+          case Color.Green => 1
+          case Color.Blue => 2
         };
         print n;
     )",

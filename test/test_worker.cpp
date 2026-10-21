@@ -144,7 +144,7 @@ TEST_F(WorkerTest, DuplicateSendsCountOnce) {
     ASSERT_EQ(vm.interpret(R"(
         enum Box { Of(v) }
         fun entry(main) {
-            var e = Of(1);
+            var e = Box.Of(1);
             var s = "dup" + "licate";
             task.send(main, e);
             task.send(main, e);
@@ -186,13 +186,13 @@ TEST_F(WorkerTest, AMessageKeepsTheMessageOfAThirdWorker) {
             }
         }
         fun c_entry(a) {
-            task.send(a, Of("F" + "!"));
+            task.send(a, Box.Of("F" + "!"));
             garbage();
         }
         fun a_entry(main) {
             var c = task.spawn_worker(c_entry, task.self());
             var f = task.receive();
-            task.send(main, Of(f));
+            task.send(main, Box.Of(f));
             f = nil;
             garbage();
             awaitEnd(c);
@@ -202,11 +202,11 @@ TEST_F(WorkerTest, AMessageKeepsTheMessageOfAThirdWorker) {
         awaitEnd(a);
         garbage();
         var f = match e {
-            case Of(inner) => inner
+            case Box.Of(inner) => inner
             case _ => nil
         };
         var s = match f {
-            case Of(v) => v
+            case Box.Of(v) => v
             case _ => nil
         };
         var text = s + "";
@@ -242,7 +242,7 @@ TEST_F(WorkerTest, AFieldKeptWithoutItsMessageIsHeldOnItsOwn) {
             }
         }
         fun owner(main) {
-            var e = Of("fi" + "eld");
+            var e = Box.Of("fi" + "eld");
             task.send(main, e);
             e = nil;
             task.receive();
@@ -252,7 +252,7 @@ TEST_F(WorkerTest, AFieldKeptWithoutItsMessageIsHeldOnItsOwn) {
         var w = task.spawn_worker(owner, task.self());
         var e = task.receive();
         var f = match e {
-            case Of(v) => v
+            case Box.Of(v) => v
             case _ => nil
         };
         e = nil;
@@ -279,7 +279,7 @@ TEST_F(WorkerTest, DeadHeapLivesWhileItsMessageIsHeld) {
     program += R"(
         enum Tree { Leaf(v) Node(l, r) }
         fun entry(main) {
-            var t = Node(Leaf("left" + "!"), Node(Leaf(2), Leaf("r" + "r")));
+            var t = Tree.Node(Tree.Leaf("left" + "!"), Tree.Node(Tree.Leaf(2), Tree.Leaf("r" + "r")));
             task.send(main, t);
         }
         var w = task.spawn_worker(entry, task.self());
@@ -287,8 +287,8 @@ TEST_F(WorkerTest, DeadHeapLivesWhileItsMessageIsHeld) {
         awaitEnd(w);
         fun sum(t) {
             return match t {
-                case Leaf(v) => str(v)
-                case Node(l, r) => sum(l) + "," + sum(r)
+                case Tree.Leaf(v) => str(v)
+                case Tree.Node(l, r) => sum(l) + "," + sum(r)
             };
         }
         var text = sum(held);
@@ -469,7 +469,7 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
                     running = false;
                 } else {
                     task.send(main, match m {
-                        case Ping(n, text) => Pong(n, text + "!")
+                        case Msg.Ping(n, text) => Msg.Pong(n, text + "!")
                         case _ => nil
                     });
                 }
@@ -478,10 +478,10 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
         var w = task.spawn_worker(echo, task.self());
         var ok = 0;
         for (var i = 0; i < count; i = i + 1) {
-            task.send(w, Ping(i, "p" + str(i % 7)));
+            task.send(w, Msg.Ping(i, "p" + str(i % 7)));
             var r = task.receive();
             var good = match r {
-                case Pong(n, text) => n == i and text == "p" + str(i % 7) + "!"
+                case Msg.Pong(n, text) => n == i and text == "p" + str(i % 7) + "!"
                 case _ => false
             };
             if (good) ok = ok + 1;
@@ -502,8 +502,8 @@ TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
     ASSERT_EQ(vm.interpret(R"(
         enum List { Empty Cons(head, tail) }
         fun build(n) {
-            var l = Empty();
-            for (var i = 0; i < n; i = i + 1) l = Cons(i, l);
+            var l = List.Empty();
+            for (var i = 0; i < n; i = i + 1) l = List.Cons(i, l);
             return l;
         }
         fun sink(main) {

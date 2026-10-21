@@ -27,7 +27,7 @@ TEST_F(EnumDeclarationTest, SingleConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Msg { Ping }
-        var x = Ping();
+        var x = Msg.Ping();
     )"),
               InterpretResult::OK);
     auto v = h.getGlobal("x");
@@ -40,9 +40,9 @@ TEST_F(EnumDeclarationTest, MultipleConstructors) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Shape { Circle Rect Triangle }
-        var c = Circle();
-        var r = Rect();
-        var t = Triangle();
+        var c = Shape.Circle();
+        var r = Shape.Rect();
+        var t = Shape.Triangle();
     )"),
               InterpretResult::OK);
     auto cv = h.getGlobal("c");
@@ -93,7 +93,7 @@ TEST_F(EnumDeclarationTest, WrongArityAtRuntime) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { Pair(a, b) }
-        Pair(1);
+        E.Pair(1);
     )"),
               InterpretResult::RUNTIME_ERROR);
 }
@@ -108,11 +108,11 @@ TEST_F(MatchEnumTest, PositionalBinding) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(value) Err(msg) }
-        var r = Ok(42);
+        var r = Result.Ok(42);
         var got = 0;
         match r {
-            case Ok(v) => got = v
-            case Err(m) => got = -1
+            case Result.Ok(v) => got = v
+            case Result.Err(m) => got = -1
         };
     )"),
               InterpretResult::OK);
@@ -145,11 +145,11 @@ TEST_F(MatchEnumTest, ZeroFieldConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Opt { Some(v) None }
-        var x = None();
+        var x = Opt.None();
         var got = 0;
         match x {
-            case Some(v) => got = v
-            case None => got = 99
+            case Opt.Some(v) => got = v
+            case Opt.None => got = 99
         };
     )"),
               InterpretResult::OK);
@@ -162,11 +162,11 @@ TEST_F(MatchEnumTest, WildcardAfterConstructors) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Color { Red Green Blue }
-        var c = Blue();
+        var c = Color.Blue();
         var got = 0;
         match c {
-            case Red => got = 1
-            case Green => got = 2
+            case Color.Red => got = 1
+            case Color.Green => got = 2
             case _ => got = 99
         };
     )"),
@@ -180,12 +180,12 @@ TEST_F(MatchEnumTest, GuardOnConstructorArm) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum R { Ok(v) Err(m) }
-        var r = Ok(5);
+        var r = R.Ok(5);
         var got = 0;
         match r {
-            case Ok(v) if v > 3 => got = 1
-            case Ok(v) => got = 2
-            case Err(m) => got = 3
+            case R.Ok(v) if v > 3 => got = 1
+            case R.Ok(v) => got = 2
+            case R.Err(m) => got = 3
         };
     )"),
               InterpretResult::OK);
@@ -198,12 +198,12 @@ TEST_F(MatchEnumTest, GuardFailsFallsThrough) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum R { Ok(v) Err(m) }
-        var r = Ok(1);
+        var r = R.Ok(1);
         var got = 0;
         match r {
-            case Ok(v) if v > 3 => got = 1
-            case Ok(v) => got = 2
-            case Err(m) => got = 3
+            case R.Ok(v) if v > 3 => got = 1
+            case R.Ok(v) => got = 2
+            case R.Err(m) => got = 3
         };
     )"),
               InterpretResult::OK);
@@ -222,11 +222,11 @@ TEST_F(ExhaustivenessTest, CompleteMatchPasses) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Coin { Heads Tails }
-        var c = Heads();
+        var c = Coin.Heads();
         var got = 0;
         match c {
-            case Heads => got = 1
-            case Tails => got = 2
+            case Coin.Heads => got = 1
+            case Coin.Tails => got = 2
         };
     )"),
               InterpretResult::OK);
@@ -240,10 +240,10 @@ TEST_F(ExhaustivenessTest, MissingArmIsCompileError) {
     // Missing 'Blue' arm — should fail at compile time.
     ASSERT_EQ(h.run(R"(
         enum Color { Red Green Blue }
-        var c = Red();
+        var c = Color.Red();
         match c {
-            case Red => 1
-            case Green => 2
+            case Color.Red => 1
+            case Color.Green => 2
         };
     )"),
               InterpretResult::COMPILE_ERROR);
@@ -254,10 +254,10 @@ TEST_F(ExhaustivenessTest, WildcardSuppressesExhaustivenessError) {
     // c is Blue — not covered by Red arm, so the wildcard arm must be hit.
     ASSERT_EQ(h.run(R"(
         enum Color { Red Green Blue }
-        var c = Blue();
+        var c = Color.Blue();
         var got = 0;
         match c {
-            case Red => got = 1
+            case Color.Red => got = 1
             case _ => got = 99
         };
     )"),
@@ -277,14 +277,14 @@ TEST_F(MatchGCTest, EnumValueSurvivesGC) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Tree { Leaf(val) Node(left, right) }
-        var t = Node(Leaf(1), Leaf(2));
+        var t = Tree.Node(Tree.Leaf(1), Tree.Leaf(2));
         var got = 0;
         match t {
-            case Leaf(v) => got = v
-            case Node(l, r) => {
+            case Tree.Leaf(v) => got = v
+            case Tree.Node(l, r) => {
                 match l {
-                    case Leaf(v) => got = v
-                    case Node(a, b) => got = -1
+                    case Tree.Leaf(v) => got = v
+                    case Tree.Node(a, b) => got = -1
                 }
             }
         };
@@ -299,11 +299,11 @@ TEST_F(MatchGCTest, ConstructorIsFirstClassValue) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Wrap { Box(v) }
-        var ctor = Box;
+        var ctor = Wrap.Box;
         var w = ctor(42);
         var got = 0;
         match w {
-            case Box(v) => got = v
+            case Wrap.Box(v) => got = v
         };
     )"),
               InterpretResult::OK);

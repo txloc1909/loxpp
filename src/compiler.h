@@ -121,7 +121,7 @@ class Compiler {
         int guardMiss;    // patch offset for guard fail  (-1 = no guard)
         int bindingCount; // locals pushed by the pattern
         bool isUnguardedCatchAll;           // true → suppress MATCH_ERROR
-        std::vector<std::string> ctorNames; // constructors matched by this arm
+        std::vector<std::string> ctorNames; // "E.A" of each constructor tested
     };
     MatchArmResult compileMatchArm(int subjectSlot, int armLocalBase,
                                    int armHandlerBase, int resultSlot,
@@ -299,7 +299,8 @@ class Compiler {
     // Compiler and never reaches the runtime Chunk.
     std::unordered_map<Value, uint16_t, ValueHash> m_constantIndex;
 
-    // Constructor table — only meaningfully populated on the root compiler.
+    // Constructor table, keyed by the qualified name "E.A" — only
+    // meaningfully populated on the root compiler.
     std::unordered_map<std::string, ConstructorInfo> m_constructors;
     // enumName → ordered list of ctor names, for exhaustiveness checking.
     std::unordered_map<std::string, std::vector<std::string>> m_enumCtors;

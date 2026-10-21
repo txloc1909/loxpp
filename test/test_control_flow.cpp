@@ -445,9 +445,9 @@ TEST_F(MatchTest, MultiValueArm) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         var x = match 2 {
-            case 1, 2, 3 => 7
-            case 4       => 99
-            case _       => 0
+            case 1 or 2 or 3 => 7
+            case 4           => 99
+            case _           => 0
         };
     )"),
               InterpretResult::OK);

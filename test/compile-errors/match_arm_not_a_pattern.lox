@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Expect pattern.
+// Compile error: an arm pattern that is not a literal, a name or a list.
+print "before";
+var v = match 1 { case (1) => 1 case _ => 0 };

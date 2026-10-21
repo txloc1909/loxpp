@@ -2125,13 +2125,13 @@ TEST(EmitProgram, DenseEnumMatchFusesGetTagWithTableswitch) {
     DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
                                       "fun classify(c) {\n"
                                       "  return match c {\n"
-                                      "    case Red => 0\n"
-                                      "    case Green => 1\n"
-                                      "    case Blue => 2\n"
-                                      "    case Yellow => 3\n"
+                                      "    case Color.Red => 0\n"
+                                      "    case Color.Green => 1\n"
+                                      "    case Color.Blue => 2\n"
+                                      "    case Color.Yellow => 3\n"
                                       "  };\n"
                                       "}\n"
-                                      "print classify(Green());\n",
+                                      "print classify(Color.Green());\n",
                                       mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
     std::vector<jvm::EmittedClass> classes;
@@ -2165,13 +2165,13 @@ TEST(EmitProgram, DenseEnumMatchTableswitchDefaultTargetsMatchError) {
     DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
                                       "fun classify(c) {\n"
                                       "  return match c {\n"
-                                      "    case Red => 0\n"
-                                      "    case Green => 1\n"
-                                      "    case Blue => 2\n"
-                                      "    case Yellow => 3\n"
+                                      "    case Color.Red => 0\n"
+                                      "    case Color.Green => 1\n"
+                                      "    case Color.Blue => 2\n"
+                                      "    case Color.Yellow => 3\n"
                                       "  };\n"
                                       "}\n"
-                                      "print classify(Green());\n",
+                                      "print classify(Color.Green());\n",
                                       mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
     std::vector<jvm::EmittedClass> classes =
@@ -2215,13 +2215,13 @@ TEST(EmitProgram, SparseConstructorMatchBoxesGetTagForCompareAndBranch) {
     DecodedFunction fn = decodeScript("enum Color { Red Green Blue Yellow }\n"
                                       "fun classify(c) {\n"
                                       "  return match c {\n"
-                                      "    case Red if true => 0\n"
-                                      "    case Green => 1\n"
-                                      "    case Blue => 2\n"
-                                      "    case Yellow => 3\n"
+                                      "    case Color.Red if true => 0\n"
+                                      "    case Color.Green => 1\n"
+                                      "    case Color.Blue => 2\n"
+                                      "    case Color.Yellow => 3\n"
                                       "  };\n"
                                       "}\n"
-                                      "print classify(Green());\n",
+                                      "print classify(Color.Green());\n",
                                       mm);
     StackAnalysisTree tree = analyzeStackTree(fn);
     std::vector<jvm::EmittedClass> classes;
@@ -2836,8 +2836,8 @@ TEST(EmitScript,
     MemoryManager mm;
     DecodedFunction fn = decodeScript(
         "enum E { A B }\n"
-        "print match (match A() { case A => A() case B => B() }) { "
-        "case A => 1 case B => 2 };\n",
+        "print match (match E.A() { case E.A => E.A() case E.B => E.B() }) { "
+        "case E.A => 1 case E.B => 2 };\n",
         mm);
     FunctionStackAnalysis analysis = analyzeStack(fn);
     std::string j;

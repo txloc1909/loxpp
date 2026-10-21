@@ -34,9 +34,9 @@ TEST_F(MatchExpressionTest, EnumConstructor) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(value) Err(msg) }
-        var x = match Ok(5) {
-            case Ok(v) => v
-            case Err(m) => 0
+        var x = match Result.Ok(5) {
+            case Result.Ok(v) => v
+            case Result.Err(m) => 0
         };
     )"),
               InterpretResult::OK);
@@ -49,10 +49,10 @@ TEST_F(MatchExpressionTest, GuardPass) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum Result { Ok(value) Err(msg) }
-        var x = match Ok(5) {
-            case Ok(v) if v > 3 => 1
-            case Ok(v) => 2
-            case Err(m) => 3
+        var x = match Result.Ok(5) {
+            case Result.Ok(v) if v > 3 => 1
+            case Result.Ok(v) => 2
+            case Result.Err(m) => 3
         };
     )"),
               InterpretResult::OK);
@@ -98,9 +98,9 @@ TEST_F(MatchExpressionTest, ArmBodyDoesNotLeakPatternBinding) {
         enum E { A(v) B }
         fun g() {
           var keep = 100;
-          var x = match A(7) {
-            case A(v) => { keep = keep + 1; }
-            case B => 2
+          var x = match E.A(7) {
+            case E.A(v) => { keep = keep + 1; }
+            case E.B => 2
           };
           return [x, keep];
         }
@@ -162,9 +162,9 @@ TEST_F(MatchExpressionTest, LoopLocalSlotCorruption) {
         var i = 0;
         while (i < 2) {
             i = i + 1;
-            var r = match Ok(i) {
-                case Ok(v) => v
-                case Err(m) => -1
+            var r = match Result.Ok(i) {
+                case Result.Ok(v) => v
+                case Result.Err(m) => -1
             };
             out = out + r;
         }
@@ -185,11 +185,11 @@ class JumpTableTest : public ::testing::Test {};
 TEST_F(JumpTableTest, BytecodeContainsJumpTable) {
     std::string bytecode = compile_program_to_bytecode(R"(
         enum Color { Red Green Blue }
-        var c = Green();
+        var c = Color.Green();
         var x = match c {
-            case Red   => 1
-            case Green => 2
-            case Blue  => 3
+            case Color.Red   => 1
+            case Color.Green => 2
+            case Color.Blue  => 3
         };
     )");
     EXPECT_NE(bytecode.find("JUMP_TABLE"), std::string::npos)
@@ -206,16 +206,16 @@ TEST_F(JumpTableTest, CorrectDispatch) {
         enum Dir { North South East West }
         fun label(d) {
             return match d {
-                case North => "N"
-                case South => "S"
-                case East  => "E"
-                case West  => "W"
+                case Dir.North => "N"
+                case Dir.South => "S"
+                case Dir.East  => "E"
+                case Dir.West  => "W"
             };
         }
-        var a = label(North());
-        var b = label(South());
-        var c = label(East());
-        var d = label(West());
+        var a = label(Dir.North());
+        var b = label(Dir.South());
+        var c = label(Dir.East());
+        var d = label(Dir.West());
     )"),
               InterpretResult::OK);
     expect_str(*h.getGlobal("a"), "N");
@@ -231,14 +231,14 @@ TEST_F(JumpTableTest, FieldBindingsWork) {
         enum Shape { Circle(r) Rect(w, h) Triangle(b, ht) }
         fun area(s) {
             return match s {
-                case Circle(r)      => r * r
-                case Rect(w, h)     => w * h
-                case Triangle(b, ht) => b * ht / 2
+                case Shape.Circle(r)      => r * r
+                case Shape.Rect(w, h)     => w * h
+                case Shape.Triangle(b, ht) => b * ht / 2
             };
         }
-        var ca = area(Circle(3));
-        var ra = area(Rect(4, 5));
-        var ta = area(Triangle(6, 4));
+        var ca = area(Shape.Circle(3));
+        var ra = area(Shape.Rect(4, 5));
+        var ta = area(Shape.Triangle(6, 4));
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("ca"), 9);
@@ -251,10 +251,10 @@ TEST_F(JumpTableTest, ArmsOutOfTagOrder) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum ABC { A B C }
-        var r = match B() {
-            case C => 3
-            case A => 1
-            case B => 2
+        var r = match ABC.B() {
+            case ABC.C => 3
+            case ABC.A => 1
+            case ABC.B => 2
         };
     )"),
               InterpretResult::OK);
@@ -265,10 +265,10 @@ TEST_F(JumpTableTest, ArmsOutOfTagOrder) {
 TEST_F(JumpTableTest, SparseMatchUsesSequential) {
     std::string bytecode = compile_program_to_bytecode(R"(
         enum ABC { A B C }
-        var x = A();
+        var x = ABC.A();
         var r = match x {
-            case A => 1
-            case C => 3
+            case ABC.A => 1
+            case ABC.C => 3
             case _ => 0
         };
     )");
@@ -282,10 +282,10 @@ TEST_F(JumpTableTest, SparseMatchUsesSequential) {
 TEST_F(JumpTableTest, GuardedMatchUsesSequential) {
     std::string bytecode = compile_program_to_bytecode(R"(
         enum AB { A B }
-        var x = A();
+        var x = AB.A();
         var r = match x {
-            case A if 1 == 1 => 1
-            case B           => 2
+            case AB.A if 1 == 1 => 1
+            case AB.B           => 2
         };
     )");
     EXPECT_EQ(bytecode.find("JUMP_TABLE"), std::string::npos)
@@ -304,9 +304,9 @@ TEST_F(JumpTableTest, MatchErrorOnNoMatch) {
     // we verify the runtime error by using a catch-all that should not fire.
     ASSERT_EQ(h.run(R"(
         enum Pair { Fst Second }
-        var r = match Fst() {
-            case Fst    => 1
-            case Second => 2
+        var r = match Pair.Fst() {
+            case Pair.Fst    => 1
+            case Pair.Second => 2
         };
     )"),
               InterpretResult::OK);
@@ -322,7 +322,7 @@ TEST_F(MatchExpressionTest, MatchAsRightOperandOfBinary) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = 1 + (match A() { case A => 1 case B => 2 });
+        var r = 1 + (match E.A() { case E.A => 1 case E.B => 2 });
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 2);
@@ -333,7 +333,7 @@ TEST_F(MatchExpressionTest, MatchAsSandwichedCallArgument) {
     ASSERT_EQ(h.run(R"(
         enum E { A B }
         fun f(x) { return x + 1; }
-        var r = f(1 + (match A() { case A => 1 case B => 2 }));
+        var r = f(1 + (match E.A() { case E.A => 1 case E.B => 2 }));
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 3);
@@ -343,8 +343,8 @@ TEST_F(MatchExpressionTest, MatchBothSidesOfBinary) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = (match A() { case A => 1 case B => 2 }) +
-                (match B() { case A => 10 case B => 20 });
+        var r = (match E.A() { case E.A => 1 case E.B => 2 }) +
+                (match E.B() { case E.A => 10 case E.B => 20 });
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 21);
@@ -355,7 +355,7 @@ TEST_F(MatchExpressionTest, MatchAsFirstCallArgument) {
     ASSERT_EQ(h.run(R"(
         enum E { A B }
         fun f(a, b) { return a * 10 + b; }
-        var r = f((match A() { case A => 1 case B => 2 }), 5);
+        var r = f((match E.A() { case E.A => 1 case E.B => 2 }), 5);
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 15);
@@ -365,8 +365,8 @@ TEST_F(MatchExpressionTest, MatchAsListElementAndMapValue) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var list = [1, (match A() { case A => 7 case B => 8 })];
-        var m = { "k": match A() { case A => 9 case B => 10 } };
+        var list = [1, (match E.A() { case E.A => 7 case E.B => 8 })];
+        var m = { "k": match E.A() { case E.A => 9 case E.B => 10 } };
         var a = list[1];
         var b = m["k"];
     )"),
@@ -381,9 +381,9 @@ TEST_F(MatchExpressionTest, MatchAsNestedSubject) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = match (match A() { case A => A() case B => B() }) {
-            case A => 1
-            case B => 2
+        var r = match (match E.A() { case E.A => E.A() case E.B => E.B() }) {
+            case E.A => 1
+            case E.B => 2
         };
     )"),
               InterpretResult::OK);
@@ -398,7 +398,7 @@ TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternative) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = match A() { case A or B => (match A() { case A => 1 case B => 2 }) + 10 };
+        var r = match E.A() { case E.A or E.B => (match E.A() { case E.A => 1 case E.B => 2 }) + 10 };
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 11);
@@ -408,7 +408,7 @@ TEST_F(MatchExpressionTest, MatchInArmAfterOrAlternativeRightOperand) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = match A() { case A or B => 10 + (match A() { case A => 1 case B => 2 }) };
+        var r = match E.A() { case E.A or E.B => 10 + (match E.A() { case E.A => 1 case E.B => 2 }) };
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("r"), 11);
@@ -420,9 +420,9 @@ TEST_F(MatchExpressionTest, MatchInArmAfterFailedGuard) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { A B }
-        var r = match B() {
-            case A if false => 0
-            case B => (match A() { case A => 1 case B => 2 }) + 10
+        var r = match E.B() {
+            case E.A if false => 0
+            case E.B => (match E.A() { case E.A => 1 case E.B => 2 }) + 10
         };
     )"),
               InterpretResult::OK);
@@ -435,7 +435,7 @@ TEST_F(MatchExpressionTest, UnderscoreIsWildcardOverConstructorName) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { _(x) B }
-        var r = match B() { case _ => 1 };
+        var r = match E.B() { case _ => 1 };
         var s = match 99 { case _ => 2 };
     )"),
               InterpretResult::OK);
@@ -462,8 +462,8 @@ TEST_F(MatchExpressionTest, UnderscoreConstructorStructuralPatterns) {
     VMTestHarness h;
     ASSERT_EQ(h.run(R"(
         enum E { _(x) B }
-        var a = match _(9) { case _(y) => y case B => 0 };
-        var b = match _(3) { case _{x} => x case B => 0 };
+        var a = match E._(9) { case E._(y) => y case E.B => 0 };
+        var b = match E._(3) { case E._{x} => x case E.B => 0 };
     )"),
               InterpretResult::OK);
     expect_num(*h.getGlobal("a"), 9);
