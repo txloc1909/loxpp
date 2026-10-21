@@ -30,16 +30,25 @@ Today a Number is an IEEE 754 double (`spec/03-types.md`, "Number"). An integer
 above 2^53 loses precision, and the language has no bit operation.
 
 The proposal serves the *memory* control under "No high-level facility removes
-low-level control" in `VISION.md`: the program "can hold a 64-bit pattern as
-one value with every bit exact". No value can do this today. Under "What
-counts as a language gap", a listed control is a capability by definition, so
-the litmus test does not apply to this control.
+low-level control" in `VISION.md`, in the text of PR #798: the program "can
+hold a 64-bit pattern as one numeric value with every bit exact and apply a
+bit operation to it in one step". Under "What counts as a language gap", a
+listed control is a capability by definition, so the litmus test does not
+apply to this control. This proposal cannot be accepted before #798 merges.
 
-A program can emulate a 64-bit pattern today with two 32-bit halves. The
-review of this proposal (PR #792) gave a pure Lox++ library that agrees with a
-Python oracle. That emulation is not one value: a List compares by identity
-and is not a map key, so a user must wrap it in a class with `__eq__` and
-`__hash__`. It is also slow (see "Performance").
+No value does this today:
+
+| Value | 64 exact bits | Number | Bit operation in one step |
+|---|---|---|---|
+| Number | No, only up to 2^53 | Yes | No |
+| An 8-byte String | Yes | No | No |
+| Two 32-bit halves, as a List or a class | Yes | No | No |
+
+The review of this proposal (PR #792) gave a pure Lox++ library for the
+two-halves form that agrees with a Python oracle. A class with `__eq__` and
+`__hash__` makes it one value and a map key. That emulation is not a number:
+it has no arithmetic and no numeric order, and each bit operation is a loop.
+It is also slow (see "Performance").
 
 ### Performance
 
@@ -96,7 +105,9 @@ bits, so one of the two kinds needs a box for some values.
 
 - The positive quiet-NaN space has 50 payload bits, and only the values 1 to 4
   are in use (`src/value.h`). An inline Int takes one tag bit of that space and
-  a signed payload of 48 bits (−2^47 to 2^47 − 1).
+  a signed payload of 48 bits (−2^47 to 2^47 − 1). The tag is a high payload
+  bit, so the tags 1 to 4 stay different from the inline Ints 0 to 4. One
+  payload bit stays free.
 - An Int outside that range is a heap object that holds one `int64_t`. It
   is immutable. Equality, hashing and printing use the value, never the
   address, so a program cannot see if an Int is inline or boxed.
@@ -125,9 +136,16 @@ depend on it.
 ### Lexical
 
 - `DIGIT+` is an Int literal. `DIGIT+ "." DIGIT+` is a Float literal.
-- A decimal Int literal outside the int64 range is a compile-time error.
+- A decimal Int literal outside the int64 range is a compile-time error, with
+  one exception, as in Java: the literal `9223372036854775808` is valid when
+  it is the direct operand of a unary `-`. So `-9223372036854775808` is the
+  smallest Int, and `- (9223372036854775808)` is an error. The standard
+  library also gives `math.int_min` and `math.int_max`.
 - Open: hexadecimal `0x…` and binary `0b…` Int literals. Recommendation: add
-  them, because a programmer writes masks in hex and binary.
+  them, because a programmer writes masks in hex and binary. A hex or binary
+  literal gives a 64-bit pattern, so `0xFFFFFFFFFFFFFFFF` is `-1` and
+  `0x8000000000000000` is `math.int_min`, as in Java. A literal with more than
+  64 bits is a compile-time error.
 - New tokens: `&`, `|`, `^`, `~`, `<<`, `>>`, `>>>`. The scanner does not use
   any of them today (`src/scanner.cpp`: `<` and `>` take only `=` after them).
   The planned pipe operator `|>` (`docs/decisions/dynamic-functional-programming.md`)
@@ -158,9 +176,12 @@ the expression grammar, change to match.
 |---|---|---|
 | `a + b`, `a - b`, `a * b` | Int, wraps | Float |
 | `a / b` | Float | Float |
-| `a % b` | Int, floor semantics; `b == 0` faults | Float, floor semantics (as today) |
-| `-a` | Int, wraps (`-INT_MIN` is `INT_MIN`) | Float |
-| `idiv(a, b)` | Int, floor; wraps (`idiv(INT_MIN, -1)`); `b == 0` faults | Float, `floor(a / b)` |
+| `a % b` | Int, floor semantics; `b == 0` faults; `math.int_min % -1` is `0` | Float, floor semantics (as today) |
+| `-a` | Int, wraps (`-math.int_min` is `math.int_min`) | Float |
+| `idiv(a, b)` | Int, floor; `b == 0` faults; `idiv(math.int_min, -1)` wraps to `math.int_min` and does not fault | Float, `floor(a / b)` |
+
+In C, `INT_MIN % -1` and `INT_MIN / -1` are undefined. Here both are defined,
+and neither is a fault.
 
 The existing operator dunders (`__add__` and the others) do not change.
 
@@ -182,6 +203,10 @@ The existing operator dunders (`__add__` and the others) do not change.
 - An Int and a Float compare by their exact mathematical value. An
   implementation must not convert the Int to a double first:
   `9007199254740993 == 9007199254740992.0` is `false`.
+- `<`, `<=`, `>` and `>=` between an Int and a Float use the same rule: the
+  exact mathematical values, with no conversion of the Int to a double first.
+  So `9007199254740993 > 9007199254740992.0` is `true`. A NaN operand gives
+  `false` for all four, as it does today.
 - An integral Float in the int64 range hashes as the equal Int, so `m[1]` and
   `m[1.0]` are one entry. `-0.0` and `0` are equal and hash the same.
 - NaN stays an invalid map key.
@@ -239,7 +264,11 @@ table is complete, before backend work starts:
 - the mixed-kind operator table (each operator against each pair of kinds);
 - the precedence table;
 - the new fault rows: a bit operator on a Float, a shift count out of range,
-  Int `% 0`, `idiv` by zero, a Float index (if the owner accepts that).
+  Int `% 0`, `idiv` by zero, a Float index (if the owner accepts that);
+- the edge rows that do not fault, so the check script sees them:
+  `math.int_min % -1` is `0`, `idiv(math.int_min, -1)` is `math.int_min`,
+  `-math.int_min` is `math.int_min`, and `math.int_max + 1` is
+  `math.int_min`.
 
 ## Program impact
 
