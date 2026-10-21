@@ -44,6 +44,7 @@ const REPO = "txloc1909/loxpp";
 const GATE_OUTPUT_CAP = 8000;
 const READ_OUTPUT_CAP = 12000;
 const STATUS_OUTPUT_CAP = 2000;
+const STAGNATION_LIMIT = 3; // identical gate failures in a row before a mode stops
 
 // Per-mode iteration budget. Goal/resolve-issue implement a feature and need more
 // room than a fix-until-green loop.
@@ -120,6 +121,8 @@ interface AutonomyState {
   lastScope: "native" | "backend";
   lastCwd: string | undefined;
   declaredDone: boolean;
+  sameFailureCount: number;
+  lastGateOutput: string | undefined;
 }
 
 interface PlanState {
@@ -174,11 +177,38 @@ async function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefi
 
 // The agent runs on the host; program execution runs inside the dev container
 // (AGENTS.md), so the gate always enters the container via podman.
+async function gatePreflight(
+  scope: "native" | "backend",
+  cwd: string,
+  signal: AbortSignal | undefined,
+): Promise<{ ok: boolean; output: string }> {
+  const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
+  const podman = await runArgv(["podman", "--version"], cwd, signal);
+  if (podman.code !== 0) {
+    return {
+      ok: false,
+      output: "podman is not installed on the host. The gate builds and tests inside the dev container, so podman is required.",
+    };
+  }
+  const imageCheck = await runArgv(["podman", "image", "exists", image], cwd, signal);
+  if (imageCheck.code !== 0) {
+    return {
+      ok: false,
+      output: `The ${image} image is missing. Build it first (see AGENTS.md task loop), then re-run the gate.`,
+    };
+  }
+  return { ok: true, output: "" };
+}
+
 async function runGate(
   scope: "native" | "backend",
   cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ passed: boolean; output: string }> {
+  const preflight = await gatePreflight(scope, cwd, signal);
+  if (!preflight.ok) {
+    return { passed: false, output: preflight.output };
+  }
   const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
   const script = scope === "backend" ? BACKEND_CONTAINER_GATE : NATIVE_CONTAINER_GATE;
   // podman -v needs an absolute host path; a relative one becomes a named volume.
@@ -266,6 +296,8 @@ export default function loxppModes(pi: ExtensionAPI): void {
     lastScope: "native",
     lastCwd: undefined,
     declaredDone: false,
+    sameFailureCount: 0,
+    lastGateOutput: undefined,
   };
   let plan: PlanState = { active: false, goal: "", toolsBefore: undefined };
 
@@ -287,6 +319,8 @@ export default function loxppModes(pi: ExtensionAPI): void {
       lastScope: "native",
       lastCwd: undefined,
       declaredDone: false,
+      sameFailureCount: 0,
+      lastGateOutput: undefined,
     };
     persist();
     pi.sendUserMessage(prompt);
@@ -326,6 +360,14 @@ export default function loxppModes(pi: ExtensionAPI): void {
       autonomy.lastGatePassed = r.passed;
       autonomy.lastScope = scope;
       autonomy.lastCwd = cwd;
+      if (r.passed) {
+        autonomy.sameFailureCount = 0;
+        autonomy.lastGateOutput = undefined;
+      } else {
+        const sig = r.output.slice(-800);
+        autonomy.sameFailureCount = sig === autonomy.lastGateOutput ? autonomy.sameFailureCount + 1 : 1;
+        autonomy.lastGateOutput = sig;
+      }
       persist();
       return {
         content: [
@@ -646,6 +688,21 @@ export default function loxppModes(pi: ExtensionAPI): void {
       return;
     }
     autonomy.iterations += 1;
+
+    if (autonomy.sameFailureCount >= STAGNATION_LIMIT) {
+      autonomy.mode = null;
+      persist();
+      return {
+        entries: [
+          {
+            type: "custom_message",
+            customType: "mode-stagnant",
+            content: `${mode} mode stopped: the gate failed the same way ${STAGNATION_LIMIT} times in a row. This is likely an environment or toolchain problem, not the code. Fix the environment, then re-run the mode.`,
+            display: true,
+          },
+        ],
+      };
+    }
 
     const budget = BUDGET[mode];
     if (autonomy.iterations >= budget) {
