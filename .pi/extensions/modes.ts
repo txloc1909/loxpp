@@ -1,33 +1,42 @@
 /**
  * Lox++ autonomous modes + mission roles.
  *
- * Hand-off modes (no approval gate — the agent works to completion):
- *   /goal <goal>     plan + implement + verify + commit/push, end via loxpp_done
- *   /loop [goal]     fix-until-green; ends automatically when loxpp_gate passes
+ * Hand-off modes (work to completion, no approval wait):
+ *   /loop [goal]          fix-until-green; ends via loxpp_done after a green gate
  *   /resolve-issue <issue>  implementer role for one mission node (multi-agent-playbook)
+ *
+ * /goal has an approval gate by default, per AGENTS.md's planning policy:
+ *   /goal <goal>              plan first, read-only, wait for /approve
+ *   /goal --handoff <goal>    hand the approval decision to the agent and go
+ *   /approve                  approve the plan and begin implementation
  *
  * Single-shot roles (inject a role prompt, run one turn):
  *   /review <subject>   reviewer: adversarial, reproduce the checkpoint, tag [Reviewer]
  *   /referee <subject>  researcher/referee: verify facts, rule, bound next round, [Researcher]
  *
  * Run-observation:
- *   /mission-status <issue>  show plan_resume.py + status.py output
+ *   /mission-status <issue>   show plan_resume.py + status.py output
  *
  * Tools:
  *   loxpp_gate     build/test gate (machine-verified pass/fail)
- *   loxpp_done     declare completion; refuses unless the last gate passed
+ *   loxpp_done     re-run the gate and end the mode only if it passes now
  *   loxpp_issue    read a GitHub issue with the full --json --template form
  *   loxpp_pr       read a PR with the full form (body + comments + reviews)
  *
- * The continuation loop is driven by the gate's real exit code, never by the
- * model's say-so: turn_end keeps running while a mode is active and the gate is
- * not green, bounded by a per-mode iteration budget.
+ * loxpp_done is the single termination point: it re-runs the gate itself, so a
+ * stale green gate (for example, a bash edit after the last loxpp_gate) can
+ * never end a mode. The turn_end continuation is bounded by a per-mode budget.
  */
 
 import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+
+// Human opt-in switch. false (default) keeps the /goal approval gate; true hands
+// the approval decision to the agent for /goal. A per-command --handoff /
+// --no-handoff flag overrides this for one invocation.
+const HANDOFF = false;
 
 const REPO = "txloc1909/loxpp";
 const GATE_OUTPUT_CAP = 8000;
@@ -66,11 +75,54 @@ const PR_TPL =
   `{{"\\n=== reviews: "}}{{len .reviews}}{{"\\n"}}` +
   `{{range .reviews}}{{"\\n--- "}}{{.author.login}} {{.createdAt}} {{.state}}{{"\\n"}}{{.body}}{{"\\n"}}{{end}}`;
 
+const PLANNING_PROMPT = `Work in plan-first mode. Do not edit files, commit, push, or open a PR.
+
+1. Read the binding context first:
+   - VISION.md — what Lox++ is for; test every plan against it.
+   - spec/ — canonical semantics (the spec wins over the implementation).
+   - docs/decisions/ — the why behind past decisions; avoid conflicting designs.
+   - docs/README.md — document tiers and where a new document goes.
+2. If the goal touches the spec, the bytecode, or the standard library surface,
+   list every consumer before any work: the native VM, the JVM backend, the QBE
+   backend, the bootstrap interpreter, and every tool that parses or lowers the
+   construct (resolver, LSP, tree-sitter grammar, editor syntaxes). For each
+   backend, state what the change owes it under the roles in VISION.md.
+3. If the spec names a countable set (fault kinds, opcodes, exit paths, suspend
+   points), write it as a table and name a script that checks the table is
+   complete.
+4. Write the plan and post it as an issue comment or PR description. Open the
+   issue first if the work does not already have one.
+5. Wait for explicit approval. Do not write code or open a PR until the owner
+   approves. If the plan changes, acknowledge the revision before proceeding.
+
+Answer with the plan only. The human runs /approve when the plan is accepted.`;
+
+const GOAL_WORKING_PROMPT = (goal: string) => `[GOAL MODE — implement]\n\nGoal: ${goal}\n\nThe plan is approved. Implement it now, per AGENTS.md.\n\n1. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n2. Implement, then run loxpp_gate until it passes.\n3. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n4. When the gate is green and the work is complete, call loxpp_done with a summary.\n\nEnd only by calling loxpp_done after a green gate.`;
+
+const GOAL_HANDOFF_PROMPT = (goal: string) => `[GOAL MODE — hand-off]\n\nGoal: ${goal}\n\nThe human handed the approval decision to you. Plan, implement, and finish without waiting.\n\n1. Plan: read the binding context (VISION.md, spec/, docs/decisions/, docs/README.md). If this is a language change, list every consumer first per AGENTS.md. Keep the plan as your working notes, not a waiting step.\n2. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n3. Implement, then run loxpp_gate until it passes.\n4. Commit when the code compiles and push after each commit (AGENTS.md).\n5. When the gate is green and the work is complete, call loxpp_done with a summary.\n\nEnd only by calling loxpp_done after a green gate.`;
+
+const LOOP_PROMPT = (goal: string) => `[LOOP MODE — hand-off]\n\nGoal: ${goal}\n\nWork in a tight loop until the gate passes:\n1. Make one focused change (or fix the latest failure).\n2. Call loxpp_gate.\n3. If it fails, read the tail of the output, fix the smallest thing that unblocks it, and repeat.\n4. When loxpp_gate passes, call loxpp_done to finish (it re-checks the gate).\n\nCommit when the code compiles and push after each commit, per AGENTS.md. Do not ask to stop.`;
+
+const NODE_PROMPT = (n: string) => `[RESOLVE-ISSUE MODE — implementer, hand-off]\n\nNode issue: #${n}\n\n1. Read the node spec with loxpp_issue (full form — a hazard may live in a comment).\n2. Read docs/process/multi-agent-playbook.md, the decision in docs/decisions/ this node serves, and the spec/reference docs the issue names.\n3. Create a worktree and branch per AGENTS.md's task loop. Pass the checkout you work in to loxpp_gate and loxpp_done via their cwd argument, so the gate tests that tree and not the main checkout.\n4. Implement the deliverable; respect the issue's Scope section — out-of-scope cases fail loudly and name this node.\n5. Checkpoint: rebuild fully, then run loxpp_gate until green (ctest does not rebuild).\n6. Commit atomically with conventional commits; push after each commit.\n7. Open a PR whose body contains \`Closes #${n}\`, and tag yourself \`[Implementer]\`. Do not poll CI.\n8. Call loxpp_done with the PR number once the gate is green.\n\nEnd only by calling loxpp_done after a green gate.`;
+
 interface AutonomyState {
   mode: "goal" | "loop" | "resolve-issue" | null;
   iterations: number;
   lastGatePassed: boolean | undefined;
+  lastScope: "native" | "backend";
+  lastCwd: string | undefined;
   declaredDone: boolean;
+}
+
+interface PlanState {
+  active: boolean;
+  goal: string;
+  toolsBefore?: string[];
+}
+
+interface PersistedState {
+  autonomy: AutonomyState;
+  plan: PlanState;
 }
 
 function tail(text: string, cap: number): string {
@@ -81,12 +133,11 @@ function tail(text: string, cap: number): string {
   return `[truncated: ${bytes} bytes, showing tail]\n\n${out}`;
 }
 
-function run(
-  command: string,
+function collect(
+  proc: ReturnType<typeof spawn>,
   signal: AbortSignal | undefined,
 ): Promise<{ code: number; output: string }> {
   return new Promise((resolve) => {
-    const proc = spawn("/bin/bash", ["-lc", command], { cwd: process.cwd() });
     let output = "";
     proc.stdout.on("data", (d) => {
       output += d.toString();
@@ -104,12 +155,45 @@ function run(
   });
 }
 
-function issueCmd(number: string, repo: string): string {
-  return `gh issue view ${number} --repo ${repo} --json title,body,comments --template '${ISSUE_TPL}'`;
+function runShell(command: string, cwd: string, signal: AbortSignal | undefined) {
+  return collect(spawn("/bin/bash", ["-lc", command], { cwd }), signal);
 }
 
-function prCmd(number: string, repo: string): string {
-  return `gh pr view ${number} --repo ${repo} --json title,body,comments,reviews --template '${PR_TPL}'`;
+// argv spawn (no shell) for gh and python: model-supplied values stay arguments,
+// so they cannot be interpreted as shell syntax.
+function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefined) {
+  return collect(spawn(argv[0], argv.slice(1), { cwd }), signal);
+}
+
+function issueArgs(number: string, repo: string): string[] {
+  return ["gh", "issue", "view", number, "--repo", repo, "--json", "title,body,comments", "--template", ISSUE_TPL];
+}
+
+function prArgs(number: string, repo: string): string[] {
+  return ["gh", "pr", "view", number, "--repo", repo, "--json", "title,body,comments,reviews", "--template", PR_TPL];
+}
+
+// Denylist for the /goal plan phase: it must still permit building, running the
+// interpreter, and posting the plan (gh issue/comment). These are the verbs that
+// mutate the repo, git history, or the PR surface before approval.
+function isMutatingCommand(command: string): boolean {
+  const c = command.trim();
+  if (/^git\s+(add|commit|push|merge|rebase|reset|stash|checkout|switch|branch)\b/.test(c)) return true;
+  if (/^gh\s+pr\s+(create|merge|reopen|close)\b/.test(c)) return true;
+  if (/^gh\s+issue\s+(edit|close|reopen|delete)\b/.test(c)) return true;
+  if (/^(rm|mv|cp|touch|mkdir|rmdir|tee)\b/.test(c)) return true;
+  if (/^(sed|perl)\s+-i\b/.test(c)) return true;
+  if (/^(vim|nano|nvim|code|emacs)\b/.test(c)) return true;
+  return false;
+}
+
+function parseHandoff(args: string): { handoff: boolean; rest: string } {
+  const parts = args.split(/\s+/).filter(Boolean);
+  let handoff = HANDOFF;
+  if (parts.includes("--handoff")) handoff = true;
+  if (parts.includes("--no-handoff")) handoff = false;
+  const rest = parts.filter((p) => p !== "--handoff" && p !== "--no-handoff").join(" ");
+  return { handoff, rest };
 }
 
 export default function loxppModes(pi: ExtensionAPI): void {
@@ -117,22 +201,54 @@ export default function loxppModes(pi: ExtensionAPI): void {
     mode: null,
     iterations: 0,
     lastGatePassed: undefined,
+    lastScope: "native",
+    lastCwd: undefined,
     declaredDone: false,
   };
+  let plan: PlanState = { active: false, goal: "", toolsBefore: undefined };
+
+  const unique = (names: string[]): string[] => [...new Set(names)];
 
   function persist(): void {
-    pi.appendEntry("loxpp-modes", autonomy);
+    pi.appendEntry("loxpp-modes", { autonomy, plan } satisfies PersistedState);
   }
 
-  function startMode(mode: "goal" | "loop" | "resolve-issue", prompt: string): void {
+  function notify(ctx: ExtensionContext, text: string, kind: "info" | "error" = "info"): void {
+    if (ctx.hasUI) ctx.ui.notify(text, kind);
+  }
+
+  function startWorking(mode: "goal" | "loop" | "resolve-issue", prompt: string): void {
     autonomy = {
       mode,
       iterations: 0,
       lastGatePassed: undefined,
+      lastScope: "native",
+      lastCwd: undefined,
       declaredDone: false,
     };
     persist();
     pi.sendUserMessage(prompt);
+  }
+
+  function enterPlanMode(goal: string): void {
+    plan = { active: true, goal, toolsBefore: pi.getActiveTools() };
+    pi.setActiveTools(unique([...pi.getActiveTools().filter((t) => t !== "edit" && t !== "write"), "read", "bash"]));
+    persist();
+    pi.sendUserMessage(`[GOAL MODE — plan first]\n\nGoal: ${goal}\n\n${PLANNING_PROMPT}`);
+  }
+
+  async function runGate(scope: "native" | "backend", cwd: string, signal: AbortSignal | undefined) {
+    let all = "";
+    let failed = false;
+    for (const cmd of GATE_COMMANDS[scope]) {
+      const r = await runShell(cmd, cwd, signal);
+      all += `\n$ ${cmd}\n${r.output}`;
+      if (r.code !== 0) {
+        failed = true;
+        break;
+      }
+    }
+    return { passed: !failed, output: tail(all, GATE_OUTPUT_CAP) };
   }
 
   // ---- tools -----------------------------------------------------------
@@ -141,7 +257,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
     name: "loxpp_gate",
     label: "Lox++ gate",
     description:
-      "Run the Lox++ build/test gate and report pass or fail. Call it after each change. Modes keep running until this reports GATE PASSED.",
+      "Run the Lox++ build/test gate and report pass or fail. Call it after each change. Modes keep running until loxpp_done confirms a green gate.",
     promptSnippet: "run the Lox++ build/test gate and report pass/fail",
     parameters: Type.Object({
       scope: Type.Optional(
@@ -151,30 +267,26 @@ export default function loxppModes(pi: ExtensionAPI): void {
           default: "native",
         }),
       ),
+      cwd: Type.Optional(
+        Type.String({ description: "Checkout or worktree to gate. Default the session working directory." }),
+      ),
     }),
-    async execute(_id, params, signal) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
       const scope: "native" | "backend" = params.scope ?? "native";
-      let all = "";
-      let failed = false;
-      for (const cmd of GATE_COMMANDS[scope]) {
-        const r = await run(cmd, signal);
-        all += `\n$ ${cmd}\n${r.output}`;
-        if (r.code !== 0) {
-          failed = true;
-          break;
-        }
-      }
-      autonomy.lastGatePassed = !failed;
+      const cwd = params.cwd ?? ctx.cwd;
+      const r = await runGate(scope, cwd, signal);
+      autonomy.lastGatePassed = r.passed;
+      autonomy.lastScope = scope;
+      autonomy.lastCwd = cwd;
       persist();
-      const shown = tail(all, GATE_OUTPUT_CAP);
       return {
         content: [
           {
             type: "text",
-            text: failed ? `GATE FAILED.\n\n${shown}` : "GATE PASSED: build and tests are green.",
+            text: r.passed ? "GATE PASSED: build and tests are green." : `GATE FAILED.\n\n${r.output}`,
           },
         ],
-        details: { passed: !failed, scope },
+        details: { passed: r.passed, scope, cwd },
       };
     },
   });
@@ -183,35 +295,47 @@ export default function loxppModes(pi: ExtensionAPI): void {
     name: "loxpp_done",
     label: "Declare done",
     description:
-      "Declare the task complete and end the mode. Refuses unless loxpp_gate last passed and no file was edited since.",
-    promptSnippet: "end the mode: declare the task complete",
+      "Declare the task complete and end the mode. Re-runs the gate itself and refuses unless it passes now, so a stale green gate cannot end a mode.",
+    promptSnippet: "re-run the gate and end the mode if it passes",
     parameters: Type.Object({
       summary: Type.String({ description: "What was done and what changed." }),
       pr: Type.Optional(Type.String({ description: "PR number or URL, if one was opened." })),
+      scope: Type.Optional(
+        StringEnum(["native", "backend"] as const, {
+          description: "Gate scope to re-run. Default the scope of the last loxpp_gate call.",
+        }),
+      ),
+      cwd: Type.Optional(Type.String({ description: "Checkout to gate. Default the last loxpp_gate cwd." })),
     }),
-    async execute(_id, params) {
-      if (autonomy.lastGatePassed !== true) {
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const scope: "native" | "backend" = params.scope ?? autonomy.lastScope ?? "native";
+      const cwd = params.cwd ?? autonomy.lastCwd ?? ctx.cwd;
+      const r = await runGate(scope, cwd, signal);
+      if (!r.passed) {
         return {
           isError: true,
           content: [
             {
               type: "text",
-              text: "Not done: the gate is not green. Run loxpp_gate, fix the failures, then call loxpp_done again.",
+              text: `Not done: the gate is not green. Fix the failures, then call loxpp_done again.\n\n${r.output}`,
             },
           ],
-          details: { done: false },
+          details: { done: false, scope, cwd },
         };
       }
       autonomy.declaredDone = true;
+      autonomy.lastGatePassed = true;
+      autonomy.lastScope = scope;
+      autonomy.lastCwd = cwd;
       persist();
       return {
         content: [
           {
             type: "text",
-            text: `Recorded completion.\n\n${params.summary}${params.pr ? `\n\nPR: ${params.pr}` : ""}`,
+            text: `Recorded completion (gate green).\n\n${params.summary}${params.pr ? `\n\nPR: ${params.pr}` : ""}`,
           },
         ],
-        details: { done: true, pr: params.pr },
+        details: { done: true, pr: params.pr, scope, cwd },
       };
     },
   });
@@ -226,8 +350,15 @@ export default function loxppModes(pi: ExtensionAPI): void {
       number: Type.String({ description: "Issue number." }),
       repo: Type.Optional(Type.String({ description: `Repo, default ${REPO}.` })),
     }),
-    async execute(_id, params, signal) {
-      const r = await run(issueCmd(params.number, params.repo ?? REPO), signal);
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      if (!/^\d+$/.test(params.number)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Invalid issue number: ${params.number}` }],
+          details: { number: params.number },
+        };
+      }
+      const r = await runArgv(issueArgs(params.number, params.repo ?? REPO), ctx.cwd, signal);
       if (r.code !== 0) {
         return {
           isError: true,
@@ -252,8 +383,15 @@ export default function loxppModes(pi: ExtensionAPI): void {
       number: Type.String({ description: "PR number." }),
       repo: Type.Optional(Type.String({ description: `Repo, default ${REPO}.` })),
     }),
-    async execute(_id, params, signal) {
-      const r = await run(prCmd(params.number, params.repo ?? REPO), signal);
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      if (!/^\d+$/.test(params.number)) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Invalid PR number: ${params.number}` }],
+          details: { number: params.number },
+        };
+      }
+      const r = await runArgv(prArgs(params.number, params.repo ?? REPO), ctx.cwd, signal);
       if (r.code !== 0) {
         return {
           isError: true,
@@ -268,58 +406,63 @@ export default function loxppModes(pi: ExtensionAPI): void {
     },
   });
 
-  // ---- hand-off commands ------------------------------------------------
+  // ---- commands ----------------------------------------------------------
 
   pi.registerCommand("goal", {
-    description: "Autonomous hand-off: plan, implement, verify, and finish a goal",
+    description: "Plan-first goal (approval gate) unless --handoff hands the decision to the agent",
     handler: async (args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("goal requires interactive mode", "error");
-        return;
-      }
-      const goal = args.trim();
+      const { handoff, rest } = parseHandoff(args);
+      const goal = rest.trim();
       if (!goal) {
-        ctx.ui.notify("Usage: /goal <goal>", "error");
+        notify(ctx, "Usage: /goal [--handoff|--no-handoff] <goal>", "error");
         return;
       }
-      startMode(
-        "goal",
-        `[GOAL MODE — hand-off]\n\nGoal: ${goal}\n\nWork autonomously to the goal. No approval gate — plan, implement, and finish.\n\n1. Plan: read the binding context (VISION.md, spec/, docs/decisions/, docs/README.md). If this is a language change, list every consumer first per AGENTS.md. Keep the plan as your working notes, not a waiting step.\n2. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules). A goal without a check is unproven.\n3. Implement, then run loxpp_gate until it passes.\n4. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n5. When the gate is green and the work is complete, call loxpp_done with a summary.\n\nDo not stop to ask for approval. End only by calling loxpp_done after a green gate.`,
-      );
+      if (handoff) {
+        startWorking("goal", GOAL_HANDOFF_PROMPT(goal));
+        notify(ctx, "Goal mode (hand-off): working to completion.", "info");
+      } else {
+        enterPlanMode(goal);
+        notify(ctx, "Goal mode: plan first. Approve with /approve.", "info");
+      }
+    },
+  });
+
+  pi.registerCommand("approve", {
+    description: "Approve the plan from /goal and begin implementation",
+    handler: async (_args, ctx) => {
+      if (!plan.active) {
+        notify(ctx, "No plan awaits approval.", "info");
+        return;
+      }
+      const goal = plan.goal;
+      const toolsBefore = plan.toolsBefore;
+      plan = { active: false, goal: "", toolsBefore: undefined };
+      pi.setActiveTools(toolsBefore ?? pi.getActiveTools());
+      persist();
+      notify(ctx, "Plan approved — implementing.", "info");
+      startWorking("goal", GOAL_WORKING_PROMPT(goal));
     },
   });
 
   pi.registerCommand("loop", {
     description: "Autonomous fix-until-green loop over the Lox++ gate",
     handler: async (args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("loop requires interactive mode", "error");
-        return;
-      }
       const goal = args.trim() || "make the tree green";
-      startMode(
-        "loop",
-        `[LOOP MODE — hand-off]\n\nGoal: ${goal}\n\nWork in a tight loop until the gate passes:\n1. Make one focused change (or fix the latest failure).\n2. Call loxpp_gate.\n3. If it fails, read the tail of the output, fix the smallest thing that unblocks it, and repeat.\n\nThe loop ends automatically when the gate passes. Commit when the code compiles and push after each commit, per AGENTS.md. Do not ask to stop.`,
-      );
+      startWorking("loop", LOOP_PROMPT(goal));
+      notify(ctx, "Loop mode on. /stop to exit.", "info");
     },
   });
 
   pi.registerCommand("resolve-issue", {
     description: "Implementer mode for one mission node (hand-off)",
     handler: async (args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("resolve-issue requires interactive mode", "error");
-        return;
-      }
       const n = args.trim().replace(/^#/, "");
       if (!/^\d+$/.test(n)) {
-        ctx.ui.notify("Usage: /resolve-issue <issue-number>", "error");
+        notify(ctx, "Usage: /resolve-issue <issue-number>", "error");
         return;
       }
-      startMode(
-        "resolve-issue",
-        `[RESOLVE-ISSUE MODE — implementer, hand-off]\n\nNode issue: #${n}\n\n1. Read the node spec with loxpp_issue (full form — a hazard may live in a comment).\n2. Read docs/process/multi-agent-playbook.md, the decision in docs/decisions/ this node serves, and the spec/reference docs the issue names.\n3. Create a worktree and branch per AGENTS.md's task loop.\n4. Implement the deliverable; respect the issue's Scope section — out-of-scope cases fail loudly and name this node.\n5. Checkpoint: rebuild fully, then run loxpp_gate until green (ctest does not rebuild).\n6. Commit atomically with conventional commits; push after each commit.\n7. Open a PR whose body contains \`Closes #${n}\`, and tag yourself \`[Implementer]\`. Do not poll CI.\n8. Call loxpp_done with the PR number once the gate is green.\n\nDo not stop to ask for approval.`,
-      );
+      startWorking("resolve-issue", NODE_PROMPT(n));
+      notify(ctx, `Implementer mode on for #${n}. /stop to exit.`, "info");
     },
   });
 
@@ -327,27 +470,23 @@ export default function loxppModes(pi: ExtensionAPI): void {
     description: "Exit any active mode (goal/loop/resolve-issue)",
     handler: async (_args, ctx) => {
       if (!autonomy.mode) {
-        ctx.ui.notify("No mode is active.", "info");
+        notify(ctx, "No mode is active.", "info");
         return;
       }
       autonomy.mode = null;
       persist();
-      ctx.ui.notify("Mode off.", "info");
+      notify(ctx, "Mode off.", "info");
     },
   });
 
-  // ---- single-shot role commands ----------------------------------------
+  // ---- single-shot role commands -----------------------------------------
 
   pi.registerCommand("review", {
     description: "Reviewer mode: adversarially review a PR or node",
     handler: async (args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("review requires interactive mode", "error");
-        return;
-      }
       const subject = args.trim();
       if (!subject) {
-        ctx.ui.notify("Usage: /review <pr-or-issue>", "error");
+        notify(ctx, "Usage: /review <pr-or-issue>", "error");
         return;
       }
       pi.sendUserMessage(
@@ -359,13 +498,9 @@ export default function loxppModes(pi: ExtensionAPI): void {
   pi.registerCommand("referee", {
     description: "Researcher/referee mode: verify facts, rule, bound the next round",
     handler: async (args, ctx) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("referee requires interactive mode", "error");
-        return;
-      }
       const subject = args.trim();
       if (!subject) {
-        ctx.ui.notify("Usage: /referee <issue>", "error");
+        notify(ctx, "Usage: /referee <issue>", "error");
         return;
       }
       pi.sendUserMessage(
@@ -374,53 +509,57 @@ export default function loxppModes(pi: ExtensionAPI): void {
     },
   });
 
-  // ---- run-observation --------------------------------------------------
+  // ---- run-observation -----------------------------------------------------
 
   pi.registerCommand("mission-status", {
     description: "Show mission state (plan_resume.py + status.py)",
     handler: async (args, ctx) => {
       const n = args.trim().replace(/^#/, "");
       if (!/^\d+$/.test(n)) {
-        ctx.ui.notify("Usage: /mission-status <tracking-issue-number>", "error");
+        notify(ctx, "Usage: /mission-status <tracking-issue-number>", "error");
         return;
       }
-      const cmds = [
-        `python3 tools/agent-workflow/plan_resume.py ${n}`,
-        `python3 tools/agent-workflow/status.py`,
-      ];
       let all = "";
-      for (const cmd of cmds) {
-        const r = await run(cmd, undefined);
-        all += `\n$ ${cmd}\n${r.output}`;
+      const argv1 = ["python3", "tools/agent-workflow/plan_resume.py", n];
+      const argv2 = ["python3", "tools/agent-workflow/status.py"];
+      for (const argv of [argv1, argv2]) {
+        const r = await runArgv(argv, ctx.cwd, undefined);
+        all += `\n$ ${argv.join(" ")}\n${r.output}`;
       }
-      ctx.ui.notify(tail(all, STATUS_OUTPUT_CAP), "info");
+      pi.sendMessage({ customType: "mission-status", content: tail(all, STATUS_OUTPUT_CAP), display: true });
+      notify(ctx, "Mission status written to the transcript.", "info");
     },
   });
 
-  // ---- engine -----------------------------------------------------------
+  // ---- engine ---------------------------------------------------------------
 
-  // Editing a file after a green gate invalidates both the gate and any prior
-  // done declaration, so "done" cannot be stale relative to the tree.
+  // The /goal plan phase blocks writes; the working modes rely on loxpp_done to
+  // re-verify the gate, so no edit/write invalidation is needed here.
   pi.on("tool_call", async (event) => {
-    if (!autonomy.mode) return;
+    if (!plan.active) return;
     if (event.toolName === "edit" || event.toolName === "write") {
-      autonomy.lastGatePassed = false;
-      autonomy.declaredDone = false;
+      return {
+        block: true,
+        reason: "Goal plan mode: file edits are blocked until the plan is approved (/approve).",
+      };
+    }
+    if (event.toolName === "bash") {
+      const command = (event.input.command as string) ?? "";
+      if (isMutatingCommand(command)) {
+        return { block: true, reason: `Goal plan mode: mutating command blocked.\nCommand: ${command}` };
+      }
     }
   });
 
   pi.on("turn_end", async () => {
     const mode = autonomy.mode;
     if (!mode) return;
-    autonomy.iterations += 1;
-    const gateGreen = autonomy.lastGatePassed === true;
-    const finished = mode === "loop" ? gateGreen : gateGreen && autonomy.declaredDone;
-
-    if (finished) {
+    if (autonomy.declaredDone) {
       autonomy.mode = null;
       persist();
       return;
     }
+    autonomy.iterations += 1;
 
     const budget = BUDGET[mode];
     if (autonomy.iterations >= budget) {
@@ -431,41 +570,49 @@ export default function loxppModes(pi: ExtensionAPI): void {
           {
             type: "custom_message",
             customType: "mode-limit",
-            content: `${mode} mode stopped after ${budget} iterations. Continue by hand or re-run /${mode}.`,
+            content: `${mode} mode stopped after ${budget} iterations without completion. Continue by hand or re-run the mode.`,
             display: true,
           },
         ],
       };
     }
 
-    const nudge = gateGreen
-      ? `[${mode} mode] ${autonomy.iterations}/${budget}: the gate is green. Summarize what changed and call loxpp_done to finish.`
-      : `[${mode} mode] ${autonomy.iterations}/${budget}: the gate is not green yet. Read the latest failure output, fix it, then call loxpp_gate again.`;
+    const nudge =
+      autonomy.lastGatePassed === true
+        ? `[${mode} mode] ${autonomy.iterations}/${budget}: the gate is green. Call loxpp_done to finish (it re-checks the gate).`
+        : autonomy.lastGatePassed === false
+          ? `[${mode} mode] ${autonomy.iterations}/${budget}: the gate failed. Read the latest failure output, fix it, then call loxpp_gate again.`
+          : `[${mode} mode] ${autonomy.iterations}/${budget}: make a change and run loxpp_gate.`;
+    persist();
     return {
-      entries: [
-        { type: "custom_message", customType: "mode-continue", content: nudge, display: true },
-      ],
+      entries: [{ type: "custom_message", customType: "mode-continue", content: nudge, display: true }],
       continue: true,
     };
   });
 
-  // ---- restore on resume ------------------------------------------------
+  // ---- restore on resume -----------------------------------------------------
 
   pi.on("session_start", async (_event, ctx) => {
-    const entries = ctx.sessionManager.getEntries();
-    const last = entries
-      .filter(
+    const entries = ctx.sessionManager.getBranch();
+    const last = [...entries]
+      .reverse()
+      .find(
         (e: { type: string; customType?: string }) =>
           e.type === "custom" && e.customType === "loxpp-modes",
-      )
-      .pop() as { data?: AutonomyState } | undefined;
+      ) as { data?: PersistedState } | undefined;
     if (last?.data) {
-      autonomy = {
-        mode: last.data.mode,
-        iterations: last.data.iterations,
-        lastGatePassed: last.data.lastGatePassed,
-        declaredDone: last.data.declaredDone,
-      };
+      autonomy = { ...autonomy, ...last.data.autonomy };
+      plan = { ...plan, ...last.data.plan };
+    }
+    if (plan.active) {
+      pi.setActiveTools(unique([...pi.getActiveTools().filter((t) => t !== "edit" && t !== "write"), "read", "bash"]));
+    }
+    if (autonomy.mode) {
+      pi.sendMessage({
+        customType: "mode-resumed",
+        content: `[${autonomy.mode} mode was active when this session paused. Send a message to continue it, or run /stop to end it.]`,
+        display: true,
+      });
     }
   });
 }
