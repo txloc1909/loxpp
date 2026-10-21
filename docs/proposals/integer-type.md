@@ -1,24 +1,29 @@
 # An Int type and bit operators
 
-**Status:** proposal. Waits for the owner's approval. On acceptance it moves to
-`docs/decisions/` and a mission tracking issue opens.
+**Status:** proposal. Waits for the owner's acceptance. On acceptance it moves
+to `docs/decisions/` and a mission tracking issue opens.
 
 ## Owner decisions
 
-The owner decided these forks on 2026-10-21.
+The owner decided these forks.
 
 | Fork | Decision |
 |---|---|
 | Purpose | Low-level control. A program can express a bit-mask data structure with exact bits. |
-| Model | Two separate kinds, Int and Float. `type(1)` and `type(1.0)` are different. |
-| Range | Int is a signed 64-bit integer on every implementation. |
+| Model | Two separate kinds, Int and Float. `type(1)` is `"Int"` and `type(1.0)` is `"Float"`. The name `"Number"` goes away, and no name means "Int or Float". |
+| Range | Int is a signed 64-bit integer on every implementation. The inline width of the native VM is implementation-defined; the spec binds int64 only. |
 | Overflow | Every Int operation wraps in two's complement, as in Go and Lua 5.3. |
 | `/` | Always gives a Float. `7 / 2` is `3.5`, and `4 / 2` is `2.0`. |
-| Floor division | A standard library function `idiv(a, b)`. `//` stays the comment syntax. |
-| Equality | `1 == 1.0` is `true`. `m[1]` and `m[1.0]` are the same map entry. |
-| Printing | A Float always shows a `.` or an exponent (`1.0`). An Int shows its digits (`1`). |
+| Floor division | A standard library function, `math.idiv(a, b)`. `//` stays the comment syntax. |
+| Equality and order | `1 == 1.0` is `true`, and `m[1]` and `m[1.0]` are the same map entry. An Int and a Float compare by their exact mathematical values. |
+| Printing | A Float always shows a `.` or an exponent (`1.0`). An Int shows its digits (`1`). The exact Float format is one table in the spec. |
+| Literals | A decimal literal with no `.` is an Int. Hex `0x…` and binary `0b…` literals are Ints and give a 64-bit pattern, as in Java. No digit separators. |
 | Bit operations | The operators `&`, `\|`, `^`, `~`, `<<`, `>>` and `>>>`. |
 | Shifts | `>>` keeps the sign bit. `>>>` fills with zero bits. A shift count outside 0 to 63 is a runtime fault. |
+| Bit operands | Ints only. Any other operand, an Instance included, is a type fault. No operator protocol (dunder) exists for the bit operators. |
+| Indexing | An index and a slice bound must be an Int. A Float index is a type fault. |
+| `math.floor`, `math.ceil`, `math.round` | Return an Int. A NaN, an infinity, or a value outside the int64 range is a runtime fault. |
+| Conversions | `int(x)` and `float(x)` exist. `int` truncates toward zero and faults on a value that has no Int. |
 
 ## Why
 
@@ -43,11 +48,12 @@ No value does this today:
 | An 8-byte String | Yes | No | No |
 | Two 32-bit halves, as a List or a class | Yes | No | No |
 
-The review of this proposal (PR #792) gave a pure Lox++ library for the
-two-halves form that agrees with a Python oracle. A class with `__eq__` and
-`__hash__` makes it one value and a map key. That emulation is not a number:
-it has no arithmetic and no numeric order, and each bit operation is a loop.
-It is also slow (see "Performance").
+The two-halves form is in use in the repository: `examples/zlib.lox`, the
+CRC32 in `examples/codecrafters/build-your-own-http-server/http.lox`, and the
+idler task in `benchmarks/core/richards.lox` do bit work with `math.floor`,
+`%` and `*`. A class with `__eq__` and `__hash__` makes two halves one value
+and a map key. That emulation is not a number: it has no arithmetic and no
+numeric order, and each bit operation is a loop. It is also slow.
 
 ### Performance
 
@@ -85,7 +91,8 @@ can use Int.
   undefined. Here it is a runtime fault, so "Fail loudly" still applies.
 - **"Simple".** Two numeric kinds and seven operators add surface. One
   mixed-kind table holds all the arithmetic rules, so a reader finds them in
-  one place.
+  one place. The bit operators have no operator protocol, which keeps the
+  protocol table and every backend smaller.
 - **Cost of large Ints in the native VM.** An int64 does not fit inline in a
   NaN-boxed Value, so an operation whose result has high bits allocates (see
   "Native layout"). The *cost* control asks for a cost that the programmer
@@ -95,12 +102,12 @@ can use Int.
 
 ## Native layout
 
-This section answers the question of how the native VM holds an int64.
+How the native VM holds an int64.
 
 A Value is 64 bits. Every double and every int64 cannot both fit inline in 64
 bits, so one of the two kinds needs a box for some values.
 
-**Recommendation: a small Int inline, and a box for the rest.**
+**A small Int inline, and a box for the rest.**
 
 - The positive quiet-NaN space has 50 payload bits, and only the values 1 to 4
   are in use (`src/value.h`). An inline Int takes one tag bit of that space and
@@ -110,16 +117,18 @@ bits, so one of the two kinds needs a box for some values.
 - An Int outside that range is a heap object that holds one `int64_t`. It
   is immutable. Equality, hashing and printing use the value, never the
   address, so a program cannot see if an Int is inline or boxed.
-- The spec binds int64 only. The inline width is implementation-defined, and
-  the JVM backend uses `long` with no such split.
+- The spec binds int64 only. The inline width is implementation-defined, so a
+  change of the width, or a JIT that keeps Ints in registers, is not a
+  language change. The JVM backend uses `long` with no such split.
 - Doubles do not change. Float code keeps its speed.
 
-**Cost of a box.** On the same `release` build, one allocation of a small
-object adds about 60 ns to a loop step (205 ns becomes 265 ns, three runs).
-A round of xorshift64 on 64-bit values can box each of its six results, so the
-worst case adds about 0.4 µs. The fastest emulation takes 22 µs a round.
+**Cost of a box.** On a `release` build, one allocation of a small object adds
+about 60 to 80 ns to a loop step, and about 100 ns when the collector has
+100,000 live objects to mark. A round of xorshift64 on 64-bit values can box
+each of its six results, so the worst case adds about 0.4 µs. The fastest
+emulation takes 22 µs a round.
 
-**Alternatives and why they are not recommended:**
+**Alternatives and why they are not chosen:**
 
 | Alternative | Reason |
 |---|---|
@@ -140,11 +149,10 @@ depend on it.
   it is the direct operand of a unary `-`. So `-9223372036854775808` is the
   smallest Int, and `- (9223372036854775808)` is an error. The standard
   library also gives `math.int_min` and `math.int_max`.
-- Open: hexadecimal `0x…` and binary `0b…` Int literals. Recommendation: add
-  them, because a programmer writes masks in hex and binary. A hex or binary
-  literal gives a 64-bit pattern, so `0xFFFFFFFFFFFFFFFF` is `-1` and
-  `0x8000000000000000` is `math.int_min`, as in Java. A literal with more than
-  64 bits is a compile-time error.
+- `0x` followed by hex digits, and `0b` followed by binary digits, are Int
+  literals. Each gives a 64-bit pattern, as in Java: `0xFFFFFFFFFFFFFFFF` is
+  `-1` and `0x8000000000000000` is `math.int_min`. A literal with more than
+  64 bits is a compile-time error. There are no digit separators.
 - New tokens: `&`, `|`, `^`, `~`, `<<`, `>>`, `>>>`. The scanner does not use
   any of them today (`src/scanner.cpp`: `<` and `>` take only `=` after them).
   The planned pipe operator `|>` (`docs/decisions/dynamic-functional-programming.md`)
@@ -153,10 +161,16 @@ depend on it.
 ### Precedence
 
 The bit operators go between comparison and `+ -`, in the Python order. So
-`x & m == 0` means `(x & m) == 0`, and the C trap does not occur.
+`x & m == 0` means `(x & m) == 0`, and the C trap does not occur. This is the
+full table that replaces the one in `spec/02-syntax.md`, "Operator
+Precedence"; the expression grammar changes to match.
 
 | Precedence | Operators | Associativity |
 |---|---|---|
+| 1 (lowest) | `=` (assignment) | Right |
+| 2 | `or` | Left |
+| 3 | `and` | Left |
+| 4 | `==` `!=` | Left |
 | 5 | `<` `<=` `>` `>=` `in` | Left |
 | 6 | `\|` | Left |
 | 7 | `^` | Left |
@@ -165,9 +179,7 @@ The bit operators go between comparison and `+ -`, in the Python order. So
 | 10 | `+` `-` | Left |
 | 11 | `*` `/` `%` | Left |
 | 12 | `!` `-` `~` (unary) | Right (prefix) |
-
-The rows above 5 do not change. `spec/02-syntax.md`, "Operator Precedence" and
-the expression grammar, change to match.
+| 13 (highest) | `()` (function call), `.` (property access), `[]` (index) | Left |
 
 ### Arithmetic
 
@@ -177,25 +189,28 @@ the expression grammar, change to match.
 | `a / b` | Float | Float |
 | `a % b` | Int, floor semantics; `b == 0` faults; `math.int_min % -1` is `0` | Float, floor semantics (as today) |
 | `-a` | Int, wraps (`-math.int_min` is `math.int_min`) | Float |
-| `idiv(a, b)` | Int, floor; `b == 0` faults; `idiv(math.int_min, -1)` wraps to `math.int_min` and does not fault | Float, `floor(a / b)` |
+| `math.idiv(a, b)` | Int, floor; `b == 0` faults; `math.idiv(math.int_min, -1)` wraps to `math.int_min` and does not fault | Float, `floor(a / b)` |
 
 In C, `INT_MIN % -1` and `INT_MIN / -1` are undefined. Here both are defined,
 and neither is a fault.
 
-The existing operator dunders (`__add__` and the others) do not change.
+The existing operator protocols (`__add__` and the others) do not change.
 
 ### Bit operators
 
-- The operands must be Ints. A Float operand, also an integral one, is a
-  runtime fault.
+- The operands must be Ints. Any other operand, also an integral Float and
+  also an Instance, is a type fault.
 - `~x` inverts every bit. `a & b`, `a | b` and `a ^ b` work on all 64 bits.
 - `x << n` shifts left and wraps. `x >> n` shifts right and copies the sign
   bit. `x >>> n` shifts right and fills with zero bits.
 - A shift count `n` outside 0 to 63 is a runtime fault.
-- Open: dunders for the new operators (`__and__`, `__or__`, `__xor__`,
-  `__lshift__`, `__rshift__`, `__urshift__`, `__invert__`, and the reflected
-  forms). Recommendation: add them, to agree with the `Protocol` enum in
-  `src/runtime.h`.
+- The bit operators have no operator protocol. The purpose of the operators is
+  a control over machine words. A wider pattern (a 128-bit bitboard, a Bloom
+  filter, a BigInt) is a class over Ints with methods, and the spelling of a
+  library is not a language gap. The spec's protocol table gets a row that
+  says so, so the check script counts it. A protocol can come later as its
+  own proposal, with a program that needs it as the probe; the addition is
+  additive, because no program that runs today changes its meaning.
 
 ### Equality, ordering and hashing
 
@@ -214,22 +229,33 @@ The existing operator dunders (`__add__` and the others) do not change.
 
 - An Int prints as its decimal digits, with a `-` sign when it is negative.
 - A Float prints with a `.` or an exponent: `1.0`, `3.5`, `1e+20`. The exact
-  format is one table in the spec. The native `stringify` (`src/value.cpp`)
-  and the JVM `formatNumber` (`runtime/jvm/src/lox/LoxOps.java`) both follow it.
+  format is one table in the spec, and that table is a deliverable of the
+  first mission node, because every `CHECK` line that shows a Float depends
+  on it. The native `stringify` (`src/value.cpp`) and the JVM `formatNumber`
+  (`runtime/jvm/src/lox/LoxOps.java`) both follow it.
 
 ### Indexing
 
 - An index and a slice bound must be an Int.
-- Open: is `xs[2.0]` a fault? Recommendation: yes, because a Float index is
-  almost always an error. The `IndexNotIntegerError` row then changes to a
-  type fault.
+- A Float index, `xs[2.0]` included, is a type fault. The error message names
+  `math.idiv`, because `xs[n / 2]` is the case a user meets first. The
+  `IndexNotIntegerError` row of the fault table becomes this type fault.
 
 ### Standard library
 
 - `len`, `ord`, `math.floor`, `math.ceil` and `math.round` return an Int.
+  For `floor`, `ceil` and `round`, a NaN, an infinity, or a result outside the
+  int64 range is a runtime fault. A program tests the range first when it
+  needs to.
 - `chr`, `exit`, the port arguments, `sleep` and `read_bytes(n)` take an Int.
-- `type()` returns a new name for each kind (see "Open questions").
-- Open: the conversions `int(x)` and `float(x)`. Recommendation: add them.
+- `type()` returns `"Int"` or `"Float"`.
+- `int(x)`: an Int gives itself. A Float truncates toward zero; a NaN, an
+  infinity, or a value outside the int64 range is a runtime fault. A String
+  parses as a decimal integer, with an optional sign, or faults.
+- `float(x)`: a Float gives itself. An Int converts exactly up to 2^53 and
+  rounds to the nearest double beyond. A String parses as a decimal number, or
+  faults.
+- `math.idiv(a, b)`, `math.int_min` and `math.int_max` are added to `math`.
 - Out of scope: helpers such as popcount, count of leading or trailing zeros,
   and rotate. A later proposal can add them.
 
@@ -249,11 +275,11 @@ Each consumer and what it owes under the backend roles in `VISION.md`.
 | QBE backend | What its experiment needs | It writes NaN-box bit patterns into its output (`src/backend/qbe_emitter.cpp`, `src/backend/rt_capi.cpp`). The new representation must not break it. Expected-failure entries are permitted |
 | Bootstrap interpreter | The spec | `parseNumber`, `isLoxNum`, `reflectTypeName`, the index checks, the scanner, the parser precedence, and the new operators in `bootstrap/loxpp_interpreter.lox`. It can use host Ints and host bit operators after the native VM has them |
 | Resolver | Accept the new expressions | `src/analyze.cpp` has no number logic |
-| LSP | Correct documentation | `-> Number` signatures in `src/lsp/stdlib_docs.cpp` |
+| LSP | Correct documentation | The 29 `Number` mentions in `src/lsp/stdlib_docs.cpp` become `Int` or `Float` |
 | tree-sitter grammar | Parse every program | `editors/tree-sitter-loxpp/grammar.js`: tokens, precedence, Int and Float literals |
 | Editor syntaxes | Highlight the new tokens | `editors/loxpp-vscode/syntaxes/lox.tmLanguage.json`, the `editors/loxpp.tmbundle` syntaxes, `editors/loxpp.nvim/syntax/lox.vim` |
 | Fault table check | Cover the new rows | `tools/check_fault_table.py` |
-| Spec | Define it | `spec/01-lexical.md`, `spec/02-syntax.md`, `spec/03-types.md`, `spec/04-semantics.md` (operators, precedence, indexing, the fault table), `spec/05-stdlib.md` |
+| Spec | Define it | `spec/01-lexical.md`, `spec/02-syntax.md`, `spec/03-types.md`, `spec/04-semantics.md` (operators, precedence, the protocol table, indexing, the fault table), `spec/05-stdlib.md` |
 
 ## Countable sets
 
@@ -262,12 +288,19 @@ table is complete, before backend work starts:
 
 - the mixed-kind operator table (each operator against each pair of kinds);
 - the precedence table;
-- the new fault rows: a bit operator on a Float, a shift count out of range,
-  Int `% 0`, `idiv` by zero, a Float index (if the owner accepts that);
+- the operator protocol table, with a row for the bit operators that says
+  "no protocol";
+- the compile-time rejections: a decimal Int literal outside the int64 range
+  (except the unary-minus case), and a hex or binary literal of more than 64
+  bits;
+- the new runtime fault rows: a bit operator on a non-Int, a shift count out
+  of range, Int `% 0`, `math.idiv` by zero, a Float index, `floor`, `ceil` or
+  `round` on a NaN, an infinity, or a value outside the int64 range, `int()`
+  on the same, and `int()` or `float()` on a String that does not parse;
 - the edge rows that do not fault, so the check script sees them:
-  `math.int_min % -1` is `0`, `idiv(math.int_min, -1)` is `math.int_min`,
-  `-math.int_min` is `math.int_min`, and `math.int_max + 1` is
-  `math.int_min`.
+  `math.int_min % -1` is `0`, `math.idiv(math.int_min, -1)` is
+  `math.int_min`, `-math.int_min` is `math.int_min`, and `math.int_max + 1`
+  is `math.int_min`.
 
 ## Program impact
 
@@ -275,31 +308,27 @@ The repository has about 500 `.lox` programs and 1441 `CHECK` lines.
 
 - A whole-number Float prints `5.0`, not `5`. Each `CHECK` line that shows a
   result of `/` or of Float math changes.
-- 38 `floor(a / b)` patterns change if `floor` returns an Int.
+- 38 `floor(a / b)` patterns keep their meaning, because `floor` returns an
+  Int. A program that indexes with `a / b` directly changes to `math.idiv`.
 - Two `CHECK` lines in `%g` exponent form (`3.6288e+06`, `9.22746e+06`) change
   when the value is an Int.
+- Four programs test `type(x) == "Number"` (`examples/bigint.lox`,
+  `examples/json.lox`, the SQLite example, and one translation probe) and
+  change to the two names. The bootstrap interpreter's `reflectTypeName`
+  changes with them.
 
 The mission updates every affected program in the same PRs, with no
 deprecation period (`AGENTS.md`). It also adds programs that use masks (a flag
 set, a bitboard) as probes of the purpose.
 
-## Open questions
-
-1. `type()` names. Recommendation: `"Int"` and `"Float"`, to agree with the
-   capitalized names today (`"Number"`, `"String"`).
-2. Hex and binary literals. Recommendation: yes.
-3. `xs[2.0]`. Recommendation: a fault.
-4. `math.floor(1e300)`: a Float result, or a fault?
-5. `int(x)` and `float(x)`, and where `idiv` lives (globals or `math`).
-6. Dunders for the new operators. Recommendation: yes.
-
-The question of the native Value layout has an answer in "Native layout".
-
 ## Mission sketch
 
 This is not a node list. The DAG goes in the tracking issue after acceptance.
 
-1. Spec, shared probes, and expected-failure files.
+1. Spec, the Float print format table, shared probes, and expected-failure
+   files. The probes cover compile-time behavior (the literal rejections and
+   the unary-minus exception) and run-time behavior, as `AGENTS.md` requires
+   of the differential gate.
 2. Native: the value layer, then arithmetic and bit operators, then the
    standard library and printing.
 3. JVM.
