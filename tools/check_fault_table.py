@@ -236,7 +236,7 @@ CATCHABLE_ROWS = [
     Row(
         "constructor_arity_error",
         "caught",
-        "ok(1, 2);",
+        "E.ok(1, 2);",
         setup="enum E { ok(x) }\n",
         expected_kind="ConstructorArityError",
     ),
@@ -562,20 +562,20 @@ FATAL_ROWS = [
         "enum_index_type_error",
         "fatal",
         'v["a"];',
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     # Issue #764: a fractional index is rejected, as for a List and a String.
     Row(
         "enum_index_fractional",
         "fatal",
         "v[0.5];",
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     Row(
         "enum_index_out_of_range",
         "fatal",
         "v[3];",
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     # Regression armor for issue #363: a NaN/infinite/oversized index has no
     # well-defined narrowing conversion to int on any consumer (C++
@@ -587,19 +587,19 @@ FATAL_ROWS = [
         "enum_index_nan",
         "fatal",
         "v[0.0/0.0];",
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     Row(
         "enum_index_infinity",
         "fatal",
         "v[1.0/0.0];",
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     Row(
         "enum_index_oversized",
         "fatal",
         "v[99999999999.0];",
-        setup="enum E { A(x) } var v = A(1);\n",
+        setup="enum E { A(x) } var v = E.A(1);\n",
     ),
     Row(
         "string_index_assignment",
