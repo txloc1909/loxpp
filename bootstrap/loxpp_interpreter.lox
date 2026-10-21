@@ -1133,19 +1133,16 @@ class Parser {
         return MatchArm(pats, guard, stmts, tailExpr);
     }
 
-    // Only an arm of literals may chain patterns with commas (spec/02-syntax.md,
-    // armPats). The parser cannot tell a class or constructor name from a
-    // binding, and native reports a different message for each, so for any
-    // other arm it records the first comma in this.armChain and the resolver
-    // reports it.
+    // Only `or` joins the alternatives of an arm (spec/02-syntax.md,
+    // armPats); a comma is an error. The parser cannot tell a class name from
+    // a binding, and native reports a different message for each, so it
+    // records the first comma in this.armChain and the resolver reports it.
     parseMatchArmPatterns() {
         var pats = [];
         this.armChain = nil;
-        var literalArm = this.check("NUMBER") or this.check("STRING") or
-                         this.check("TRUE") or this.check("FALSE") or this.check("NIL");
         pats.append(this.parsePattern());
         while (this.check("OR") or this.check("COMMA")) {
-            if (this.check("COMMA") and !literalArm and this.armChain == nil) {
+            if (this.check("COMMA") and this.armChain == nil) {
                 this.armChain = [this.peek(), this.previous(), len(pats) - 1];
             }
             this.advance();
@@ -1286,18 +1283,18 @@ class Resolver {
         this.hadError        = false;
         this.loopDepth       = 0;
         this.matchArmDepth   = 0;
-        // Constructor name -> name of its enum, and enum name -> its
-        // constructor names in declaration order. Both are global.
-        this.enumCtors       = {};
+        // Enum name -> its constructor names in declaration order.
         this.enumDecls       = {};
-        // Constructor name -> its declared field names, in declaration order.
-        // A named-field constructor pattern binds these fields by name.
+        // "E.A" -> the declared field names of the constructor A of E, in
+        // declaration order. A named-field constructor pattern binds these
+        // fields by name.
         this.enumCtorFields  = {};
-        // Global classes declared so far, in source order. With enumCtors,
-        // this set decides the pattern names that classifyArmPat changes.
+        // Global classes declared so far, in source order. This set decides
+        // the bare pattern names that classifyArmPat makes class tests.
         this.classNames      = {};
         // Every enum name of the program (the parser's scan), the enums
-        // declared so far, and "E.A" for each constructor A of a declared E.
+        // declared so far, and "E.A" -> E for each constructor A of a
+        // declared E.
         this.enumNames       = {};
         this.declaredEnums   = {};
         this.qualifiedCtors  = {};
@@ -1652,8 +1649,9 @@ class Resolver {
     }
 
     // An enum is registered when its first constructor is, so an enum with
-    // no constructor can be declared twice. A duplicate constructor stops
-    // the declaration; the constructors before it stay registered.
+    // no constructor can be declared twice. Constructors of different enums
+    // may share a name. A duplicate constructor in one enum stops the
+    // declaration; the constructors before it stay registered.
     resolveEnumDecl(name, ctor_names, ctor_fields_list, keyword_line, name_line, ctor_lines) {
         if (len(this.scopes) > 0) {
             this.resError("enum", keyword_line, "Enum declarations are only allowed at global scope.");
@@ -1667,13 +1665,13 @@ class Resolver {
         var i = 0;
         while (i < len(ctor_names)) {
             var cname = ctor_names[i];
-            if (this.enumCtors.has(cname)) {
+            var qname = name + "." + cname;
+            if (this.qualifiedCtors.has(qname)) {
                 this.resError(cname, ctor_lines[i], "Duplicate constructor name.");
                 return;
             }
-            this.enumCtors[cname] = name;
-            this.qualifiedCtors[name + "." + cname] = true;
-            this.enumCtorFields[cname] = ctor_fields_list[i];
+            this.qualifiedCtors[qname] = name;
+            this.enumCtorFields[qname] = ctor_fields_list[i];
             if (!this.enumDecls.has(name)) this.enumDecls[name] = [];
             this.enumDecls[name].append(cname);
             i = i + 1;
@@ -1734,17 +1732,16 @@ class Resolver {
         return Pattern.AtPat(at_name, sub);
     }
 
+    // A bare name is never a constructor test: it is a class test when a
+    // global class of that name is declared earlier, and a binding
+    // otherwise. An enum name stays a binding, which declare rejects.
     classifyBareName(pat, name) {
-        // An enum name stays a binding, which declare rejects, also where a
-        // constructor has that name. A constructor wins over a class of the
-        // same name.
         if (this.enumNames.has(name)) return pat;
-        if (this.enumCtors.has(name)) return Pattern.TagPat(name, nil, 0);
         if (this.classNames.has(name)) return Pattern.ClassPat(name);
         return pat;
     }
 
-    // A comma after a pattern of an arm that is not a literal chain. Native
+    // A comma after a pattern of an arm. Native
     // names the binding when the pattern before the comma is a plain name that
     // stays a binding or `_`, and the missing `=>` otherwise.
     reportArmChain(chain, pat) {
@@ -1787,9 +1784,10 @@ class Resolver {
     // pattern of a constructor names declared fields; a class has no fixed
     // field set, so its names are bindings.
     resolveCtorPat(cname, subpats, named, line, enum_name) {
-        if (enum_name != nil and !this.checkQualifiedCtor(enum_name, cname, line)) return;
-        if (this.enumCtors.has(cname)) {
-            var arity = len(this.enumCtorFields[cname]);
+        if (enum_name != nil) {
+            if (!this.checkQualifiedCtor(enum_name, cname, line)) return;
+            var qname = enum_name + "." + cname;
+            var arity = len(this.enumCtorFields[qname]);
             if (!named and len(subpats) > arity) {
                 this.resError(cname, line, "Too many fields in constructor pattern.");
                 return;
@@ -1799,7 +1797,7 @@ class Resolver {
                 return;
             }
             if (named) {
-                var fields = this.enumCtorFields[cname];
+                var fields = this.enumCtorFields[qname];
                 var i = 0;
                 while (i < len(subpats)) {
                     var fname = match subpats[i] {
@@ -1931,19 +1929,20 @@ class Resolver {
         }
     }
 
-    // The constructor that an arm pattern tests, or nil. classifyArmPat has
-    // already turned a bare constructor name into a TagPat.
+    // "E.A" for the constructor that an arm pattern tests, or nil.
     patCtorName(pat) {
         return match pat {
-            case Pattern.TagPat{cname}           => this.knownCtor(cname)
-            case Pattern.CtorPat{cname, subpats, named, line} => this.knownCtor(cname)
+            case Pattern.TagPat{cname, enum_name}           => this.knownCtor(enum_name, cname)
+            case Pattern.CtorPat{cname, enum_name} => this.knownCtor(enum_name, cname)
             case Pattern.AtPat{at_name, subpat}  => this.patCtorName(subpat)
             case _                       => nil
         };
     }
 
-    knownCtor(name) {
-        if (this.enumCtors.has(name)) return name;
+    knownCtor(enumName, name) {
+        if (enumName == nil) return nil;
+        var qname = enumName + "." + name;
+        if (this.qualifiedCtors.has(qname)) return qname;
         return nil;
     }
 
@@ -1960,7 +1959,7 @@ class Resolver {
     // Spec: a match with a constructor arm of enum E needs an arm for every
     // constructor of E, or an unguarded catch-all. A guarded arm counts.
     checkEnumExhaustive(seen, end_line) {
-        // Sorted, as native reports the enums in constructor-name order.
+        // Sorted, as native reports the enums in the order of "E.A".
         var names = [];
         var keys = seen.keys();
         var i = 0;
@@ -1977,7 +1976,7 @@ class Resolver {
         var checked = {};
         i = 0;
         while (i < len(names)) {
-            var enumName = this.enumCtors[names[i]];
+            var enumName = this.qualifiedCtors[names[i]];
             i = i + 1;
             if (checked.has(enumName)) continue;
             checked[enumName] = true;
@@ -1985,7 +1984,7 @@ class Resolver {
             var ctors = this.enumDecls[enumName];
             var c = 0;
             while (c < len(ctors)) {
-                if (!seen.has(ctors[c])) {
+                if (!seen.has(enumName + "." + ctors[c])) {
                     if (missing != "") missing = missing + ", ";
                     missing = missing + ctors[c];
                 }
@@ -2015,12 +2014,9 @@ class Resolver {
                 reportedUnreachable = true;
             }
             this.beginScope();
-            // A comma chain of literals is not an or-chain, and neither is a
-            // literal-first arm. Every other arm with more than one pattern
-            // separates its alternatives with `or` (spec/02-syntax.md,
-            // armPats).
-            var orArm = arm.chain == nil and len(arm.pats) > 1 and
-                        !this.isLiteralPattern(arm.pats[0]);
+            // An arm with more than one pattern separates its alternatives
+            // with `or` (spec/02-syntax.md, armPats); a comma is an error.
+            var orArm = arm.chain == nil and len(arm.pats) > 1;
             var firstNames = nil;
             var orOpen = true;
             var j = 0;
@@ -3269,11 +3265,9 @@ class LoxError {
 class Interpreter {
     init(locals) {
         this.locals        = locals;
-        // The resolver's enum constructor names and their declared field
-        // names. A constructor pattern tests an enum tag; any other name in a
-        // constructor pattern is a class. A named-field pattern binds by
-        // name, so the match reads the field index from here.
-        this.enumCtors      = {};
+        // The resolver's "E.A" -> declared field names. A named-field
+        // pattern binds by name, so the match reads the field index from
+        // here.
         this.enumCtorFields = {};
         this.globals       = Environment(nil);
         this.returnFlag    = false;
@@ -5232,15 +5226,14 @@ class Interpreter {
     }
 
     // An enum declaration defines its constructors, never the type name.
-    // Each constructor is the global "E.A", which E.A reads, and the global
-    // with its bare name. Both hold the same object, as constructors compare
-    // by identity.
+    // Each constructor is the global "E.A", which E.A reads. No identifier
+    // can spell that name, so a bare constructor name is an ordinary
+    // variable name.
     execEnumDecl(name, ctor_names, ctor_fields_list, env) {
         var i = 0;
         while (i < len(ctor_names)) {
             var ctor = LoxEnumCtor(name, ctor_names[i], ctor_fields_list[i]);
             env.define(name + "." + ctor_names[i], ctor);
-            env.define(ctor_names[i], ctor);
             i = i + 1;
         }
     }
@@ -5356,11 +5349,11 @@ class Interpreter {
             case Pattern.WildPat                   => true
             case Pattern.LitPat{v}                 => v == subject
             case Pattern.BindPat{name}             => this.matchBind(name, subject, bindings)
-            case Pattern.CtorPat{cname, subpats, named, line} => this.matchCtor(cname, subpats, named, subject, bindings)
+            case Pattern.CtorPat{cname, subpats, named, line, enum_name} => this.matchCtor(cname, enum_name, subpats, named, subject, bindings)
             case Pattern.ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case Pattern.AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
             case Pattern.ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
-            case Pattern.TagPat{cname}             => this.matchTag(cname, subject)
+            case Pattern.TagPat{cname, enum_name}  => this.matchTag(cname, enum_name, subject)
         };
     }
 
@@ -5375,27 +5368,23 @@ class Interpreter {
         return true;
     }
 
-    // An enum constructor test reads the subject's tag. A subject that is not
-    // an enum value is a fatal fault, as with native's GET_TAG. A class test
-    // has no such fault: a non-instance subject is a plain miss.
-    matchTag(cname, subject) {
-        if (loxTag(subject) != "enum_val") {
-            this.fatalError("GET_TAG: expected an enum value.");
-            return false;
-        }
-        return subject.tag == cname;
+    // The constructor test of E.A: the constructor A of the enum E made the
+    // subject. A value of another enum, or a value that is not an enum value,
+    // does not match, and the test never faults.
+    matchTag(cname, enumName, subject) {
+        if (loxTag(subject) != "enum_val") return false;
+        return subject.enumName == enumName and subject.tag == cname;
     }
 
-    matchCtor(cname, subpats, named, subject, bindings) {
+    // A pattern with a field list: E.A(...) or E.A{...} when enumName is
+    // set, and a class pattern otherwise.
+    matchCtor(cname, enumName, subpats, named, subject, bindings) {
         var stag = loxTag(subject);
-        if (stag != "enum_val" and this.enumCtors.has(cname)) {
-            return this.matchTag(cname, subject);
-        }
-        if (stag == "enum_val") {
-            if (subject.tag != cname) return false;
+        if (enumName != nil) {
+            if (!this.matchTag(cname, enumName, subject)) return false;
             var i = 0;
             if (named) {
-                var fields = this.enumCtorFields[cname];
+                var fields = this.enumCtorFields[enumName + "." + cname];
                 while (i < len(subpats)) {
                     var fname = match subpats[i] {
                         case Pattern.BindPat{name} => name
@@ -5558,7 +5547,6 @@ try {
         resolver.resolve(stmts);
         if (!resolver.hadError) {
             interpreter = Interpreter(resolver.locals);
-            interpreter.enumCtors = resolver.enumCtors;
             interpreter.enumCtorFields = resolver.enumCtorFields;
             // The per-call try in LoxFunction.call already converts an
             // overflow inside a target function call into this
