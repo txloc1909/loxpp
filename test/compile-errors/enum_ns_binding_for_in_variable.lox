@@ -1,0 +1,5 @@
+// DIAGNOSTIC: A variable can't have the name of the enum '<...>'.
+// Compile error: a for-in variable with the name of an enum.
+enum E { A(x) }
+print "before";
+for (var E in [1]) { print 1; }

@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Can't assign to the constructor '<...>.<...>'.
+// Compile error: an assignment to a qualified constructor.
+enum E { A }
+E.A = 1;

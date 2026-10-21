@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Can't assign to the enum '<...>'.
+// Compile error: an assignment to an enum name.
+enum E { A }
+print "before";
+E = 1;

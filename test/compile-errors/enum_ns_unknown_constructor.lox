@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Enum '<...>' has no constructor '<...>'.
+// Compile error: a qualified constructor that the enum does not declare.
+enum E { A }
+print "before";
+print E.B;

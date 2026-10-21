@@ -1,0 +1,5 @@
+// DIAGNOSTIC: Too few fields in constructor pattern.
+// Compile error: a positional constructor pattern with fewer names than fields.
+enum E { A(x, y) }
+print "before";
+var v = match E.A(1, 2) { case E.A(p) => p };
