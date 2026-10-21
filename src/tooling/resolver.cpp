@@ -4,6 +4,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "tooling/stdlib_names.h"
@@ -74,6 +75,10 @@ class Resolver {
     int m_functionDepth = 0;
     int m_loopDepth = 0;
     int m_matchDepth = 0;
+    // The enums declared at global scope. An enum name means the enum in
+    // the whole program, also where a constructor of another enum has the
+    // same name in the global scope.
+    std::unordered_map<std::string_view, Symbol*> m_enums;
 
     struct PendingVar {
         std::string_view name;
@@ -181,6 +186,7 @@ class Resolver {
                                             nameSpan(e.name), stmtSpan(e));
                 enumSym->isEnum = true;
                 enumSym->members = std::move(ctors);
+                m_enums.emplace(e.name.text, enumSym);
                 break;
             }
             default:
@@ -198,7 +204,7 @@ class Resolver {
                  "'" + std::string(name) + "' is used in its own initializer");
             return;
         }
-        if (Symbol* sym = lookup(name, m_current)) {
+        if (Symbol* sym = lookupPreferEnum(name, m_current)) {
             sym->uses.push_back(span);
             m_out.references.add({span, sym, false, false});
             return;
@@ -208,6 +214,24 @@ class Resolver {
             return;
         }
         warn(span, "unknown name '" + std::string(name) + "'");
+    }
+
+    // The symbol of a global enum with this name, or nullptr.
+    Symbol* enumNamed(std::string_view name) const {
+        const auto it = m_enums.find(name);
+        return it == m_enums.end() ? nullptr : it->second;
+    }
+
+    // A local declaration wins, as in lookup(). In the global scope an enum
+    // wins over a constructor of another enum with the same name.
+    Symbol* lookupPreferEnum(std::string_view name, Scope* from) const {
+        Symbol* sym = lookup(name, from);
+        if (sym == nullptr || sym->scope->kind == ScopeKind::Global) {
+            if (Symbol* e = enumNamed(name)) {
+                return e;
+            }
+        }
+        return sym;
     }
 
     static bool scopeWithin(const Scope* inner, const Scope* outer) {
@@ -464,7 +488,7 @@ class Resolver {
             }
             return;
         }
-        Symbol* enumSym = m_current->findLocal(e.name.text);
+        Symbol* enumSym = enumNamed(e.name.text);
         if (enumSym != nullptr) {
             m_out.references.add({nameSpan(e.name), enumSym, true, false});
         }
@@ -605,7 +629,7 @@ class Resolver {
             visitExpr(e.object.get());
             if (e.object != nullptr && e.object->kind == ExprKind::Identifier) {
                 const auto& obj = static_cast<const IdentifierExpr&>(*e.object);
-                Symbol* sym = lookup(obj.name, m_current);
+                Symbol* sym = lookupPreferEnum(obj.name, m_current);
                 if (sym != nullptr && sym->isEnum) {
                     resolveEnumMember(sym, e.name,
                                       {e.name_offset, e.name_length});
@@ -743,7 +767,7 @@ class Resolver {
     // The head `E.A` of a pattern: a use of E and of its constructor A.
     void resolveQualifiedCtor(const Name& enumName, std::string_view name,
                               Span span, Scope* armScope) {
-        Symbol* sym = lookup(enumName.text, armScope);
+        Symbol* sym = lookupPreferEnum(enumName.text, armScope);
         if (sym == nullptr || !sym->isEnum) {
             warn(nameSpan(enumName),
                  "'" + std::string(enumName.text) + "' is not an enum");

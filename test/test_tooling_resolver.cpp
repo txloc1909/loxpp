@@ -341,6 +341,28 @@ var v = E.E(5);
     EXPECT_EQ(ctorDef->offset, offsetOf(src, "E(x)"));
 }
 
+TEST(ToolingResolver, EnumNameWinsOverConstructorOfALaterEnum) {
+    const std::string src = R"(enum G { X(v) }
+enum F { G(w) }
+var a = G.X(1);
+print match a { case G.X(v) => v };
+)";
+    DocumentModel model(src);
+    EXPECT_TRUE(warningMessages(model).empty())
+        << "first warning: " << warningMessages(model).front();
+    const std::size_t enumDecl = offsetOf(src, "G {");
+    const std::size_t xDecl = offsetOf(src, "X(v)");
+    for (int nth : {1, 2}) {
+        const std::size_t use = offsetOf(src, "G.X", nth);
+        auto enumDef = model.definitionAt(use);
+        ASSERT_TRUE(enumDef) << "occurrence " << nth;
+        EXPECT_EQ(enumDef->offset, enumDecl) << "occurrence " << nth;
+        auto ctorDef = model.definitionAt(use + 2);
+        ASSERT_TRUE(ctorDef) << "occurrence " << nth;
+        EXPECT_EQ(ctorDef->offset, xDecl) << "occurrence " << nth;
+    }
+}
+
 TEST(ToolingResolver, OrPatternBindsSameName) {
     const std::string src = R"(enum E { Move(x) Teleport(x) Quit }
 fun go(e) {
