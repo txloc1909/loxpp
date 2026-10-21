@@ -18,15 +18,16 @@
  *   /mission-status <issue>   show plan_resume.py + status.py output
  *
  * Tools:
- *   loxpp_gate     build/test gate, run inside the dev container
- *   loxpp_done     verify the done criteria (gate + optional CI + review) and end
+ *   loxpp_gate     build/test gate, run inside the dev container, with fail-fast preflight
+ *   loxpp_done     declare done: gate always; CI + review when a PR number is given
  *   loxpp_issue    read a GitHub issue with the full --json --template form
  *   loxpp_pr       read a PR with the full form (body + comments + reviews)
  *
  * loxpp_done is the single termination point. It always re-runs the gate, so a
  * stale green gate can never end a mode, and it widens "done" beyond a local
- * green gate to CI status and reviewer approval when those criteria are named.
- * The turn_end continuation is bounded by a per-mode budget.
+ * green gate to CI status and reviewer approval whenever a PR number is given.
+ * The turn_end continuation is bounded by a per-mode budget and stops early when
+ * the gate fails identically three times in a row.
  */
 
 import { spawn } from "node:child_process";
@@ -106,13 +107,13 @@ const PLANNING_PROMPT = `Work in plan-first mode. Do not edit files, commit, pus
 
 Answer with the plan only. The human runs /approve when the plan is accepted.`;
 
-const GOAL_WORKING_PROMPT = (goal: string) => `[GOAL MODE — implement]\n\nGoal: ${goal}\n\nThe plan is approved. Implement it now, per AGENTS.md.\n\n1. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n2. Implement, then run loxpp_gate (it builds and tests inside the dev container) until it passes.\n3. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n4. Open a PR when the work is ready for review.\n5. Done means more than a local green gate. When you open a PR, call loxpp_done with the PR number and criteria ci+review, so CI green and reviewer approval are also required.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
+const GOAL_WORKING_PROMPT = (goal: string) => `[GOAL MODE — implement]\n\nGoal: ${goal}\n\nThe plan is approved. Implement it now, per AGENTS.md.\n\n1. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n2. Implement, then run loxpp_gate (it builds and tests inside the dev container) until it passes.\n3. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n4. Open a PR when the work is ready for review.\n5. Done means more than a local green gate. When you open a PR, call loxpp_done with the PR number; it then also requires CI green and reviewer approval.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
 
-const GOAL_HANDOFF_PROMPT = (goal: string) => `[GOAL MODE — hand-off]\n\nGoal: ${goal}\n\nThe human handed the approval decision to you. Plan, implement, and finish without waiting.\n\n1. Plan: read the binding context (VISION.md, spec/, docs/decisions/, docs/README.md). If this is a language change, list every consumer first per AGENTS.md. Keep the plan as your working notes, not a waiting step.\n2. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n3. Implement, then run loxpp_gate (it builds and tests inside the dev container) until it passes.\n4. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n5. Open a PR when the work is ready for review.\n6. Done means more than a local green gate. When you open a PR, call loxpp_done with the PR number and criteria ci+review, so CI green and reviewer approval are also required.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
+const GOAL_HANDOFF_PROMPT = (goal: string) => `[GOAL MODE — hand-off]\n\nGoal: ${goal}\n\nThe human handed the approval decision to you. Plan, implement, and finish without waiting.\n\n1. Plan: read the binding context (VISION.md, spec/, docs/decisions/, docs/README.md). If this is a language change, list every consumer first per AGENTS.md. Keep the plan as your working notes, not a waiting step.\n2. Add a test or probe for the goal's behavior and connect it to ctest (AGENTS.md engineering rules).\n3. Implement, then run loxpp_gate (it builds and tests inside the dev container) until it passes.\n4. Commit when the code compiles and push after each commit (AGENTS.md). Conventional commits; split if the subject would say "and".\n5. Open a PR when the work is ready for review.\n6. Done means more than a local green gate. When you open a PR, call loxpp_done with the PR number; it then also requires CI green and reviewer approval.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
 
-const LOOP_PROMPT = (goal: string) => `[LOOP MODE — hand-off]\n\nGoal: ${goal}\n\nWork in a tight loop until the gate passes:\n1. Make one focused change (or fix the latest failure).\n2. Call loxpp_gate (it builds and tests inside the dev container).\n3. If it fails, read the tail of the output, fix the smallest thing that unblocks it, and repeat.\n4. When the gate is green, call loxpp_done to finish. If the work is on a PR, pass the PR number and criteria ci+review, so the loop does not stop before CI is green and the reviewer approved.\n\nCommit when the code compiles and push after each commit, per AGENTS.md. Do not ask to stop.`;
+const LOOP_PROMPT = (goal: string) => `[LOOP MODE — hand-off]\n\nGoal: ${goal}\n\nWork in a tight loop until the gate passes:\n1. Make one focused change (or fix the latest failure).\n2. Call loxpp_gate (it builds and tests inside the dev container).\n3. If it fails, read the tail of the output, fix the smallest thing that unblocks it, and repeat.\n4. When the gate is green, call loxpp_done to finish. If the work is on a PR, pass the PR number; the loop then does not stop before CI is green and the reviewer approved.\n\nCommit when the code compiles and push after each commit, per AGENTS.md. Do not ask to stop.`;
 
-const NODE_PROMPT = (n: string) => `[RESOLVE-ISSUE MODE — implementer, hand-off]\n\nNode issue: #${n}\n\n1. Read the node spec with loxpp_issue (full form — a hazard may live in a comment).\n2. Read docs/process/multi-agent-playbook.md, the decision in docs/decisions/ this node serves, and the spec/reference docs the issue names.\n3. Create a worktree and branch per AGENTS.md's task loop. Pass the checkout you work in to loxpp_gate and loxpp_done via their cwd argument, so the gate builds and tests that tree inside the dev container, not the main checkout.\n4. Implement the deliverable; respect the issue's Scope section — out-of-scope cases fail loudly and name this node.\n5. Checkpoint: rebuild fully, then run loxpp_gate until green (ctest does not rebuild).\n6. Commit atomically with conventional commits; push after each commit.\n7. Open a PR whose body contains \`Closes #${n}\`, and tag yourself \`[Implementer]\`. Do not poll CI.\n8. Call loxpp_done with the PR number and criteria ci+review. Done requires the local gate green, CI green, and the reviewer approved.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
+const NODE_PROMPT = (n: string) => `[RESOLVE-ISSUE MODE — implementer, hand-off]\n\nNode issue: #${n}\n\n1. Read the node spec with loxpp_issue (full form — a hazard may live in a comment).\n2. Read docs/process/multi-agent-playbook.md, the decision in docs/decisions/ this node serves, and the spec/reference docs the issue names.\n3. Create a worktree and branch per AGENTS.md's task loop. Pass the checkout you work in to loxpp_gate and loxpp_done via their cwd argument, so the gate builds and tests that tree inside the dev container, not the main checkout.\n4. Implement the deliverable; respect the issue's Scope section — out-of-scope cases fail loudly and name this node.\n5. Checkpoint: rebuild fully, then run loxpp_gate until green (ctest does not rebuild).\n6. Commit atomically with conventional commits; push after each commit.\n7. Open a PR whose body contains \`Closes #${n}\`, and tag yourself \`[Implementer]\`. Do not poll CI.\n8. Call loxpp_done with the PR number. Done requires the local gate green, CI green, and the reviewer approved.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
 
 interface AutonomyState {
   mode: "goal" | "loop" | "resolve-issue" | null;
@@ -179,18 +180,19 @@ async function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefi
 // (AGENTS.md), so the gate always enters the container via podman.
 async function gatePreflight(
   scope: "native" | "backend",
-  cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ ok: boolean; output: string }> {
   const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
-  const podman = await runArgv(["podman", "--version"], cwd, signal);
+  // These checks do not depend on the checkout; run them from process.cwd() so a
+  // missing checkout is not misreported as a missing podman.
+  const podman = await runArgv(["podman", "--version"], process.cwd(), signal);
   if (podman.code !== 0) {
     return {
       ok: false,
       output: "podman is not installed on the host. The gate builds and tests inside the dev container, so podman is required.",
     };
   }
-  const imageCheck = await runArgv(["podman", "image", "exists", image], cwd, signal);
+  const imageCheck = await runArgv(["podman", "image", "exists", image], process.cwd(), signal);
   if (imageCheck.code !== 0) {
     return {
       ok: false,
@@ -205,7 +207,7 @@ async function runGate(
   cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ passed: boolean; output: string }> {
-  const preflight = await gatePreflight(scope, cwd, signal);
+  const preflight = await gatePreflight(scope, signal);
   if (!preflight.ok) {
     return { passed: false, output: preflight.output };
   }
@@ -232,7 +234,9 @@ async function ciGreen(
 ): Promise<{ ok: boolean; state: "green" | "pending" | "failed"; output: string }> {
   const r = await runArgv(["gh", "pr", "checks", pr, "--repo", repo], cwd, signal);
   if (r.code === 0) return { ok: true, state: "green", output: r.output };
-  const state = /pending/i.test(r.stdout) ? "pending" : "failed";
+  // Failure before pending: a mixed run with a failed and a pending check must
+  // read as failed, not "still running".
+  const state = /fail/i.test(r.stdout) ? "failed" : /pending/i.test(r.stdout) ? "pending" : "failed";
   return { ok: false, state, output: r.output };
 }
 
@@ -307,6 +311,20 @@ export default function loxppModes(pi: ExtensionAPI): void {
     pi.appendEntry("loxpp-modes", { autonomy, plan } satisfies PersistedState);
   }
 
+  function recordGate(scope: "native" | "backend", cwd: string, passed: boolean, output: string): void {
+    autonomy.lastGatePassed = passed;
+    autonomy.lastScope = scope;
+    autonomy.lastCwd = cwd;
+    if (passed) {
+      autonomy.sameFailureCount = 0;
+      autonomy.lastGateOutput = undefined;
+    } else {
+      const sig = output.slice(-800);
+      autonomy.sameFailureCount = sig === autonomy.lastGateOutput ? autonomy.sameFailureCount + 1 : 1;
+      autonomy.lastGateOutput = sig;
+    }
+  }
+
   function notify(ctx: ExtensionContext, text: string, kind: "info" | "error" = "info"): void {
     if (ctx.hasUI) ctx.ui.notify(text, kind);
   }
@@ -357,17 +375,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
       const scope: "native" | "backend" = params.scope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
       const r = await runGate(scope, cwd, signal);
-      autonomy.lastGatePassed = r.passed;
-      autonomy.lastScope = scope;
-      autonomy.lastCwd = cwd;
-      if (r.passed) {
-        autonomy.sameFailureCount = 0;
-        autonomy.lastGateOutput = undefined;
-      } else {
-        const sig = r.output.slice(-800);
-        autonomy.sameFailureCount = sig === autonomy.lastGateOutput ? autonomy.sameFailureCount + 1 : 1;
-        autonomy.lastGateOutput = sig;
-      }
+      recordGate(scope, cwd, r.passed, r.output);
       persist();
       return {
         content: [
@@ -385,11 +393,11 @@ export default function loxppModes(pi: ExtensionAPI): void {
     name: "loxpp_done",
     label: "Declare done",
     description:
-      "Verify the done criteria and end the mode. Always re-runs the local gate (inside the dev container); optionally also requires CI green and reviewer approval when those criteria are named.",
-    promptSnippet: "verify the done criteria (gate, CI, review) and end the mode",
+      "Declare the task complete and end the mode. Always re-runs the local gate (inside the dev container); when a PR number is given, also requires CI green and reviewer approval.",
+    promptSnippet: "verify done (gate, plus CI and review when a PR is given) and end the mode",
     parameters: Type.Object({
       summary: Type.String({ description: "What was done and what changed." }),
-      pr: Type.Optional(Type.String({ description: "PR number, required when criteria includes ci or review." })),
+      pr: Type.Optional(Type.String({ description: "PR number or URL. When given, CI green and [Reviewer] APPROVED are also required." })),
       repo: Type.Optional(Type.String({ description: `Repo, default ${REPO}.` })),
       scope: Type.Optional(
         StringEnum(["native", "backend"] as const, {
@@ -397,49 +405,29 @@ export default function loxppModes(pi: ExtensionAPI): void {
         }),
       ),
       cwd: Type.Optional(Type.String({ description: "Checkout to gate. Default the last loxpp_gate cwd." })),
-      criteria: Type.Optional(
-        Type.Array(
-          StringEnum(["ci", "review"] as const, {
-            description: "An extra done criterion beyond the local gate.",
-          }),
-          { description: "Extra done criteria. ci = CI checks green; review = [Reviewer] APPROVED present. The local gate is always checked." },
-        ),
-      ),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const scope: "native" | "backend" = params.scope ?? autonomy.lastScope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : (autonomy.lastCwd ?? ctx.cwd);
       const repo = params.repo ?? REPO;
-      const criteria: Array<"ci" | "review"> = params.criteria ?? [];
       const pr = params.pr?.trim();
-
-      if ((criteria.includes("ci") || criteria.includes("review")) && !pr) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Not done: the ci/review criteria need a PR number. Pass pr." }],
-          details: { done: false },
-        };
-      }
 
       const failures: string[] = [];
       const r = await runGate(scope, cwd, signal);
+      recordGate(scope, cwd, r.passed, r.output);
       if (!r.passed) {
         failures.push(`gate not green:\n${r.output}`);
-      } else {
-        if (criteria.includes("ci")) {
-          const ci = await ciGreen(pr!, repo, cwd, signal);
-          if (!ci.ok) {
-            failures.push(
-              ci.state === "pending"
-                ? "CI still running. Wait for it to finish, then call loxpp_done again."
-                : `CI not green:\n${ci.output}`,
-            );
-          }
+      } else if (pr) {
+        const ci = await ciGreen(pr, repo, cwd, signal);
+        if (!ci.ok) {
+          failures.push(
+            ci.state === "pending"
+              ? "CI still running. Wait for it to finish, then call loxpp_done again."
+              : `CI not green:\n${ci.output}`,
+          );
         }
-        if (criteria.includes("review")) {
-          const rv = await reviewApproved(pr!, repo, cwd, signal);
-          if (!rv.ok) failures.push(`review not approved: ${rv.output}`);
-        }
+        const rv = await reviewApproved(pr, repo, cwd, signal);
+        if (!rv.ok) failures.push(`review not approved: ${rv.output}`);
       }
 
       if (failures.length > 0) {
@@ -451,16 +439,12 @@ export default function loxppModes(pi: ExtensionAPI): void {
       }
 
       autonomy.declaredDone = true;
-      autonomy.lastGatePassed = true;
-      autonomy.lastScope = scope;
-      autonomy.lastCwd = cwd;
       persist();
-      const extra = criteria.length > 0 ? ` (criteria: gate, ${criteria.join(", ")})` : " (gate green)";
       return {
         content: [
           {
             type: "text",
-            text: `Recorded completion${extra}.\n\n${params.summary}${params.pr ? `\n\nPR: ${params.pr}` : ""}`,
+            text: `Recorded completion${pr ? " (gate + CI + review)" : " (gate green)"}.\n\n${params.summary}${pr ? `\n\nPR: ${pr}` : ""}`,
           },
         ],
         details: { done: true, pr: params.pr, scope, cwd },
