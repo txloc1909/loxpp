@@ -457,7 +457,11 @@ makes every function re-enterable. The spec must word the table so that
 such a mode adds points under a flag without a change of rule. The mode
 itself is a later decision with a measurement.
 
-### A session
+### A session (2026-10-22)
+
+Added after the decision, for issues #787, #788, and #789. The decision's own
+non-goals above state that it made no spec change at the time; this subsection
+records the later change that a session needed.
 
 The REPL enters one program as a sequence of lines, so a session is one run
 (`spec/04-semantics.md`, A Session). Two rules follow from that:
