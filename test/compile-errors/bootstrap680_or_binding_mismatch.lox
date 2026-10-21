@@ -1,6 +1,6 @@
 // DIAGNOSTIC: Or-pattern alternatives must bind the same names in the same order.
 // Compile error: the alternatives bind different names, x and y.
 enum E { A(x) B(y) }
-var v = A(1);
-var r = match v { case A(x) or B(y) => x case _ => 0 };
+var v = E.A(1);
+var r = match v { case E.A(x) or E.B(y) => x case _ => 0 };
 print "after";

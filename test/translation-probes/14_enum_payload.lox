@@ -1,7 +1,7 @@
 enum Result { Ok(value) Err(msg) }
-var r = Ok(5);
+var r = Result.Ok(5);
 var x = match r {
-  case Ok(v) => v
-  case Err(m) => 0
+  case Result.Ok(v) => v
+  case Result.Err(m) => 0
 };
 print x;

@@ -15,16 +15,16 @@ fun literal(v) {
 
 fun table(v) {
     return match v {
-        case A => 10
-        case B => 20
+        case Kind.A => 10
+        case Kind.B => 20
     };
 }
 
 print literal(1);
 print literal(2);
 
-print table(A());
-print table(B());
+print table(Kind.A());
+print table(Kind.B());
 
 // STATUS: ok
 // CHECK: one

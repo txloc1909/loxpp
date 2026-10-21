@@ -1,2 +1,2 @@
 enum E { A(x) }
-try { A(1, 2); } catch (e) { print e.kind; print type(e.message); }
+try { E.A(1, 2); } catch (e) { print e.kind; print type(e.message); }

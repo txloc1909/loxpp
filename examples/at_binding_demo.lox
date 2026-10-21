@@ -11,9 +11,9 @@
 enum Tree { Leaf(val) Node(left, right) }
 
 // Build a small tree for the demos.
-var t = Node(
-    Node(Leaf(1), Leaf(2)),
-    Node(Leaf(3), Node(Leaf(4), Leaf(5)))
+var t = Tree.Node(
+    Tree.Node(Tree.Leaf(1), Tree.Leaf(2)),
+    Tree.Node(Tree.Leaf(3), Tree.Node(Tree.Leaf(4), Tree.Leaf(5)))
 );
 
 // --- Demo 1: find_leaf -------------------------------------------------------
@@ -23,8 +23,8 @@ var t = Node(
 
 fun find_leaf(tree, target) {
     return match tree {
-        case leaf @ Leaf(v) => (v == target) and leaf or nil
-        case Node(l, r)     => find_leaf(l, target) or find_leaf(r, target)
+        case leaf @ Tree.Leaf(v) => (v == target) and leaf or nil
+        case Tree.Node(l, r)     => find_leaf(l, target) or find_leaf(r, target)
     };
 }
 
@@ -34,7 +34,7 @@ print "found: " + str(found != nil);
 
 // Verify it is really the Leaf(3) node by re-matching on it.
 var found_val = match found {
-    case Leaf(v) => v
+    case Tree.Leaf(v) => v
     case _       => -1
 };
 // CHECK: found val: 3
@@ -71,11 +71,11 @@ enum Result { Ok(value) Err(msg) }
 
 fun unwrap_or(r, default_val) {
     return match r {
-        case v @ Ok(x) or v @ Err(x) => x
+        case v @ Result.Ok(x) or v @ Result.Err(x) => x
     };
 }
 
 // CHECK: ok value: 42
-print "ok value: " + str(unwrap_or(Ok(42), 0));
+print "ok value: " + str(unwrap_or(Result.Ok(42), 0));
 // CHECK: err value: 7
-print "err value: " + str(unwrap_or(Err(7), 0));
+print "err value: " + str(unwrap_or(Result.Err(7), 0));

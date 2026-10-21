@@ -1,4 +1,4 @@
 // DIAGNOSTIC: Expect binding name.
 // Compile error: a field slot of a constructor pattern holds a sequence pattern.
 enum Wrap { W(inner) }
-var r = match W([1]) { case W([a]) => 1 };
+var r = match Wrap.W([1]) { case Wrap.W([a]) => 1 };

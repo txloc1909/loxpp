@@ -6,13 +6,13 @@ enum Result { Ok(value) Err(msg) }
 enum Option { Some(v) None }
 
 fun divide(a, b) {
-    if (b == 0) return Err("division by zero");
-    return Ok(a / b);
+    if (b == 0) return Result.Err("division by zero");
+    return Result.Ok(a / b);
 }
 
 fun safeSqrt(n) {
-    if (n < 0) return None();
-    return Some(math.sqrt(n));
+    if (n < 0) return Option.None();
+    return Option.Some(math.sqrt(n));
 }
 
 // CHECK: === Result / Option demo ===
@@ -22,8 +22,8 @@ var cases = [divide(10, 2), divide(7, 0), divide(9, 3)];
 var i = 0;
 while (i < 3) {
     var label = match cases[i] {
-        case Ok(v)  => "ok: " + str(v)
-        case Err(m) => "err: " + m
+        case Result.Ok(v)  => "ok: " + str(v)
+        case Result.Err(m) => "err: " + m
     };
     print label;
     i = i + 1;
@@ -37,8 +37,8 @@ var roots = [safeSqrt(4), safeSqrt(-1), safeSqrt(9)];
 i = 0;
 while (i < 3) {
     print match roots[i] {
-        case Some(v) => "sqrt = " + str(v)
-        case None    => "no real root"
+        case Option.Some(v) => "sqrt = " + str(v)
+        case Option.None    => "no real root"
     };
     i = i + 1;
 }
@@ -48,14 +48,14 @@ while (i < 3) {
 
 // Nested match as expression.
 print "";
-var r = Ok(42);
+var r = Result.Ok(42);
 var desc = match r {
-    case Ok(v) => match v {
+    case Result.Ok(v) => match v {
         case 0  => "zero"
         case 42 => "the answer"
         case _  => "other"
     }
-    case Err(m) => "error"
+    case Result.Err(m) => "error"
 };
 print desc;
 // CHECK: the answer

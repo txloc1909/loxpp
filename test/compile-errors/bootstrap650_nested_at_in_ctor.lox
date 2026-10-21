@@ -2,4 +2,4 @@
 // Compile error: a field slot of a constructor pattern holds an @-pattern.
 class Shape {}
 enum Wrap { W(inner) }
-var r = match W(Shape()) { case W(s @ Shape) => 1 };
+var r = match Wrap.W(Shape()) { case Wrap.W(s @ Shape) => 1 };

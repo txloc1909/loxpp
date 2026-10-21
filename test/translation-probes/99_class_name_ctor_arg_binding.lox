@@ -8,8 +8,8 @@ enum Wrap {
     W(v)
 }
 
-print match W(7) {
-    case W(Shape) => "arg " + str(Shape)
+print match Wrap.W(7) {
+    case Wrap.W(Shape) => "arg " + str(Shape)
     case _ => "no match"
 };
 

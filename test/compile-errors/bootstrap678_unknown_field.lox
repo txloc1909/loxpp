@@ -1,6 +1,6 @@
 // DIAGNOSTIC: Unknown field '<...>' for '<...>'.
 // Compile error: a named-field constructor pattern names a field the constructor lacks.
 enum E { A(x) }
-var v = A(1);
-var r = match v { case A{bogus} => 1 case _ => 0 };
+var v = E.A(1);
+var r = match v { case E.A{bogus} => 1 case _ => 0 };
 print "after";

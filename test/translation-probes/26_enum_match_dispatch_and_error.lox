@@ -25,18 +25,18 @@
 // exactly the real, reachable in-language shape that produces.
 enum Status { A B C D E }
 
-print match C() {
-    case A => "a"
-    case B => "b"
-    case C => "c"
-    case D => "d"
-    case E => "e"
+print match Status.C() {
+    case Status.A => "a"
+    case Status.B => "b"
+    case Status.C => "c"
+    case Status.D => "d"
+    case Status.E => "e"
 };
 
-print match B() {
-    case A if false => "a"
-    case B if false => "b"
-    case C if false => "c"
-    case D if false => "d"
-    case E if false => "e"
+print match Status.B() {
+    case Status.A if false => "a"
+    case Status.B if false => "b"
+    case Status.C if false => "c"
+    case Status.D if false => "d"
+    case Status.E if false => "e"
 };

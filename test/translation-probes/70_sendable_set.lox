@@ -36,10 +36,10 @@ try_send("Boolean", true);
 try_send("Number", 1.5);
 try_send("String", "s");
 try_send("Task", me);
-try_send("Enum of messages", Tagged("t", Point(1, 2)));
-try_send("Enum with no fields", Empty());
-try_send("Enum with a List field", Point([1], 2));
-try_send("Enum with a nested List field", Tagged("t", Point(1, [2])));
+try_send("Enum of messages", Shape.Tagged("t", Shape.Point(1, 2)));
+try_send("Enum with no fields", Shape.Empty());
+try_send("Enum with a List field", Shape.Point([1], 2));
+try_send("Enum with a nested List field", Shape.Tagged("t", Shape.Point(1, [2])));
 try_send("Function", f);
 try_send("BoundMethod", C().m);
 try_send("Class", C);
@@ -52,7 +52,7 @@ try_send("Server", server);
 try_send("Process", process);
 try_send("Error", caught);
 try_send("Coroutine", coroutine.create(f));
-try_send("EnumConstructor", Point);
+try_send("EnumConstructor", Shape.Point);
 print task.pending();
 
 try {
@@ -61,7 +61,7 @@ try {
     print type(e.message);
 }
 try {
-    task.send(me, Point([1], 2));
+    task.send(me, Shape.Point([1], 2));
 } catch (e) {
     print type(e.message);
 }

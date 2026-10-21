@@ -367,7 +367,7 @@ class Parser {
         var superLine = 0;
         if (this.matchT("LESS")) {
             var superTok = this.expect("IDENTIFIER", "Expect superclass name.");
-            if (this.panicMode) return ClassDecl(cname, nil, nil, 0, []);
+            if (this.panicMode) return Stmt.ClassDecl(cname, nil, nil, 0, []);
             superId   = this.allocId();
             superName = superTok.lexeme;
             superLine = superTok.line;
@@ -376,14 +376,14 @@ class Parser {
             }
         }
         this.expect("LEFT_BRACE", "Expect '{' before class body.");
-        if (this.panicMode) return ClassDecl(cname, superId, superName, superLine, []);
+        if (this.panicMode) return Stmt.ClassDecl(cname, superId, superName, superLine, []);
         var methods = [];
         while (!this.check("RIGHT_BRACE") and !this.isAtEnd()) {
             methods.append(this.funDeclaration("method"));
             if (this.panicMode) break;
         }
         this.expect("RIGHT_BRACE", "Expect '}' after class body.");
-        return ClassDecl(cname, superId, superName, superLine, methods);
+        return Stmt.ClassDecl(cname, superId, superName, superLine, methods);
     }
 
     funDeclaration(kind) {
@@ -400,11 +400,11 @@ class Parser {
             }
         }
         this.expect("RIGHT_PAREN", "Expect ')' after parameters.");
-        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        if (this.panicMode) return Stmt.FunDecl(nameTok.lexeme, nameTok.line, params, []);
         this.expect("LEFT_BRACE", "Expect '{' before " + kind + " body.");
-        if (this.panicMode) return FunDecl(nameTok.lexeme, nameTok.line, params, []);
+        if (this.panicMode) return Stmt.FunDecl(nameTok.lexeme, nameTok.line, params, []);
         var body = this.blockContents();
-        return FunDecl(nameTok.lexeme, nameTok.line, params, body);
+        return Stmt.FunDecl(nameTok.lexeme, nameTok.line, params, body);
     }
 
     varDeclaration() {
@@ -412,7 +412,7 @@ class Parser {
         var init = nil;
         if (this.matchT("EQUAL")) init = this.expression();
         this.expect("SEMICOLON", "Expect ';' after variable declaration.");
-        return VarDecl(nameTok.lexeme, nameTok.line, init);
+        return Stmt.VarDecl(nameTok.lexeme, nameTok.line, init);
     }
 
     statement() {
@@ -421,7 +421,7 @@ class Parser {
         if (this.matchT("PRINT"))  return this.printStatement();
         if (this.matchT("RETURN")) return this.returnStatement();
         if (this.matchT("WHILE"))  return this.whileStatement();
-        if (this.matchT("LEFT_BRACE")) return Block(this.blockContents());
+        if (this.matchT("LEFT_BRACE")) return Stmt.Block(this.blockContents());
         return this.expressionStatement();
     }
 
@@ -453,12 +453,12 @@ class Parser {
         this.expect("RIGHT_PAREN", "Expect ')' after for clauses.");
         var body = this.statement();
         if (inc != nil) {
-            body = Block([body, ExpressionStmt(inc)]);
+            body = Stmt.Block([body, Stmt.ExpressionStmt(inc)]);
         }
-        if (cond == nil) cond = Literal(true);
-        body = WhileStmt(cond, body);
+        if (cond == nil) cond = Expr.Literal(true);
+        body = Stmt.WhileStmt(cond, body);
         if (init != nil) {
-            body = Block([init, body]);
+            body = Stmt.Block([init, body]);
         }
         return body;
     }
@@ -470,13 +470,13 @@ class Parser {
         var thenB = this.statement();
         var elseB = nil;
         if (this.matchT("ELSE")) elseB = this.statement();
-        return IfStmt(cond, thenB, elseB);
+        return Stmt.IfStmt(cond, thenB, elseB);
     }
 
     printStatement() {
         var val = this.expression();
         this.expect("SEMICOLON", "Expect ';' after value.");
-        return PrintStmt(val);
+        return Stmt.PrintStmt(val);
     }
 
     returnStatement() {
@@ -484,7 +484,7 @@ class Parser {
         var val  = nil;
         if (!this.check("SEMICOLON")) val = this.expression();
         this.expect("SEMICOLON", "Expect ';' after return value.");
-        return ReturnStmt(line, val);
+        return Stmt.ReturnStmt(line, val);
     }
 
     whileStatement() {
@@ -492,14 +492,14 @@ class Parser {
         var cond = this.expression();
         this.expect("RIGHT_PAREN", "Expect ')' after condition.");
         var body = this.statement();
-        return WhileStmt(cond, body);
+        return Stmt.WhileStmt(cond, body);
     }
 
     expressionStatement() {
         var expr = this.expression();
         if (this.panicMode) return nil;
         this.expect("SEMICOLON", "Expect ';' after expression.");
-        return ExpressionStmt(expr);
+        return Stmt.ExpressionStmt(expr);
     }
 
     expression() { return this.assignment(); }
@@ -510,18 +510,18 @@ class Parser {
             var equals = this.previous();
             var val    = this.assignment();
             return match expr {
-                case Variable{id, name, line}      => Assign(id, name, equals.line, val)
-                case Get{object, name, line}       => Set(object, name, line, val)
-                case Literal{v}              => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Assign{id, name, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Binary{op, left, right} => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Unary{op, right}        => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Logical{op, left, right}=> { this.parseError(equals, "Invalid assignment target."); expr }
-                case Call{callee, paren_line, args} => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Set{object, name, line, value}=> { this.parseError(equals, "Invalid assignment target."); expr }
-                case ThisExpr{id, line}      => { this.parseError(equals, "Invalid assignment target."); expr }
-                case SuperExpr{id, method, line}   => { this.parseError(equals, "Invalid assignment target."); expr }
-                case Grouping{expression}    => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Variable{id, name, line}      => Expr.Assign(id, name, equals.line, val)
+                case Expr.Get{object, name, line}       => Expr.Set(object, name, line, val)
+                case Expr.Literal{v}              => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Assign{id, name, line, value} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Binary{op, left, right} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Unary{op, right}        => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Logical{op, left, right}=> { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Call{callee, paren_line, args} => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Set{object, name, line, value}=> { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.ThisExpr{id, line}      => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.SuperExpr{id, method, line}   => { this.parseError(equals, "Invalid assignment target."); expr }
+                case Expr.Grouping{expression}    => { this.parseError(equals, "Invalid assignment target."); expr }
             };
         }
         return expr;
@@ -532,7 +532,7 @@ class Parser {
         while (this.matchT("OR")) {
             var op    = this.previous().lexeme;
             var right = this.logicAnd();
-            left = Logical(op, left, right);
+            left = Expr.Logical(op, left, right);
         }
         return left;
     }
@@ -542,7 +542,7 @@ class Parser {
         while (this.matchT("AND")) {
             var op    = this.previous().lexeme;
             var right = this.equality();
-            left = Logical(op, left, right);
+            left = Expr.Logical(op, left, right);
         }
         return left;
     }
@@ -552,7 +552,7 @@ class Parser {
         while (this.matchAny(["BANG_EQUAL", "EQUAL_EQUAL"])) {
             var op    = this.previous();
             var right = this.comparison();
-            left = Binary(op, left, right);
+            left = Expr.Binary(op, left, right);
         }
         return left;
     }
@@ -562,7 +562,7 @@ class Parser {
         while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL"])) {
             var op    = this.previous();
             var right = this.term();
-            left = Binary(op, left, right);
+            left = Expr.Binary(op, left, right);
         }
         return left;
     }
@@ -572,7 +572,7 @@ class Parser {
         while (this.matchAny(["MINUS", "PLUS"])) {
             var op    = this.previous();
             var right = this.factor();
-            left = Binary(op, left, right);
+            left = Expr.Binary(op, left, right);
         }
         return left;
     }
@@ -582,7 +582,7 @@ class Parser {
         while (this.matchAny(["SLASH", "STAR"])) {
             var op    = this.previous();
             var right = this.unary();
-            left = Binary(op, left, right);
+            left = Expr.Binary(op, left, right);
         }
         return left;
     }
@@ -591,7 +591,7 @@ class Parser {
         if (this.matchAny(["BANG", "MINUS"])) {
             var op    = this.previous();
             var right = this.unary();
-            return Unary(op, right);
+            return Expr.Unary(op, right);
         }
         return this.call();
     }
@@ -603,7 +603,7 @@ class Parser {
                 expr = this.finishCall(expr);
             } else if (this.matchT("DOT")) {
                 var nameTok = this.expect("IDENTIFIER", "Expect property name after '.'.");
-                expr = Get(expr, nameTok.lexeme, nameTok.line);
+                expr = Expr.Get(expr, nameTok.lexeme, nameTok.line);
             } else {
                 break;
             }
@@ -623,40 +623,40 @@ class Parser {
             }
         }
         var paren = this.expect("RIGHT_PAREN", "Expect ')' after arguments.");
-        return Call(callee, paren.line, args);
+        return Expr.Call(callee, paren.line, args);
     }
 
     primary() {
-        if (this.matchT("FALSE"))  return Literal(false);
-        if (this.matchT("TRUE"))   return Literal(true);
-        if (this.matchT("NIL"))    return Literal(nil);
-        if (this.matchT("NUMBER")) return Literal(this.previous().literal);
-        if (this.matchT("STRING")) return Literal(this.previous().literal);
+        if (this.matchT("FALSE"))  return Expr.Literal(false);
+        if (this.matchT("TRUE"))   return Expr.Literal(true);
+        if (this.matchT("NIL"))    return Expr.Literal(nil);
+        if (this.matchT("NUMBER")) return Expr.Literal(this.previous().literal);
+        if (this.matchT("STRING")) return Expr.Literal(this.previous().literal);
 
         if (this.matchT("SUPER")) {
             var superTok = this.previous();
             this.expect("DOT", "Expect '.' after 'super'.");
             var method = this.expect("IDENTIFIER", "Expect superclass method name.");
-            return SuperExpr(this.allocId(), method.lexeme, superTok.line);
+            return Expr.SuperExpr(this.allocId(), method.lexeme, superTok.line);
         }
 
         if (this.matchT("THIS")) {
-            return ThisExpr(this.allocId(), this.previous().line);
+            return Expr.ThisExpr(this.allocId(), this.previous().line);
         }
 
         if (this.matchT("IDENTIFIER")) {
             var tok = this.previous();
-            return Variable(this.allocId(), tok.lexeme, tok.line);
+            return Expr.Variable(this.allocId(), tok.lexeme, tok.line);
         }
 
         if (this.matchT("LEFT_PAREN")) {
             var expr = this.expression();
             this.expect("RIGHT_PAREN", "Expect ')' after expression.");
-            return Grouping(expr);
+            return Expr.Grouping(expr);
         }
 
         this.parseError(this.peek(), "Expect expression.");
-        return Literal(nil);
+        return Expr.Literal(nil);
     }
 }
 
@@ -721,15 +721,15 @@ class Resolver {
 
     resolveStmt(stmt) {
         match stmt {
-            case Block{statements}                               => this.resolveBlock(statements)
-            case ClassDecl{name, super_id, super_name, super_line, methods} => this.resolveClass(name, super_id, super_name, methods)
-            case ExpressionStmt{expr}                            => this.resolveExpr(expr)
-            case FunDecl{name, line, params, body}               => this.resolveFunDecl(name, line, params, body)
-            case IfStmt{condition, then_branch, else_branch}     => this.resolveIf(condition, then_branch, else_branch)
-            case PrintStmt{expr}                                 => this.resolveExpr(expr)
-            case ReturnStmt{line, value}                         => this.resolveReturn(line, value)
-            case VarDecl{name, line, initializer}                => this.resolveVarDecl(name, line, initializer)
-            case WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body) }
+            case Stmt.Block{statements}                               => this.resolveBlock(statements)
+            case Stmt.ClassDecl{name, super_id, super_name, super_line, methods} => this.resolveClass(name, super_id, super_name, methods)
+            case Stmt.ExpressionStmt{expr}                            => this.resolveExpr(expr)
+            case Stmt.FunDecl{name, line, params, body}               => this.resolveFunDecl(name, line, params, body)
+            case Stmt.IfStmt{condition, then_branch, else_branch}     => this.resolveIf(condition, then_branch, else_branch)
+            case Stmt.PrintStmt{expr}                                 => this.resolveExpr(expr)
+            case Stmt.ReturnStmt{line, value}                         => this.resolveReturn(line, value)
+            case Stmt.VarDecl{name, line, initializer}                => this.resolveVarDecl(name, line, initializer)
+            case Stmt.WhileStmt{condition, body}                      => { this.resolveExpr(condition); this.resolveStmt(body) }
         };
     }
 
@@ -761,7 +761,7 @@ class Resolver {
     // body rather than inline in the while loop in resolveClass.
     resolveMethodItem(method) {
         match method {
-            case FunDecl{name, line, params, body} => this.resolveMethodDecl(name, params, body)
+            case Stmt.FunDecl{name, line, params, body} => this.resolveMethodDecl(name, params, body)
             case _                                 => nil
         };
     }
@@ -830,18 +830,18 @@ class Resolver {
 
     resolveExpr(expr) {
         match expr {
-            case Literal{v}                    => nil
-            case Variable{id, name, line}      => this.resolveVariable(id, name, line)
-            case Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
-            case Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
-            case Unary{op, right}              => this.resolveExpr(right)
-            case Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
-            case Call{callee, paren_line, args} => this.resolveCall(callee, args)
-            case Get{object, name, line}       => this.resolveExpr(object)
-            case Set{object, name, line, value} => { this.resolveExpr(object); this.resolveExpr(value) }
-            case ThisExpr{id, line}            => this.resolveThis(id, line)
-            case SuperExpr{id, method, line}   => this.resolveSuper(id, line)
-            case Grouping{expression}          => this.resolveExpr(expression)
+            case Expr.Literal{v}                    => nil
+            case Expr.Variable{id, name, line}      => this.resolveVariable(id, name, line)
+            case Expr.Assign{id, name, line, value} => { this.resolveExpr(value); this.resolveLocal(id, name) }
+            case Expr.Binary{op, left, right}       => { this.resolveExpr(left);  this.resolveExpr(right) }
+            case Expr.Unary{op, right}              => this.resolveExpr(right)
+            case Expr.Logical{op, left, right}      => { this.resolveExpr(left);  this.resolveExpr(right) }
+            case Expr.Call{callee, paren_line, args} => this.resolveCall(callee, args)
+            case Expr.Get{object, name, line}       => this.resolveExpr(object)
+            case Expr.Set{object, name, line, value} => { this.resolveExpr(object); this.resolveExpr(value) }
+            case Expr.ThisExpr{id, line}            => this.resolveThis(id, line)
+            case Expr.SuperExpr{id, method, line}   => this.resolveSuper(id, line)
+            case Expr.Grouping{expression}          => this.resolveExpr(expression)
         };
     }
 
@@ -1077,15 +1077,15 @@ class Interpreter {
 
     execStmt(stmt, env) {
         match stmt {
-            case Block{statements}                               => this.execBlock(statements, Environment(env))
-            case ClassDecl{name, super_id, super_name, super_line, methods} => this.execClass(name, super_id, super_name, super_line, methods, env)
-            case ExpressionStmt{expr}                            => { this.evalExpr(expr, env) }
-            case FunDecl{name, line, params, body}               => this.execFun(name, params, body, env)
-            case IfStmt{condition, then_branch, else_branch}     => this.execIf(condition, then_branch, else_branch, env)
-            case PrintStmt{expr}                                 => this.execPrint(expr, env)
-            case ReturnStmt{line, value}                         => this.execReturn(line, value, env)
-            case VarDecl{name, line, initializer}                => this.execVar(name, initializer, env)
-            case WhileStmt{condition, body}                      => this.execWhile(condition, body, env)
+            case Stmt.Block{statements}                               => this.execBlock(statements, Environment(env))
+            case Stmt.ClassDecl{name, super_id, super_name, super_line, methods} => this.execClass(name, super_id, super_name, super_line, methods, env)
+            case Stmt.ExpressionStmt{expr}                            => { this.evalExpr(expr, env) }
+            case Stmt.FunDecl{name, line, params, body}               => this.execFun(name, params, body, env)
+            case Stmt.IfStmt{condition, then_branch, else_branch}     => this.execIf(condition, then_branch, else_branch, env)
+            case Stmt.PrintStmt{expr}                                 => this.execPrint(expr, env)
+            case Stmt.ReturnStmt{line, value}                         => this.execReturn(line, value, env)
+            case Stmt.VarDecl{name, line, initializer}                => this.execVar(name, initializer, env)
+            case Stmt.WhileStmt{condition, body}                      => this.execWhile(condition, body, env)
         };
     }
 
@@ -1107,7 +1107,7 @@ class Interpreter {
     // body rather than inline in the while loop in execClass.
     processMethodDecl(method, methodMap, methodEnv) {
         match method {
-            case FunDecl{name, line, params, body} => {
+            case Stmt.FunDecl{name, line, params, body} => {
                 var isInit = name == "init";
                 methodMap[name] = LoxFunction(name, params, body, methodEnv, isInit)
             }
@@ -1189,18 +1189,18 @@ class Interpreter {
 
     evalExpr(expr, env) {
         return match expr {
-            case Literal{v}                     => v
-            case Grouping{expression}           => this.evalExpr(expression, env)
-            case Variable{id, name, line}       => this.evalVariable(id, name, line, env)
-            case Assign{id, name, line, value}  => this.evalAssign(id, name, line, value, env)
-            case Unary{op, right}               => this.evalUnary(op, right, env)
-            case Binary{op, left, right}        => this.evalBinary(op, left, right, env)
-            case Logical{op, left, right}       => this.evalLogical(op, left, right, env)
-            case Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
-            case Get{object, name, line}        => this.evalGet(object, name, line, env)
-            case Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
-            case ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
-            case SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
+            case Expr.Literal{v}                     => v
+            case Expr.Grouping{expression}           => this.evalExpr(expression, env)
+            case Expr.Variable{id, name, line}       => this.evalVariable(id, name, line, env)
+            case Expr.Assign{id, name, line, value}  => this.evalAssign(id, name, line, value, env)
+            case Expr.Unary{op, right}               => this.evalUnary(op, right, env)
+            case Expr.Binary{op, left, right}        => this.evalBinary(op, left, right, env)
+            case Expr.Logical{op, left, right}       => this.evalLogical(op, left, right, env)
+            case Expr.Call{callee, paren_line, args} => this.evalCall(callee, paren_line, args, env)
+            case Expr.Get{object, name, line}        => this.evalGet(object, name, line, env)
+            case Expr.Set{object, name, line, value} => this.evalSet(object, name, line, value, env)
+            case Expr.ThisExpr{id, line}             => this.lookupVariable(id, "this", 0, env)
+            case Expr.SuperExpr{id, method, line}    => this.evalSuper(id, method, line, env)
         };
     }
 

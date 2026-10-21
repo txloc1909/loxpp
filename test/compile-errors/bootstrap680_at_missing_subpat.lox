@@ -1,6 +1,6 @@
 // DIAGNOSTIC: Expected a structural pattern (constructor, class, or '[') after '@'.
 // Compile error: an @-binding has no sub-pattern.
 enum E { A(x) }
-var v = A(1);
+var v = E.A(1);
 var r = match v { case p @ => 1 case _ => 0 };
 print "after";

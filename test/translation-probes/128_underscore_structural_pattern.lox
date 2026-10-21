@@ -3,8 +3,8 @@
 // armPat).
 enum E { _(x) B }
 
-print match _(9) { case _(y) => y case B => 0 };
-print match _(3) { case _{x} => x case B => 0 };
+print match E._(9) { case E._(y) => y case E.B => 0 };
+print match E._(3) { case E._{x} => x case E.B => 0 };
 
 // STATUS: ok
 // CHECK: 9

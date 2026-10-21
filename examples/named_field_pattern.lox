@@ -6,14 +6,14 @@
 
 enum Pair { P(first, second) }
 
-var p = P(1, 2);
+var p = Pair.P(1, 2);
 
 // The pattern lists the fields in the opposite order from the declaration.
-var swapped = match p { case P{second, first} => [first, second] };
+var swapped = match p { case Pair.P{second, first} => [first, second] };
 // CHECK: order: [1, 2]
 print "order: " + str(swapped);
 
 // A named-field pattern may bind a subset of the fields.
-var second_only = match p { case P{second} => second };
+var second_only = match p { case Pair.P{second} => second };
 // CHECK: subset: 2
 print "subset: " + str(second_only);

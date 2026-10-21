@@ -157,67 +157,67 @@ fun joinNodes(nodes) { return joinStrs(mapPretty(nodes), " "); }
 fun pretty(node) {
     return match node {
         // --- Literals & atoms ---
-        case Literal{v}                  => fmtLiteral(v)
-        case Variable{name}              => name
-        case This                        => "this"
-        case Super{method}               => "(super " + method + ")"
-        case Group{e}                    => "(group " + pretty(e) + ")"
+        case AST.Literal{v}                  => fmtLiteral(v)
+        case AST.Variable{name}              => name
+        case AST.This                        => "this"
+        case AST.Super{method}               => "(super " + method + ")"
+        case AST.Group{e}                    => "(group " + pretty(e) + ")"
 
         // --- Operators ---
-        case Unary{op, e}                => "(" + op + " " + pretty(e) + ")"
-        case Binary{op, l, r}            => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
-        case Logical{op, l, r}           => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
+        case AST.Unary{op, e}                => "(" + op + " " + pretty(e) + ")"
+        case AST.Binary{op, l, r}            => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
+        case AST.Logical{op, l, r}           => "(" + op + " " + pretty(l) + " " + pretty(r) + ")"
 
         // --- L-values ---
-        case Assign{name, value}         => "(= " + name + " " + pretty(value) + ")"
-        case Get{obj, name}              => "(. " + pretty(obj) + " " + name + ")"
-        case Set{obj, name, v}           => "(.set " + pretty(obj) + " " + name + " " + pretty(v) + ")"
-        case IndexGet{obj, idx}          => "([] " + pretty(obj) + " " + pretty(idx) + ")"
-        case IndexSet{obj, idx, v}       => "([]set " + pretty(obj) + " " + pretty(idx) + " " + pretty(v) + ")"
-        case Slice{obj, s, e}            => "(slice " + pretty(obj) + " " + pretty(s) + " " + pretty(e) + ")"
-        case Call{callee, args}          => "(call " + pretty(callee) + " " + joinNodes(args) + ")"
+        case AST.Assign{name, value}         => "(= " + name + " " + pretty(value) + ")"
+        case AST.Get{obj, name}              => "(. " + pretty(obj) + " " + name + ")"
+        case AST.Set{obj, name, v}           => "(.set " + pretty(obj) + " " + name + " " + pretty(v) + ")"
+        case AST.IndexGet{obj, idx}          => "([] " + pretty(obj) + " " + pretty(idx) + ")"
+        case AST.IndexSet{obj, idx, v}       => "([]set " + pretty(obj) + " " + pretty(idx) + " " + pretty(v) + ")"
+        case AST.Slice{obj, s, e}            => "(slice " + pretty(obj) + " " + pretty(s) + " " + pretty(e) + ")"
+        case AST.Call{callee, args}          => "(call " + pretty(callee) + " " + joinNodes(args) + ")"
 
         // --- Aggregates ---
-        case ListLit{elements}           => "(list " + joinNodes(elements) + ")"
-        case MapLit{entries}             => "(map " + joinStrs(prettyMapEntries(entries), " ") + ")"
+        case AST.ListLit{elements}           => "(list " + joinNodes(elements) + ")"
+        case AST.MapLit{entries}             => "(map " + joinStrs(prettyMapEntries(entries), " ") + ")"
 
         // --- Match ---
-        case MatchExpr{scrut, arms}      => "(match " + pretty(scrut) + " " + joinNodes(arms) + ")"
-        case MatchArm{pats, guard, body} => "(arm (" + joinNodes(pats) + ") " + fmtMaybe(guard) + " " + pretty(body) + ")"
+        case AST.MatchExpr{scrut, arms}      => "(match " + pretty(scrut) + " " + joinNodes(arms) + ")"
+        case AST.MatchArm{pats, guard, body} => "(arm (" + joinNodes(pats) + ") " + fmtMaybe(guard) + " " + pretty(body) + ")"
 
         // --- Patterns ---
-        case LiteralPat{v}               => "(plit " + fmtLiteral(v) + ")"
-        case WildcardPat                 => "_"
-        case BindingPat{name}            => "(bind " + name + ")"
-        case CtorPat{ctor}               => "(ctor " + ctor + ")"
-        case FieldPat{ctor, fields}      => "(field " + ctor + " " + joinStrs(fields, " ") + ")"
-        case PositionalPat{ctor, binds}  => "(pos " + ctor + " " + joinStrs(binds, " ") + ")"
-        case OrPat{alts}                 => "(or-pat " + joinNodes(alts) + ")"
+        case AST.LiteralPat{v}               => "(plit " + fmtLiteral(v) + ")"
+        case AST.WildcardPat                 => "_"
+        case AST.BindingPat{name}            => "(bind " + name + ")"
+        case AST.CtorPat{ctor}               => "(ctor " + ctor + ")"
+        case AST.FieldPat{ctor, fields}      => "(field " + ctor + " " + joinStrs(fields, " ") + ")"
+        case AST.PositionalPat{ctor, binds}  => "(pos " + ctor + " " + joinStrs(binds, " ") + ")"
+        case AST.OrPat{alts}                 => "(or-pat " + joinNodes(alts) + ")"
 
         // --- Declarations ---
-        case VarDecl{name, init_}         => "(var " + name + " " + fmtMaybe(init_) + ")"
-        case ListDestructure{names, init_} => "(varlist (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
-        case MapDestructure{names, init_}  => "(varmap (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
-        case FunDecl{name, params, body}   => "(fun " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
-        case Method{name, params, body}    => "(method " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
-        case ClassDecl{name, super_, methods} => "(class " + name + " " + fmtMaybeName(super_) + " " + joinNodes(methods) + ")"
-        case EnumDecl{name, ctors}            => "(enum " + name + " " + joinNodes(ctors) + ")"
-        case EnumCtor{name, fields}           => fmtEnumCtor(name, fields)
+        case AST.VarDecl{name, init_}         => "(var " + name + " " + fmtMaybe(init_) + ")"
+        case AST.ListDestructure{names, init_} => "(varlist (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
+        case AST.MapDestructure{names, init_}  => "(varmap (" + joinStrs(names, " ") + ") " + pretty(init_) + ")"
+        case AST.FunDecl{name, params, body}   => "(fun " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
+        case AST.Method{name, params, body}    => "(method " + name + " (" + joinStrs(params, " ") + ") " + pretty(body) + ")"
+        case AST.ClassDecl{name, super_, methods} => "(class " + name + " " + fmtMaybeName(super_) + " " + joinNodes(methods) + ")"
+        case AST.EnumDecl{name, ctors}            => "(enum " + name + " " + joinNodes(ctors) + ")"
+        case AST.EnumCtor{name, fields}           => fmtEnumCtor(name, fields)
 
         // --- Statements ---
-        case ExprStmt{e}                  => "(expr " + pretty(e) + ")"
-        case PrintStmt{e}                 => "(print " + pretty(e) + ")"
-        case IfStmt{c, t, e}              => "(if " + pretty(c) + " " + pretty(t) + " " + fmtMaybe(e) + ")"
-        case WhileStmt{c, body}           => "(while " + pretty(c) + " " + pretty(body) + ")"
-        case ForStmt{init_, c, inc, body} => "(for " + fmtMaybe(init_) + " " + fmtMaybe(c) + " " + fmtMaybe(inc) + " " + pretty(body) + ")"
-        case ForInStmt{name, seq, body}   => "(for-in " + name + " " + pretty(seq) + " " + pretty(body) + ")"
-        case Block{decls}                 => "(block " + joinNodes(decls) + ")"
-        case BreakStmt                    => "(break)"
-        case ContinueStmt                 => "(continue)"
-        case ReturnStmt{e}                => "(return " + fmtMaybe(e) + ")"
+        case AST.ExprStmt{e}                  => "(expr " + pretty(e) + ")"
+        case AST.PrintStmt{e}                 => "(print " + pretty(e) + ")"
+        case AST.IfStmt{c, t, e}              => "(if " + pretty(c) + " " + pretty(t) + " " + fmtMaybe(e) + ")"
+        case AST.WhileStmt{c, body}           => "(while " + pretty(c) + " " + pretty(body) + ")"
+        case AST.ForStmt{init_, c, inc, body} => "(for " + fmtMaybe(init_) + " " + fmtMaybe(c) + " " + fmtMaybe(inc) + " " + pretty(body) + ")"
+        case AST.ForInStmt{name, seq, body}   => "(for-in " + name + " " + pretty(seq) + " " + pretty(body) + ")"
+        case AST.Block{decls}                 => "(block " + joinNodes(decls) + ")"
+        case AST.BreakStmt                    => "(break)"
+        case AST.ContinueStmt                 => "(continue)"
+        case AST.ReturnStmt{e}                => "(return " + fmtMaybe(e) + ")"
 
         // --- Top-level ---
-        case Program{decls}               => "(program " + joinNodes(decls) + ")"
+        case AST.Program{decls}               => "(program " + joinNodes(decls) + ")"
 
         case _                            => "?"
     };
@@ -298,7 +298,7 @@ class Parser {
         while (!this.isAtEnd()) {
             decls.append(this.declaration());
         }
-        return Program(decls);
+        return AST.Program(decls);
     }
 
     // ---------------------------------------------------------------------
@@ -328,14 +328,14 @@ class Parser {
             methods.append(this.method());
         }
         this.expect("RIGHT_BRACE", "'}' after class body");
-        return ClassDecl(name, super_, methods);
+        return AST.ClassDecl(name, super_, methods);
     }
 
     method() {
         var name = this.expect("IDENTIFIER", "method name").lexeme;
         var params = this.parameters();
         var body = this.blockBody();
-        return Method(name, params, body);
+        return AST.Method(name, params, body);
     }
 
     // ---------------------------------------------------------------------
@@ -351,7 +351,7 @@ class Parser {
             ctors.append(this.enumCtor());
         }
         this.expect("RIGHT_BRACE", "'}' after enum body");
-        return EnumDecl(name, ctors);
+        return AST.EnumDecl(name, ctors);
     }
 
     enumCtor() {
@@ -366,7 +366,7 @@ class Parser {
             }
             this.expect("RIGHT_PAREN", "')' after enum constructor fields");
         }
-        return EnumCtor(name, fields);
+        return AST.EnumCtor(name, fields);
     }
 
     // funDecl ::= "fun" IDENT "(" parameters? ")" block
@@ -374,7 +374,7 @@ class Parser {
         var name = this.expect("IDENTIFIER", "function name").lexeme;
         var params = this.parameters();
         var body = this.blockBody();
-        return FunDecl(name, params, body);
+        return AST.FunDecl(name, params, body);
     }
 
     // parameters ::= "(" ( IDENT ( "," IDENT )* )? ")"
@@ -403,7 +403,7 @@ class Parser {
             decls.append(this.declaration());
         }
         this.expect("RIGHT_BRACE", "'}' after block");
-        return Block(decls);
+        return AST.Block(decls);
     }
 
     // ---------------------------------------------------------------------
@@ -421,7 +421,7 @@ class Parser {
             init_ = this.expression();
         }
         this.expect("SEMICOLON", "';' after variable declaration");
-        return VarDecl(name, init_);
+        return AST.VarDecl(name, init_);
     }
 
     // Shared parser for `var { a, b } = e;` and `var [ a, b ] = e;`.
@@ -441,8 +441,8 @@ class Parser {
         this.expect("EQUAL", "'=' in destructure");
         var init_ = this.expression();
         this.expect("SEMICOLON", "';' after destructure");
-        if (isMap) return MapDestructure(names, init_);
-        return ListDestructure(names, init_);
+        if (isMap) return AST.MapDestructure(names, init_);
+        return AST.ListDestructure(names, init_);
     }
 
     // ---------------------------------------------------------------------
@@ -464,13 +464,13 @@ class Parser {
     exprStmt() {
         var e = this.expression();
         this.expect("SEMICOLON", "';' after expression");
-        return ExprStmt(e);
+        return AST.ExprStmt(e);
     }
 
     printStmt() {
         var e = this.expression();
         this.expect("SEMICOLON", "';' after print value");
-        return PrintStmt(e);
+        return AST.PrintStmt(e);
     }
 
     returnStmt() {
@@ -479,7 +479,7 @@ class Parser {
             e = this.expression();
         }
         this.expect("SEMICOLON", "';' after return");
-        return ReturnStmt(e);
+        return AST.ReturnStmt(e);
     }
 
     whileStmt() {
@@ -487,11 +487,11 @@ class Parser {
         var c = this.expression();
         this.expect("RIGHT_PAREN", "')' after while condition");
         var body = this.statement();
-        return WhileStmt(c, body);
+        return AST.WhileStmt(c, body);
     }
 
-    breakStmt()    { this.expect("SEMICOLON", "';' after 'break'");    return BreakStmt(); }
-    continueStmt() { this.expect("SEMICOLON", "';' after 'continue'"); return ContinueStmt(); }
+    breakStmt()    { this.expect("SEMICOLON", "';' after 'break'");    return AST.BreakStmt(); }
+    continueStmt() { this.expect("SEMICOLON", "';' after 'continue'"); return AST.ContinueStmt(); }
 
     ifStmt() {
         this.expect("LEFT_PAREN", "'(' after 'if'");
@@ -500,7 +500,7 @@ class Parser {
         var t = this.statement();
         var e = nil;
         if (this.matchT("ELSE")) e = this.statement();
-        return IfStmt(c, t, e);
+        return AST.IfStmt(c, t, e);
     }
 
     // ---------------------------------------------------------------------
@@ -517,7 +517,7 @@ class Parser {
             var seq = this.expression();
             this.expect("RIGHT_PAREN", "')' after for-in header");
             var body = this.statement();
-            return ForInStmt(name, seq, body);
+            return AST.ForInStmt(name, seq, body);
         }
         // C-style: initializer
         var init_ = nil;
@@ -537,7 +537,7 @@ class Parser {
         if (!this.check("RIGHT_PAREN")) inc = this.expression();
         this.expect("RIGHT_PAREN", "')' after for clauses");
         var body = this.statement();
-        return ForStmt(init_, c, inc, body);
+        return AST.ForStmt(init_, c, inc, body);
     }
 
     // ---------------------------------------------------------------------
@@ -555,9 +555,9 @@ class Parser {
         if (this.matchT("EQUAL")) {
             var rhs = this.assignment();
             return match lhs {
-                case Variable{name}     => Assign(name, rhs)
-                case Get{obj, name}     => Set(obj, name, rhs)
-                case IndexGet{obj, idx} => IndexSet(obj, idx, rhs)
+                case AST.Variable{name}     => AST.Assign(name, rhs)
+                case AST.Get{obj, name}     => AST.Set(obj, name, rhs)
+                case AST.IndexGet{obj, idx} => AST.IndexSet(obj, idx, rhs)
                 case _                  => this.invalidAssignTarget()
             };
         }
@@ -565,14 +565,14 @@ class Parser {
     }
     invalidAssignTarget() {
         this.error("invalid assignment target");
-        return Literal(nil);
+        return AST.Literal(nil);
     }
 
     logicOr() {
         var l = this.logicAnd();
         while (this.matchT("OR")) {
             var r = this.logicAnd();
-            l = Logical("or", l, r);
+            l = AST.Logical("or", l, r);
         }
         return l;
     }
@@ -580,7 +580,7 @@ class Parser {
         var l = this.equality();
         while (this.matchT("AND")) {
             var r = this.equality();
-            l = Logical("and", l, r);
+            l = AST.Logical("and", l, r);
         }
         return l;
     }
@@ -589,7 +589,7 @@ class Parser {
         while (this.matchAny(["BANG_EQUAL", "EQUAL_EQUAL"])) {
             var op = this.previous().lexeme;
             var r = this.comparison();
-            l = Binary(op, l, r);
+            l = AST.Binary(op, l, r);
         }
         return l;
     }
@@ -598,7 +598,7 @@ class Parser {
         while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "IN"])) {
             var op = this.previous().lexeme;
             var r = this.term();
-            l = Binary(op, l, r);
+            l = AST.Binary(op, l, r);
         }
         return l;
     }
@@ -607,7 +607,7 @@ class Parser {
         while (this.matchAny(["MINUS", "PLUS"])) {
             var op = this.previous().lexeme;
             var r = this.factor();
-            l = Binary(op, l, r);
+            l = AST.Binary(op, l, r);
         }
         return l;
     }
@@ -616,7 +616,7 @@ class Parser {
         while (this.matchAny(["SLASH", "STAR", "PERCENT"])) {
             var op = this.previous().lexeme;
             var r = this.unary();
-            l = Binary(op, l, r);
+            l = AST.Binary(op, l, r);
         }
         return l;
     }
@@ -624,7 +624,7 @@ class Parser {
         if (this.matchAny(["BANG", "MINUS"])) {
             var op = this.previous().lexeme;
             var e = this.unary();
-            return Unary(op, e);
+            return AST.Unary(op, e);
         }
         return this.call();
     }
@@ -637,7 +637,7 @@ class Parser {
             if (this.matchT("LEFT_PAREN"))        { e = this.finishCall(e); }
             else if (this.matchT("DOT"))           {
                 var name = this.expect("IDENTIFIER", "property name").lexeme;
-                e = Get(e, name);
+                e = AST.Get(e, name);
             }
             else if (this.matchT("LEFT_BRACKET"))  { e = this.finishSubscript(e); }
             else                                   { running = false; }
@@ -653,17 +653,17 @@ class Parser {
             }
         }
         this.expect("RIGHT_PAREN", "')' after arguments");
-        return Call(callee, args);
+        return AST.Call(callee, args);
     }
     finishSubscript(obj) {
         var first = this.expression();
         if (this.matchT("COLON")) {
             var second = this.expression();
             this.expect("RIGHT_BRACKET", "']' after slice");
-            return Slice(obj, first, second);
+            return AST.Slice(obj, first, second);
         }
         this.expect("RIGHT_BRACKET", "']' after index");
-        return IndexGet(obj, first);
+        return AST.IndexGet(obj, first);
     }
 
     // ---------------------------------------------------------------------
@@ -671,27 +671,27 @@ class Parser {
     //           | "(" expression ")" | listLit | mapLit | matchExpr
     // ---------------------------------------------------------------------
     primary() {
-        if (this.matchT("TRUE"))   return Literal(true);
-        if (this.matchT("FALSE"))  return Literal(false);
-        if (this.matchT("NIL"))    return Literal(nil);
-        if (this.matchT("NUMBER")) return Literal(this.parseNumber(this.previous().lexeme));
-        if (this.matchT("STRING")) return Literal(this.previous().lexeme);
-        if (this.matchT("THIS"))   return This();
+        if (this.matchT("TRUE"))   return AST.Literal(true);
+        if (this.matchT("FALSE"))  return AST.Literal(false);
+        if (this.matchT("NIL"))    return AST.Literal(nil);
+        if (this.matchT("NUMBER")) return AST.Literal(this.parseNumber(this.previous().lexeme));
+        if (this.matchT("STRING")) return AST.Literal(this.previous().lexeme);
+        if (this.matchT("THIS"))   return AST.This();
         if (this.matchT("SUPER")) {
             this.expect("DOT", "'.' after 'super'");
-            return Super(this.expect("IDENTIFIER", "superclass method name").lexeme);
+            return AST.Super(this.expect("IDENTIFIER", "superclass method name").lexeme);
         }
-        if (this.matchT("IDENTIFIER")) return Variable(this.previous().lexeme);
+        if (this.matchT("IDENTIFIER")) return AST.Variable(this.previous().lexeme);
         if (this.matchT("LEFT_PAREN")) {
             var e = this.expression();
             this.expect("RIGHT_PAREN", "')' after expression");
-            return Group(e);
+            return AST.Group(e);
         }
         if (this.matchT("LEFT_BRACKET")) return this.listLiteral();
         if (this.matchT("LEFT_BRACE"))   return this.mapLiteral();
         if (this.matchT("MATCH"))        return this.matchExpr();
         this.error("expected expression");
-        return Literal(nil);
+        return AST.Literal(nil);
     }
 
     // The scanner already produces a NUMBER lexeme; here we re-parse to a
@@ -739,7 +739,7 @@ class Parser {
             }
         }
         this.expect("RIGHT_BRACKET", "']' after list literal");
-        return ListLit(elems);
+        return AST.ListLit(elems);
     }
     // mapLit: "{" already consumed.
     mapLiteral() {
@@ -753,7 +753,7 @@ class Parser {
             }
         }
         this.expect("RIGHT_BRACE", "'}' after map literal");
-        return MapLit(entries);
+        return AST.MapLit(entries);
     }
     mapEntry() {
         var k = this.expression();
@@ -774,7 +774,7 @@ class Parser {
             arms.append(this.matchArm());
         }
         this.expect("RIGHT_BRACE", "'}' after match arms");
-        return MatchExpr(scrut, arms);
+        return AST.MatchExpr(scrut, arms);
     }
 
     matchArm() {
@@ -784,7 +784,7 @@ class Parser {
         if (this.matchT("IF")) guard = this.expression();
         this.expect("FAT_ARROW", "'=>' before arm body");
         var body = this.armBody();
-        return MatchArm(pats, guard, body);
+        return AST.MatchArm(pats, guard, body);
     }
 
     // armPats : armPat (","  armPat)*    (only when each is a literal)
@@ -803,13 +803,13 @@ class Parser {
             while (this.matchT("OR")) {
                 alts.append(this.armPat());
             }
-            return [OrPat(alts)];
+            return [AST.OrPat(alts)];
         }
         return [first];
     }
     isLiteralPat(p) {
         return match p {
-            case LiteralPat{v} => true
+            case AST.LiteralPat{v} => true
             case _             => false
         };
     }
@@ -817,11 +817,11 @@ class Parser {
     // armPat : NUMBER|STRING|"true"|"false"|"nil"
     //        | IDENT ( "{" IDENT (","IDENT)* "}" | "(" IDENT (","IDENT)* ")" )?
     armPat() {
-        if (this.matchT("NUMBER")) return LiteralPat(this.parseNumber(this.previous().lexeme));
-        if (this.matchT("STRING")) return LiteralPat(this.previous().lexeme);
-        if (this.matchT("TRUE"))   return LiteralPat(true);
-        if (this.matchT("FALSE"))  return LiteralPat(false);
-        if (this.matchT("NIL"))    return LiteralPat(nil);
+        if (this.matchT("NUMBER")) return AST.LiteralPat(this.parseNumber(this.previous().lexeme));
+        if (this.matchT("STRING")) return AST.LiteralPat(this.previous().lexeme);
+        if (this.matchT("TRUE"))   return AST.LiteralPat(true);
+        if (this.matchT("FALSE"))  return AST.LiteralPat(false);
+        if (this.matchT("NIL"))    return AST.LiteralPat(nil);
         var name = this.expect("IDENTIFIER", "pattern identifier").lexeme;
         if (this.matchT("LEFT_BRACE")) {
             var fields = [];
@@ -830,7 +830,7 @@ class Parser {
                 fields.append(this.expect("IDENTIFIER", "field name").lexeme);
             }
             this.expect("RIGHT_BRACE", "'}' after field pattern");
-            return FieldPat(name, fields);
+            return AST.FieldPat(name, fields);
         }
         if (this.matchT("LEFT_PAREN")) {
             var binds = [];
@@ -839,15 +839,15 @@ class Parser {
                 binds.append(this.expect("IDENTIFIER", "binding name").lexeme);
             }
             this.expect("RIGHT_PAREN", "')' after positional pattern");
-            return PositionalPat(name, binds);
+            return AST.PositionalPat(name, binds);
         }
-        if (name == "_") return WildcardPat();
+        if (name == "_") return AST.WildcardPat();
         // Ambiguous in isolation: bare identifier may be either a binding or
         // a zero-field constructor tag. The compiler resolves at semantic
         // analysis; here we report it as BindingPat (the spec's default for
         // unknown names) — tests that expect zero-field tags rely on the
         // fact that the parser cannot distinguish, only the back-end can.
-        return BindingPat(name);
+        return AST.BindingPat(name);
     }
 
     armBody() {
@@ -873,14 +873,14 @@ class Parser {
                     // For pretty-print purposes we model this as Block.
                     if (len(decls) == 0) return bodyExpr;
                     // Append the bare expression as an ExprStmt for printing.
-                    decls.append(ExprStmt(bodyExpr));
-                    return Block(decls);
+                    decls.append(AST.ExprStmt(bodyExpr));
+                    return AST.Block(decls);
                 }
                 decls.append(d);
             }
             // Empty {} body — degenerate, return a nil literal.
             this.expect("RIGHT_BRACE", "'}' after match arm body");
-            return Block(decls);
+            return AST.Block(decls);
         }
         return this.expression();
     }
@@ -889,13 +889,13 @@ class Parser {
     // error.
     armBodyExpr(d) {
         return match d {
-            case ExprStmt{e} => e
+            case AST.ExprStmt{e} => e
             case _           => this.armBodyError()
         };
     }
     armBodyError() {
         this.error("match arm body must end with an expression");
-        return Literal(nil);
+        return AST.Literal(nil);
     }
 }
 

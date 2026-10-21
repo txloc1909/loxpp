@@ -42,7 +42,7 @@ fun chanUnexpected(msg) {
 
 fun chanValue(item) {
     var value = match item {
-        case Item(v) => v
+        case Chan.Item(v) => v
         case _ => chanUnexpected(item)
     };
     return value;
@@ -60,7 +60,7 @@ class Sender {
         while (this.credits == 0) {
             this.takeControl();
         }
-        task.send(this.consumer, Item(value));
+        task.send(this.consumer, Chan.Item(value));
         this.credits = this.credits - 1;
     }
 
@@ -69,14 +69,14 @@ class Sender {
         while (this.capacity == nil or this.credits < this.capacity) {
             this.takeControl();
         }
-        task.send(this.consumer, Closed());
+        task.send(this.consumer, Chan.Closed());
     }
 
     takeControl() {
         var msg = task.receive();
         var gained = match msg {
-            case Grant(capacity) => this.granted(capacity)
-            case Credit => 1
+            case Chan.Grant(capacity) => this.granted(capacity)
+            case Chan.Credit => 1
             case _ => chanUnexpected(msg)
         };
         this.credits = this.credits + gained;
@@ -95,19 +95,19 @@ class Receiver {
         }
         this.producer = producer;
         this.closed = false;
-        task.send(producer, Grant(capacity));
+        task.send(producer, Chan.Grant(capacity));
     }
 
     // Returns Item(value) for the next item, or Closed when the channel has
     // ended. Waits when no item is in the mailbox.
     receive() {
         if (this.closed) {
-            return Closed();
+            return Chan.Closed();
         }
         var msg = task.receive();
         var taken = match msg {
-            case Item(value) => this.took(msg)
-            case Closed => this.ended(msg)
+            case Chan.Item(value) => this.took(msg)
+            case Chan.Closed => this.ended(msg)
             case _ => chanUnexpected(msg)
         };
         return taken;
@@ -123,7 +123,7 @@ class Receiver {
     }
 
     took(msg) {
-        task.send(this.producer, Credit());
+        task.send(this.producer, Chan.Credit());
         return msg;
     }
 

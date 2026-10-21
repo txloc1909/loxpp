@@ -3,4 +3,4 @@
 class Item {}
 class Box {}
 enum Wrap { W(inner) }
-var r = match W(Box()) { case W(Box{Item}) => 1 };
+var r = match Wrap.W(Box()) { case Wrap.W(Box{Item}) => 1 };

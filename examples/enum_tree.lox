@@ -4,8 +4,8 @@ enum Tree { Leaf(val) Node(left, right) }
 
 fun tree_sum(t) {
     return match t {
-        case Leaf(v)    => v
-        case Node(l, r) => tree_sum(l) + tree_sum(r)
+        case Tree.Leaf(v)    => v
+        case Tree.Node(l, r) => tree_sum(l) + tree_sum(r)
     };
 }
 
@@ -16,8 +16,8 @@ fun max_int(a, b) {
 
 fun tree_depth(t) {
     return match t {
-        case Leaf(v)    => 0
-        case Node(l, r) => max_int(tree_depth(l), tree_depth(r)) + 1
+        case Tree.Leaf(v)    => 0
+        case Tree.Node(l, r) => max_int(tree_depth(l), tree_depth(r)) + 1
     };
 }
 
@@ -25,14 +25,14 @@ fun tree_depth(t) {
 // so the caller can re-inspect it without matching again.
 fun tree_find(t, target) {
     return match t {
-        case leaf @ Leaf(v) => (v == target) and leaf or nil
-        case Node(l, r)     => tree_find(l, target) or tree_find(r, target)
+        case leaf @ Tree.Leaf(v) => (v == target) and leaf or nil
+        case Tree.Node(l, r)     => tree_find(l, target) or tree_find(r, target)
     };
 }
 
-var t = Node(
-    Node(Leaf(1), Leaf(2)),
-    Node(Leaf(3), Node(Leaf(4), Leaf(5)))
+var t = Tree.Node(
+    Tree.Node(Tree.Leaf(1), Tree.Leaf(2)),
+    Tree.Node(Tree.Leaf(3), Tree.Node(Tree.Leaf(4), Tree.Leaf(5)))
 );
 
 // CHECK: sum: 15
@@ -43,6 +43,6 @@ print "depth: " + str(tree_depth(t));
 var found = tree_find(t, 4);
 // CHECK: found: true
 print "found: " + str(found != nil);
-var found_val = match found { case Leaf(v) => v case _ => -1 };
+var found_val = match found { case Tree.Leaf(v) => v case _ => -1 };
 // CHECK: found val: 4
 print "found val: " + str(found_val);

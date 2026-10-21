@@ -5,15 +5,15 @@ enum Option { Some(v) None }
 
 fun safe_div(a, b) {
     if (b == 0) {
-        return Err("division by zero");
+        return Result.Err("division by zero");
     }
-    return Ok(a / b);
+    return Result.Ok(a / b);
 }
 
 fun show_result(r) {
     print match r {
-        case Ok(v)  => "ok: " + str(v)
-        case Err(m) => "err: " + m
+        case Result.Ok(v)  => "ok: " + str(v)
+        case Result.Err(m) => "err: " + m
     };
 }
 
@@ -26,11 +26,11 @@ fun find_first(lst, pred) {
     var i = 0;
     while (i < len(lst)) {
         if (pred(lst[i])) {
-            return Some(lst[i]);
+            return Option.Some(lst[i]);
         }
         i = i + 1;
     }
-    return None();
+    return Option.None();
 }
 
 fun is_even(x) { return x % 2 == 0; }
@@ -40,6 +40,6 @@ var result = find_first(nums, is_even);
 
 // CHECK: found even: 4
 print match result {
-    case Some(v) => "found even: " + str(v)
-    case None    => "no even number"
+    case Option.Some(v) => "found even: " + str(v)
+    case Option.None    => "no even number"
 };

@@ -42,29 +42,29 @@ fun printLines(main, id) {
     }
     var head = "w" + str(id) + " ";
     var tail = " " + pad(letter);
-    task.send(main, Ready(id));
+    task.send(main, Note.Ready(id));
     task.receive();
     var i = 0;
     while (i < lineCount()) {
         print head + digits(i) + tail;
         i = i + 1;
     }
-    task.send(main, Done(id));
+    task.send(main, Note.Done(id));
 }
 
 // The entry of a printer worker. It reads no top-level var: a new worker
 // does not run the top-level var declarations.
 fun printer(job) {
     match job {
-        case Start(main, id) => printLines(main, id)
+        case Job.Start(main, id) => printLines(main, id)
     };
 }
 
-var first = task.spawn_worker(printer, Start(task.self(), 1));
-var second = task.spawn_worker(printer, Start(task.self(), 2));
+var first = task.spawn_worker(printer, Job.Start(task.self(), 1));
+var second = task.spawn_worker(printer, Job.Start(task.self(), 2));
 task.receive();
 task.receive();
-task.send(first, Go());
-task.send(second, Go());
+task.send(first, Note.Go());
+task.send(second, Note.Go());
 task.receive();
 task.receive();
