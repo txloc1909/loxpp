@@ -1704,12 +1704,15 @@ void Compiler::enumDeclaration() {
         m_mm->popTempRoot(); // ctorNameStr
 
         ConstructorInfo info{enumName, ctorName, tag, arity, fieldNames};
+        uint16_t hiddenConst = constructorGlobalConstant(info);
         emitConstantOp(Op::CONSTANT, ctorConst);
-        emitConstantOp(Op::DEFINE_GLOBAL, constructorGlobalConstant(info));
+        emitConstantOp(Op::DEFINE_GLOBAL, hiddenConst);
         // The bare name stays a global too, unless it is an enum name, which
-        // means the enum.
+        // means the enum. It reads the hidden global and does not load the
+        // constant again: the JVM backend makes a new constructor object for
+        // each load of the constant, and the two names must hold one object.
         if (!isEnumName(ctorName)) {
-            emitConstantOp(Op::CONSTANT, ctorConst);
+            emitConstantOp(Op::GET_GLOBAL, hiddenConst);
             emitConstantOp(Op::DEFINE_GLOBAL, identifierConstant(ctorTok));
         }
 
