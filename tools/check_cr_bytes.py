@@ -8,8 +8,9 @@ drops still shows as a difference. Two cases do not show: a runner that
 changes a CR into a newline, and a runner that drops a CR before a newline.
 This script runs each program on native and on a second runner in binary
 mode, and compares the raw stdout bytes and the exit status. The default
-probe holds a lone CR, so it covers a CR changed into a newline; it holds no
-CR before a newline.
+probes hold a lone CR and a CR directly before a newline. The first covers a
+runner that changes a CR into a newline; the second covers a runner that
+drops a CR before a newline, which the text-mode gates cannot see.
 
 Native must print a CR byte itself. Without that rule, two outputs that both
 lost the CR would be equal and the check would pass with nothing checked.
@@ -17,8 +18,7 @@ lost the CR would be equal and the check would pass with nothing checked.
 Usage:
     python3 tools/check_cr_bytes.py <native-loxpp> <other-runner> [program.lox...]
 
-With no program, it runs
-test/translation-probes/bootstrap-only/stdout_carriage_return.lox.
+With no program, it runs both probes that DEFAULT_PROGRAMS names.
 Exit status: 0 when every program matches, 1 on a difference, 2 on a usage
 error.
 """
@@ -27,9 +27,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_PROGRAM = (
-    Path(__file__).resolve().parent.parent
-    / "test/translation-probes/bootstrap-only/stdout_carriage_return.lox"
+PROBE_DIR = (
+    Path(__file__).resolve().parent.parent / "test/translation-probes/bootstrap-only"
+)
+DEFAULT_PROGRAMS = (
+    PROBE_DIR / "stdout_carriage_return.lox",
+    PROBE_DIR / "stdout_carriage_return_before_newline.lox",
 )
 TIMEOUT_SECONDS = 120
 
@@ -44,7 +47,7 @@ def main() -> int:
         print(__doc__, file=sys.stderr)
         return 2
     native, other = sys.argv[1], sys.argv[2]
-    programs = [Path(p) for p in sys.argv[3:]] or [DEFAULT_PROGRAM]
+    programs = [Path(p) for p in sys.argv[3:]] or list(DEFAULT_PROGRAMS)
 
     failed = False
     for program in programs:

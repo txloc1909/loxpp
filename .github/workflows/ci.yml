@@ -517,9 +517,10 @@ jobs:
       # in bootstrap-only/. Name them, so the bootstrap is compared with
       # native, byte for byte, on a NUL byte in a string literal, a NUL byte in
       # file content, and a last line with no newline.
-      # The same step runs tools/check_cr_bytes.py on a printed carriage
-      # return. diff_runtimes.py reads stdout in text mode, which turns each CR
-      # into a newline, so that script compares the raw bytes (issue #656).
+      # The same step runs tools/check_cr_bytes.py on two printed carriage
+      # returns: a lone one, and one directly before a newline.
+      # diff_runtimes.py reads stdout in text mode, which turns each CR into a
+      # newline, so that script compares the raw bytes (issue #656, issue #701).
       - name: Bootstrap differential suite - NUL probes
         if: matrix.preset == 'release'
         run: |
