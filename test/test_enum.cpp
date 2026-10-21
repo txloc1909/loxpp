@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 static void expect_num(Value v, double n) {
     ASSERT_TRUE(is<Number>(v));
     EXPECT_DOUBLE_EQ(as<Number>(v), n);
@@ -308,4 +310,26 @@ TEST_F(MatchGCTest, ConstructorIsFirstClassValue) {
     auto v = h.getGlobal("got");
     ASSERT_TRUE(v.has_value());
     expect_num(*v, 42.0);
+}
+
+// JUMP_TABLE holds its entry count in one byte, so a match with one arm for
+// each of 256 constructors must not use a jump table.
+TEST_F(MatchEnumTest, MatchOverAllTagsDoesNotUseAJumpTable) {
+    std::string ctors;
+    std::string arms;
+    for (int i = 0; i < 256; ++i) {
+        ctors += " C" + std::to_string(i);
+        arms += " case E.C" + std::to_string(i) + " => " + std::to_string(i);
+    }
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum E {" + ctors + " }\n" +
+                    "var last = match E.C255() {" + arms + " };\n" +
+                    "var first = match E.C0() {" + arms + " };\n"),
+              InterpretResult::OK);
+    auto last = h.getGlobal("last");
+    auto first = h.getGlobal("first");
+    ASSERT_TRUE(last.has_value());
+    ASSERT_TRUE(first.has_value());
+    expect_num(*last, 255.0);
+    expect_num(*first, 0.0);
 }
