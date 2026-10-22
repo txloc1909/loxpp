@@ -99,7 +99,7 @@ subagent window by hand, the run ends and is reported as aborted.
 
 ```bash
 # Unit tests. A fake `kitten` stands in for kitty, so no terminal is needed.
-node --test .pi/extensions/subagent/
+node --test .pi/extensions/subagent/*.test.ts
 
 # Live test. Needs a running kitty with remote control:
 LOXPP_SUBAGENT_LIVE=1 KITTY_LISTEN_ON=unix:/tmp/kitty.sock \

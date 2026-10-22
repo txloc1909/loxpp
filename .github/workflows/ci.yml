@@ -82,7 +82,7 @@ jobs:
       # files. Its unit tests use a fake `kitten`, so they need no terminal.
       # The live kitty test stays out of CI: it needs a graphical kitty.
       - name: Run extension unit tests
-        run: node --test .pi/extensions/subagent/
+        run: node --test .pi/extensions/subagent/*.test.ts
 
   tree-sitter:
     name: tree-sitter grammar
