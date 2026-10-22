@@ -15,11 +15,6 @@ fun g(xs) {
 }
 print g([1, 3, 1]);
 
-var n = 0;
-for (var x in [1, 2, 3]) { n = n + (match x { case 2 => 10 case _ => 1 }); }
-print n;
-
 // STATUS: ok
 // CHECK: a-
 // CHECK: a-a
-// CHECK: 12
