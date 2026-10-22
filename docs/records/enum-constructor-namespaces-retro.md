@@ -44,6 +44,18 @@ that `str` of a constructor is `<A>` "as today". Every consumer printed
 ## What the reviews found
 
 The reviews ran programs on every node, and most findings came from that.
+A separate reviewer agent did each review, in its own worktree and
+container.
+
+| Node | PR | Rounds | Findings |
+|---|---|---|---|
+| N2 | #783 | 2 | 5 (R1 to R5) |
+| N3 | #790 | 2 | 1 |
+| N5 | #791 | 2 | 2 |
+| N6 | #796 | 4 | 2, then two owner changes (the expected-failure lists and a merge from `main`) |
+| N7 | #799 | 1 | 0 |
+| N8 | #800 | 2 | 1 |
+| N4 | #811 | 2 | 2 |
 
 - **A compile-error case passed on a halt** (N3, #790). The compile-error
   phase of `tools/diff_runtimes.py` counts a run with no stdout and a
