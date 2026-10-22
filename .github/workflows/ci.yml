@@ -68,6 +68,27 @@ jobs:
       - name: Check credit channel copies
         run: tools/check_credit_channel_copies.py
 
+  pi-modes:
+    name: pi mode guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The turn-policy test runs TypeScript directly, which needs the type
+      # stripping that node 22.18 and later enable by default.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install pi
+        run: npm install -g @earendil-works/pi-coding-agent
+
+      # Each guard of the autonomous-mode policy has a unit test, so a broken
+      # guard fails by name. Pure node, so it needs no build.
+      - name: Unit-test the turn policy
+        run: node --test .pi/extensions/mode-policy.test.ts
+
+
   tree-sitter:
     name: tree-sitter grammar
     runs-on: ubuntu-latest
