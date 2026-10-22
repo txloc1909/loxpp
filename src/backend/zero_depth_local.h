@@ -24,6 +24,13 @@
 // One authority for this rule; a second, independently derived copy in
 // another emitter is a defect. Call into this function rather than
 // re-deriving the cross-check inside a new emitter.
+// `knownJoinSlot` is the exact cell the shared analysis recorded at an
+// `and`/`or` join whose operand was a folded `match` (abstract_stack.h,
+// FunctionStackAnalysis::shortCircuitJoins), or -1 when this offset has no
+// such record. A recorded cell is not an estimate, so the merge cross-check
+// below does not apply to it; it must still agree with
+// `exactLocalCountMinusOne`, and this throws if it does not (that would mean
+// the analysis and this emitter disagree about the merge).
 int resolveZeroDepthLocalSlot(int exactLocalCountMinusOne, bool atCfgMergeLabel,
-                              int lastInvisibleVarSlot, int offset,
-                              const char* backendTag);
+                              int lastInvisibleVarSlot, int knownJoinSlot,
+                              int offset, const char* backendTag);

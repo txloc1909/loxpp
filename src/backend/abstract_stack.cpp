@@ -1282,6 +1282,15 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     addShortCircuitJoinSites(ins, cfg, heightBefore, heightAfter, reached,
                              fn.function->chunk.shortCircuitJoins(),
                              siteIndices);
+    for (const ShortCircuitJoin& join :
+         fn.function->chunk.shortCircuitJoins()) {
+        for (const DecodedInstruction& instr : ins) {
+            if (instr.offset == join.offset && join.slot >= 0) {
+                result.shortCircuitJoins.push_back(join);
+                break;
+            }
+        }
+    }
     std::vector<std::vector<int>> declaredSlotsAt(n);
     for (const auto& [idx, slot] : siteIndices) {
         declaredSlotsAt[idx].push_back(slot);

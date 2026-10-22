@@ -21,6 +21,7 @@
 // so `var x = yield e;` claims it through the ordinary invisible-var
 // mechanism, exactly like any other expression result.
 
+#include "chunk.h"
 #include "chunk_decoder.h"
 
 #include <cstdint>
@@ -114,6 +115,16 @@ struct FunctionStackAnalysis {
     // from more than one predecessor (e.g. a captured local initialised by
     // a short-circuit `and`/`or` expression lands via either branch).
     std::vector<InvisibleVarSite> invisibleVars;
+
+    // One entry per `and`/`or` join the compiler recorded whose operand was
+    // a folded `match` (Chunk::shortCircuitJoin). `offset` is the join's own
+    // destination instruction — the one that consumes the expression's
+    // result — and `slot` is that result cell, now a named local on every
+    // incoming path (see addShortCircuitJoinSites). A consumer that reads it
+    // at operand depth 0 must use `slot` directly: at this CFG merge
+    // `localCount - 1` is only an upper bound, and the forward-walk
+    // cross-check in zero_depth_local.cpp cannot confirm it here.
+    std::vector<ShortCircuitJoin> shortCircuitJoins;
 
     // One entry per PUSH_HANDLER in this chunk. See HandlerEntryContract:
     // each catch-target instruction's `before`/`after` state above is
