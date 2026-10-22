@@ -682,6 +682,63 @@ void findPersistentPopLocals(
     }
 }
 
+// Treats each `and`/`or` join the compiler recorded (Chunk::ShortCircuitJoin)
+// as a reference to its result cell, exactly like a GET_LOCAL/SET_LOCAL would
+// be: every incoming path's declaring push for that cell becomes a recognized
+// declaration, so the value is a named local at the join on every path. The
+// match path already is one (its arms store through SET_LOCAL), the other
+// path's value arrives as an ordinary temporary that the JVM emitter stores
+// into the same local slot at that declaring push (the invisible-var
+// machinery it already has). Without this the two paths reach the join at
+// different operand depths — native accepts the program, the JVM verifier
+// would not (issue #817).
+//
+// Height-only data drives the walk, like findInvisibleVarIndices; a join whose
+// offset names no instruction of this chunk is skipped (a truncated chunk can
+// produce one, a compiled one cannot).
+void addShortCircuitJoinSites(const std::vector<DecodedInstruction>& ins,
+                              const LocalCfg& cfg,
+                              const std::vector<StackState>& before,
+                              const std::vector<StackState>& after,
+                              const std::vector<bool>& reached,
+                              const std::vector<ShortCircuitJoin>& joins,
+                              std::set<std::pair<int, int>>& sites) {
+    if (joins.empty()) {
+        return;
+    }
+    std::unordered_map<int, int> indexByOffset;
+    for (size_t i = 0; i < ins.size(); i++) {
+        indexByOffset[ins[i].offset] = static_cast<int>(i);
+    }
+    std::unordered_map<int, int> catchEntryToPushIdx;
+    for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
+        catchEntryToPushIdx[catchIdx] = pushIdx;
+    }
+    for (const ShortCircuitJoin& join : joins) {
+        auto it = indexByOffset.find(join.offset);
+        if (it == indexByOffset.end() || join.slot < 0) {
+            continue;
+        }
+        for (int pred : cfg.predecessors[static_cast<size_t>(it->second)]) {
+            if (!reached[static_cast<size_t>(pred)]) {
+                continue;
+            }
+            // The predecessor itself may be the declaring push (a plain
+            // `... or 4` ends with the CONSTANT that creates the value), in
+            // which case the backward walk below only ever sees the value
+            // that instruction replaced and finds nothing.
+            const StackEffect effect = stackEffect(ins[pred]);
+            int popReach = before[pred].height - effect.popCount;
+            if (popReach <= join.slot && join.slot < after[pred].height) {
+                sites.insert({pred, join.slot});
+                continue;
+            }
+            findDeclaringPushIndices(pred, join.slot, ins, cfg, before, after,
+                                     reached, catchEntryToPushIdx, sites);
+        }
+    }
+}
+
 // A local's frame can end with no explicit reclaim opcode at all: a
 // function's own top-level locals never run through endScope(), because
 // there is no enclosing block left to close there — the whole frame is
@@ -1222,6 +1279,9 @@ FunctionStackAnalysis analyzeStack(const DecodedFunction& fn) {
     // local exactly there instead of at its first reference.
     std::set<std::pair<int, int>> siteIndices =
         findInvisibleVarIndices(ins, cfg, heightBefore, heightAfter, reached);
+    addShortCircuitJoinSites(ins, cfg, heightBefore, heightAfter, reached,
+                             fn.function->chunk.shortCircuitJoins(),
+                             siteIndices);
     std::vector<std::vector<int>> declaredSlotsAt(n);
     for (const auto& [idx, slot] : siteIndices) {
         declaredSlotsAt[idx].push_back(slot);
