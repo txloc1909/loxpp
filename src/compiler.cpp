@@ -1085,6 +1085,10 @@ void Compiler::compileMatchBody() {
     // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
     // Pop the subject; result_value becomes the match expression result.
     emitByte(Op::POP);
+    // `and`/`or` may need this cell's own identity later: see
+    // lastOperandWasFoldedMatch.
+    m_lastMatchFoldOffset = static_cast<int>(getCurrentChunk()->size());
+    m_lastMatchFoldSlot = resultSlot;
     m_localCount--; // retire subject from tracking
     m_scopeDepth--;
     while (m_localCount > 0 &&
@@ -2726,21 +2730,73 @@ void Compiler::parseFunction(FunctionType /*type*/) {
     endCompiler();
 }
 
+// Answers whether the operand just compiled ends with its value in a named
+// local the way a `match` result does, and consumes that answer. It does when
+// nothing was emitted since that offset: `m_lastMatchFoldOffset` is where the
+// match body (or the `and`/`or` join that re-armed it) ended, so an enclosing
+// `+`, call, or property read — each of which emits its own instruction first
+// — cannot match it by accident.
+bool Compiler::lastOperandWasFoldedMatch() {
+    bool matches =
+        m_lastMatchFoldOffset >= 0 &&
+        m_lastMatchFoldOffset == static_cast<int>(getCurrentChunk()->size());
+    if (matches) {
+        m_lastMatchFoldOffset = -1;
+    }
+    return matches;
+}
+
+// An `and`/`or` whose operand is a folded `match` needs one fact recorded at
+// its join: the result cell is a named local on the match path (the match
+// stores every arm's value into its synthetic result slot) but an ordinary
+// temporary on the other path. Both paths must present the same thing there —
+// the JVM verifier requires one operand-stack depth on every incoming edge,
+// and the value really is a local on the match path — so the join is recorded
+// as a reference to the result cell (chunk.h, ShortCircuitJoin), and the
+// abstract-stack analysis finds that cell's declaring push on each path so the
+// JVM emitter's invisible-var store puts the temporary path's value into the
+// same local slot (issue #817). Native and QBE need nothing: one cell holds
+// the value either way.
+//
+// Every other consumer of a folded `match` reads it in place and needs no
+// record, so this is deliberately limited to `and`/`or` with such an operand.
+//
+// The record also re-arms the same answer for this expression's own result: a
+// chained `a and b and c` whose first operand is a folded match leaves every
+// join's result in that same named local, so the next `and`/`or` up needs its
+// own record for the very same reason.
+void Compiler::recordShortCircuitJoinIfFoldedMatchOperand(bool folded) {
+    if (!folded) {
+        return;
+    }
+    int slot = m_stackHeight - 1;
+    getCurrentChunk()->recordShortCircuitJoin(
+        static_cast<int>(getCurrentChunk()->size()), slot);
+    m_lastMatchFoldOffset = static_cast<int>(getCurrentChunk()->size());
+    m_lastMatchFoldSlot = slot;
+}
+
 void Compiler::and_() {
+    bool leftFolded = lastOperandWasFoldedMatch();
     int endJump = emitJump(Op::JUMP_IF_FALSE);
     emitByte(Op::POP);
     m_parser->parsePrecedence(Precedence::AND, this);
+    bool rightFolded = lastOperandWasFoldedMatch();
     patchJump(endJump);
+    recordShortCircuitJoinIfFoldedMatchOperand(leftFolded || rightFolded);
     markNotAssignable();
 }
 
 void Compiler::or_() {
+    bool leftFolded = lastOperandWasFoldedMatch();
     int elseJump = emitJump(Op::JUMP_IF_FALSE);
     int endJump = emitJump(Op::JUMP);
     patchJump(elseJump);
     emitByte(Op::POP);
     m_parser->parsePrecedence(Precedence::OR, this);
+    bool rightFolded = lastOperandWasFoldedMatch();
     patchJump(endJump);
+    recordShortCircuitJoinIfFoldedMatchOperand(leftFolded || rightFolded);
     markNotAssignable();
 }
 

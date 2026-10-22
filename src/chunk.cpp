@@ -25,12 +25,21 @@ void Chunk::write(Op op, int line) { write(static_cast<Byte>(op), line); }
 
 void Chunk::patch(int offset, Byte byte) { (*this)[offset] = byte; }
 
+void Chunk::recordShortCircuitJoin(int offset, int slot) {
+    m_shortCircuitJoins.push_back({offset, slot});
+}
+
 void Chunk::truncate(std::size_t size) {
     if (size >= this->size()) {
         return;
     }
     std::size_t drop = this->size() - size;
     resize(size);
+    while (!m_shortCircuitJoins.empty() &&
+           static_cast<std::size_t>(m_shortCircuitJoins.back().offset) >=
+               size) {
+        m_shortCircuitJoins.pop_back();
+    }
     while (drop > 0) {
         auto& run = m_lines.back();
         auto count = static_cast<std::size_t>(run.second);
