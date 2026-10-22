@@ -196,6 +196,10 @@ StackAnalysisTree analyzeStackTree(const DecodedFunction& root);
 // (bytecode-translation-problems.md P2).
 bool peeksInsteadOfPops(Op op);
 
+// The number of operand-stack cells `ins` pops (its stack effect's pop
+// count). A peek, such as SET_LOCAL, pops none.
+int stackPopCount(const DecodedInstruction& ins);
+
 // Internal to analyzeStack's own implementation (a safety-net guard in
 // abstract_stack.cpp). Declared here, not in the anonymous namespace it once
 // sat in, only so test_backend_abstract_stack.cpp can drive it directly
