@@ -1751,6 +1751,9 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info) {
                                         .c_str());
                     break;
                 }
+                if (fieldName == "_") {
+                    continue; // `_` binds nothing (spec/04-semantics.md)
+                }
                 auto idx = static_cast<uint8_t>(
                     std::distance(info.fieldNames.begin(), it));
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
@@ -1775,6 +1778,10 @@ int Compiler::compileCtorPattern(int subjectSlot, const ConstructorInfo& info) {
                 }
                 m_parser->consume(TokenType::IDENTIFIER,
                                   "Expect binding name.");
+                if (m_parser->m_previous.lexeme == "_") {
+                    i++;
+                    continue; // `_` binds nothing (spec/04-semantics.md)
+                }
                 emitBytes(Op::GET_LOCAL, static_cast<uint8_t>(subjectSlot));
                 emitConstantOp(Op::CONSTANT,
                                makeConstant(Value{static_cast<double>(i)}));

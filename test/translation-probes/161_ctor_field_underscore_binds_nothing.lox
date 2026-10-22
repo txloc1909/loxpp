@@ -1,0 +1,30 @@
+// A field name `_` in a constructor pattern binds nothing
+// (spec/04-semantics.md, match Expression, "Constructor patterns"). So an
+// alternative with `_` binds the same names as one with no field, and one
+// pattern may hold `_` more than once. In a named-field pattern, `_` names
+// a field `_`, and that field binds nothing too.
+enum T { N S(v) P(a, b) }
+enum U { B(_) C }
+
+fun f(t) {
+    return match t {
+        case T.N or T.S(_) => "n or s"
+        case T.P(_, _)     => "p"
+    };
+}
+print f(T.N());
+print f(T.S(1));
+print f(T.P(1, 2));
+print match T.P(3, 4) { case T.P(_, b) => b case _ => 0 };
+print match T.P(5, 6) { case T.P{a} or T.S(a) => a case _ => 0 };
+print match U.B(3) { case U.B{_} or U.C => "b or c" case _ => "no" };
+print match U.C() { case U.B{_} or U.C => "b or c" case _ => "no" };
+
+// STATUS: ok
+// CHECK: n or s
+// CHECK: n or s
+// CHECK: p
+// CHECK: 4
+// CHECK: 5
+// CHECK: b or c
+// CHECK: b or c

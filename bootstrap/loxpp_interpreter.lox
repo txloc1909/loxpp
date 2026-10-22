@@ -1763,6 +1763,9 @@ class Resolver {
     }
 
     resolveBindPat(name) {
+        // A field `_` binds nothing (spec/04-semantics.md, "Constructor
+        // patterns"); a bare `_` is a WildPat and never reaches here.
+        if (name == "_") return;
         // In OR-patterns, the same name may appear in multiple alternatives.
         // Skip re-declaration if already bound in the current scope.
         if (len(this.scopes) > 0) {
@@ -1878,13 +1881,18 @@ class Resolver {
         return match pat {
             case Pattern.WildPat       => []
             case Pattern.LitPat{v}     => []
-            case Pattern.BindPat{name} => [name]
+            case Pattern.BindPat{name} => this.boundName(name)
             case Pattern.TagPat{cname} => []
             case Pattern.ClassPat{cname} => []
             case Pattern.CtorPat{cname, subpats, named, line} => this.patternListBindNames(subpats)
             case Pattern.ListPat{elems, rest_name} => this.listPatBindNames(elems, rest_name)
             case Pattern.AtPat{at_name, subpat} => this.withName(this.patternBindNames(subpat), at_name)
         };
+    }
+
+    boundName(name) {
+        if (name == "_") return [];
+        return [name];
     }
 
     patternListBindNames(pats) {
@@ -5364,6 +5372,7 @@ class Interpreter {
     }
 
     matchBind(name, subject, bindings) {
+        if (name == "_") return true;
         bindings[name] = subject;
         return true;
     }
