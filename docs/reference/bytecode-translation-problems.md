@@ -636,8 +636,8 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     are BOTH wrong is not ruled out by that cross-check — only real,
     per-edge merge verification closes it, which no node has attempted. No
     known program reaches that second residue.
-  - **Still open, unowned, REACHABLE — deferred by referee ruling, PR #115
-    (originally R13, PR #115 round 2; disposition ruled at round 3).**
+  - **FIXED (issue #817), was REACHABLE — deferred by referee ruling, PR
+    #115 (originally R13, PR #115 round 2; disposition ruled at round 3).**
     `and`/`or` (`compiler.cpp`'s `and_`/`or_`) compile `JUMP_IF_FALSE` then
     either `POP` (true path, falls through into the right operand) or `JUMP`
     straight to the shared exit (false path, the left operand's own value
@@ -683,6 +683,32 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     who rules on it — not something N11 resolves alone. This gap stays
     unassigned until a program actually reaches it or a researcher rules
     on N2's fold model if the corpus ever reaches this shape.
+    **Fixed (issue #817).** The compiler now records the join itself, and the
+    analysis treats it as a reference to the result cell.
+    `compileMatchBody` already knows the result cell; `and_`/`or_` know their
+    shared exit, and know whether the operand they just compiled was a whole
+    match expression (`Compiler::lastOperandWasFoldedMatch`, an offset
+    comparison, so an enclosing `+` or call cannot match it by accident).
+    When it was, they record `Chunk::ShortCircuitJoin {offset, slot}` — the
+    same channel the chunk's line table uses, and not part of the chunk
+    bytes, so QBE's startup hash is unaffected.
+    `abstract_stack.cpp`'s `addShortCircuitJoinSites` turns each recorded join
+    into what a `GET_LOCAL`/`SET_LOCAL` reference already produces: the
+    declaring push of that cell on every incoming path. On the match path
+    that push is the match's own `NIL` (already recognized); on the other
+    path it is whatever instruction creates the operand (`CONSTANT 4` in the
+    repro), which the existing invisible-var machinery now makes the JVM
+    emitter store into the same local slot. Both paths therefore reach the
+    join as one named local at operand depth 0, the merge check holds, and the
+    consumer's own fold-aware read (`normalizeFoldedOperands`,
+    `loadNamedLocalAtZeroDepth`) loads it as it already does for a plain
+    folded match. Native still needs nothing — locals and temporaries share a
+    cell there — and QBE addresses every cell by height, so neither changes.
+    Probe `163_match_and_or_operand` covers both operators, both sides, and
+    three consumers; `AbstractStackTest.
+    ShortCircuitJoinWithFoldedMatchMakesBothPathsLocal` pins the analysis fact
+    and fails with this entry's own throw when the record is removed. No
+    relaxation of `validateMergeConsistency` was needed.
   - **Still open, unowned, REACHABLE, not silent — a folded operand plus a
     sibling operand ending in `and`/`or` (R22, PR #115 round 4).** Distinct
     from the residue above: there, `and`/`or` sits ABOVE the fold, and the
