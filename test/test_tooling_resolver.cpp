@@ -256,8 +256,8 @@ TEST(ToolingResolver, MatchBindingResolves) {
     const std::string src = R"(enum Option { Some(v) None }
 fun unwrap(o) {
   return match o {
-    case Some(inner) => inner
-    case None => 0
+    case Option.Some(inner) => inner
+    case Option.None => 0
   };
 }
 )";
@@ -270,11 +270,67 @@ fun unwrap(o) {
     ASSERT_TRUE(def);
     EXPECT_EQ(def->offset, bindDecl);
 
-    // `Some` in the pattern is the constructor, not a fresh binding.
-    const std::size_t ctorUse = offsetOf(src, "case Some(inner)") + 5;
+    // `Some` in `Option.Some(inner)` is the constructor, not a binding.
+    const std::size_t ctorUse = offsetOf(src, "case Option.Some(inner)") + 12;
     auto ctorDef = model.definitionAt(ctorUse);
     ASSERT_TRUE(ctorDef);
     EXPECT_EQ(ctorDef->offset, offsetOf(src, "Some(v)"));
+}
+
+// A constructor is not a variable, so its bare name is not a constructor: in
+// a pattern it is a binding, and in an expression it is an unknown name.
+TEST(ToolingResolver, BareConstructorNameIsNotAConstructor) {
+    const std::string src = R"(enum Option { Some(v) None }
+fun f(o) {
+  return match o { case None => None };
+}
+print Some;
+)";
+    DocumentModel model(src);
+    const std::vector<std::string> warnings = warningMessages(model);
+    ASSERT_EQ(warnings.size(), 1u);
+    EXPECT_EQ(warnings.front(), "unknown name 'Some'");
+
+    const std::size_t bindDecl = offsetOf(src, "case None") + 5;
+    const std::size_t bindUse = offsetOf(src, "=> None") + 3;
+    auto def = model.definitionAt(bindUse);
+    ASSERT_TRUE(def);
+    EXPECT_EQ(def->offset, bindDecl);
+}
+
+// A bare enum name in a pattern is a binding, not a class test of the enum.
+// The compiler rejects the binding, because no variable may have an enum
+// name; the tooling must not link it to the enum.
+TEST(ToolingResolver, BareEnumNameInPatternIsABinding) {
+    const std::string src = R"(enum Option { Some(v) None }
+fun f(o) {
+  return match o { case Option => 1 };
+}
+)";
+    DocumentModel model(src);
+    const std::size_t head = offsetOf(src, "case Option") + 5;
+    auto def = model.definitionAt(head);
+    ASSERT_TRUE(def);
+    EXPECT_EQ(def->offset, head);
+}
+
+// A head with a field list and no enum name can name only a class. A head
+// that names an enum or a function is a compile error, so the tooling links
+// it to nothing.
+TEST(ToolingResolver, BareFieldListHeadNamesOnlyAClass) {
+    const std::string src = R"(enum Option { Some(v) None }
+fun Pick(a) { return a; }
+class Point {}
+fun f(o) {
+  return match o { case Option(v) => v case Pick(a) => a case Point{x} => x case _ => 0 };
+}
+)";
+    DocumentModel model(src);
+    EXPECT_FALSE(model.definitionAt(offsetOf(src, "case Option(v)") + 5));
+    EXPECT_FALSE(model.definitionAt(offsetOf(src, "case Pick(a)") + 5));
+    auto classDef = model.definitionAt(offsetOf(src, "case Point{x}") + 5);
+    ASSERT_TRUE(classDef);
+    EXPECT_EQ(classDef->offset, offsetOf(src, "Point {}"));
 }
 
 TEST(ToolingResolver, QualifiedConstructorResolvesToItsEnum) {
@@ -367,8 +423,8 @@ TEST(ToolingResolver, OrPatternBindsSameName) {
     const std::string src = R"(enum E { Move(x) Teleport(x) Quit }
 fun go(e) {
   return match e {
-    case Move(x) or Teleport(x) => x
-    case Quit => 0
+    case E.Move(x) or E.Teleport(x) => x
+    case E.Quit => 0
   };
 }
 )";
@@ -387,8 +443,8 @@ TEST(ToolingResolver, OrPatternRepeatBindingIsAReference) {
     const std::string src = R"(enum E { Move(x) Teleport(x) Quit }
 fun go(e) {
   return match e {
-    case Move(x) or Teleport(x) => x
-    case Quit => 0
+    case E.Move(x) or E.Teleport(x) => x
+    case E.Quit => 0
   };
 }
 )";
@@ -416,8 +472,8 @@ TEST(ToolingResolver, AtBindingBindsOuterAndInner) {
     const std::string src = R"(enum Tree { Leaf(v) Node(l, r) }
 fun describe(t) {
   return match t {
-    case whole @ Node(l, r) => whole
-    case Leaf(v) => v
+    case whole @ Tree.Node(l, r) => whole
+    case Tree.Leaf(v) => v
   };
 }
 )";
@@ -500,8 +556,8 @@ TEST(ToolingResolver, OrPatternMismatchedNamesWarnsOnce) {
     const std::string src = R"(enum E { A(x) B(y) Quit }
 fun go(e) {
   return match e {
-    case A(p) or B(q) => p
-    case Quit => 0
+    case E.A(p) or E.B(q) => p
+    case E.Quit => 0
   };
 }
 )";
@@ -521,8 +577,8 @@ TEST(ToolingResolver, OrPatternMatchedNamesDoesNotWarn) {
     const std::string src = R"(enum E { A(x) B(y) Quit }
 fun go(e) {
   return match e {
-    case A(v) or B(v) => v
-    case Quit => 0
+    case E.A(v) or E.B(v) => v
+    case E.Quit => 0
   };
 }
 )";
@@ -745,6 +801,7 @@ TEST(ToolingResolver, RebuildReplacesState) {
 // warns must be added here on purpose.
 const std::set<std::string> kExpectedWarnedFiles = {
     "06_shared_upvalue.lox",
+    "131_enum_bare_constructor_name.lox",
     "133_enum_unknown_constructor_rejected.lox",
     "140_ctor_pattern_unknown_constructor_rejected.lox",
     "test_enum_arity_try.lox",

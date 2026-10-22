@@ -129,9 +129,10 @@ class Resolver {
         return nullptr;
     }
 
-    static bool isConstructorSymbol(const Symbol* sym) {
-        return sym != nullptr && (sym->kind == SymbolKind::EnumCtor ||
-                                  sym->kind == SymbolKind::Class);
+    // A bare pattern name is a class test when it names a class, and a
+    // binding otherwise. An enum name is not a class test.
+    static bool isClassTest(const Symbol* sym) {
+        return sym != nullptr && sym->kind == SymbolKind::Class && !sym->isEnum;
     }
 
     // -- first sweep: every top-level declaration ------------------------
@@ -172,20 +173,10 @@ class Resolver {
             }
             case StmtKind::EnumDecl: {
                 const auto& e = static_cast<const EnumDecl&>(*stmt);
-                // The constructors first: a later declaration wins a lookup,
-                // and the enum name means the enum also when a constructor
-                // has the same name.
-                std::vector<Symbol*> ctors;
-                ctors.reserve(e.ctors.size());
-                for (const EnumCtorDecl& ctor : e.ctors) {
-                    ctors.push_back(declareIn(
-                        g, ctor.name.text, SymbolKind::EnumCtor,
-                        nameSpan(ctor.name), {ctor.offset, ctor.length}));
-                }
                 Symbol* enumSym = declareIn(g, e.name.text, SymbolKind::Class,
                                             nameSpan(e.name), stmtSpan(e));
                 enumSym->isEnum = true;
-                enumSym->members = std::move(ctors);
+                enumSym->members = declareConstructors(g, e, false);
                 m_enums.emplace(e.name.text, enumSym);
                 break;
             }
@@ -193,6 +184,26 @@ class Resolver {
                 break;
             }
         }
+    }
+
+    // The constructors of `e`, in a scope of their own under `parent`. A
+    // constructor is not a variable: only `E.A` names it, through the
+    // members of the enum symbol, so no plain lookup finds it.
+    static std::vector<Symbol*>
+    declareConstructors(Scope* parent, const EnumDecl& e, bool implicit) {
+        Scope* ctorScope =
+            SymbolTable::addChild(parent, ScopeKind::Block, stmtSpan(e));
+        std::vector<Symbol*> ctors;
+        ctors.reserve(e.ctors.size());
+        for (const EnumCtorDecl& ctor : e.ctors) {
+            Symbol* sym =
+                ctorScope->declare(std::string(ctor.name.text),
+                                   SymbolKind::EnumCtor, nameSpan(ctor.name));
+            sym->fullRange = {ctor.offset, ctor.length};
+            sym->implicit = implicit;
+            ctors.push_back(sym);
+        }
+        return ctors;
     }
 
     // -- reference resolution ------------------------------------------
@@ -479,13 +490,7 @@ class Resolver {
                           nameSpan(e.name), stmtSpan(e));
             enumSym->implicit = true;
             enumSym->isEnum = true;
-            for (const EnumCtorDecl& ctor : e.ctors) {
-                Symbol* cs =
-                    declareIn(m_current, ctor.name.text, SymbolKind::EnumCtor,
-                              nameSpan(ctor.name), {ctor.offset, ctor.length});
-                cs->implicit = true;
-                enumSym->members.push_back(cs);
-            }
+            enumSym->members = declareConstructors(m_current, e, true);
             return;
         }
         Symbol* enumSym = enumNamed(e.name.text);
@@ -729,7 +734,7 @@ class Resolver {
 
     void bindPatternHead(std::string_view name, Span span, Scope* armScope) {
         Symbol* sym = lookup(name, armScope);
-        if (isConstructorSymbol(sym)) {
+        if (isClassTest(sym)) {
             sym->uses.push_back(span);
             m_out.references.add({span, sym, false, false});
             return;
@@ -737,18 +742,17 @@ class Resolver {
         declareMatchBinding(armScope, name, span);
     }
 
+    // The head of `A(...)` or `A{...}` with no enum name: only a class can
+    // have that head, as a constructor pattern names its enum. Any other
+    // head is a compile error, which the compiler's own diagnostics report.
     void resolveCtorName(std::string_view name, Span span, Scope* armScope) {
         Symbol* sym = lookup(name, armScope);
-        if (sym != nullptr) {
+        if (isClassTest(sym)) {
             sym->uses.push_back(span);
             m_out.references.add({span, sym, false, false});
-            return;
-        }
-        if (isStdlibGlobal(name)) {
+        } else if (sym == nullptr && isStdlibGlobal(name)) {
             m_out.references.add({span, nullptr, false, true});
-            return;
         }
-        warn(span, "unknown name '" + std::string(name) + "'");
     }
 
     // The constructor `name` of the enum symbol `enumSym`.
@@ -867,7 +871,7 @@ class Resolver {
         case PatternKind::Binding: {
             const auto& p = static_cast<const BindingPat&>(*pat);
             if (p.enum_name.text.empty() &&
-                !isConstructorSymbol(lookup(p.name, armScope))) {
+                !isClassTest(lookup(p.name, armScope))) {
                 keep(p.name);
             }
             break;
