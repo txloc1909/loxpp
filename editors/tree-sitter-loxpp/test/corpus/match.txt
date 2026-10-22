@@ -4,7 +4,7 @@ Literal and wildcard arms
 
 var a = match n {
   case 0 => "zero"
-  case 1, 2, 3 => "small"
+  case 1 or 2 or 3 => "small"
   case "x" => "ex"
   case true => "yes"
   case nil => "none"
@@ -58,8 +58,8 @@ Constructor and record patterns
 ================================================================================
 
 var a = match t {
-  case Leaf(v) => v
-  case Node(l, r) => l
+  case Tree.Leaf(v) => v
+  case Tree.Node(l, r) => l
   case Point{x, y} => x
 };
 
@@ -73,10 +73,12 @@ var a = match t {
       (match_arm
         (constructor_pattern
           (identifier)
+          (identifier)
           (identifier))
         (identifier))
       (match_arm
         (constructor_pattern
+          (identifier)
           (identifier)
           (identifier)
           (identifier))
@@ -127,9 +129,9 @@ At-bindings
 ================================================================================
 
 var a = match tree {
-  case leaf @ Leaf(v) => leaf
+  case leaf @ Tree.Leaf(v) => leaf
   case whole @ [h, ...t] => whole
-  case node @ Node{left, right} => node
+  case node @ Tree.Node{left, right} => node
 };
 
 --------------------------------------------------------------------------------
@@ -143,6 +145,7 @@ var a = match tree {
         (binding_pattern
           (identifier)
           (constructor_pattern
+            (identifier)
             (identifier)
             (identifier)))
         (identifier))
@@ -160,6 +163,7 @@ var a = match tree {
           (record_pattern
             (identifier)
             (identifier)
+            (identifier)
             (identifier)))
         (identifier)))))
 
@@ -168,9 +172,9 @@ Or-patterns and guards
 ================================================================================
 
 var a = match sig {
-  case Red or Amber => true
-  case Stop(reason) or SlowDown(reason) if "!" in reason => reason
-  case v @ Ok(x) or v @ Err(x) => x
+  case Light.Red or Light.Amber => true
+  case Cmd.Stop(reason) or Cmd.SlowDown(reason) if "!" in reason => reason
+  case v @ Res.Ok(x) or v @ Res.Err(x) => x
   case n if n >= 500 => "server"
 };
 
@@ -182,14 +186,20 @@ var a = match sig {
     (match_expression
       (identifier)
       (match_arm
-        (identifier_pattern)
-        (identifier_pattern)
+        (constructor_tag_pattern
+          (identifier)
+          (identifier))
+        (constructor_tag_pattern
+          (identifier)
+          (identifier))
         (true))
       (match_arm
         (constructor_pattern
           (identifier)
+          (identifier)
           (identifier))
         (constructor_pattern
+          (identifier)
           (identifier)
           (identifier))
         (guard
@@ -203,10 +213,12 @@ var a = match sig {
           (identifier)
           (constructor_pattern
             (identifier)
+            (identifier)
             (identifier)))
         (binding_pattern
           (identifier)
           (constructor_pattern
+            (identifier)
             (identifier)
             (identifier)))
         (identifier))
@@ -224,8 +236,8 @@ Block and expression arm bodies
 ================================================================================
 
 var a = match node {
-  case A(x) => x + 1
-  case B(y) => {
+  case E.A(x) => x + 1
+  case E.B(y) => {
     var doubled = y * 2;
     doubled
   }
@@ -241,12 +253,14 @@ var a = match node {
       (match_arm
         (constructor_pattern
           (identifier)
+          (identifier)
           (identifier))
         (binary_expression
           (identifier)
           (number)))
       (match_arm
         (constructor_pattern
+          (identifier)
           (identifier)
           (identifier))
         (block_arm_body
@@ -378,3 +392,25 @@ var a = match t {
       (match_arm
         (identifier_pattern)
         (nil)))))
+
+================================================================================
+The comma chain is not an arm pattern
+:error
+================================================================================
+
+var a = match n {
+  case 1, 2 => "small"
+};
+
+--------------------------------------------------------------------------------
+
+================================================================================
+A constructor pattern names its enum
+:error
+================================================================================
+
+var a = match v {
+  case A(x) => x
+};
+
+--------------------------------------------------------------------------------

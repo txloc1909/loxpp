@@ -108,9 +108,15 @@
   function: (field_expression
     property: (identifier) @function.method.call))
 
-; Match patterns
+; Match patterns. `E.A`, `E.A(...)` and `E.A{...}` name the enum E and its
+; constructor A. A record pattern with no enum is a class pattern.
+(constructor_pattern enum: (identifier) @type)
 (constructor_pattern name: (identifier) @constructor)
-(record_pattern name: (identifier) @constructor)
+(constructor_tag_pattern enum: (identifier) @type)
+(constructor_tag_pattern name: (identifier) @constructor)
+(record_pattern name: (identifier) @type)
+(record_pattern enum: (identifier) @type)
+(record_pattern enum: (identifier) name: (identifier) @constructor)
 (record_pattern binding: (identifier) @variable.member)
 (binding_pattern name: (identifier) @variable)
 
@@ -118,11 +124,21 @@
 (this_expression) @variable.builtin
 (super_expression "super" @variable.builtin)
 
-; Bare identifier arm pattern: a value binding, or a zero-field constructor
-; tag check (`case Quit =>`). Syntax alone cannot tell them apart, so fall
-; back on the naming convention: a leading capital reads as a constructor.
+; Bare identifier arm pattern: a value binding, or a class test (`case Point
+; =>`). It is never a constructor test. Syntax alone cannot tell a binding
+; from a class test, so fall back on the naming convention: a leading capital
+; reads as a class.
 ((identifier_pattern) @variable)
-((identifier_pattern) @constructor
+((identifier_pattern) @type
+ (#match? @type "^[A-Z]"))
+
+; `E.A` in an expression: the constructor A of the enum E. Syntax alone
+; cannot tell it from a property read, so fall back on the naming
+; convention: a capital on both names reads as an enum and a constructor.
+((field_expression
+  object: (identifier) @type
+  property: (identifier) @constructor)
+ (#match? @type "^[A-Z]")
  (#match? @constructor "^[A-Z]"))
 
 ; Wildcard pattern (after everything else so it wins for `_`)

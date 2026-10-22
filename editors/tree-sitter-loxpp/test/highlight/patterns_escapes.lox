@@ -11,7 +11,7 @@ var e = "\r";
 var f = "\0";
 //       ^ string.escape
 
-enum Tree { Leaf(v) Node(l, r) }
+enum Tree { Leaf(v) Node(l, r) Empty }
 // <- keyword
 //   ^ type
 //          ^ constructor
@@ -21,17 +21,30 @@ fun size(t) {
 //       ^ keyword.conditional
     case Tree.Leaf(v) => v
 //  ^ keyword.conditional
+//       ^ type
 //            ^ constructor
     case node @ Tree.Node(l, r) => size(l) + size(r)
 //       ^ variable
 //                   ^ constructor
 //                                 ^ function.call
-    case Empty => 0
-//       ^ constructor
+    case Tree.Empty => 0
+//       ^ type
+//            ^ constructor
+    case Point => 0
+//       ^ type
+    case Point{x} => x
+//       ^ type
+    case Tree.Node{l} => l
+//       ^ type
+//            ^ constructor
     case _ => 0
 //       ^ variable.builtin
   };
 }
+
+var leaf = Tree.Leaf(1);
+//         ^ type
+//              ^ constructor
 
 class Point < Shape {
 //    ^ type

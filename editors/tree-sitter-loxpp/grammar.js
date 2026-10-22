@@ -366,7 +366,6 @@ module.exports = grammar({
     guard: $ => seq("if", $._expression),
 
     _arm_patterns: $ => choice(
-      seq($.literal_pattern, repeat1(seq(",", $.literal_pattern))),
       $.sequence_pattern,
       seq($._arm_alternative, repeat(seq("or", $._arm_alternative))),
     ),
@@ -404,8 +403,8 @@ module.exports = grammar({
     ),
 
     // A bare identifier pattern: the match wildcard `_`, a value binding, or a
-    // zero-field constructor tag check. The three roles are a resolver
-    // concern, not a syntactic one.
+    // class test. It is never a constructor test: a constructor pattern names
+    // its enum (`E.A`). The roles are a resolver concern, not a syntactic one.
     _arm_pattern_ident: $ => alias($.identifier, $.identifier_pattern),
 
     binding_pattern: $ => seq(
@@ -415,7 +414,8 @@ module.exports = grammar({
     ),
 
     constructor_pattern: $ => seq(
-      optional(seq(field("enum", $.identifier), ".")),
+      field("enum", $.identifier),
+      ".",
       field("name", $.identifier),
       "(",
       field("binding", $.identifier),

@@ -146,6 +146,28 @@
 						<key>1</key>
 						<dict>
 							<key>name</key>
+							<string>entity.name.type.enum.lox</string>
+						</dict>
+						<key>2</key>
+						<dict>
+							<key>name</key>
+							<string>punctuation.separator.dot.lox</string>
+						</dict>
+						<key>3</key>
+						<dict>
+							<key>name</key>
+							<string>entity.name.function.constructor.lox</string>
+						</dict>
+					</dict>
+					<key>match</key>
+					<string>\b([A-Z]\w*)\s*(\.)\s*([A-Z]\w*)\b</string>
+				</dict>
+				<dict>
+					<key>captures</key>
+					<dict>
+						<key>1</key>
+						<dict>
+							<key>name</key>
 							<string>entity.name.function.lox</string>
 						</dict>
 					</dict>
