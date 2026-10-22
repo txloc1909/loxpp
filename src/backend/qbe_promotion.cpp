@@ -207,20 +207,26 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
             plan.candidate[static_cast<std::size_t>(slot)] = false;
         }
     }
-    // A local slot used directly as an instruction's own top operand — a
-    // folded `match` result, or a for-in loop's hidden iterator slot, which
-    // the compiler leaves on the stack instead of copying with GET_LOCAL —
-    // is read and written as a temporary. Its memory is authoritative, so
-    // keep it out of registers.
+    // A local slot used directly as an instruction's operand — a folded
+    // `match` result, the hidden slot of an operand that a `match` folds
+    // into (the `r` of `r + str(match ...)`), or a for-in loop's hidden
+    // iterator slot, which the compiler leaves on the stack instead of
+    // copying with GET_LOCAL — is read and written as a temporary. Its
+    // memory is authoritative, so keep it out of registers. Every cell the
+    // instruction pops counts, not only the top one: ADD consumes the cell
+    // below its top too, and writes its result there.
     for (std::size_t i = 0; i < fn.instructions.size(); i++) {
         if (!analysis.reached[i] || !usesTopOperand(fn.instructions[i].op)) {
             continue;
         }
         const StackState& before = analysis.before[i];
-        int slot = before.height - 1;
-        if (slot > 0 && slot < before.localCount &&
-            slot < static_cast<int>(plan.candidate.size())) {
-            plan.candidate[static_cast<std::size_t>(slot)] = false;
+        int operands = std::max(1, stackPopCount(fn.instructions[i]));
+        for (int k = 0; k < operands; k++) {
+            int slot = before.height - 1 - k;
+            if (slot > 0 && slot < before.localCount &&
+                slot < static_cast<int>(plan.candidate.size())) {
+                plan.candidate[static_cast<std::size_t>(slot)] = false;
+            }
         }
     }
 

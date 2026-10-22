@@ -1035,6 +1035,10 @@ void validateMergeConsistency(const std::vector<DecodedInstruction>& ins,
 
 } // namespace
 
+int stackPopCount(const DecodedInstruction& ins) {
+    return stackEffect(ins).popCount;
+}
+
 // This is a safety net for a *false* site, not a detector for a *missing*
 // one. It iterates only over the sites discovery already found
 // (`declaredSlotsAt[i].empty()` skips silently), so a slot the persistence
