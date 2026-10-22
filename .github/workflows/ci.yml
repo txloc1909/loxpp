@@ -88,6 +88,11 @@ jobs:
       - name: Unit-test the turn policy
         run: node --test .pi/extensions/mode-policy.test.ts
 
+      # A real `pi --mode rpc` session with a scripted model: it proves the
+      # guards fire in the extension, not only in the policy module.
+      - name: Run the scripted mode sessions
+        run: node tools/test_pi_modes.mjs
+
 
   tree-sitter:
     name: tree-sitter grammar
