@@ -20,22 +20,27 @@ public final class StringifyTest {
         checkEquals("0.1", LoxOps.stringify(0.1), "stringify(0.1)");
         checkEquals("0.5", LoxOps.stringify(0.5), "stringify(0.5)");
         checkEquals("100", LoxOps.stringify(100.0), "stringify(100)");
-        checkEquals("1e+06", LoxOps.stringify(1000000.0), "stringify(1000000)");
+        checkEquals("1000000", LoxOps.stringify(1000000.0), "stringify(1000000)");
         checkEquals("999999", LoxOps.stringify(999999.0), "stringify(999999)");
-        checkEquals("1.23457e+06", LoxOps.stringify(1234567.0), "stringify(1234567)");
+        checkEquals("1234567", LoxOps.stringify(1234567.0), "stringify(1234567)");
         checkEquals("0.0001", LoxOps.stringify(0.0001), "stringify(0.0001)");
-        checkEquals("1e-05", LoxOps.stringify(0.00001), "stringify(0.00001)");
-        checkEquals("1e+20", LoxOps.stringify(Math.pow(10, 20)), "stringify(1e20)");
+        checkEquals("0.00001", LoxOps.stringify(0.00001), "stringify(0.00001)");
+        checkEquals("100000000000000000000", LoxOps.stringify(Math.pow(10, 20)), "stringify(1e20)");
         checkEquals("1e-20", LoxOps.stringify(Math.pow(10, -20)), "stringify(1e-20)");
-        checkEquals("-0", LoxOps.stringify(-0.0), "stringify(-0.0)");
+        checkEquals("0", LoxOps.stringify(-0.0), "stringify(-0.0)");
+        // Double.toString returns 4.9e-324 and 9.9e-324 for these; one digit
+        // round-trips, so the shortest form is 5e-324 and 1e-323.
+        checkEquals("5e-324", LoxOps.stringify(Double.MIN_VALUE), "stringify(min subnormal)");
+        checkEquals("1e-323", LoxOps.stringify(2 * Double.MIN_VALUE), "stringify(2 * min subnormal)");
+        checkEquals("-5e-324", LoxOps.stringify(-Double.MIN_VALUE), "stringify(-min subnormal)");
         // A runtime (not compile-time-folded) division, exactly as
         // LoxOps.divide always performs it: on x86_64 this carries a set
-        // sign bit, matching glibc's "-nan" for the native oracle.
+        // sign bit, matching the native oracle's "-nan" for 0/0.
         checkEquals("-nan", LoxOps.stringify(LoxOps.divide(0.0, 0.0)), "stringify(0/0)");
         checkEquals("inf", LoxOps.stringify(LoxOps.divide(1.0, 0.0)), "stringify(1/0)");
         checkEquals("2.5", LoxOps.stringify(2.5), "stringify(2.5)");
-        checkEquals("0.333333", LoxOps.stringify(LoxOps.divide(1.0, 3.0)), "stringify(1/3)");
-        checkEquals("1.23457e+08", LoxOps.stringify(123456789.0), "stringify(123456789)");
+        checkEquals("0.3333333333333333", LoxOps.stringify(LoxOps.divide(1.0, 3.0)), "stringify(1/3)");
+        checkEquals("123456789", LoxOps.stringify(123456789.0), "stringify(123456789)");
 
         // PR #97: the exponent must stay ASCII digits
         // under every JVM default locale, not just en_US (the CI runner's
@@ -44,7 +49,7 @@ public final class StringifyTest {
         java.util.Locale savedLocale = java.util.Locale.getDefault();
         try {
             java.util.Locale.setDefault(java.util.Locale.forLanguageTag("ar-SA"));
-            checkEquals("1e+06", LoxOps.stringify(1000000.0), "stringify(1e6) stays ASCII under a non-Latin locale");
+            checkEquals("1000000", LoxOps.stringify(1000000.0), "stringify(1e6) stays ASCII under a non-Latin locale");
         } finally {
             java.util.Locale.setDefault(savedLocale);
         }

@@ -78,4 +78,4 @@
 240_int_suffix_before_in_rejected.lox  N2 #826: the front end of the QBE backend is the native one
 241_int_suffix_before_if_rejected.lox  N2 #826: the front end of the QBE backend is the native one
 242_int_fractional_suffix_before_in_rejected.lox  N2 #826: the front end of the QBE backend is the native one
-243_int_fractional_suffix_before_if_rejected.lox  N2 #826: the front end of the QBE backend is the native one
+244_int_fractional_suffix_before_if_rejected.lox  N2 #826: the front end of the QBE backend is the native one

@@ -1,10 +1,8 @@
 package lox;
 
 import java.math.BigDecimal;
-import java.math.MathContext;
-import java.math.RoundingMode;
+import java.math.BigInteger;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -1557,65 +1555,96 @@ public final class LoxOps {
     }
 
     /**
-     * Reproduces C's {@code snprintf("%g", d)} byte for byte (6 significant
-     * digits, trailing zeros stripped, {@code e±0N} exponents) — see
-     * spec/03-types.md's Number row and value.cpp's stringify. Java's
-     * Double.toString uses a different algorithm entirely (e.g. it never
-     * strips to a bare integer, and switches to scientific notation on a
-     * different threshold), so it cannot be used here.
+     * The shortest decimal that round-trips to the same IEEE 754 double,
+     * presented as ECMAScript Number::toString (radix 10) with Lox++'s
+     * lower-case special-value names — see docs/decisions/number-print-format.md
+     * and value.cpp's stringifyNumber.
+     *
+     * BigDecimal.valueOf reads Double.toString's locale-free digits. Java
+     * appends ".0" when the value is integral, so the trailing zeros are
+     * stripped back off and the scale gives the decimal point position.
+     * Double.toString is not always the shortest form: where one digit
+     * round-trips it can still return two (4.9e-324 for 5e-324), so a
+     * two-digit result is checked against the one-digit neighbours.
      */
     static String formatNumber(double d) {
         if (Double.isNaN(d)) {
-            // glibc's printf prints the sign bit of the NaN payload itself;
-            // an indeterminate 0.0/0.0 on x86_64 carries a set sign bit
-            // (confirmed against build/loxpp, matching this JVM's runtime
-            // division on the same hardware), hence "-nan" rather than "nan".
+            // The sign bit of the NaN payload names the sign: an
+            // indeterminate 0.0/0.0 on x86_64 carries a set sign bit, hence
+            // "-nan" rather than "nan" (value.cpp's stringifyNumber does the
+            // same with std::signbit).
             return (Double.doubleToRawLongBits(d) < 0) ? "-nan" : "nan";
         }
         if (Double.isInfinite(d)) {
             return (d > 0) ? "inf" : "-inf";
         }
-        boolean negative = Double.doubleToRawLongBits(d) < 0;
-        double mag = Math.abs(d);
-        if (mag == 0.0) {
-            return negative ? "-0" : "0";
+        if (d == 0.0) {
+            return "0"; // covers -0.0
         }
+        boolean negative = d < 0;
+        double mag = negative ? -d : d;
 
-        // Round to 6 significant digits from the double's exact binary value —
-        // the same correctly-rounded conversion snprintf performs, not a
-        // round-trip through the shortest decimal string.
-        BigDecimal rounded = new BigDecimal(mag).round(
-            new MathContext(6, RoundingMode.HALF_EVEN));
-        int exponent = rounded.precision() - rounded.scale() - 1; // %g's X
-        String digits = rounded.unscaledValue().toString();
-
-        String body;
-        if (exponent < -4 || exponent >= 6) {
-            StringBuilder mantissa = new StringBuilder();
-            mantissa.append(digits.charAt(0));
-            if (digits.length() > 1) {
-                mantissa.append('.').append(digits, 1, digits.length());
+        BigDecimal bd = BigDecimal.valueOf(mag);
+        BigInteger digitsInt = bd.unscaledValue();
+        int scale = bd.scale();
+        int stripped = 0;
+        while (digitsInt.mod(BigInteger.TEN).signum() == 0) {
+            digitsInt = digitsInt.divide(BigInteger.TEN);
+            stripped++;
+        }
+        String digits = digitsInt.toString();
+        int k = digits.length();
+        int n = k - scale + stripped; // decimal point position, as in ECMAScript
+        if (k == 2) {
+            int lo = digits.charAt(0) - '0';
+            BigDecimal exact = new BigDecimal(mag);
+            BigDecimal best = null;
+            for (int c = lo; c <= lo + 1; c++) {
+                BigDecimal cand = BigDecimal.valueOf(c).scaleByPowerOfTen(n - 1);
+                if (cand.doubleValue() == mag
+                        && (best == null || cand.subtract(exact).abs()
+                                .compareTo(best.subtract(exact).abs()) < 0)) {
+                    best = cand;
+                }
             }
-            body = stripTrailingZeros(mantissa.toString()) + "e" +
-                   String.format(Locale.ROOT, "%+03d", exponent);
-        } else {
-            body = stripTrailingZeros(rounded.toPlainString());
+            if (best != null) {
+                BigDecimal norm = best.stripTrailingZeros();
+                digits = norm.unscaledValue().toString();
+                k = digits.length();
+                n = k - norm.scale();
+            }
         }
-        return negative ? "-" + body : body;
-    }
 
-    private static String stripTrailingZeros(String s) {
-        if (s.indexOf('.') < 0) {
-            return s;
+        StringBuilder sb = new StringBuilder();
+        if (negative) {
+            sb.append('-');
         }
-        int end = s.length();
-        while (end > 0 && s.charAt(end - 1) == '0') {
-            end--;
+        if (k <= n && n <= 21) {
+            sb.append(digits);
+            for (int i = n - k; i > 0; i--) {
+                sb.append('0');
+            }
+        } else if (0 < n && n <= 21) {
+            sb.append(digits, 0, n).append('.').append(digits, n, k);
+        } else if (-6 < n && n <= 0) {
+            sb.append("0.");
+            for (int i = -n; i > 0; i--) {
+                sb.append('0');
+            }
+            sb.append(digits);
+        } else {
+            sb.append(digits.charAt(0));
+            if (k > 1) {
+                sb.append('.').append(digits, 1, k);
+            }
+            sb.append('e');
+            int sciExp = n - 1;
+            if (sciExp >= 0) {
+                sb.append('+');
+            }
+            sb.append(sciExp);
         }
-        if (end > 0 && s.charAt(end - 1) == '.') {
-            end--;
-        }
-        return s.substring(0, end);
+        return sb.toString();
     }
 
     // ------------------------------------------------------------------

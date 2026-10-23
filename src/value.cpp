@@ -1,11 +1,13 @@
 #include "value.h"
 
+#include <charconv>
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <string_view>
 
 void reportPointerOutOfRange(uintptr_t p) {
     std::fprintf(stderr,
@@ -62,6 +64,82 @@ bool operator==(const Value& a, const Value& b) {
     return false;
 }
 
+// The canonical string form of a Number: the shortest decimal that round-trips
+// to the same IEEE 754 double, presented as ECMAScript Number::toString
+// (radix 10) with Lox++'s lower-case special-value names. See
+// docs/decisions/number-print-format.md.
+static std::string stringifyNumber(Number value) {
+    if (std::isnan(value)) {
+        return std::signbit(value) ? "-nan" : "nan";
+    }
+    if (std::isinf(value)) {
+        return value > 0 ? "inf" : "-inf";
+    }
+    if (value == 0.0) {
+        return "0"; // covers -0.0
+    }
+
+    const bool negative = value < 0;
+    const double mag = negative ? -value : value;
+
+    // The shortest digits in scientific form d[.ddd]e±NN. A 64-byte buffer is
+    // ample for any double, so to_chars cannot fail.
+    char buf[64];
+    auto res = std::to_chars(buf, buf + sizeof(buf), mag,
+                             std::chars_format::scientific);
+    const std::string_view sci(buf, static_cast<size_t>(res.ptr - buf));
+    const size_t epos = sci.find('e');
+
+    std::string digits;
+    digits.reserve(sci.size());
+    for (char c : sci.substr(0, epos)) {
+        if (c != '.') {
+            digits.push_back(c);
+        }
+    }
+
+    const char* exp = sci.data() + epos + 1;
+    if (*exp == '+') {
+        ++exp; // from_chars accepts a '-' but not a '+'
+    }
+    int exponent = 0;
+    std::from_chars(exp, sci.data() + sci.size(), exponent);
+
+    const int k = static_cast<int>(digits.size());
+    const int n = exponent + 1; // the decimal point position, as in ECMAScript
+
+    std::string result;
+    result.reserve(digits.size() + 8);
+    if (negative) {
+        result.push_back('-');
+    }
+    if (k <= n && n <= 21) {
+        result += digits;
+        result.append(static_cast<size_t>(n - k), '0');
+    } else if (0 < n && n <= 21) {
+        result.append(digits, 0, static_cast<size_t>(n));
+        result.push_back('.');
+        result.append(digits, static_cast<size_t>(n), std::string::npos);
+    } else if (-6 < n && n <= 0) {
+        result += "0.";
+        result.append(static_cast<size_t>(-n), '0');
+        result += digits;
+    } else {
+        result.push_back(digits[0]);
+        if (k > 1) {
+            result.push_back('.');
+            result.append(digits, 1, std::string::npos);
+        }
+        result.push_back('e');
+        const int sciExp = n - 1;
+        if (sciExp >= 0) {
+            result.push_back('+');
+        }
+        result += std::to_string(sciExp);
+    }
+    return result;
+}
+
 std::string stringify(const Value& value) {
     if (is<bool>(value)) {
         return as<bool>(value) ? "true" : "false";
@@ -72,9 +150,7 @@ std::string stringify(const Value& value) {
     if (is<Obj*>(value)) {
         return stringifyObj(as<Obj*>(value));
     }
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%g", as<Number>(value));
-    return buf;
+    return stringifyNumber(as<Number>(value));
 }
 
 void printValue(const Value& value) {

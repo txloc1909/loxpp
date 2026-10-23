@@ -29,7 +29,7 @@ fun polarToCart(r, degrees) {
 
 // CHECK: === Cartesian to Polar ===
 print "=== Cartesian to Polar ===";
-// CHECK:   (3, 4) -> r=5, theta=53.1301 deg
+// CHECK:   (3, 4) -> r=5, theta=53.13010235415598 deg
 cartToPolar(3, 4);
 // CHECK:   (1, 0) -> r=1, theta=0 deg
 cartToPolar(1, 0);
@@ -41,9 +41,9 @@ cartToPolar(-1, 0);
 // CHECK: === Polar to Cartesian ===
 print "";
 print "=== Polar to Cartesian ===";
-// CHECK:   r=5, theta=53.1301 deg -> (3, 4)
+// CHECK:   r=5, theta=53.1301023541559 deg -> (3.0000000000000053, 3.9999999999999956)
 polarToCart(5, 53.1301023541559);
-// CHECK:   r=10, theta=45 deg -> (7.07107, 7.07107)
+// CHECK:   r=10, theta=45 deg -> (7.0710678118654755, 7.071067811865475)
 polarToCart(10, 45);
 
 // CHECK: === Unit Circle (sin, cos, tan) ===
@@ -59,9 +59,9 @@ while (i < 4) {
     i = i + 1;
 }
 // CHECK:   0 deg:  sin=0  cos=1  tan=0
-// CHECK:   30 deg:  sin=0.5  cos=0.866025  tan=0.57735
-// CHECK:   45 deg:  sin=0.707107  cos=0.707107  tan=1
-// CHECK:   60 deg:  sin=0.866025  cos=0.5  tan=1.73205
+// CHECK:   30 deg:  sin=0.49999999999999994  cos=0.8660254037844387  tan=0.5773502691896257
+// CHECK:   45 deg:  sin=0.7071067811865475  cos=0.7071067811865476  tan=0.9999999999999999
+// CHECK:   60 deg:  sin=0.8660254037844386  cos=0.5000000000000001  tan=1.7320508075688767
 
 // -----------------------------------------------------------------------
 // Complex numbers — the operators make them read as arithmetic.
@@ -122,9 +122,9 @@ print "a != b: " + str(a != b);
 print "";
 // CHECK: === Complex as polar form ===
 print "=== Complex as polar form ===";
-// CHECK: a: modulus=2.23607 argument=63.4349 deg
+// CHECK: a: modulus=2.23606797749979 argument=63.43494882292201 deg
 print "a: modulus=" + str(a.modulus()) + " argument=" + str(a.argument()) + " deg";
-// CHECK: b: modulus=3.16228 argument=-18.4349 deg
+// CHECK: b: modulus=3.1622776601683795 argument=-18.43494882292201 deg
 print "b: modulus=" + str(b.modulus()) + " argument=" + str(b.argument()) + " deg";
 
 // Mandelbrot escape: z = z*z + c is ordinary arithmetic on Complex.

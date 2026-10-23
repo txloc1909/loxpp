@@ -66,6 +66,7 @@ backend work. Each row has one `// COVERS:` probe.
 | scientific lower bound | `1e21` | `1e+21` |
 | fixed lower bound | `1e-6` | `0.000001` |
 | scientific upper bound | `1e-7` | `1e-7` |
+| smallest subnormal | `1` halved 1074 times | `5e-324` |
 | positive infinity | `math.inf` | `inf` |
 | negative infinity | `-math.inf` | `-inf` |
 | not a number | `math.nan` | `nan` |

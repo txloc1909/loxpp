@@ -9,5 +9,5 @@ var {bogus} = math;
 print "unreachable";
 
 // STATUS: error
-// CHECK: 3.14159
+// CHECK: 3.141592653589793
 // CHECK: 2

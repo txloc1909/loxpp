@@ -1,0 +1,74 @@
+// STATUS: ok
+// Pins every boundary of the Number string form in spec/03-types.md's edge
+// table. Each `// COVERS:` line names one row of that table;
+// tools/check_number_format.py proves the two stay in lockstep.
+
+// COVERS: number-format positive-zero
+print 0.0;
+// CHECK: 0
+
+// COVERS: number-format negative-zero
+print -0.0;
+// CHECK: 0
+
+// COVERS: number-format small-integer
+print 42.0;
+// CHECK: 42
+
+// COVERS: number-format negative-integer
+print -3.0;
+// CHECK: -3
+
+// COVERS: number-format fraction
+print 3.14;
+// CHECK: 3.14
+
+// COVERS: number-format half
+print 0.5;
+// CHECK: 0.5
+
+// COVERS: number-format imprecise-sum
+print 0.1 + 0.2;
+// CHECK: 0.30000000000000004
+
+// COVERS: number-format seven-digits
+print 1000000.0;
+// CHECK: 1000000
+
+// COVERS: number-format nine-digits
+print 123456789.0;
+// CHECK: 123456789
+
+// COVERS: number-format fixed-upper-bound
+print 100000000000000000000;
+// CHECK: 100000000000000000000
+
+// COVERS: number-format scientific-lower-bound
+print 1000000000000000000000;
+// CHECK: 1e+21
+
+// COVERS: number-format fixed-lower-bound
+print 0.000001;
+// CHECK: 0.000001
+
+// COVERS: number-format scientific-upper-bound
+print 0.0000001;
+// CHECK: 1e-7
+
+// COVERS: number-format smallest-subnormal
+var tiny = 1;
+for (var i = 0; i < 1074; i = i + 1) tiny = tiny / 2;
+print tiny;
+// CHECK: 5e-324
+
+// COVERS: number-format positive-infinity
+print math.inf;
+// CHECK: inf
+
+// COVERS: number-format negative-infinity
+print -math.inf;
+// CHECK: -inf
+
+// COVERS: number-format not-a-number
+print math.nan;
+// CHECK: nan

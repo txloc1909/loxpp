@@ -187,6 +187,7 @@ each has an off-the-shelf solution.
 | `161_ctor_field_underscore_binds_nothing` | a field name `_` in a constructor pattern binds nothing, so an `or` alternative with `_` matches one with no field, and `_` can appear twice in one pattern (issue #797) — a spec probe | none (spec probe) |
 | `162_match_folded_into_binary_in_loop` | a `match` folded into an operand of a binary expression inside a loop; QBE's register promotion once kept the waiting left operand in a register and wrote it back over the binary result (issue #786) — a spec probe | QBE |
 | `163_match_and_or_operand` | a `match` expression as an operand of `and`/`or`, on the left and on the right: the match path holds the result in its synthetic named local while the other path arrives with a temporary, so the join must turn both into the same named local before the merge check sees them (issue #817); it has no STATUS line, because the bootstrap interpreter does not parse a `match` expression yet | P1, P2, P3 |
+| `243_number_format` | the shortest Number string form at every boundary — the two zeroes, the special values, and the notation thresholds of spec/03-types.md's edge table (`docs/decisions/number-print-format.md`) — a spec probe | none (spec probe) |
 | `164_folded_match_deficit_two_or_more` | a folded `match` result with two or more live sibling operands below it (issue #821): the compiler reserves one phantom local per live sibling, so every operand below the match folds too, and `normalizeFoldedOperands` loads them all back, bottom first, in ascending slot order. Covers `ADD`, `CALL`, `BUILD_LIST`, a class constructor call, `SET_PROPERTY`, `SET_INDEX`, a deferred call, the `and`/`or` result shapes, a sandwiched match with a genuine operand above it, and two matches on one consumer | P2, P5, P7, P8 |
 | `165_int_literals` | every form of an Int literal prints as its decimal digits: the suffix, hex and binary, leading zeros, and a 64-bit pattern | none (spec probe of the Int kind, N2 #826) |
 | `166_int_literal_limits` | the accepted limit of each Int literal rule: the largest decimal, the smallest through the unary-minus exception, 64-bit hex and binary | none (spec probe of the Int kind, N2 #826) |
@@ -266,10 +267,10 @@ each has an off-the-shelf solution.
 | `240_int_suffix_before_in_rejected` | an `i` directly after the digits is the suffix, so `1in [1, 2]`, a valid program before the suffix existed, is a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
 | `241_int_suffix_before_if_rejected` | the same for the guard `case 1if t` | none (spec probe of the Int kind, N2 #826) |
 | `242_int_fractional_suffix_before_in_rejected` | the same rule for a fractional literal: `1.5in [1.5]`, a valid program before the suffix existed, is the literal `1.5i` and a name, a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
-| `243_int_fractional_suffix_before_if_rejected` | the same for the guard `case 1.5if t` | none (spec probe of the Int kind, N2 #826) |
-| `244_int_uppercase_hex_prefix_rejected` | the hexadecimal prefix is `0x` in lower case only: `0XFF` is the Number `0` and the name `XFF`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
-| `245_int_hex_suffix_rejected` | a hexadecimal literal takes no suffix: `0xFFi` is the Int `0xFF` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
-| `246_int_binary_suffix_rejected` | a binary literal takes no suffix: `0b1i` is the Int `0b1` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `244_int_fractional_suffix_before_if_rejected` | the same for the guard `case 1.5if t` | none (spec probe of the Int kind, N2 #826) |
+| `245_int_uppercase_hex_prefix_rejected` | the hexadecimal prefix is `0x` in lower case only: `0XFF` is the Number `0` and the name `XFF`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `246_int_hex_suffix_rejected` | a hexadecimal literal takes no suffix: `0xFFi` is the Int `0xFF` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `247_int_binary_suffix_rejected` | a binary literal takes no suffix: `0b1i` is the Int `0b1` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
@@ -360,7 +361,7 @@ divergence. Two more files serve the walkers that are not a consumer's own gate:
 `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
 that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
 
-The probes `165` to `246` are the spec probes of the Int kind
+The probes `165` to `242` and `244` to `247` are the spec probes of the Int kind
 (`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
 lines. They say which row of which spec table the probe checks. Six scripts
 read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
@@ -375,7 +376,7 @@ and `urem`, of its zero divisor.
 
 Each native node makes a group of these probes pass: the value layer and the
 literals (`165`, `166`, `177` to `184`, and the static-error probes `237` to
-`243`), the operators (`185` to `200`), and the conversions, the `integer`
+`242` and `244`), the operators (`185` to `200`), and the conversions, the `integer`
 module, and the indexes (`201` to `236`).
 Every one of these probes, except the static-error probes below, uses a form
 that no consumer accepts yet, so each is on the expected-failure list of every
@@ -404,7 +405,7 @@ Without the line, a halt at run time with no output passes both tools.
 `tools/check_int_literal_rejections.py` fails a rejected probe that does not
 start with such a line.
 
-Four more static-error probes, `240` to `243`, are the exception to "on no
+Four more static-error probes, `240` to `242` and `244`, are the exception to "on no
 list". Before the suffix existed, `1in [1, 2]`, `case 1if t`, `1.5in [1.5]`,
 and `case 1.5if t` were valid programs, so every consumer runs them and they
 fail today. They are on the
@@ -416,7 +417,7 @@ scanner, so N6 deletes its lines. The tree-sitter step of CI leaves the four
 probes out for good, because the grammar will reject them, and the tooling list
 needs no line.
 
-Three more static-error probes, `244` to `246`, are on no list, and they are
+Three more static-error probes, `245` to `247`, are on no list, and they are
 a real check from the start. `0XFF`, `0xFFi`, and `0b1i` are syntax errors
 under the longest match, and every consumer rejects them today. A scanner that
 a later node writes can accept them by mistake: it reads `0X` as a prefix, as C
