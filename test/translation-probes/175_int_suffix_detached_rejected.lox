@@ -12,3 +12,4 @@ print 1 i;
 
 // STATIC-ERROR
 // STATUS: error
+// COVERS: literal suffix-boundary

@@ -5,7 +5,8 @@
 The table must have one row for each static error that
 docs/decisions/integer-kind.md names (countable sets): a decimal literal
 outside the Int range, a hexadecimal or a binary literal of more than 64 bits,
-and a fractional literal with the suffix. A row removed here fails.
+a fractional literal with the suffix, and a decimal literal with the letter `i`
+in the wrong position (`1in`, `1if`, `1 i`). A row removed here fails.
 
 Each row needs two kinds of spec probe in test/translation-probes/:
 
@@ -32,6 +33,12 @@ and a call after the literal. A postfix form is a static error because the
 literal is then not the whole operand of the minus; a consumer that reads the
 exception as a rule about the token before the literal accepts it.
 
+The suffix rule has its own forms: `1in [` and `case 1if` are rejected, in
+probes that carry `// STATIC-ERROR`, and `1i in [` and `case 1i if` are
+accepted. Before the suffix existed, the first two were valid programs, so
+they are the only rejected probes that fail on a consumer today. The others
+pass for the wrong reason, because no consumer has an Int literal yet.
+
 Usage:
     tools/check_int_literal_rejections.py [--lexical PATH] [--probes DIR]
 """
@@ -45,9 +52,16 @@ from spec_tables import PROBE_DIR, SpecError, code, probe_covers, report, sectio
 
 SCRIPT = "check_int_literal_rejections.py"
 # The rows of docs/decisions/integer-kind.md, "Countable sets", with the hex
-# and the binary row apart.
-EXPECTED_ROWS = {"decimal-range", "hex-width", "binary-width", "fractional-suffix"}
-ACCEPTED_FORMS = ["-9223372036854775808i", "- 9223372036854775808i", "-9223372036854775808i + 1i"]
+# and the binary row apart, and the suffix boundary, which the decision names
+# in its constraint 4.
+EXPECTED_ROWS = {"decimal-range", "hex-width", "binary-width", "fractional-suffix", "suffix-boundary"}
+ACCEPTED_FORMS = [
+    "-9223372036854775808i",
+    "- 9223372036854775808i",
+    "-9223372036854775808i + 1i",
+    "1i in [",
+    "case 1i if",
+]
 REJECTED_FORMS = [
     "-(9223372036854775808i)",
     "0i - 9223372036854775808i",
@@ -55,6 +69,9 @@ REJECTED_FORMS = [
     "-9223372036854775808i[0]",
     "-9223372036854775808i.x",
     "-9223372036854775808i(1)",
+    "1in [",
+    "case 1if",
+    "1 i;",
 ]
 # The first line of code of a rejected probe: a `print` of a String.
 LEADING_PRINT = re.compile(r'^print "[^"\\]+";$')
@@ -146,7 +163,7 @@ def main() -> None:
         problems,
         f"{len(ids)} rows, each with a rejected probe and an accepted twin, "
         f"{len(rejected_paths)} rejected probes that print before the error, "
-        f"and the {len(ACCEPTED_FORMS) + len(REJECTED_FORMS)} forms of the unary-minus exception",
+        f"and {len(ACCEPTED_FORMS) + len(REJECTED_FORMS)} forms of the unary-minus exception and the suffix rule",
     )
 
 

@@ -4,9 +4,10 @@
 // the literal `9223372036854775808i`, which the unary-minus exception allows,
 // with or without white space. A binary operator after the literal is valid
 // too, because the unary minus takes only the literal. Leading zeros do not
-// count towards the 64 bits. Each static-error probe has this file as its
-// twin: a consumer that rejects every Int literal passes the static-error probe
-// and fails this one.
+// count towards the 64 bits. The suffix boundary has its limit too: a space
+// after the suffix, before `in` and before the `if` of a guard, is valid. Each
+// static-error probe has this file as its twin: a consumer that rejects every
+// Int literal passes the static-error probe and fails this one.
 
 print 9223372036854775807i;
 print -9223372036854775808i;
@@ -21,6 +22,16 @@ print 15i;
 print 1.5;
 print 1.0;
 print -9223372036854775808i + 1i;
+print 1i in [1i, 2i];
+
+var t = true;
+fun pick(x) {
+    return match x {
+        case 1i if t => "guarded"
+        case _ => "other"
+    };
+}
+print pick(1i);
 
 // STATUS: ok
 // CHECK: 9223372036854775807
@@ -36,7 +47,10 @@ print -9223372036854775808i + 1i;
 // CHECK: 1.5
 // CHECK: 1
 // CHECK: -9223372036854775807
+// CHECK: true
+// CHECK: guarded
 // COVERS: literal-accepts decimal-range
 // COVERS: literal-accepts hex-width
 // COVERS: literal-accepts binary-width
 // COVERS: literal-accepts fractional-suffix
+// COVERS: literal-accepts suffix-boundary

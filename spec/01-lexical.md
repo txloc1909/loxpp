@@ -194,10 +194,16 @@ NUMBER followed by an identifier, which is a syntax error. There are no digit
 separators.
 
 The suffix is part of the token. The scanner reads an `i` directly after the
-digits as the suffix, so `1i` is one token, while `1 i` and `1if` are not an
-Int literal and are syntax errors, as they were before the suffix existed. No
-literal that has no suffix and no `0x` or `0b` prefix is an Int: `1` and
-`1.0` are Numbers, and `1.5i` is an error.
+digits of a decimal literal as the suffix, whatever character follows it, so
+`1i` is one token. An `i` after white space is not a suffix: `1 i` is the
+Number `1` and the name `i`, a syntax error, as it was before the suffix
+existed. Two forms change from valid to a syntax error. Before the suffix
+existed, `1in xs` was `1 in xs`, and `case 1if t` was the pattern `1` with the
+guard `if t`. Now the scanner reads the `i` as the suffix, so each is an Int
+literal followed by the name `n` or `f`. A program that writes a decimal
+literal directly before `in` or `if` needs a space between them. No literal
+that has no suffix and no `0x` or `0b` prefix is an Int: `1` and `1.0` are
+Numbers, and `1.5i` is an error.
 
 Examples: Numbers `0`, `42`, `3.14`, `1.0`; Ints `0i`, `42i`, `0xFF`, `0b1010`.
 
@@ -212,6 +218,7 @@ nearest literal of the same form that is valid.
 | `hex-width` | A hexadecimal literal whose value needs more than 64 bits | `0x10000000000000000` | `0xFFFFFFFFFFFFFFFF` |
 | `binary-width` | A binary literal whose value needs more than 64 bits | `0b1` followed by 64 zeros | `0b` followed by 64 ones |
 | `fractional-suffix` | A literal with a fractional part and the suffix `i` | `1.5i`, `1.0i` | `15i` |
+| `suffix-boundary` | A decimal literal and the letter `i` in the wrong position: the `i` directly after the digits with a name character after it, or the `i` after white space | `1in [1, 2]`, `case 1if t`, `1 i` | `1i in [1i, 2i]` |
 
 **The unary-minus exception.** The literal `9223372036854775808i` is valid
 when it is the direct operand of a unary `-`. The unary `-` and the literal

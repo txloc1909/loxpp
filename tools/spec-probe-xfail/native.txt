@@ -77,3 +77,5 @@
 233_integer_fault_parse_unsigned_empty.lox  N4 #828: native conversions, the integer module, and indexing
 234_int_fault_slice_negative.lox  N4 #828: native conversions, the integer module, and indexing
 235_int_fault_enum_index_out_of_range.lox  N4 #828: native conversions, the integer module, and indexing
+239_int_suffix_before_in_rejected.lox  N2 #826: native scanner reads the suffix before a name
+240_int_suffix_before_if_rejected.lox  N2 #826: native scanner reads the suffix before a name
