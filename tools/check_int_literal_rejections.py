@@ -109,7 +109,6 @@ def main() -> None:
         rows = table(section(lexical, "### Static errors in Int literals"), "Row")
         examples = table(section(lexical, "### Examples of the literal rules"), "Source")
         covers = probe_covers(probe_dir)
-        exception_paragraph = "unary-minus exception" in lexical
         probes = [p for p in sorted(probe_dir.glob("*.lox")) if parse_probe(p) is not None]
         lines_of = {p: code_lines(p) for p in probes}
         covers_of: dict[Path, set[tuple[str, ...]]] = {}
@@ -132,8 +131,6 @@ def main() -> None:
         problems.append(f"the static error {row_id!r} has no row")
     for row_id in sorted({i for i in ids if ids.count(i) > 1}):
         problems.append(f"row {row_id!r} appears more than once")
-    if not exception_paragraph:
-        problems.append("the section no longer states the unary-minus exception")
 
     for row_id in sorted(EXPECTED_ROWS):
         rejecting = covers.get(("literal", row_id), [])

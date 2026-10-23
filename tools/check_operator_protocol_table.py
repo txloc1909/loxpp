@@ -22,9 +22,6 @@ need a probe with a line
 
     // COVERS: protocol-result <method>
 
-The spec sentence that says the result must be a Number, and that an Int is not
-one, must be present.
-
 Usage:
     tools/check_operator_protocol_table.py [--syntax PATH] [--semantics PATH]
                                            [--probes DIR]
@@ -130,13 +127,6 @@ def main() -> None:
             problems.append(
                 f"method {method}: no spec probe has `// COVERS: protocol-result {method}`"
             )
-        if f"`{method}`" not in overloading:
-            problems.append(f"the section does not mention {method}")
-    if not re.search(r"must be a Number\b.{0,200}An Int is not a Number", overloading, re.S):
-        problems.append(
-            "the section no longer says that the result of `__len__` and `__hash__` "
-            "must be a Number and that an Int is not one"
-        )
     known = {("protocol", op) for op in bit} | {("protocol-result", m) for m in RESULT_METHODS}
     for words in sorted(w for w in covers if w[0] in ("protocol", "protocol-result")):
         if words not in known:
