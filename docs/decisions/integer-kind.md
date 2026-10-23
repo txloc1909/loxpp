@@ -358,6 +358,15 @@ checks them.
    N2, the bootstrap interpreter at N6, the tree-sitter grammar and the
    tooling parser at N7) implements the three rules, not the list of examples,
    and its review checks each row of the table against them.
+6. **A check reads one object, never prose.** A check in a `tools/check_*.py`
+   script names one object: a table row or cell, a `// COVERS:` tuple, or one
+   named line of a probe. Its evidence comes from that object only. A check
+   that searches a file or a section for a phrase is not a check of a
+   countable set: another occurrence satisfies it, or an equal-meaning edit
+   breaks it. No script checks that a sentence of prose is present. Every site
+   that adds a problem has one mutation on record that makes it fire, and a
+   node that adds a site adds its mutation to the record. The shared layer is
+   the check scripts on `tools/spec_tables.py`.
 
 ## Program impact
 
