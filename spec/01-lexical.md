@@ -59,6 +59,10 @@ There are no block comments.
 | `*` | STAR |
 | `%` | PERCENT |
 | `@` | AT |
+| `&` | AMPERSAND |
+| `\|` | PIPE |
+| `^` | CARET |
+| `~` | TILDE |
 
 ### One-or-Two-Character Tokens
 
@@ -74,6 +78,14 @@ The scanner always prefers the longer match.
 | `>=` | GREATER_EQUAL |
 | `<` | LESS |
 | `<=` | LESS_EQUAL |
+| `<<` | LESS_LESS |
+| `>>` | GREATER_GREATER |
+| `>>>` | GREATER_GREATER_GREATER |
+
+`>>>` has three characters. The scanner reads `>>>` in preference to `>>`,
+`>>` in preference to `>`, and `<<` in preference to `<`. No token holds an
+`=` after `<<` or `>>`, so `x >>= 1` is the tokens `x`, `>>`, `=`, and `1`:
+Lox++ has no compound assignment.
 
 ### Compound Punctuation
 
@@ -151,20 +163,65 @@ followed by zero or more letters, digits (`0`–`9`), or underscores.
 
 ---
 
-## Number Literals
+## Number and Int Literals
 
 ```
-NUMBER ::= DIGIT+ ( "." DIGIT+ )? ;
+NUMBER   ::= DIGIT+ ( "." DIGIT+ )? ;
+INT      ::= DIGIT+ "i" | "0x" HEXDIGIT+ | "0b" BINDIGIT+ ;
+HEXDIGIT ::= [0-9a-fA-F] ;
+BINDIGIT ::= [01] ;
 ```
 
-Numbers are decimal. An optional fractional part is introduced by `.` followed
-by at least one digit. There are no hexadecimal, octal, binary, or exponential
-notations.
+A `NUMBER` is a Number literal. Its digits are decimal. An optional fractional
+part is introduced by `.` followed by at least one digit. There are no octal
+or exponential notations.
 
-All numbers are represented as IEEE 754 double-precision floating point. There
-is no separate integer type.
+All Numbers are represented as IEEE 754 double-precision floating point.
 
-Examples: `0`, `42`, `3.14`, `1.0`
+An `INT` is an Int literal, a signed 64-bit integer (see
+[§03-types](03-types.md#int)). It has one of three forms:
+
+- Decimal digits directly followed by the suffix `i`: `0i`, `42i`, `007i`.
+- `0x` followed by hexadecimal digits, in either case: `0xff`, `0xFF`.
+- `0b` followed by binary digits: `0b1010`.
+
+A hexadecimal or binary literal takes no suffix. It gives a 64-bit pattern:
+`0xFFFFFFFFFFFFFFFF` is `-1i`, and `0x8000000000000000` is the smallest Int.
+Leading zero digits do not count towards the 64 bits. The prefix is `0x` or
+`0b` in lower case only. A `0x` or `0b` that no digit of its base follows is
+not a prefix: the scanner reads the `0` as a NUMBER, so `0xg` and `0b2` are a
+NUMBER followed by an identifier, which is a syntax error. There are no digit
+separators.
+
+The suffix is part of the token. The scanner reads an `i` directly after the
+digits as the suffix, so `1i` is one token, while `1 i` and `1if` are not an
+Int literal and are syntax errors, as they were before the suffix existed. No
+literal that has no suffix and no `0x` or `0b` prefix is an Int: `1` and
+`1.0` are Numbers, and `1.5i` is an error.
+
+Examples: Numbers `0`, `42`, `3.14`, `1.0`; Ints `0i`, `42i`, `0xFF`, `0b1010`.
+
+### Static errors in Int literals
+
+Each row of the table is a static error. The accepted limit of a row is the
+nearest literal of the same form that is valid.
+
+| Row | Static error | Example | Accepted limit |
+|---|---|---|---|
+| `decimal-range` | A decimal Int literal whose value is above 9223372036854775807, except the unary-minus exception below | `9223372036854775808i` | `9223372036854775807i` |
+| `hex-width` | A hexadecimal literal whose value needs more than 64 bits | `0x10000000000000000` | `0xFFFFFFFFFFFFFFFF` |
+| `binary-width` | A binary literal whose value needs more than 64 bits | `0b1` followed by 64 zeros | `0b` followed by 64 ones |
+| `fractional-suffix` | A literal with a fractional part and the suffix `i` | `1.5i`, `1.0i` | `15i` |
+
+**The unary-minus exception.** The literal `9223372036854775808i` is valid
+when it is the direct operand of a unary `-`. The unary `-` and the literal
+together then give the smallest Int, `-9223372036854775808i`. The literal is
+the direct operand when the token just before it is a `-` in prefix position:
+a `-` with a left operand is a binary `-`, and a literal inside parentheses has
+the parenthesis before it. White space between the tokens does not matter. So
+`-9223372036854775808i` and `- 9223372036854775808i` are valid, and
+`-(9223372036854775808i)`, `0i - 9223372036854775808i`, and
+`-9223372036854775809i` are static errors.
 
 ---
 

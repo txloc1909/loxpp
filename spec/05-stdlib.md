@@ -5,9 +5,10 @@ every program. They behave like user-defined functions in all respects
 (first-class values, strict arity enforcement) except that their bodies are
 provided by the host environment.
 
-The standard library also provides the global `math` object (numeric functions
-and constants), the global `coroutine` and `task` objects, the `open`
-function, and the methods on the File value it returns. These are described below. The built-in methods on Map values are
+The standard library also provides the global functions `int` and `float` and
+the global `integer` object (Int functions and constants), the global `math`
+object (numeric functions and constants), the global `coroutine` and `task`
+objects, the `open` function, and the methods on the File value it returns. These are described below. The built-in methods on Map values are
 specified in §03-types and §04-semantics.
 
 ---
@@ -124,6 +125,98 @@ String `s`.
 
 ---
 
+## `int(value) → Int`
+
+Converts `value` to an Int. It never rounds: a program that wants a rounding
+writes `int(math.floor(x))` or `int(math.round(x))`, which name the rounding
+at the call.
+
+| `value` is a... | Result |
+|---|---|
+| Int | The Int itself. |
+| Number | The equal Int, when the Number is integer-valued and in the range of an Int, from -9223372036854775808 up to, and not including, 9223372036854775808. `int(-0.0)` is `0i`. |
+| String | The Int that the String names, when the String is an optional `+` or `-` followed by one or more decimal digits and nothing else, and the value is in the range of an Int. Leading zeros are allowed. |
+
+A fractional Number, a NaN, an infinity, a Number outside the range, a String
+that is not of that form, and a value of any other kind are runtime errors. A
+String has no white space, no `0x` prefix, no suffix, and no fractional part:
+`int("0x10")`, `int(" 1")`, `int("1i")`, `int("1.0")`, `int("")`, and
+`int("9223372036854775808")` are runtime errors. A hexadecimal String goes
+through `integer.parse_unsigned` for an unsigned decimal, or through a loop
+that the program writes.
+
+```lox
+print int(5.0);           // 5
+print int("-42");         // -42
+print type(int(7));       // Int
+```
+
+**Arity:** 1  
+**Returns:** Int
+
+---
+
+## `float(value) → Number`
+
+Converts `value` to a Number.
+
+| `value` is a... | Result |
+|---|---|
+| Number | The Number itself, a NaN and an infinity included. |
+| Int | The nearest Number. The result is exact for every Int from -9007199254740992 to 9007199254740992 (2^53). Beyond that it is the nearest double, and a tie goes to the double with an even last bit, as IEEE 754 round-to-nearest-even says. |
+| String | The nearest Number to the decimal that the String names, when the String is an optional `+` or `-`, one or more decimal digits, and optionally a `.` followed by one or more decimal digits, with nothing else. |
+
+A String of another form (`"1e5"`, `".5"`, `"5."`, `" 1"`, `"inf"`, `""`) and a
+value of any other kind are runtime errors.
+
+```lox
+print float(3i) == 3;                       // true
+print float(9007199254740993i) == 9007199254740992.0;  // true: the tie goes to even
+print float("2.5");                         // 2.5
+```
+
+**Arity:** 1  
+**Returns:** Number
+
+---
+
+## `integer` — Int functions and constants
+
+`integer` is a global object bound at the start of every program. Its members
+are Int functions and constants, reached with `.`. `integer` behaves like any
+other global name, as `math` does: a local variable of the same name shadows
+it, and the global can be reassigned. The name `int` is the conversion
+function, so the module cannot take it.
+
+| Member | Meaning |
+|---|---|
+| `integer.min_value`, `integer.max_value` | The smallest Int, -9223372036854775808, and the largest Int, 9223372036854775807. |
+| `integer.abs(x)` | The absolute value of `x`. `integer.abs(integer.min_value)` wraps to `integer.min_value`. |
+| `integer.min(a, b)`, `integer.max(a, b)` | The smaller and the larger of two Ints, by signed value. |
+| `integer.udiv(a, b)`, `integer.urem(a, b)` | The quotient and the remainder of `a` and `b` with both operands read as unsigned 64-bit values. The result is the Int with the bit pattern of the unsigned result. A zero `b` is a runtime error. |
+| `integer.ult(a, b)` | `true` when `a` is below `b` with both read as unsigned 64-bit values, `false` otherwise. |
+| `integer.ustr(x)` | The String of the decimal digits of `x` read as an unsigned 64-bit value: `integer.ustr(-1i)` is `"18446744073709551615"`. |
+| `integer.parse_unsigned(s)` | The Int whose bit pattern is the unsigned decimal integer that the String `s` names. `s` is one or more decimal digits, with no sign and nothing else, and its value is at most 18446744073709551615 (2^64 - 1). |
+
+Every argument must be an Int, except the argument of `parse_unsigned`, which
+must be a String. An argument of any other kind, an integer-valued Number
+included, is a runtime error. So is a `parse_unsigned` argument that is not of
+the form above or is too large.
+
+The `math` module does not change: its functions take Numbers, and an Int
+argument is a runtime error.
+
+```lox
+print integer.max_value;                   // 9223372036854775807
+print integer.ustr(0xFFFFFFFFFFFFFFFF);    // 18446744073709551615
+print integer.ult(1i, 0xFFFFFFFFFFFFFFFF); // true
+```
+
+**Arity:** `abs`, `ustr`, and `parse_unsigned` 1; `min`, `max`, `udiv`, `urem`, and `ult` 2  
+**Returns:** Int, except `ult` (Boolean) and `ustr` (String)
+
+---
+
 ## `math` — numeric functions and constants
 
 `math` is a global object bound at the start of every program. Its members are
@@ -139,8 +232,8 @@ shadows it, and the global can be reassigned.
 
 ### Functions of one argument
 
-Each takes one Number and returns a Number. A non-Number argument is a runtime
-error.
+Each takes one Number and returns a Number. A non-Number argument, an Int
+included, is a runtime error.
 
 `abs`, `ceil`, `floor`, `round`, `sqrt`, `cbrt`, `exp`, `log`, `log2`,
 `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
@@ -158,8 +251,8 @@ error.
 
 ### Functions of two arguments
 
-Each takes two Numbers and returns a Number. A non-Number argument is a runtime
-error.
+Each takes two Numbers and returns a Number. A non-Number argument, an Int
+included, is a runtime error.
 
 `pow`, `atan2`, `hypot`, `min`, `max`
 
@@ -820,6 +913,7 @@ Returns the language-level type name of `value` as a String.
 | Nil | `"Nil"` |
 | Boolean | `"Boolean"` |
 | Number | `"Number"` |
+| Int | `"Int"` |
 | String | `"String"` |
 | Function (see §03-types) | `"Function"` |
 | BoundMethod | `"BoundMethod"` |
@@ -850,6 +944,7 @@ a promise that a program can produce one to pass to `type()` today.
 
 ```lox
 print type(1);          // Number
+print type(1i);         // Int
 print type("hi");       // String
 class Dog {}
 print type(Dog);        // Class

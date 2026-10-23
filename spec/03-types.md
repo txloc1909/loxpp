@@ -8,7 +8,7 @@ types over its lifetime.
 
 ## Runtime Types
 
-There are thirteen runtime types:
+There are fourteen runtime types:
 
 ### Nil
 
@@ -21,12 +21,62 @@ One of exactly two values: `true` or `false`.
 
 ### Number
 
-A 64-bit IEEE 754 double-precision floating-point value. There is no separate
-integer type; `1` and `1.0` are the same value.
+A 64-bit IEEE 754 double-precision floating-point value. `1` and `1.0` are the
+same value. An integer-valued Number is still a Number: it is never an
+[Int](#int), and the two kinds do not mix.
 
 Special IEEE 754 values (positive/negative infinity, NaN) are not directly
 expressible as literals but may arise from certain arithmetic operations. Their
 behavior follows IEEE 754.
+
+### Int
+
+A signed 64-bit integer, from -9223372036854775808 to 9223372036854775807. An
+Int is a kind of its own, beside Number. A program writes an Int as a literal
+with the suffix `i`, or as a hexadecimal or binary literal
+([§01-lexical](01-lexical.md#number-and-int-literals)), or makes one with the
+`int` function ([§05-stdlib](05-stdlib.md#intvalue--int)).
+
+- **No mixing.** An operator with one Int operand and one Number operand is a
+  runtime error. `1 + 1i` is the same kind of fault as `1 + "1"`. Equality is
+  the one exception: it never faults, so `1 == 1i` is `false`. The table in
+  [§04-semantics, Operand Kinds](04-semantics.md#operand-kinds) gives every
+  operator.
+- **Wrap.** Every Int operation wraps in two's complement: the largest Int
+  plus `1i` is the smallest Int. No Int operation raises an overflow fault.
+  A program that must detect overflow checks the range itself.
+- **Bit operators.** The operators `&`, `|`, `^`, `~`, `<<`, `>>`, and `>>>`
+  work on Ints only (see [§04-semantics, Bit
+  Operators](04-semantics.md#bit-operators)).
+- **Equality and hashing.** Two Ints are equal when they hold the same
+  value. An Int is never equal to a value of another kind, a Number
+  included, so `1 == 1i` is `false` and `1 != 1i` is `true`. An Int is a
+  valid map key and it hashes by its value, so `1` and `1i` are two different
+  keys of one Map. No Int is a NaN, so no Int is an invalid key. A literal
+  pattern of `match` follows `==`: the pattern `1i` matches the Int `1i` and
+  not the Number `1`.
+- **Truthiness.** An Int is always truthy, `0i` included.
+- **Printing.** An Int prints as its exact decimal digits, with a `-` sign
+  when it is negative, and never in an exponent form: `str(1i)` is `"1"` and
+  `str(-1i)` is `"-1"`.
+- **Messages.** An Int is always a [message](#messages).
+- **The standard library.** A function of the standard library that takes a
+  Number does not take an Int, and a function that gives a Number does not give
+  an Int, unless [§05-stdlib](05-stdlib.md) says otherwise for `int`, `float`,
+  and the `integer` module. `len(x)` gives a Number. `chr(65i)` and
+  `math.floor(1i)` are runtime errors.
+- **Width.** The spec binds 64 bits. How an implementation stores an Int is
+  implementation-defined, and no program can observe it: an Int that an
+  implementation keeps in a register, in a tagged word, or in a heap object
+  behaves the same way.
+
+```lox
+print 255i;                     // 255
+print 0xFF;                     // 255
+print 9223372036854775807i + 1i; // -9223372036854775808
+print 1 == 1i;                  // false
+print type(1i);                 // Int
+```
 
 ### String
 
@@ -163,7 +213,7 @@ var m = {"a": 1, 2: "two", true: 3, nil: 4};
 var empty = {};
 ```
 
-**Valid key types**: Nil, Boolean, Number (not NaN), String, and an Instance
+**Valid key types**: Nil, Boolean, Number (not NaN), Int, String, and an Instance
 whose class defines **both** `__hash__` and `__eq__` (see
 [§04-semantics, Operator Overloading](04-semantics.md#operator-overloading)).
 Any other type as a key is a **runtime error**. NaN is explicitly rejected even
@@ -339,7 +389,7 @@ A **message** is a value that can pass from one task to another, on the
 same worker or on a different one (see [§04-semantics, Workers and
 Tasks](04-semantics.md#workers-and-tasks)). The message rule:
 
-- A value of kind Nil, Boolean, Number, String, or Task is always a message.
+- A value of kind Nil, Boolean, Number, Int, String, or Task is always a message.
 - A value of kind Enum is a message when each of its fields is a message.
 - A value of any other kind is never a message.
 
@@ -351,6 +401,7 @@ table below gives the rule for every kind:
 | `Nil` | always | A scalar. |
 | `Boolean` | always | A scalar. |
 | `Number` | always | A scalar. |
+| `Int` | always | A scalar. |
 | `String` | always | Immutable. |
 | `Task` | always | An identity, not a container. |
 | `Enum` | when each field is a message | Its fields cannot change. |
@@ -400,7 +451,7 @@ conditions (`if`, `while`, `for`) and short-circuit operators (`and`, `or`).
 | `nil` | Falsy |
 | Everything else | Truthy |
 
-Note: `0`, `""` (empty string), functions, `[]` (empty list), and `{}` (empty map) are all **truthy**.
+Note: `0`, `0i`, `""` (empty string), functions, `[]` (empty list), and `{}` (empty map) are all **truthy**.
 
 ---
 
@@ -409,12 +460,14 @@ Note: `0`, `""` (empty string), functions, `[]` (empty list), and `{}` (empty ma
 The `==` and `!=` operators compare two values.
 
 - Values of **different types** are **never equal**: `nil == false` → `false`,
-  `0 == "0"` → `false`.
+  `0 == "0"` → `false`, `1 == 1i` → `false`.
 - Values of the **same type** are compared by the rule for that type:
   - `nil == nil` → `true`
   - Booleans are equal when both are `true` or both are `false`
   - Numbers are equal when they have the same numeric value (IEEE 754 equality;
     note that `NaN != NaN` follows the standard)
+  - Ints are equal when they hold the same value, for every value of the 64
+    bits: `9007199254740993i == 9007199254740992i` is `false`
   - Strings are equal when they contain the same sequence of characters
   - Functions are equal only when they are the same function object (identity
     equality)
@@ -448,7 +501,9 @@ key dispatches its own `__eq__` (see the Map section above).
 
 Lox++ performs **no implicit type conversions**. Passing a String where a
 Number is required (e.g., in arithmetic) is a runtime error. Use the `str()`
-built-in to convert explicitly.
+built-in to convert explicitly. An Int and a Number do not convert into each
+other either: `1i + 1` is a runtime error, and a program writes `int(x)` or
+`float(x)` ([§05-stdlib](05-stdlib.md)) to say which kind it wants.
 
 ---
 
@@ -464,6 +519,7 @@ Every value has a canonical string form, produced by `print` and by the
 | `false` | `false` |
 | Number (integer-valued) | Digits, no decimal point — `42`, `-3`, `0` |
 | Number (fractional) | Shortest decimal representation — `3.14`, `1.5` |
+| Int | The exact decimal digits, with a `-` sign when negative, and no exponent form — `255`, `-1`, `0`, `9223372036854775807` |
 | String | The string content itself (no surrounding quotes) |
 | Function / BoundMethod | `<fn name>` where *name* is the declared function name |
 | Native function | `<native fn>` |

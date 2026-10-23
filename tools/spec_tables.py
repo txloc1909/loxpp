@@ -47,13 +47,18 @@ def section(text: str, heading: str) -> str:
 
 
 def split_row(line: str) -> list[str]:
-    """Splits one pipe-table row into its stripped cells."""
+    """Splits one pipe-table row into its stripped cells.
+
+    A backslash-escaped pipe (`\\|`) is part of a cell, as in the cell of
+    the `|` operator.
+    """
     inner = line.strip()
     if inner.startswith("|"):
         inner = inner[1:]
-    if inner.endswith("|"):
+    if inner.endswith("|") and not inner.endswith("\\|"):
         inner = inner[:-1]
-    return [cell.strip() for cell in inner.split("|")]
+    cells = re.split(r"(?<!\\)\|", inner)
+    return [cell.replace("\\|", "|").strip() for cell in cells]
 
 
 def table(body: str, first_header: str) -> list[dict[str, str]]:
