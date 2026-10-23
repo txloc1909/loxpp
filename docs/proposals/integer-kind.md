@@ -17,9 +17,9 @@ The owner decided these forks on 2026-10-23.
 | Range | Int is a signed 64-bit integer on every implementation. The inline width of the native VM is implementation-defined. |
 | Overflow | Every Int operation wraps in two's complement. |
 | `/` and `%` | On two Ints, `/` is floor division and `%` is floor modulo, so `a == (a / b) * b + a % b`. A zero divisor is a runtime fault. |
-| Conversions | `int(x)` converts a Number or a String to an Int. `float(x)` converts an Int or a String to a Number. |
+| Conversions | `int(x)` converts an integral Number or a decimal String to an Int. A fractional Number or a hex String is a runtime fault. `float(x)` converts an Int or a String to a Number. |
 | Indexing | A List or String index, a slice bound, and an enum field index accept an integral Number or an Int. |
-| Helpers | A dedicated module for Int functions and constants. Its name is open question 1. |
+| Helpers | A dedicated module `integer` for Int functions and constants. The name `int` is the conversion function, so the module cannot take it. |
 | Printing | An Int prints as its decimal digits, the same text as the equal Number. `str(1i)` is `"1"`. |
 | Bit operations | The operators `&`, `\|`, `^`, `~`, `<<`, `>>` and `>>>`, on Ints only. No operator protocol. Unchanged from #792. |
 | Shifts | `>>` keeps the sign bit. `>>>` fills with zero bits. A shift count outside 0 to 63 is a runtime fault. Unchanged from #792. |
@@ -211,15 +211,20 @@ defined, and neither is a fault.
 ### Conversions
 
 - `int(x)`: an Int gives itself. An integral Number inside the int64 range
-  gives the equal Int. A String parses as a decimal integer with an optional
-  sign, or faults. Open question 2 decides a fractional Number.
+  gives the equal Int. A fractional Number, a NaN, an infinity, or a Number
+  outside the range is a runtime fault, as JavaScript `BigInt(1.5)` throws.
+  A program that wants a rounding writes `int(math.floor(x))` or
+  `int(math.round(x))`, which name the rounding at the site. A String parses
+  as a decimal integer with an optional sign, or faults. A hex String faults:
+  `int()` parses decimal only, and a hex String goes through
+  `integer.parse_unsigned` or a program's own loop.
 - `float(x)`: a Number gives itself. An Int converts exactly up to 2^53 and
   rounds to the nearest double beyond. A String parses as a decimal number, or
   faults. The function gives a Number; its name pairs with `int`.
 
 ### The Int module
 
-Its name is open question 1. This text calls it `integer`.
+The module is `integer`.
 
 | Name | Meaning |
 |---|---|
@@ -305,9 +310,10 @@ the table is complete, before backend work starts:
   and a fractional literal with the suffix;
 - the runtime fault rows: a mixed-kind operand, a bit operator on a Number
   or an Instance, a shift count that is not an Int or is out of range, Int
-  `/ 0i` and `% 0i`, `int()` on a Number outside the int64 range or on a
-  String that does not parse, `float()` on a String that does not parse, and
-  each module function on a non-Int;
+  `/ 0i` and `% 0i`, `int()` on a fractional Number, a NaN, an infinity, a
+  Number outside the int64 range, or a String that does not parse as decimal,
+  `float()` on a String that does not parse, and each module function on a
+  non-Int;
 - the edge rows that do not fault: the smallest Int `/ -1i` and `% -1i`, the
   negation of the smallest Int, the largest Int `+ 1i`, `1 == 1i` is
   `false`, and `0i` is truthy.
@@ -346,14 +352,9 @@ corpus gate is green.
 
 ## Open questions
 
-1. The name of the Int module. `int` clashes with the function `int(x)`,
-   because a module and a function share one global namespace.
-   Recommendation: `integer`.
-2. `int(1.5)`. Recommendation: a runtime fault, as JavaScript `BigInt(1.5)`
-   throws. A program that wants truncation writes `int(math.floor(x))` or
-   `int(math.round(x))`, which name the rounding at the site.
-3. `int("0x1F")`. Recommendation: a fault. `int()` parses decimal only, and a
-   hex String goes through `parse_unsigned` or a program's own loop.
+None. The owner answered the three questions of the first draft on
+2026-10-23: the module is `integer`, `int(1.5)` faults, and `int("0x1F")`
+faults.
 
 ## Mission sketch
 
