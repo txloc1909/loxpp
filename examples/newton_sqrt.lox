@@ -29,10 +29,10 @@ while (step < 5) {
     step = step + 1;
 }
 // CHECK:   step 1: x = 1.5
-// CHECK:   step 2: x = 1.41667
-// CHECK:   step 3: x = 1.41422
-// CHECK:   step 4: x = 1.41421
-// CHECK:   step 5: x = 1.41421
+// CHECK:   step 2: x = 1.4166666666666665
+// CHECK:   step 3: x = 1.4142156862745097
+// CHECK:   step 4: x = 1.4142135623746899
+// CHECK:   step 5: x = 1.414213562373095
 
 // CHECK: === Comparison with math.sqrt ===
 print "";
@@ -47,10 +47,10 @@ while (i < 5) {
         "  exact=" + str(exact);
     i = i + 1;
 }
-// CHECK:   sqrt(2):  newton=1.41421  exact=1.41421
-// CHECK:   sqrt(9):  newton=3  exact=3
-// CHECK:   sqrt(25):  newton=5  exact=5
-// CHECK:   sqrt(144):  newton=12  exact=12
+// CHECK:   sqrt(2):  newton=1.4142135623746899  exact=1.4142135623730951
+// CHECK:   sqrt(9):  newton=3.000000001396984  exact=3
+// CHECK:   sqrt(25):  newton=5.000000000053722  exact=5
+// CHECK:   sqrt(144):  newton=12.000000012408687  exact=12
 // CHECK:   sqrt(10000):  newton=100  exact=100
 
 // -----------------------------------------------------------------------
@@ -108,7 +108,7 @@ fun sqrtNewtonDual(n) {
 print "";
 // CHECK: === Newton with automatic derivatives ===
 print "=== Newton with automatic derivatives ===";
-// CHECK:   sqrt(2)   = 1.41421
+// CHECK:   sqrt(2)   = 1.4142135623746899
 print "  sqrt(2)   = " + str(sqrtNewtonDual(2));
-// CHECK:   sqrt(144) = 12
+// CHECK:   sqrt(144) = 12.000000012408687
 print "  sqrt(144) = " + str(sqrtNewtonDual(144));

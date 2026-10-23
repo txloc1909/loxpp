@@ -63,7 +63,7 @@ while (i < 4) {
     shapes[i].describe();
     i = i + 1;
 }
-// CHECK: Circle(r=5): area=78.5398, perimeter=31.4159
+// CHECK: Circle(r=5): area=78.53981633974483, perimeter=31.41592653589793
 // CHECK: Rectangle(4x6): area=24, perimeter=20
 // CHECK: Square(3): area=9, perimeter=12
 // CHECK: Triangle(b=6, h=4): area=12, perimeter=16
@@ -80,5 +80,5 @@ fun totalArea(shapeList, count) {
     }
     return total;
 }
-// CHECK: Total area of all shapes: 123.54
+// CHECK: Total area of all shapes: 123.53981633974483
 print "Total area of all shapes: " + str(totalArea(shapes, 4));

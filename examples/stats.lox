@@ -79,7 +79,7 @@ print "=== data2 ===";
 // CHECK:   n        = 5
 // CHECK:   mean     = 3
 // CHECK:   variance = 2
-// CHECK:   std dev  = 1.41421
+// CHECK:   std dev  = 1.4142135623730951
 // CHECK:   min      = 1
 // CHECK:   max      = 5
 // CHECK:   range    = 4
