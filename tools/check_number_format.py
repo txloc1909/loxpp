@@ -41,7 +41,7 @@ def spec_rows() -> dict[str, str]:
     return rows
 
 
-def probe_rows() -> dict[str, str]:
+def probe_rows(duplicates: list[str]) -> dict[str, str]:
     """Returns {case: CHECK value} from the probe, one COVERS then its CHECK."""
     rows: dict[str, str] = {}
     pending = None
@@ -49,6 +49,8 @@ def probe_rows() -> dict[str, str]:
         m = COVERS_RE.match(line)
         if m:
             pending = m.group(1)
+            if pending in rows:
+                duplicates.append(pending)
             continue
         m = CHECK_RE.match(line)
         if m and pending is not None:
@@ -59,8 +61,12 @@ def probe_rows() -> dict[str, str]:
 
 def main() -> int:
     spec = spec_rows()
-    probe = probe_rows()
-    findings: list[str] = []
+    duplicates: list[str] = []
+    probe = probe_rows(duplicates)
+    findings: list[str] = [
+        f"{PROBE_PATH.name} has more than one COVERS line for {case!r}"
+        for case in duplicates
+    ]
     for case, expected in spec.items():
         if case not in probe:
             findings.append(

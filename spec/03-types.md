@@ -462,7 +462,7 @@ Every value has a canonical string form, produced by `print` and by the
 | `nil` | `nil` |
 | `true` | `true` |
 | `false` | `false` |
-| Number | The shortest decimal that round-trips to the same IEEE 754 double (ECMAScript `Number::toString`, radix 10). An integral value below `1e21` prints its bare digits (`42`, `-3`, `1000000`); a fraction prints with a decimal point (`3.14`, `0.30000000000000004`); a value outside `[1e-6, 1e21)` prints in scientific notation (`1e+21`, `1e-7`). The special values print `inf`, `-inf`, and `nan`, and both zeroes print `0`. |
+| Number | The shortest decimal that round-trips to the same IEEE 754 double (ECMAScript `Number::toString`, radix 10). An integral value below `1e21` prints its bare digits (`42`, `-3`, `1000000`); a fraction prints with a decimal point (`3.14`, `0.30000000000000004`); a value outside `[1e-6, 1e21)` prints in scientific notation (`1e+21`, `1e-7`). The special values print `inf`, `-inf`, `nan`, and `-nan` (the sign of a NaN is not guaranteed), and both zeroes print `0`. |
 | String | The string content itself (no surrounding quotes) |
 | Function / BoundMethod | `<fn name>` where *name* is the declared function name |
 | Native function | `<native fn>` |
@@ -499,6 +499,7 @@ language change. `tools/check_number_format.py` proves the table complete.
 | scientific-lower-bound | `1000000000000000000000` | `1e+21` |
 | fixed-lower-bound | `0.000001` | `0.000001` |
 | scientific-upper-bound | `0.0000001` | `1e-7` |
+| smallest-subnormal | `1` halved 1074 times | `5e-324` |
 | positive-infinity | `math.inf` | `inf` |
 | negative-infinity | `-math.inf` | `-inf` |
 | not-a-number | `math.nan` | `nan` |

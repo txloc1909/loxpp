@@ -28,6 +28,11 @@ public final class StringifyTest {
         checkEquals("100000000000000000000", LoxOps.stringify(Math.pow(10, 20)), "stringify(1e20)");
         checkEquals("1e-20", LoxOps.stringify(Math.pow(10, -20)), "stringify(1e-20)");
         checkEquals("0", LoxOps.stringify(-0.0), "stringify(-0.0)");
+        // Double.toString returns 4.9e-324 and 9.9e-324 for these; one digit
+        // round-trips, so the shortest form is 5e-324 and 1e-323.
+        checkEquals("5e-324", LoxOps.stringify(Double.MIN_VALUE), "stringify(min subnormal)");
+        checkEquals("1e-323", LoxOps.stringify(2 * Double.MIN_VALUE), "stringify(2 * min subnormal)");
+        checkEquals("-5e-324", LoxOps.stringify(-Double.MIN_VALUE), "stringify(-min subnormal)");
         // A runtime (not compile-time-folded) division, exactly as
         // LoxOps.divide always performs it: on x86_64 this carries a set
         // sign bit, matching the native oracle's "-nan" for 0/0.

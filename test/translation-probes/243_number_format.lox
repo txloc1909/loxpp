@@ -55,6 +55,12 @@ print 0.000001;
 print 0.0000001;
 // CHECK: 1e-7
 
+// COVERS: number-format smallest-subnormal
+var tiny = 1;
+for (var i = 0; i < 1074; i = i + 1) tiny = tiny / 2;
+print tiny;
+// CHECK: 5e-324
+
 // COVERS: number-format positive-infinity
 print math.inf;
 // CHECK: inf

@@ -22,12 +22,11 @@ public final class MapTest {
         checkEquals("neg-zero", map.get(0.0), "the later write under -0.0 is what 0.0 now reads");
         // PR #97: the stored value is normalized for
         // lookup, but the key keeps the raw bits the caller last wrote.
-        // Since #834 a Number stringifies as the shortest round-trip form,
-        // so -0.0 prints "0", and that preserved sign bit is no longer
-        // observable through str().
+        // -0.0 prints "0", so the preserved sign bit is not observable
+        // through str().
         for (Map.Entry<Object, Object> e : map.entrySet()) {
             if ("neg-zero".equals(e.getValue())) {
-                checkEquals("0", LoxOps.stringify(e.getKey()), "a later write under -0.0 stringifies to 0 (#834)");
+                checkEquals("0", LoxOps.stringify(e.getKey()), "a later write under -0.0 stringifies to 0");
             }
         }
 

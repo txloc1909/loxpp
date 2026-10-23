@@ -1560,9 +1560,12 @@ public final class LoxOps {
      * lower-case special-value names — see docs/decisions/number-print-format.md
      * and value.cpp's stringifyNumber.
      *
-     * BigDecimal.valueOf reads Double.toString's shortest, locale-free digits.
-     * Java appends ".0" when the value is integral, so the trailing zeros are
+     * BigDecimal.valueOf reads Double.toString's locale-free digits. Java
+     * appends ".0" when the value is integral, so the trailing zeros are
      * stripped back off and the scale gives the decimal point position.
+     * Double.toString is not always the shortest form: where one digit
+     * round-trips it can still return two (4.9e-324 for 5e-324), so a
+     * two-digit result is checked against the one-digit neighbours.
      */
     static String formatNumber(double d) {
         if (Double.isNaN(d)) {
@@ -1592,6 +1595,25 @@ public final class LoxOps {
         String digits = digitsInt.toString();
         int k = digits.length();
         int n = k - scale + stripped; // decimal point position, as in ECMAScript
+        if (k == 2) {
+            int lo = digits.charAt(0) - '0';
+            BigDecimal exact = new BigDecimal(mag);
+            BigDecimal best = null;
+            for (int c = lo; c <= lo + 1; c++) {
+                BigDecimal cand = BigDecimal.valueOf(c).scaleByPowerOfTen(n - 1);
+                if (cand.doubleValue() == mag
+                        && (best == null || cand.subtract(exact).abs()
+                                .compareTo(best.subtract(exact).abs()) < 0)) {
+                    best = cand;
+                }
+            }
+            if (best != null) {
+                BigDecimal norm = best.stripTrailingZeros();
+                digits = norm.unscaledValue().toString();
+                k = digits.length();
+                n = k - norm.scale();
+            }
+        }
 
         StringBuilder sb = new StringBuilder();
         if (negative) {
