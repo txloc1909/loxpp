@@ -636,6 +636,10 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     are BOTH wrong is not ruled out by that cross-check — only real,
     per-edge merge verification closes it, which no node has attempted. No
     known program reaches that second residue.
+    The JVM deficit ceiling is tracked as issue #821. That issue also names
+    the `and`/`or` result shapes that inherit it: issue #817 makes such a
+    result a named local, so it reaches the consumer through the same fold
+    path a plain `match` result already used.
   - **FIXED (issue #817), was REACHABLE — deferred by referee ruling, PR
     #115 (originally R13, PR #115 round 2; disposition ruled at round 3).**
     `and`/`or` (`compiler.cpp`'s `and_`/`or_`) compile `JUMP_IF_FALSE` then
