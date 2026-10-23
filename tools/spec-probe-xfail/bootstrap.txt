@@ -77,3 +77,5 @@
 235_int_fault_enum_index_out_of_range.lox  N6 #830: bootstrap interpreter
 239_int_suffix_before_in_rejected.lox  N6 #830: bootstrap interpreter scanner
 240_int_suffix_before_if_rejected.lox  N6 #830: bootstrap interpreter scanner
+241_int_fractional_suffix_before_in_rejected.lox  N6 #830: bootstrap interpreter scanner
+242_int_fractional_suffix_before_if_rejected.lox  N6 #830: bootstrap interpreter scanner

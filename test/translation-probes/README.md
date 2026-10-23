@@ -264,6 +264,8 @@ each has an off-the-shelf solution.
 | `238_int_decimal_min_call_rejected` | the same for a call after the literal | none (spec probe of the Int kind, static error) |
 | `239_int_suffix_before_in_rejected` | an `i` directly after the digits is the suffix, so `1in [1, 2]`, a valid program before the suffix existed, is a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
 | `240_int_suffix_before_if_rejected` | the same for the guard `case 1if t` | none (spec probe of the Int kind, N2 #826) |
+| `241_int_fractional_suffix_before_in_rejected` | the same rule for a fractional literal: `1.5in [1.5]`, a valid program before the suffix existed, is the literal `1.5i` and a name, a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
+| `242_int_fractional_suffix_before_if_rejected` | the same for the guard `case 1.5if t` | none (spec probe of the Int kind, N2 #826) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
@@ -354,7 +356,7 @@ divergence. Two more files serve the walkers that are not a consumer's own gate:
 `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
 that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
 
-The probes `164` to `240` are the spec probes of the Int kind
+The probes `164` to `242` are the spec probes of the Int kind
 (`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
 lines. They say which row of which spec table the probe checks. Six scripts
 read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
@@ -369,7 +371,7 @@ and `urem`, of its zero divisor.
 
 Each native node makes a group of these probes pass: the value layer and the
 literals (`164`, `165`, `176` to `183`, and the static-error probes `236` to
-`240`), the operators (`184` to `199`), and the conversions, the `integer`
+`242`), the operators (`184` to `199`), and the conversions, the `integer`
 module, and the indexes (`200` to `235`).
 Every one of these probes, except the static-error probes below, uses a form
 that no consumer accepts yet, so each is on the expected-failure list of every
@@ -398,16 +400,22 @@ Without the line, a halt at run time with no output passes both tools.
 `tools/check_int_literal_rejections.py` fails a rejected probe that does not
 start with such a line.
 
-Two more static-error probes, `239` and `240`, are the exception to "on no
-list". Before the suffix existed, `1in [1, 2]` and `case 1if t` were valid
-programs, so every consumer runs them and they fail today. They are on the
+Four more static-error probes, `239` to `242`, are the exception to "on no
+list". Before the suffix existed, `1in [1, 2]`, `case 1if t`, `1.5in [1.5]`,
+and `case 1.5if t` were valid programs, so every consumer runs them and they
+fail today. They are on the
 lists of the native VM, the JVM backend, the QBE backend, and the bootstrap
 interpreter. The JVM and QBE backends use the native front end, so the node
 that makes native reject them (N2) deletes their lines from the native, JVM,
 and QBE files in one pull request. The bootstrap interpreter has its own
-scanner, so N6 deletes its lines. The tree-sitter step of CI leaves both probes
-out for good, because the grammar will reject them, and the tooling list needs
-no line.
+scanner, so N6 deletes its lines. The tree-sitter step of CI leaves the four
+probes out for good, because the grammar will reject them, and the tooling list
+needs no line.
+
+The twins of the suffix rule are in `165`: `1i in [1i, 2i]`, `case 1i if t`,
+`1.5 in [1.5]`, and `case 1.5 if t` with a space. The same probe pins the
+other side of the rule: a hexadecimal or a binary literal has no suffix, so
+`0x1in [1i]`, `0b1in [1i]`, and `case 0x1if t` are valid.
 
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its

@@ -77,3 +77,5 @@
 235_int_fault_enum_index_out_of_range.lox  N5 #829: JVM backend as the oracle
 239_int_suffix_before_in_rejected.lox  N2 #826: the front end of the JVM backend is the native one
 240_int_suffix_before_if_rejected.lox  N2 #826: the front end of the JVM backend is the native one
+241_int_fractional_suffix_before_in_rejected.lox  N2 #826: the front end of the JVM backend is the native one
+242_int_fractional_suffix_before_if_rejected.lox  N2 #826: the front end of the JVM backend is the native one
