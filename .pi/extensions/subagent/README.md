@@ -9,15 +9,31 @@ it registers no tool.
 
 ## Requirements
 
-pi must reach kitty's remote control. In `~/.config/kitty/kitty.conf`:
+pi must reach kitty's remote control **through a socket**. In
+`~/.config/kitty/kitty.conf`:
 
 ```
-allow_remote_control yes
+allow_remote_control socket-only
+listen_on unix:/tmp/kitty-{kitty_pid}
 ```
 
-or `allow_remote_control socket-only` together with a `listen_on` line. Restart
-kitty after the change. Without remote control, pi can start no window, and the
-tool fails with a message that names this setting.
+Restart kitty after the change. A socket address must be in `KITTY_LISTEN_ON`;
+`listen_on` is what creates the socket.
+
+Use a literal path. kitty expands `$VAR` in `listen_on`, but it leaves an unset
+variable in the path as text, so the copy of kitty's man page that uses
+`${TEMP}` makes an invalid line on most Linux systems: `TEMP` is not set there
+and the socket never appears. kitty appends `-<pid>` to a `unix:` path that has
+no `{kitty_pid}`, so the address it reports is not the text above.
+
+Do not use `allow_remote_control yes` without a `listen_on` line. That setting
+opens the terminal channel instead: `kitten @` writes the request to the
+controlling terminal and reads kitty's reply from it, and pi reads its keys
+from that same terminal. The reply then arrives as input, so a large listing
+such as `ls` lands in the prompt. The extension refuses to run in that mode and
+says which two lines to add.
+
+Every call names the socket with `--to`. The code never relies on a fallback.
 
 ## Agents
 
@@ -76,9 +92,10 @@ Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `hold`,
 
 ## How a run works
 
-1. `kitten @ launch --match=window_id=<pi window> --type=window --cwd=<cwd>`
-   opens the child window as a split in pi's tab. The match on pi's own window
-   keeps the placement independent of which kitty window has focus.
+1. `kitten @ --to=<socket> launch --match=window_id=<pi window> --type=window
+   --cwd=<cwd>` opens the child window as a split in pi's tab. The match on
+   pi's own window keeps the placement independent of which kitty window has
+   focus. The socket address keeps kitty's reply out of pi's terminal.
 2. kitty runs a small shell script. The script sends the child's stdout (the
    `--mode json` event stream), its stderr, and its exit code to files in a
    temporary directory.
@@ -101,9 +118,11 @@ subagent window by hand, the run ends and is reported as aborted.
 # Unit tests. A fake `kitten` stands in for kitty, so no terminal is needed.
 node --test .pi/extensions/subagent/*.test.ts
 
-# Live test. Needs a running kitty with remote control:
-LOXPP_SUBAGENT_LIVE=1 KITTY_LISTEN_ON=unix:/tmp/kitty.sock \
-  node --test .pi/extensions/subagent/live.test.ts
+# Live test. Needs a running kitty with remote control over a socket: run it
+# from a shell inside a kitty window, so KITTY_LISTEN_ON is inherited. The
+# address there is the one kitty reports, which may differ from the listen_on
+# text: kitty appends -<pid> when the line has no {kitty_pid}.
+LOXPP_SUBAGENT_LIVE=1 node --test .pi/extensions/subagent/live.test.ts
 ```
 
 `LOXPP_SUBAGENT_PI=/path/to/program` makes the extension launch that program

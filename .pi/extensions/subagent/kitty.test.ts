@@ -15,15 +15,21 @@ import {
   windowIds,
 } from "./kitty.ts";
 
-const session = { windowId: "3" };
+const session = { windowId: "3", listenOn: "unix:/tmp/kitty.sock" };
 
-test("detectKitty reads KITTY_WINDOW_ID only", () => {
-  assert.deepEqual(detectKitty({ KITTY_WINDOW_ID: "3" }), { windowId: "3" });
-  assert.deepEqual(detectKitty({ KITTY_WINDOW_ID: " 12 " }), { windowId: "12" });
+test("detectKitty reads the window id and the socket address", () => {
+  assert.deepEqual(detectKitty({ KITTY_WINDOW_ID: "3", KITTY_LISTEN_ON: "unix:/tmp/k.sock" }), {
+    windowId: "3",
+    listenOn: "unix:/tmp/k.sock",
+  });
+  assert.deepEqual(detectKitty({ KITTY_WINDOW_ID: " 12 " }), { windowId: "12", listenOn: null });
   assert.equal(detectKitty({}), null);
   assert.equal(detectKitty({ TERM: "xterm-kitty" }), null);
   assert.equal(detectKitty({ KITTY_WINDOW_ID: "" }), null);
   assert.equal(detectKitty({ KITTY_WINDOW_ID: "not-a-number" }), null);
+  // `allow_remote_control yes` without a listen_on line leaves no socket, and
+  // `kitten @` then falls back to the terminal, where pi reads its keys.
+  assert.equal(detectKitty({ KITTY_WINDOW_ID: "3", KITTY_LISTEN_ON: "  " })?.listenOn, null);
 });
 
 test("shellQuote survives a real shell", () => {
@@ -44,6 +50,7 @@ test("launchArgv opens a window in the parent's tab", () => {
   assert.deepEqual(argv, [
     "kitten",
     "@",
+    "--to=unix:/tmp/kitty.sock",
     "launch",
     "--match=window_id:3",
     "--type=window",
@@ -52,6 +59,19 @@ test("launchArgv opens a window in the parent's tab", () => {
     "/bin/sh",
     "/tmp/run.sh",
   ]);
+});
+
+test("launchArgv refuses to build a call without a socket", () => {
+  assert.throws(
+    () =>
+      launchArgv({
+        session: { windowId: "3", listenOn: null },
+        cwd: "/repo",
+        title: "t",
+        command: ["cmd"],
+      }),
+    /socket/,
+  );
 });
 
 test("launchArgv adds hold, focus and env in a stable order", () => {
@@ -64,7 +84,7 @@ test("launchArgv adds hold, focus and env in a stable order", () => {
     keepFocus: true,
     env: { PATH: "/bin", PI_OFFLINE: "1" },
   });
-  assert.deepEqual(argv.slice(4, 11), [
+  assert.deepEqual(argv.slice(5, 12), [
     "--type=window",
     "--cwd=/repo",
     "--title=t",
@@ -77,9 +97,22 @@ test("launchArgv adds hold, focus and env in a stable order", () => {
 });
 
 test("window helper argv point at one window", () => {
-  assert.deepEqual(closeWindowArgv("9"), ["kitten", "@", "close-window", "--match=id:9"]);
-  assert.deepEqual(setTitleArgv("9", "busy"), ["kitten", "@", "set-window-title", "--match=id:9", "busy"]);
-  assert.deepEqual(listWindowsArgv(), ["kitten", "@", "ls"]);
+  assert.deepEqual(closeWindowArgv("9", "unix:/tmp/k.sock"), [
+    "kitten",
+    "@",
+    "--to=unix:/tmp/k.sock",
+    "close-window",
+    "--match=id:9",
+  ]);
+  assert.deepEqual(setTitleArgv("9", "busy", "unix:/tmp/k.sock"), [
+    "kitten",
+    "@",
+    "--to=unix:/tmp/k.sock",
+    "set-window-title",
+    "--match=id:9",
+    "busy",
+  ]);
+  assert.deepEqual(listWindowsArgv("unix:/tmp/k.sock"), ["kitten", "@", "--to=unix:/tmp/k.sock", "ls"]);
 });
 
 test("windowIds reads window ids, not OS window or tab ids", () => {

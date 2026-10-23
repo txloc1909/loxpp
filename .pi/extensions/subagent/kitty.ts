@@ -8,16 +8,44 @@
 export interface KittySession {
   /** The kitty window that runs pi. Subagent windows open beside it. */
   windowId: string;
+  /**
+   * Address of kitty's remote-control socket, from KITTY_LISTEN_ON.
+   *
+   * Without it, `kitten @` sends its request to the controlling terminal and
+   * reads the reply from that same terminal, which pi reads for keystrokes.
+   * The reply then arrives as input: a large listing lands in the prompt. The
+   * extension refuses to run in that mode instead of racing.
+   */
+  listenOn: string | null;
 }
 
 /**
  * Kitty sets KITTY_WINDOW_ID for every process it starts, so its presence is
- * how the extension knows it may open windows at all.
+ * how the extension knows it may open windows at all. KITTY_LISTEN_ON is
+ * present only when kitty listens on a socket, which needs a `listen_on` line.
  */
 export function detectKitty(env: Record<string, string | undefined> = process.env): KittySession | null {
   const raw = env.KITTY_WINDOW_ID?.trim();
   if (!raw || !/^\d+$/.test(raw)) return null;
-  return { windowId: raw };
+  const listenOn = env.KITTY_LISTEN_ON?.trim();
+  return { windowId: raw, listenOn: listenOn ? listenOn : null };
+}
+
+/**
+ * The socket address, named on every call. `kitten @` falls back to the
+ * controlling terminal when it cannot find a socket, and that fallback writes
+ * into the terminal pi reads its keyboard input from. Both entry points need
+ * the address and neither may proceed without it.
+ */
+export function requireListenOn(session: KittySession): string {
+  if (!session.listenOn) {
+    throw new Error("kitty remote control needs a socket; add a listen_on line to kitty.conf");
+  }
+  return session.listenOn;
+}
+
+function targetArg(to: string): string {
+  return `--to=${to}`;
 }
 
 export interface LaunchSpec {
@@ -41,9 +69,11 @@ export interface LaunchSpec {
  * Without `--hold`, kitty closes the window when the command exits.
  */
 export function launchArgv(spec: LaunchSpec, kitten = "kitten"): string[] {
+  const to = requireListenOn(spec.session);
   const argv = [
     kitten,
     "@",
+    targetArg(to),
     "launch",
     `--match=window_id:${spec.session.windowId}`,
     "--type=window",
@@ -58,16 +88,16 @@ export function launchArgv(spec: LaunchSpec, kitten = "kitten"): string[] {
   return argv;
 }
 
-export function closeWindowArgv(windowId: string, kitten = "kitten"): string[] {
-  return [kitten, "@", "close-window", `--match=id:${windowId}`];
+export function closeWindowArgv(windowId: string, to: string, kitten = "kitten"): string[] {
+  return [kitten, "@", targetArg(to), "close-window", `--match=id:${windowId}`];
 }
 
-export function setTitleArgv(windowId: string, title: string, kitten = "kitten"): string[] {
-  return [kitten, "@", "set-window-title", `--match=id:${windowId}`, title];
+export function setTitleArgv(windowId: string, title: string, to: string, kitten = "kitten"): string[] {
+  return [kitten, "@", targetArg(to), "set-window-title", `--match=id:${windowId}`, title];
 }
 
-export function listWindowsArgv(kitten = "kitten"): string[] {
-  return [kitten, "@", "ls"];
+export function listWindowsArgv(to: string, kitten = "kitten"): string[] {
+  return [kitten, "@", targetArg(to), "ls"];
 }
 
 /**

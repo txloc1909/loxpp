@@ -19,6 +19,7 @@ import {
   type KittySession,
   launchArgv,
   listWindowsArgv,
+  requireListenOn,
   setTitleArgv,
   windowIds,
 } from "./kitty.ts";
@@ -67,32 +68,58 @@ export function runProcess(argv: string[], timeoutMs = KITTEN_TIMEOUT_MS): Promi
 }
 
 /**
- * One `kitten @ ls` per process: it proves remote control works and that pi's
- * window belongs to the kitty instance the socket reaches. Memoized because
- * every tool call would otherwise pay for it.
+ * A run needs a socket, not kitty's terminal fallback: `kitten @` without a
+ * socket writes its request to the controlling terminal and reads the reply
+ * from it, and pi reads that terminal for keystrokes. A listing reply then
+ * lands in the prompt. `allow_remote_control yes` alone does not create a
+ * socket; only a `listen_on` line does.
  */
-let controlCheck: Promise<ProcResult> | null = null;
+export type ControlCheck = { ok: true } | { ok: false; problem: string };
 
-export function checkRemoteControl(): Promise<ProcResult> {
-  controlCheck ??= runProcess(listWindowsArgv());
-  return controlCheck;
+function socketRequiredMessage(): string {
+  return [
+    "kitty remote control must use a socket, but KITTY_LISTEN_ON is not set.",
+    "Without a socket, `kitten @` writes to the terminal and reads kitty's reply from it,",
+    "where pi also reads its keys, so the reply spills into the prompt.",
+    "",
+    "Add these lines to kitty.conf and restart kitty:",
+    "  allow_remote_control socket-only",
+    "  listen_on unix:/tmp/kitty-{kitty_pid}",
+    "",
+    "Use a literal path. TEMP is not set on most Linux systems, and kitty leaves",
+    "an unset variable in the path, which makes the whole line invalid.",
+  ].join("\n");
 }
 
-export function describeControlProblem(result: ProcResult, session: KittySession): string {
-  const reason = result.stderr.trim() || result.stdout.trim();
-  if (result.code !== 0) {
-    return [
-      `kitty remote control is unavailable${reason ? `: ${reason}` : ""}.`,
-      "",
-      "Enable it in kitty.conf and restart kitty:",
-      "  allow_remote_control yes",
-      'or "allow_remote_control socket-only" together with a listen_on line.',
-    ].join("\n");
+/**
+ * Nothing prints here: this only proves that the socket answers and that pi's
+ * window belongs to the kitty instance behind it. A pass is kept per socket
+ * address, so a tool call in a normal session pays for one check. A failure is
+ * never kept: the user may be about to fix the setting and restart kitty.
+ */
+let verifiedTarget: string | null = null;
+
+export async function checkRemoteControl(session: KittySession, kitten = "kitten"): Promise<ControlCheck> {
+  const target = session.listenOn;
+  if (!target) return { ok: false, problem: socketRequiredMessage() };
+  if (verifiedTarget === target) return { ok: true };
+
+  const listing = await runProcess(listWindowsArgv(target, kitten));
+  if (listing.code !== 0) {
+    const reason = listing.stderr.trim() || listing.stdout.trim();
+    return {
+      ok: false,
+      problem: `kitty remote control at ${target} did not answer${reason ? `: ${reason}` : "."}`,
+    };
   }
-  if (!windowIds(result.stdout).includes(session.windowId)) {
-    return `kitty window ${session.windowId} is not reachable through the current kitty socket, so a new window cannot open beside it.`;
+  if (!windowIds(listing.stdout).includes(session.windowId)) {
+    return {
+      ok: false,
+      problem: `kitty window ${session.windowId} is not reachable through ${target}, so a new window cannot open beside it.`,
+    };
   }
-  return "";
+  verifiedTarget = target;
+  return { ok: true };
 }
 
 export interface WindowRunOptions {
@@ -123,6 +150,7 @@ export interface WindowRunResult {
 
 export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRunResult> {
   const kitten = opts.kitten ?? "kitten";
+  const target = requireListenOn(opts.session);
   const pollMs = opts.pollMs ?? POLL_MS;
   const livenessMs = opts.livenessMs ?? LIVENESS_MS;
   const deadWindowGraceMs = opts.deadWindowGraceMs ?? DEAD_WINDOW_GRACE_MS;
@@ -172,7 +200,7 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
     throw new Error(`kitty did not report the new window id (got ${JSON.stringify(launched.stdout)})`);
   }
 
-  const closeWindow = (): Promise<ProcResult> => runProcess(closeWindowArgv(windowId, kitten));
+  const closeWindow = (): Promise<ProcResult> => runProcess(closeWindowArgv(windowId, target, kitten));
   const onAbort = (): void => {
     void closeWindow();
   };
@@ -218,13 +246,13 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
 
       if (Date.now() - lastLiveness >= livenessMs) {
         lastLiveness = Date.now();
-        const listing = await runProcess(listWindowsArgv(kitten));
+        const listing = await runProcess(listWindowsArgv(target, kitten));
         if (listing.code === 0) {
           if (windowIds(listing.stdout).includes(windowId)) {
             const title = progressTitle(opts.title, stream.state);
             if (title !== lastTitle) {
               lastTitle = title;
-              void runProcess(setTitleArgv(windowId, title, kitten));
+              void runProcess(setTitleArgv(windowId, title, target, kitten));
             }
           } else if (goneSince === null) {
             goneSince = Date.now();

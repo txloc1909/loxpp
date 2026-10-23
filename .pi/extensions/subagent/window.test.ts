@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { runInKittyWindow } from "./window.ts";
+import { checkRemoteControl, runInKittyWindow } from "./window.ts";
 
 const FAKE_KITTEN = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -18,9 +18,12 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const dir = process.env.FAKE_KITTY_DIR;
-const [, sub, ...rest] = process.argv.slice(2);
+const [, ...args] = process.argv.slice(2); // drop "@"
+const [, sub, ...rest] = args; // drop "--to=<socket>"
 const file = (name) => path.join(dir, name);
 const windowId = 42;
+
+fs.appendFileSync(file("calls.log"), JSON.stringify(args) + "\\n");
 
 if (sub === "launch") {
   const command = [];
@@ -70,7 +73,7 @@ async function withFakeKitten(fn: (dir: string, kitten: string) => Promise<void>
 }
 
 const baseOptions = (kitten: string, cwd: string) => ({
-  session: { windowId: "1" },
+  session: { windowId: "1", listenOn: "unix:/tmp/fake-kitty.sock" },
   cwd,
   title: "pi subagent: test",
   header: ["pi subagent: test"],
@@ -107,14 +110,71 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.deepEqual(run.state.messages[0].content, [{ type: "text", text: "done" }]);
     assert.ok(progress.length > 0, "progress reached the caller");
 
-    const argv = JSON.parse(await fs.promises.readFile(path.join(process.env.FAKE_KITTY_DIR!, "launch.argv"), "utf8"));
+    const dir = process.env.FAKE_KITTY_DIR!;
+    const argv = JSON.parse(await fs.promises.readFile(path.join(dir, "launch.argv"), "utf8"));
     assert.ok(argv.includes("--match=window_id:1"));
     assert.ok(argv.includes("--cwd=" + cwd));
     assert.ok(argv.includes("--dont-take-focus"));
     assert.equal(argv.includes("--hold"), false);
 
-    const closed = await fs.promises.readFile(path.join(process.env.FAKE_KITTY_DIR!, "closed.log"), "utf8");
+    // A `kitten @` without a socket writes into pi's terminal, so every call
+    // must name the socket itself.
+    const calls = (await fs.promises.readFile(path.join(dir, "calls.log"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert.ok(calls.length > 0);
+    for (const call of calls) {
+      assert.equal(call[0], "--to=unix:/tmp/fake-kitty.sock", `kitten ${call[1]} names the socket`);
+    }
+    assert.ok(
+      calls.some((call) => call[1] === "close-window"),
+      "the auto-close also goes through the socket",
+    );
+
+    const closed = await fs.promises.readFile(path.join(dir, "closed.log"), "utf8");
     assert.match(closed, /--match=id:42/, "the window is closed even when kitty already would");
+  });
+});
+
+test("tty-only remote control is refused before any kitten call", async () => {
+  await withFakeKitten(async (_cwd, kitten) => {
+    const check = await checkRemoteControl({ windowId: "1", listenOn: null }, kitten);
+    assert.equal(check.ok, false);
+    if (check.ok) return;
+    assert.match(check.problem, /listen_on/);
+    assert.match(check.problem, /socket/);
+    assert.equal(
+      fs.existsSync(path.join(process.env.FAKE_KITTY_DIR!, "calls.log")),
+      false,
+      "no kitten ran: without a socket it would write kitty's reply into pi's terminal",
+    );
+  });
+});
+
+test("a socket that answers and holds pi's window passes the check", async () => {
+  await withFakeKitten(async (_cwd, kitten) => {
+    const check = await checkRemoteControl({ windowId: "42", listenOn: "unix:/tmp/fake-kitty.sock" }, kitten);
+    assert.deepEqual(check, { ok: true });
+  });
+});
+
+test("a run refuses a session with no socket before it writes anything", async () => {
+  await withFakeKitten(async (cwd, kitten) => {
+    await assert.rejects(
+      runInKittyWindow({
+        ...baseOptions(kitten, cwd),
+        session: { windowId: "1", listenOn: null },
+        command: ["/bin/sh", "-c", "exit 0"],
+        onProgress: () => {},
+      }),
+      /needs a socket/,
+    );
+    assert.equal(
+      fs.existsSync(path.join(process.env.FAKE_KITTY_DIR!, "calls.log")),
+      false,
+      "no kitten ran without a socket",
+    );
   });
 });
 
@@ -174,5 +234,16 @@ test("a window closed by hand ends the run instead of hanging", async () => {
     });
     assert.equal(run.closedByUser, true);
     assert.equal(run.exitCode, 128);
+
+    // This run outlives a liveness interval, so the poll path is covered: its
+    // listing must name the socket like every other call.
+    const calls = (await fs.promises.readFile(path.join(process.env.FAKE_KITTY_DIR!, "calls.log"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert.ok(calls.some((call) => call[1] === "ls"), "the liveness poll ran");
+    for (const call of calls) {
+      assert.equal(call[0], "--to=unix:/tmp/fake-kitty.sock", `kitten ${call[1]} names the socket`);
+    }
   });
 });
