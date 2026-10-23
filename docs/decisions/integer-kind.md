@@ -118,9 +118,10 @@ does not apply. `VISION.md` needs no change for this model.
   error. The suffix is part of the token, so `1 i` is two tokens and a syntax
   error, as it is today.
 - A decimal Int literal outside the int64 range is a compile-time error, with
-  one exception, as in Java: the literal `9223372036854775808i` is valid when
-  it is the direct operand of a unary `-`. So `-9223372036854775808i` is the
-  smallest Int, and `-(9223372036854775808i)` is an error.
+  one exception, as in Java: a decimal Int literal whose value is
+  9223372036854775808 is valid when it is the direct operand of a unary `-`.
+  So `-9223372036854775808i` is the smallest Int, and
+  `-(9223372036854775808i)` is an error.
 - `0x` followed by hex digits, and `0b` followed by binary digits, are Int
   literals and take no suffix. Each gives a 64-bit pattern, as in Java:
   `0xFFFFFFFFFFFFFFFF` is `-1i` and `0x8000000000000000` is the smallest
@@ -307,13 +308,14 @@ the table is complete, before backend work starts:
 - the precedence table;
 - the operator protocol table, with a row for the bit operators that says
   "no protocol";
-- the compile-time rejections: a decimal Int literal outside the int64 range
-  except the unary-minus case, where the literal must be the whole operand of
-  the `-`, with no call, property read, or index after it; a hex or binary
-  literal of more than 64 bits; a fractional literal with the suffix, which
-  includes a fractional literal directly before `in` or `if` (`1.5i`,
-  `1.5in`, `1.5if`); and a decimal literal with the letter `i` in the wrong
-  position (`1in`, `1if`, `1 i`);
+- the compile-time rejections, five rows in `spec/01-lexical.md`: a decimal
+  Int literal above the int64 range, except under the unary-minus exception; a
+  hex or binary literal above 64 bits; a fractional literal with the suffix,
+  which is a `BADINT` token; and a name after a literal. The table of examples
+  in the same file lists each form that follows from the three rules of the
+  section, with its tokens and its result, and
+  `tools/check_int_literal_rejections.py` requires a spec probe for each row of
+  it;
 - the runtime fault rows: a mixed-kind operand, a bit operator on a Number
   or an Instance, a shift count that is not an Int or is out of range, Int
   `/ 0i` and `% 0i`, `int()` on a fractional Number, a NaN, an infinity, a
@@ -342,21 +344,20 @@ checks them.
 3. **The constant pool keys by bit pattern, not by `==`.** This is true
    today and must stay true. `1` and `1i` have different bits, so they are
    different constants.
-4. **The suffix is part of the token.** The scanner reads an `i` directly
-   after the digits of a decimal literal, with a fractional part or without
-   one, as the suffix, whatever follows it, so `1i` is one token. `1 i` is a
-   syntax error today and stays one. `1in` and `1if` are valid today
-   (`1 in xs`, and the guard of `case 1if t`), and so are `1.5in` and
-   `1.5if`. All four become syntax errors, because the `i` is now the suffix:
-   the last two are the literal `1.5i`, which is an error by itself. No
-   program in this repository writes a digit directly before `in` or `if`, so
-   no program here changes meaning. A program elsewhere puts a space before
-   the keyword. A hexadecimal or binary literal has no suffix and ends at its
-   last digit of its base, so `0x1in [1i]` is `0x1 in [1i]`, a valid program.
-   Each consumer that scans or parses programs owes this rule: the native
-   scanner, the bootstrap interpreter, the tree-sitter grammar, and the
-   tooling parser. Probes `239` to `242` of `test/translation-probes/` pin the
-   four errors, and probe `165` pins the accepted forms.
+4. **Four forms change meaning, as a consequence of the longest match.**
+   `1in`, `1if`, `1.5in` and `1.5if` were valid before the suffix existed, and
+   now the `i` is the suffix, so each is a syntax error; probes `239` to `242`
+   of `test/translation-probes/` pin them. No program in this repository
+   writes one of the four, so no program here changes meaning, and a program
+   elsewhere puts a space before the keyword.
+5. **One normative statement per lexical question.** Tokenization is the
+   longest match over the lexical grammar. The range of a literal is by value,
+   never by spelling. The unary-minus exception is by value and on the
+   grammar. Every other sentence about a literal is an example in the table of
+   examples of `spec/01-lexical.md`. A scanner consumer (the native scanner at
+   N2, the bootstrap interpreter at N6, the tree-sitter grammar and the
+   tooling parser at N7) implements the three rules, not the list of examples,
+   and its review checks each row of the table against them.
 
 ## Program impact
 
