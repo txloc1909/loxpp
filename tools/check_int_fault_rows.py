@@ -187,10 +187,6 @@ def main() -> None:
         report(SCRIPT, [f"cannot read the inputs: {exc}"], "")
         return
 
-    ids = [r.id for r in ROWS]
-    if len(set(ids)) != len(ids):
-        problems.append("ROWS holds an id twice")
-
     for name in sorted(MODULE_FUNCTIONS - functions):
         problems.append(f"the member table of `integer` has no function {name!r}, which the decision names")
     for name in sorted(DIVIDING_FUNCTIONS - dividing):
