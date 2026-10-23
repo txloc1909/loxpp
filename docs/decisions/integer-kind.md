@@ -1,8 +1,8 @@
 # An Int kind beside Number
 
-**Status:** proposal. It waits for the owner's approval in its pull request.
-It replaces `docs/records/integer-type-split-model.md`, the decision of #792
-that the owner dropped in #810 on 2026-10-23.
+**Status:** accepted. The owner approved it in #823 (2026-10-23). Tracking
+issue: #824. It replaces `docs/records/integer-type-split-model.md`, the
+decision of #792 that the owner dropped in #810 on 2026-10-23.
 
 ## Owner decisions
 
@@ -350,15 +350,9 @@ so each consumer's expected-failure file covers them until its node merges.
 An example under `examples/` that uses Int lands at mission close, when every
 corpus gate is green.
 
-## Open questions
-
-None. The owner answered the three questions of the first draft on
-2026-10-23: the module is `integer`, `int(1.5)` faults, and `int("0x1F")`
-faults.
-
 ## Mission sketch
 
-This is not a node list. The DAG goes in the new tracking issue.
+This is not a node list. The DAG is in the tracking issue, #824.
 
 1. Spec, the shared probes with compile-time and run-time coverage, the check
    scripts, and the expected-failure file per consumer.

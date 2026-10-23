@@ -1,6 +1,6 @@
 # An Int type and bit operators
 
-**Status:** superseded by `docs/proposals/integer-kind.md` (2026-10-23).
+**Status:** superseded by `docs/decisions/integer-kind.md` (2026-10-23).
 The owner approved this decision in #792 (2026-10-22) and dropped it in
 #810 on 2026-10-23, before any node started. The reason is in the
 proposal that replaces it, "Why this model and not the split". This
