@@ -1,0 +1,15 @@
+// The suffix is part of the token (spec/01-lexical.md, Number and Int
+// Literals). `1 i` is the Number 1 followed by an identifier, a syntax error,
+// as it was before the suffix existed.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 1 i;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal suffix-boundary

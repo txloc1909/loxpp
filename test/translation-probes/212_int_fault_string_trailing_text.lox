@@ -1,0 +1,17 @@
+// `int(s)` reads the whole String. Text after the digits is a runtime error: a
+// parse that stops at the first non-digit is wrong.
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print int(12.0);
+int("12abc");
+print "unreachable";
+
+// STATUS: error
+// CHECK: 12
+// COVERS: fault int_string_not_decimal

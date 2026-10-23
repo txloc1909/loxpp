@@ -88,13 +88,21 @@ logicAnd       ::= equality ( "and" equality )* ;
 
 equality       ::= comparison ( ( "!=" | "==" ) comparison )* ;
 
-comparison     ::= term ( ( ">" | ">=" | "<" | "<=" | "in" ) term )* ;
+comparison     ::= bitOr ( ( ">" | ">=" | "<" | "<=" | "in" ) bitOr )* ;
+
+bitOr          ::= bitXor ( "|" bitXor )* ;
+
+bitXor         ::= bitAnd ( "^" bitAnd )* ;
+
+bitAnd         ::= shift ( "&" shift )* ;
+
+shift          ::= term ( ( "<<" | ">>" | ">>>" ) term )* ;
 
 term           ::= factor ( ( "-" | "+" ) factor )* ;
 
 factor         ::= unary ( ( "/" | "*" | "%" ) unary )* ;
 
-unary          ::= ( "!" | "-" ) unary
+unary          ::= ( "!" | "-" | "~" ) unary
                  | "len" "(" expression ")"
                  | "str" "(" expression ")"
                  | call ;
@@ -110,6 +118,7 @@ primary        ::= "true"
                  | "false"
                  | "nil"
                  | NUMBER
+                 | INT
                  | STRING
                  | IDENTIFIER
                  | "this"
@@ -128,7 +137,7 @@ armPat         ::= literalPat
                  | ctorPat
                  | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* class pattern *)
                  | IDENTIFIER ;                                        (* "_" = wildcard, else binding or class test *)
-literalPat     ::= NUMBER | STRING | "true" | "false" | "nil" ;
+literalPat     ::= NUMBER | INT | STRING | "true" | "false" | "nil" ;
 
 subPat         ::= ctorPat
                  | IDENTIFIER "{" IDENTIFIER ( "," IDENTIFIER )* "}"   (* class pattern *)
@@ -165,10 +174,20 @@ Operators within the same group are left-associative unless noted otherwise.
 | 3 | `and` | Left |
 | 4 | `==` `!=` | Left |
 | 5 | `<` `<=` `>` `>=` `in` | Left |
-| 6 | `+` `-` | Left |
-| 7 | `*` `/` `%` | Left |
-| 8 | `!` `-` (unary) | Right (prefix) |
-| 9 (highest) | `()` (function call), `.` (property access), `[]` (index) | Left |
+| 6 | `\|` | Left |
+| 7 | `^` | Left |
+| 8 | `&` | Left |
+| 9 | `<<` `>>` `>>>` | Left |
+| 10 | `+` `-` | Left |
+| 11 | `*` `/` `%` | Left |
+| 12 | `!` `-` `~` (unary) | Right (prefix) |
+| 13 (highest) | `()` (function call), `.` (property access), `[]` (index) | Left |
+
+The bit operators `|`, `^`, `&`, `<<`, `>>`, and `>>>` bind tighter than the
+comparisons and looser than `+` and `-`, in the order of Python, not of C. So
+`x & m == 0i` parses as `(x & m) == 0i`, `a | b in c` parses as `(a | b) in c`,
+`1i << 2i + 1i` parses as `1i << (2i + 1i)`, and `a | b ^ c & d` parses as
+`a | (b ^ (c & d))`.
 
 ---
 
@@ -232,7 +251,7 @@ required — omitting either is a parse error. A slice cannot appear as an
 assignment target. See §04-semantics for full evaluation rules.
 
 The disambiguation rule: a `:` inside `[...]` makes the form a slice; without
-`:` it is a plain index. Both bind at CALL precedence (level 9).
+`:` it is a plain index. Both bind at CALL precedence (level 13).
 
 ### Assignment
 

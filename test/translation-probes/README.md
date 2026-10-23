@@ -189,6 +189,88 @@ each has an off-the-shelf solution.
 | `163_match_and_or_operand` | a `match` expression as an operand of `and`/`or`, on the left and on the right: the match path holds the result in its synthetic named local while the other path arrives with a temporary, so the join must turn both into the same named local before the merge check sees them (issue #817); it has no STATUS line, because the bootstrap interpreter does not parse a `match` expression yet | P1, P2, P3 |
 | `243_number_format` | the shortest Number string form at every boundary — the two zeroes, the special values, and the notation thresholds of spec/03-types.md's edge table (`docs/decisions/number-print-format.md`) — a spec probe | none (spec probe) |
 | `164_folded_match_deficit_two_or_more` | a folded `match` result with two or more live sibling operands below it (issue #821): the compiler reserves one phantom local per live sibling, so every operand below the match folds too, and `normalizeFoldedOperands` loads them all back, bottom first, in ascending slot order. Covers `ADD`, `CALL`, `BUILD_LIST`, a class constructor call, `SET_PROPERTY`, `SET_INDEX`, a deferred call, the `and`/`or` result shapes, a sandwiched match with a genuine operand above it, and two matches on one consumer | P2, P5, P7, P8 |
+| `165_int_literals` | every form of an Int literal prints as its decimal digits: the suffix, hex and binary, leading zeros, and a 64-bit pattern | none (spec probe of the Int kind, N2 #826) |
+| `166_int_literal_limits` | the accepted limit of each Int literal rule: the largest decimal, the smallest through the unary-minus exception, 64-bit hex and binary | none (spec probe of the Int kind, N2 #826) |
+| `167_int_decimal_above_max_rejected` | a decimal Int literal one above the largest Int is a static error | none (spec probe of the Int kind, static error) |
+| `168_int_decimal_far_above_max_rejected` | a decimal Int literal far above the largest Int is a static error | none (spec probe of the Int kind, static error) |
+| `169_int_decimal_min_in_parens_rejected` | the unary-minus exception needs the literal as the direct operand: a parenthesis is a static error | none (spec probe of the Int kind, static error) |
+| `170_int_decimal_below_min_rejected` | a unary minus before 9223372036854775809i is a static error | none (spec probe of the Int kind, static error) |
+| `171_int_decimal_min_binary_minus_rejected` | the unary-minus exception does not cover a binary minus | none (spec probe of the Int kind, static error) |
+| `172_int_hex_65_bits_rejected` | a hex literal whose value needs 65 bits is a static error | none (spec probe of the Int kind, static error) |
+| `173_int_binary_65_bits_rejected` | a binary literal whose value needs 65 bits is a static error | none (spec probe of the Int kind, static error) |
+| `174_int_fractional_suffix_rejected` | a literal with a fractional part and the suffix is a static error | none (spec probe of the Int kind, static error) |
+| `175_int_fractional_zero_suffix_rejected` | an integer-valued fractional literal with the suffix is a static error | none (spec probe of the Int kind, static error) |
+| `176_int_suffix_detached_rejected` | the suffix is part of the token: a space before it is a syntax error | none (spec probe of the Int kind, static error) |
+| `177_int_equality_kinds` | `==` and `!=` on Ints compare by value, never across kinds; the constant pool keeps `1` and `1i` apart; `in` and `remove` follow `==` | none (spec probe of the Int kind, N2 #826) |
+| `178_int_map_keys` | an Int is a valid map key that hashes by value: `1` and `1i` are two keys, and two Ints of one value are one key | none (spec probe of the Int kind, N2 #826) |
+| `179_int_printing` | an Int prints as its exact decimal digits, alone and nested in a List, a Map and an Enum; `type` names the kind | none (spec probe of the Int kind, N2 #826) |
+| `180_int_match_patterns` | a literal pattern of `match` follows `==`: `1i` matches the Int and not the Number, for inline and heap-held Ints | none (spec probe of the Int kind, N2 #826) |
+| `181_int_messages` | an Int is always a message, inline or heap-held, alone or as a field of an Enum, and it arrives equal to what was sent | none (spec probe of the Int kind, N2 #826) |
+| `182_int_boxed_gc` | Ints that an implementation may hold in the heap survive collections and stay equal to their literals | none (spec probe of the Int kind, N2 #826) |
+| `183_int_fault_chr_int` | `chr` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
+| `184_int_fault_math_int` | `math.floor` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
+| `185_int_truthiness` | an Int is always truthy, `0i` included; `!` of an Int is `false` | none (spec probe of the Int kind, N3 #827) |
+| `186_int_arithmetic` | `+`, `-`, `*` and unary `-` on two Ints wrap in two's complement, for values inside and outside the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
+| `187_int_division` | `/` is floor division and `%` is floor modulo on two Ints, with the sign cases, the smallest Int, and `a == (a / b) * b + a % b` | none (spec probe of the Int kind, N3 #827) |
+| `188_int_comparison` | `<`, `<=`, `>` and `>=` on two Ints compare by signed value across the whole range, including neighbours of the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
+| `189_int_bit_logic` | `&`, `|`, `^` and `~` work on all 64 bits, the sign bit included | none (spec probe of the Int kind, N3 #827) |
+| `190_int_shifts` | `<<` shifts left and wraps, `>>` keeps the sign bit, `>>>` fills with zero bits; counts from 0 to 63 | none (spec probe of the Int kind, N3 #827) |
+| `191_int_precedence` | the bit operators sit between the comparisons and `+` `-`, in the order of Python; the shifts associate to the left; `~` is unary | none (spec probe of the Int kind, N3 #827) |
+| `192_int_edge_cases` | the rows of the Int edge-case table: the smallest Int `/ -1i` and `% -1i`, its negation, the largest Int `+ 1i`, `1 == 1i`, and a truthy `0i` | none (spec probe of the Int kind, N3 #827) |
+| `193_int_mixed_kind_faults` | an Int with a Number, in either order, is a type fault on every operator but `==` and `!=`; a bit operator faults on a Number or any other kind | none (spec probe of the Int kind, N3 #827) |
+| `194_int_operator_faults` | a zero divisor, a shift count outside 0 to 63, and a shift count or operand that is not an Int are catchable faults with their own kinds | none (spec probe of the Int kind, N3 #827) |
+| `195_int_bit_operator_no_protocol` | a bit operator has no operator protocol: an Instance operand is a BitwiseTypeError on either side, whatever methods its class defines | none (spec probe of the Int kind, N3 #827) |
+| `196_int_operator_result_check` | the result check of an operator method does not change: an Int is not a Number, so `__len__` and `__hash__` may not return one | none (spec probe of the Int kind, N3 #827) |
+| `197_int_wrap_churn` | a loop that makes thousands of Ints outside the inline range, mixing them with `*`, `+`, `^`, and `>>>`, keeps exact bits across collections | none (spec probe of the Int kind, N3 #827) |
+| `198_int_flag_set` | purpose: a flag set in one Int, with flags in the top two bits | none (spec probe of the Int kind, N3 #827) |
+| `199_int_bitboard` | purpose: a 64-square bitboard, with popcount by `b & (b - 1i)` and knight moves by shifts and masks | none (spec probe of the Int kind, N3 #827) |
+| `200_int_hash_mix_splitmix` | purpose: a 64-bit hash mix (splitmix64), with the wrap in `*` and `+`, `>>>`, and `^`, over hexadecimal constants | none (spec probe of the Int kind, N3 #827) |
+| `201_int_conversions` | `int` converts an integral Number or a decimal String to an Int, `float` converts an Int or a String to a Number; the range ends and the rounding of `float` | none (spec probe of the Int kind, N4 #828) |
+| `202_int_index` | a List or String index, a slice bound, and an enum field index accept an Int; a Map index is a key; an Int that no index reaches is out of bounds | none (spec probe of the Int kind, N4 #828) |
+| `203_integer_module` | the `integer` module: `min_value`, `max_value`, `abs`, `min`, `max`, `udiv`, `urem`, `ult`, `ustr`, and `parse_unsigned` | none (spec probe of the Int kind, N4 #828) |
+| `204_int_hash_mix_fnv` | purpose: FNV-1a over the bytes of a String, with `int(ord(c))`, `^`, and a `*` that wraps | none (spec probe of the Int kind, N4 #828) |
+| `205_int_fault_fractional` | `int` of a fractional Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `206_int_fault_nan` | `int` of a NaN is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `207_int_fault_infinity` | `int` of an infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `208_int_fault_negative_infinity` | `int` of a negative infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `209_int_fault_out_of_range` | `int` of the Number 2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `210_int_fault_below_range` | `int` of a Number below -2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `211_int_fault_string_fractional` | `int` of the String "1.5" is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `212_int_fault_string_trailing_text` | `int` of a String with text after the digits is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `213_int_fault_string_hex` | `int` of a hex String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `214_int_fault_string_overflow` | `int` of a decimal String above the largest Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `215_int_fault_string_empty` | `int` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `216_int_fault_string_space` | `int` of a String with a space is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `217_int_fault_other_kind` | `int` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `218_float_fault_string_not_number` | `float` of a String that is not a number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `219_float_fault_string_exponent` | `float` of a String in exponent form is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `220_float_fault_string_empty` | `float` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `221_float_fault_other_kind` | `float` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `222_integer_fault_abs_number` | `integer.abs` of a Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `223_integer_fault_min_number` | `integer.min` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `224_integer_fault_max_number` | `integer.max` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `225_integer_fault_udiv_number` | `integer.udiv` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `226_integer_fault_urem_number` | `integer.urem` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `227_integer_fault_ult_number` | `integer.ult` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `228_integer_fault_ustr_number` | `integer.ustr` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `229_integer_fault_parse_unsigned_int` | `integer.parse_unsigned` with an Int argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `230_integer_fault_udiv_zero` | `integer.udiv` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `231_integer_fault_urem_zero` | `integer.urem` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `232_integer_fault_parse_unsigned_too_large` | `integer.parse_unsigned` of 2^64 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `233_integer_fault_parse_unsigned_sign` | `integer.parse_unsigned` of a signed String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `234_integer_fault_parse_unsigned_empty` | `integer.parse_unsigned` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `235_int_fault_slice_negative` | a slice bound that is a negative Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `236_int_fault_enum_index_out_of_range` | an enum field index that is an Int past the last field is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `237_int_decimal_min_index_rejected` | the unary-minus exception needs the literal as the whole operand: an index after it is a static error, not a fault of the index | none (spec probe of the Int kind, static error) |
+| `238_int_decimal_min_property_rejected` | the same for a property read after the literal | none (spec probe of the Int kind, static error) |
+| `239_int_decimal_min_call_rejected` | the same for a call after the literal | none (spec probe of the Int kind, static error) |
+| `240_int_suffix_before_in_rejected` | an `i` directly after the digits is the suffix, so `1in [1, 2]`, a valid program before the suffix existed, is a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
+| `241_int_suffix_before_if_rejected` | the same for the guard `case 1if t` | none (spec probe of the Int kind, N2 #826) |
+| `242_int_fractional_suffix_before_in_rejected` | the same rule for a fractional literal: `1.5in [1.5]`, a valid program before the suffix existed, is the literal `1.5i` and a name, a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
+| `244_int_fractional_suffix_before_if_rejected` | the same for the guard `case 1.5if t` | none (spec probe of the Int kind, N2 #826) |
+| `245_int_uppercase_hex_prefix_rejected` | the hexadecimal prefix is `0x` in lower case only: `0XFF` is the Number `0` and the name `XFF`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `246_int_hex_suffix_rejected` | a hexadecimal literal takes no suffix: `0xFFi` is the Int `0xFF` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `247_int_binary_suffix_rejected` | a binary literal takes no suffix: `0b1i` is the Int `0b1` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
@@ -269,9 +351,84 @@ and bootstrap runs with native; the bootstrap walk takes only the spec
 probes (`--only-spec-probes`), and separate CI steps name `32_string_nul`,
 `56_file_nul`, and `bootstrap-only/stdout_no_trailing_newline` for the JVM and
 QBE bootstrap wrappers (issue #654). A consumer that does not pass a probe yet
-can list it in an expected-failure file, which both tools read with
-`--xfail`: a listed probe must fail, and a listed probe that passes fails
-the gate until its line is deleted.
+can list it in its expected-failure file under `tools/spec-probe-xfail/`
+(`native`, `jvm`, `bootstrap`, `qbe`), which both tools read with `--xfail`: a
+listed probe must fail, and a listed probe that passes fails the gate until its
+line is deleted. The differential steps also read native's file with
+`--oracle-xfail`, so a backend that passes a probe before native does is not a
+divergence. Two more files serve the walkers that are not a consumer's own gate:
+`tooling.txt` for the tooling parser and resolver tests (`test/corpus.h`), and
+`tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
+that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
+
+The probes `165` to `242` and `244` to `247` are the spec probes of the Int kind
+(`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
+lines. They say which row of which spec table the probe checks. Six scripts
+read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
+`check_operator_protocol_table.py`, `check_int_literal_rejections.py`,
+`check_int_fault_rows.py`, and `check_int_edge_rows.py`. A row with no probe
+fails its script. Two fault rows hold one fault for each function of the
+`integer` module, so their COVERS line names the function
+(`// COVERS: fault integer_module_non_int urem`). The script reads the
+function names from the member table of the module in `spec/05-stdlib.md`, and
+it fails for a function that has no probe of its non-Int fault, or, for `udiv`
+and `urem`, of its zero divisor.
+
+Each native node makes a group of these probes pass: the value layer and the
+literals (`165`, `166`, `177` to `184`, and the static-error probes `237` to
+`242` and `244`), the operators (`185` to `200`), and the conversions, the `integer`
+module, and the indexes (`201` to `236`).
+Every one of these probes, except the static-error probes below, uses a form
+that no consumer accepts yet, so each is on the expected-failure list of every
+consumer until the node of that consumer lands.
+
+A probe of a halting fault starts with a control line: the same function on a
+valid argument. Without the control line, a consumer that has no `int`
+function would pass the probe, because a call of an unknown name also halts
+the program.
+
+The thirteen static-error probes (`167` to `176` and `237` to `239`, each with
+a `// STATIC-ERROR` line) are on no list. Every consumer rejects them today,
+because it has no Int literal, so they pass for the wrong reason. The twin of
+each is a probe that must be accepted, in `165` or `166`, and the twin fails
+today. A consumer that rejects every Int literal passes a static-error probe
+and fails its twin. A static-error probe is a real check only after its
+consumer has Int literals.
+
+Each of these probes starts with `print "ran";`. A static error is found
+before any code runs, so a probe with `// STATIC-ERROR` prints nothing:
+`tools/check_spec_probes.py` fails it when the stdout is not empty, and
+`tools/diff_runtimes.py` reports a divergence when native rejects the program
+and the other consumer prints. A consumer that finds the error only when it
+runs the program, as the bootstrap interpreter can, prints `ran` and fails.
+Without the line, a halt at run time with no output passes both tools.
+`tools/check_int_literal_rejections.py` fails a rejected probe that does not
+start with such a line.
+
+Four more static-error probes, `240` to `242` and `244`, are the exception to "on no
+list". Before the suffix existed, `1in [1, 2]`, `case 1if t`, `1.5in [1.5]`,
+and `case 1.5if t` were valid programs, so every consumer runs them and they
+fail today. They are on the
+lists of the native VM, the JVM backend, the QBE backend, and the bootstrap
+interpreter. The JVM and QBE backends use the native front end, so the node
+that makes native reject them (N2) deletes their lines from the native, JVM,
+and QBE files in one pull request. The bootstrap interpreter has its own
+scanner, so N6 deletes its lines. The tree-sitter step of CI leaves the four
+probes out for good, because the grammar will reject them, and the tooling list
+needs no line.
+
+Three more static-error probes, `245` to `247`, are on no list, and they are
+a real check from the start. `0XFF`, `0xFFi`, and `0b1i` are syntax errors
+under the longest match, and every consumer rejects them today. A scanner that
+a later node writes can accept them by mistake: it reads `0X` as a prefix, as C
+and Java do, or it reads an optional `i` after each literal. Such a scanner
+fails the probe, and no node has to delete a line. The tree-sitter step of CI
+leaves them out for good, as it does for `174` to `176`.
+
+The twins of the suffix rule are in `166`: `1i in [1i, 2i]`, `case 1i if t`,
+`1.5 in [1.5]`, and `case 1.5 if t` with a space. The same probe pins the
+other side of the rule: a hexadecimal or a binary literal has no suffix, so
+`0x1in [1i]`, `0b1in [1i]`, and `case 0x1if t` are valid.
 
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its

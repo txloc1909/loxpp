@@ -1,0 +1,27 @@
+// An Int outside the range an implementation holds inline may be a heap
+// object, which the collector must keep alive while a List holds it
+// (spec/03-types.md, Int, Width). The loop allocates enough to run the
+// collector many times, then reads every Int back.
+
+var keep = [9223372036854775807i, 0x8000000000000000, 9007199254740993i, 140737488355328i,
+            0x7FFFFFFFFFFFFFFE, 1i];
+var i = 0;
+var junk = nil;
+while (i < 20000) {
+    junk = [[i], "a" + "b", {i: [i]}, [i, i + 1]];
+    i = i + 1;
+}
+print keep;
+print keep[0] == 0x7FFFFFFFFFFFFFFF;
+print keep[1] == -9223372036854775808i;
+print keep[2] == 9007199254740993i;
+print keep[2] == 9007199254740992i;
+print keep[3] == 140737488355328i;
+
+// STATUS: ok
+// CHECK: [9223372036854775807, -9223372036854775808, 9007199254740993, 140737488355328, 9223372036854775806, 1]
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: true

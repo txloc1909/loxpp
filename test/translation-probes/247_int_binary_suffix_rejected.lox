@@ -1,0 +1,17 @@
+// A binary literal takes no suffix. At `0b1i` the longest match is the INT
+// `0b1`, because `i` is not a binary digit, and `i` is a name, so the program
+// has a name directly after a literal, a syntax error (spec/01-lexical.md, row
+// `suffix-boundary`). A scanner that reads an optional `i` after each literal
+// accepts it.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 0b1i;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal suffix-boundary

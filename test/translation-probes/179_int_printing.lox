@@ -1,0 +1,47 @@
+// An Int prints as its exact decimal digits, with a `-` sign when negative and
+// never in an exponent form (spec/03-types.md, Canonical String
+// Representation). A Number prints in the format of its own rule, so
+// `1000000i` and `1000000` do not print alike here, and only the Int lines are
+// checked against the digits. `type` returns `"Int"` (spec/05-stdlib.md).
+
+print [1i, 2i, 3i];
+print [0xFFFFFFFFFFFFFFFF, 0x7FFFFFFFFFFFFFFF];
+print str(255i) + "!";
+print str(9223372036854775807i);
+print str(0x8000000000000000);
+print str(1000000i);
+print 1000000i;
+print 123456789012i;
+print 9007199254740993i;
+print 1000000000000000000i;
+enum E { A(v) }
+print E.A(9223372036854775807i);
+print E.A(1i);
+print {1i: 2i};
+print type(1i);
+print type(9223372036854775807i);
+print type(0x8000000000000000);
+print type(1);
+print type(1.5);
+print type(str(1i));
+
+// STATUS: ok
+// CHECK: [1, 2, 3]
+// CHECK: [-1, 9223372036854775807]
+// CHECK: 255!
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: 1000000
+// CHECK: 1000000
+// CHECK: 123456789012
+// CHECK: 9007199254740993
+// CHECK: 1000000000000000000
+// CHECK: E::A(9223372036854775807)
+// CHECK: E::A(1)
+// CHECK: {1: 2}
+// CHECK: Int
+// CHECK: Int
+// CHECK: Int
+// CHECK: Number
+// CHECK: Number
+// CHECK: String

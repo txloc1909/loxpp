@@ -1,0 +1,145 @@
+// The members of the `integer` module (spec/05-stdlib.md). `abs` of the
+// smallest Int wraps to itself. `min` and `max` compare as signed, and `udiv`,
+// `urem`, `ult`, and `ustr` read their operands as unsigned 64-bit values, so
+// `0xFFFFFFFFFFFFFFFF` is 2^64 - 1 there. `parse_unsigned` reads unsigned
+// decimal digits and gives the Int with that bit pattern. The expected values
+// come from Python integers.
+
+print integer.max_value;
+print integer.min_value;
+print type(integer.max_value);
+print integer.max_value == 0x7FFFFFFFFFFFFFFF;
+print integer.min_value == 0x8000000000000000;
+print integer.abs(5i);
+print integer.abs(0xFFFFFFFFFFFFFFFF);
+print integer.abs(integer.min_value);
+print integer.abs(0x8000000000000001);
+print integer.abs(0i);
+print integer.min(1i, 2i);
+print integer.max(1i, 2i);
+print integer.min(0xFFFFFFFFFFFFFFFF, 1i);
+print integer.max(0xFFFFFFFFFFFFFFFF, 1i);
+print integer.min(integer.min_value, integer.max_value);
+print integer.max(integer.min_value, integer.max_value);
+print integer.udiv(0xA, 0x3);
+print integer.udiv(0xFFFFFFFFFFFFFFFF, 0x2);
+print integer.udiv(0xFFFFFFFFFFFFFFFF, 0x1);
+print integer.udiv(0x8000000000000000, 0x2);
+print integer.udiv(0x8000000000000000, 0x3);
+print integer.udiv(0xFFFFFFFFFFFFFFFF, 0xA);
+print integer.udiv(0x7FFFFFFFFFFFFFFF, 0x7);
+print integer.udiv(0x1, 0xFFFFFFFFFFFFFFFF);
+print integer.udiv(0x5, 0x5);
+print integer.udiv(0x0, 0x9);
+print integer.udiv(0x8000000000000000, 0xFFFFFFFFFFFFFFFF);
+print integer.udiv(0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF);
+print integer.urem(0xA, 0x3);
+print integer.urem(0xFFFFFFFFFFFFFFFF, 0x2);
+print integer.urem(0xFFFFFFFFFFFFFFFF, 0x1);
+print integer.urem(0x8000000000000000, 0x2);
+print integer.urem(0x8000000000000000, 0x3);
+print integer.urem(0xFFFFFFFFFFFFFFFF, 0xA);
+print integer.urem(0x7FFFFFFFFFFFFFFF, 0x7);
+print integer.urem(0x1, 0xFFFFFFFFFFFFFFFF);
+print integer.urem(0x5, 0x5);
+print integer.urem(0x0, 0x9);
+print integer.urem(0x8000000000000000, 0xFFFFFFFFFFFFFFFF);
+print integer.urem(0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF);
+print integer.ult(0x1, 0x2);
+print integer.ult(0x2, 0x1);
+print integer.ult(0x1, 0x1);
+print integer.ult(0x1, 0xFFFFFFFFFFFFFFFF);
+print integer.ult(0xFFFFFFFFFFFFFFFF, 0x1);
+print integer.ult(0x8000000000000000, 0x7FFFFFFFFFFFFFFF);
+print integer.ult(0x7FFFFFFFFFFFFFFF, 0x8000000000000000);
+print integer.ult(0x0, 0xFFFFFFFFFFFFFFFF);
+print integer.ult(0xFFFFFFFFFFFFFFFF, 0x0);
+print integer.ult(0x8000000000000000, 0x8000000000000000);
+print integer.ustr(0x0);
+print integer.ustr(0x1);
+print integer.ustr(0xFFFFFFFFFFFFFFFF);
+print integer.ustr(0x8000000000000000);
+print integer.ustr(0x7FFFFFFFFFFFFFFF);
+print integer.ustr(0xFF);
+print integer.ustr(0xDEADBEEFDEADBEEF);
+print integer.parse_unsigned("0");
+print integer.parse_unsigned("1");
+print integer.parse_unsigned("007");
+print integer.parse_unsigned("9223372036854775807");
+print integer.parse_unsigned("9223372036854775808");
+print integer.parse_unsigned("18446744073709551615");
+print integer.parse_unsigned("12345678901234567890");
+print integer.parse_unsigned(integer.ustr(0xDEADBEEFDEADBEEF)) == 0xDEADBEEFDEADBEEF;
+print type(integer.ustr(1i));
+print type(integer.ult(1i, 2i));
+print type(integer.udiv(1i, 1i));
+
+// STATUS: ok
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: Int
+// CHECK: true
+// CHECK: true
+// CHECK: 5
+// CHECK: 1
+// CHECK: -9223372036854775808
+// CHECK: 9223372036854775807
+// CHECK: 0
+// CHECK: 1
+// CHECK: 2
+// CHECK: -1
+// CHECK: 1
+// CHECK: -9223372036854775808
+// CHECK: 9223372036854775807
+// CHECK: 3
+// CHECK: 9223372036854775807
+// CHECK: -1
+// CHECK: 4611686018427387904
+// CHECK: 3074457345618258602
+// CHECK: 1844674407370955161
+// CHECK: 1317624576693539401
+// CHECK: 0
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 1
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 2
+// CHECK: 5
+// CHECK: 0
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: -9223372036854775808
+// CHECK: -2
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: 0
+// CHECK: 1
+// CHECK: 18446744073709551615
+// CHECK: 9223372036854775808
+// CHECK: 9223372036854775807
+// CHECK: 255
+// CHECK: 16045690984833335023
+// CHECK: 0
+// CHECK: 1
+// CHECK: 7
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: -1
+// CHECK: -6101065172474983726
+// CHECK: true
+// CHECK: String
+// CHECK: Boolean
+// CHECK: Int

@@ -1,0 +1,19 @@
+// An `i` directly after the digits of a decimal literal is the suffix, with a
+// fractional part or without one (spec/01-lexical.md, rows `fractional-suffix`
+// and `suffix-boundary`). Before the suffix existed, `1.5in [1.5]` was
+// `1.5 in [1.5]`, a valid program that printed `true`. Now it is the literal
+// `1.5i`, a fractional literal with the suffix, and the name `n`: a static
+// error. A consumer that has no Int literal yet runs the program, so this
+// probe fails today on every consumer and is on each expected-failure list.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 1.5in [1.5];
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal fractional-suffix

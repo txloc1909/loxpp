@@ -1,0 +1,26 @@
+// The same rule for the `if` of a guard after a fractional literal
+// (spec/01-lexical.md, rows `fractional-suffix` and `suffix-boundary`).
+// Before the suffix existed, `case 1.5if t` was the pattern `1.5` with the
+// guard `if t`, a valid arm that matched. Now it is the literal `1.5i`, a
+// fractional literal with the suffix, and the name `f`: a static error. A
+// consumer that has no Int literal yet runs the program, so this probe fails
+// today on every consumer and is on each expected-failure list.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+var t = true;
+fun pick(x) {
+    return match x {
+        case 1.5if t => "guarded"
+        case _ => "other"
+    };
+}
+print pick(1.5);
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal fractional-suffix

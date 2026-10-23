@@ -107,8 +107,9 @@ to a new variable in the current scope.
 
 ### Literal Expressions
 
-`true`, `false`, `nil`, NUMBER, STRING each evaluate to the corresponding
-value.
+`true`, `false`, `nil`, NUMBER, INT, STRING each evaluate to the corresponding
+value. A NUMBER gives a Number and an INT gives an Int
+([§01-lexical](01-lexical.md#number-and-int-literals)).
 
 ### Identifier
 
@@ -136,45 +137,140 @@ parsing precedence.
 
 | Expression | Requirement | Result |
 |---|---|---|
-| `a + b` | Both Numbers, **or** both Strings | Sum (Number) or concatenated string |
-| `a - b` | Both Numbers | Difference |
-| `a * b` | Both Numbers | Product |
-| `a / b` | Both Numbers | Quotient |
-| `a % b` | Both Numbers | Remainder (floor-division semantics) |
-| `-a` | Number | Negation |
+| `a + b` | Both Numbers, both Ints, **or** both Strings | Sum (Number or Int) or concatenated string |
+| `a - b` | Both Numbers, **or** both Ints | Difference |
+| `a * b` | Both Numbers, **or** both Ints | Product |
+| `a / b` | Both Numbers, **or** both Ints | Quotient |
+| `a % b` | Both Numbers, **or** both Ints | Remainder (floor-division semantics) |
+| `-a` | Number **or** Int | Negation |
 
-Any violation of the type requirement is a **runtime error**.
+Any violation of the type requirement is a **runtime error**. A Number and an
+Int together violate it: the two kinds do not mix (see [§03-types,
+Int](03-types.md#int) and [Operand Kinds](#operand-kinds)).
 
 String concatenation (`+`) creates a new string whose content is the
 characters of the left operand followed by the characters of the right
 operand.
 
-Division follows IEEE 754; dividing by zero produces `Infinity` or
+Number division follows IEEE 754; dividing by zero produces `Infinity` or
 `-Infinity` (not an error).
 
-Modulo (`%`) is computed as `fmod(a, b)` adjusted so the result has the same sign as `b` (floor-division semantics, same as Python and Lua). `a % 0` produces `NaN` (consistent with `a / 0` producing `Infinity`).
+Number modulo (`%`) is computed as `fmod(a, b)` adjusted so the result has the same sign as `b` (floor-division semantics, same as Python and Lua). `a % 0` produces `NaN` (consistent with `a / 0` producing `Infinity`).
+
+**Int arithmetic.** On two Ints, `+`, `-`, `*`, and unary `-` wrap in two's
+complement. `a / b` is floor division, which rounds toward negative infinity,
+and `a % b` is floor modulo, which has the sign of `b`, so
+`a == (a / b) * b + a % b` for every `a` and every `b` other than `0i`. A
+zero divisor of `/` or `%` is a catchable fault of kind `DivisionByZeroError`.
+The smallest Int divided by `-1i` wraps to the smallest Int, and the smallest
+Int modulo `-1i` is `0i`: neither is a fault. An Int has no infinity and no
+NaN.
 
 ### Comparison
 
 | Expression | Requirement | Result |
 |---|---|---|
-| `a < b` | Both Numbers, **or** both Strings | Boolean |
-| `a <= b` | Both Numbers, **or** both Strings | Boolean |
-| `a > b` | Both Numbers, **or** both Strings | Boolean |
-| `a >= b` | Both Numbers, **or** both Strings | Boolean |
+| `a < b` | Both Numbers, both Ints, **or** both Strings | Boolean |
+| `a <= b` | Both Numbers, both Ints, **or** both Strings | Boolean |
+| `a > b` | Both Numbers, both Ints, **or** both Strings | Boolean |
+| `a >= b` | Both Numbers, both Ints, **or** both Strings | Boolean |
 
-Two Numbers compare by numeric value. Two Strings compare as byte sequences:
+Two Numbers compare by numeric value. Two Ints compare by their signed
+value, for every value of the 64 bits. Two Strings compare as byte sequences:
 `<` and `>` compare byte by byte from the first byte, using each byte's
 unsigned value (0 through 255), and a String that is a prefix of the other is
 the smaller. So `"Z" < "a"` is true and `"ab" < "abc"` is true.
 
 Any violation is a **runtime error**. A comparison of a String with a Number,
-or any other mixed pair, is a runtime error.
+a Number with an Int, or any other mixed pair, is a runtime error.
 
 ### Equality
 
 `a == b` and `a != b` are defined for all type combinations and never produce
-a runtime error. See [03-types.md § Equality](03-types.md#equality).
+a runtime error. See [03-types.md § Equality](03-types.md#equality). An Int
+and a Number are never equal: `1 == 1i` is `false` and `1 != 1i` is `true`.
+
+### Operand Kinds
+
+The table gives, for every arithmetic, comparison, equality, bit, and
+negation operator, the result for two Ints, for two Numbers, and for an Int
+together with a Number in either order. A fault in a cell is a catchable
+fault of the kind named (see [Runtime Errors](#runtime-errors)). For
+a unary operator the first column is an Int operand, the second a Number
+operand, and the third does not apply. A cell that says "as today" is the
+behavior of the Number operators before the Int existed. An operand that is a
+String, an Instance, or any other kind follows [Arithmetic](#arithmetic),
+[Comparison](#comparison), and [Operator Overloading](#operator-overloading)
+as before, and the bit operators fault on it (see [Bit
+Operators](#bit-operators)).
+
+| Operation | Int, Int | Number, Number | Int and Number |
+|---|---|---|---|
+| `a + b` | Int, wraps | Number, as today | Fault `ConcatenationTypeError` |
+| `a - b` | Int, wraps | Number, as today | Fault `ArithmeticTypeError` |
+| `a * b` | Int, wraps | Number, as today | Fault `ArithmeticTypeError` |
+| `a / b` | Int, floor division; a zero divisor is `DivisionByZeroError`; the smallest Int divided by `-1i` is the smallest Int | Number, as today | Fault `ArithmeticTypeError` |
+| `a % b` | Int, floor modulo; a zero divisor is `DivisionByZeroError`; the smallest Int modulo `-1i` is `0i` | Number, as today | Fault `ArithmeticTypeError` |
+| `a < b` | Boolean | Boolean, as today | Fault `ComparisonTypeError` |
+| `a <= b` | Boolean | Boolean, as today | Fault `ComparisonTypeError` |
+| `a > b` | Boolean | Boolean, as today | Fault `ComparisonTypeError` |
+| `a >= b` | Boolean | Boolean, as today | Fault `ComparisonTypeError` |
+| `a == b` | Boolean, by value | Boolean, as today | `false`, never a fault |
+| `a != b` | Boolean, by value | Boolean, as today | `true`, never a fault |
+| `a & b` | Int | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `a \| b` | Int | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `a ^ b` | Int | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `a << b` | Int, wraps; a count outside `0i` to `63i` is `ShiftCountError` | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `a >> b` | Int; a count outside `0i` to `63i` is `ShiftCountError` | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `a >>> b` | Int; a count outside `0i` to `63i` is `ShiftCountError` | Fault `BitwiseTypeError` | Fault `BitwiseTypeError` |
+| `-a` | Int, wraps; the negation of the smallest Int is itself | Number, as today | — |
+| `~a` | Int | Fault `BitwiseTypeError` | — |
+| `!a` | `false`: an Int is always truthy, `0i` included | As today | — |
+
+In C, the smallest Int divided by `-1` and the smallest Int modulo `-1` are
+undefined. Here both are defined, and neither is a fault. No Int operation is
+an overflow fault.
+
+### Bit Operators
+
+The operators `&`, `|`, `^`, `~`, `<<`, `>>`, and `>>>` work on Ints only.
+
+- Every operand must be an Int. A Number operand is a fault, an integer-valued
+  one included: `1 & 1` and `1i & 1` are both `BitwiseTypeError`. So is an
+  operand of any other kind, a String, an Instance, and `nil` included. The
+  shift count is an operand, so a count that is not an Int is also a
+  `BitwiseTypeError`.
+- `a & b`, `a | b`, and `a ^ b` work on all 64 bits. `~a` inverts every bit:
+  `~0i` is `-1i`.
+- `a << n` shifts the 64 bits of `a` left by `n` places and fills the right
+  with zero bits. Bits shifted out of the left end are lost, so the result
+  wraps: `1i << 63i` is the smallest Int.
+- `a >> n` shifts right by `n` places and copies the sign bit into the left
+  end: `-8i >> 1i` is `-4i`, and `-1i >> 63i` is `-1i`.
+- `a >>> n` shifts right by `n` places and fills the left end with zero bits:
+  `-1i >>> 63i` is `1i`.
+- The count `n` must be an Int from `0i` to `63i`, and a count of `0i` leaves
+  `a` as it is. A count outside that range is a catchable fault of kind
+  `ShiftCountError`. The operands are evaluated left to right, and the kind of
+  both operands is checked before the range of the count, so `1 << 64i` is a
+  `BitwiseTypeError`.
+- The bit operators have no operator protocol and no reflected form (see
+  [Operator Overloading](#operator-overloading)).
+
+### Int Edge Cases
+
+Each row is an Int operation whose result is defined and is not a fault. A
+program prints the result of the example, and the result column is the text it
+prints.
+
+| Row | Case | Example | Result |
+|---|---|---|---|
+| `min-div-neg1` | The smallest Int divided by `-1i` wraps to itself | `print -9223372036854775808i / -1i;` | `-9223372036854775808` |
+| `min-mod-neg1` | The smallest Int modulo `-1i` is `0i` | `print -9223372036854775808i % -1i;` | `0` |
+| `neg-min` | The negation of the smallest Int is itself | `print -(-9223372036854775808i);` | `-9223372036854775808` |
+| `max-plus-1` | The largest Int plus `1i` wraps to the smallest | `print 9223372036854775807i + 1i;` | `-9223372036854775808` |
+| `int-number-equal` | An Int is never equal to a Number | `print 1 == 1i;` | `false` |
+| `zero-truthy` | `0i` is truthy | `print 0i and "truthy";` | `truthy` |
 
 ### Operator Overloading
 
@@ -182,9 +278,11 @@ An Instance may define special methods ("dunder" methods) that the operators
 above dispatch to. The dispatch order is fixed:
 
 1. **Built-in branch first.** The operator's ordinary behaviour applies when
-   the operands match the built-in types (Numbers for arithmetic; Numbers or
-   Strings for comparison; Numbers, Strings, or the concatenation case for
-   `+`; List, String, or Map for `in`).
+   the operands match the built-in types (two Numbers or two Ints for
+   arithmetic; two Numbers, two Ints, or two Strings for comparison; two
+   Numbers, two Ints, two Strings, or the concatenation case for `+`; List,
+   String, or Map for `in`). A Number together with an Int does not match, so
+   the operator goes on to step 2.
 2. **Then the user method on the receiver.** When the built-in branch does not
    apply, the operator tries the method on its receiver — the left operand for
    the arithmetic, comparison, and equality operators, the container (right
@@ -216,6 +314,7 @@ happens to equal a dunder name never participates.
 | `a / b` | `__div__(b)` | `a` |
 | `a % b` | `__mod__(b)` | `a` |
 | `-a` | `__neg__()` | `a` |
+| `a & b`, `a \| b`, `a ^ b`, `~a`, `a << b`, `a >> b`, `a >>> b` | none: a bit operator has no protocol | — |
 | `a < b` | `__lt__(b)` | `a` |
 | `a > b` | `__gt__(b)` | `a` |
 | `a == b` | `__eq__(b)` | `a` |
@@ -244,6 +343,14 @@ therefore computes `a - b`, and `b.__rlt__(a)` computes `a < b`.
 | `a > b` | `__rgt__` | `b` | `a` |
 | `a == b` | `__eq__` | `b` | `a` |
 
+**Bit operators have no protocol.** The operators `&`, `|`, `^`, `~`, `<<`,
+`>>`, and `>>>` work on Ints only. They have no method in the first table, no
+reflected method in the second, and no other hook. An Instance operand, on
+either side, raises `BitwiseTypeError` even when its class defines a method
+that is named like an operator, because method lookup reads only the names
+that the tables list. A program that wants a bit operator on its own type
+writes a method and calls it by name.
+
 `a != b` is `==` then logical negation: it derives from `__eq__` (the left
 operand's, or the reflected one on the right) and has no method of its own.
 `a <= b` is `!(a > b)` and `a >= b` is `!(a < b)`; each dispatches `__gt__` /
@@ -254,9 +361,11 @@ The result of `__eq__`, `__lt__`, `__gt__`, and `__contains__` must be a
 Boolean, whether the method ran on the left operand or as the reflected method
 on the right. The result of `__len__` and `__hash__` must be a Number, the
 result of `__iter__` must be a List, String, Map, or Coroutine, and the result of
-`__str__` must be a String. Any other result raises a catchable
+`__str__` must be a String. An Int is not a Number, so an Int result of
+`__len__` or `__hash__` is an error too. Any other result raises a catchable
 `OperatorResultTypeError` (see [Runtime Errors](#runtime-errors)). The
-result of every other method in the tables above is unconstrained.
+result of every other method in the tables above is unconstrained: `__add__`
+may return an Int.
 
 `__hash__` has no operator expression of its own. A Map key that is an Instance
 uses it to place the key; see [Map Literal](#map-literal), [Index
@@ -311,7 +420,7 @@ their operands.
 ### Logical Negation
 
 `!a` — evaluates `a` and returns `false` if `a` is truthy, `true` if `a` is
-falsy. Always returns a Boolean.
+falsy. Always returns a Boolean. An Int is always truthy, so `!0i` is `false`.
 
 ### Property Get
 
@@ -1199,18 +1308,22 @@ collection[key]
       value.
    c. If `key` is absent, the expression evaluates to `nil`.
 4. If `collection` is a **List** or a **String**:
-   a. If `key` is not a Number, this is a **runtime error**.
-   b. If `key` is not an integer-valued number (i.e., `key ≠ floor(key)`),
-      this is a **runtime error**.
+   a. If `key` is neither a Number nor an Int, this is a **runtime error**.
+   b. If `key` is a Number and not an integer-valued number (i.e.,
+      `key ≠ floor(key)`), this is a **runtime error**. An Int is always
+      integer-valued.
    c. Let `i` be the integer value of `key`.
    d. If `i < 0` or `i ≥ length(collection)`, this is a **runtime error**.
+      The comparison is exact for every Int: an Int that no index can reach,
+      such as the largest or the smallest Int, is out of bounds, never a
+      wrapped or truncated index.
    e. For a List, the expression evaluates to `collection[i]`. For a String,
       it evaluates to the one-character String at position `i`.
 5. If `collection` is an **Enum** value:
-   a. If `key` is not a Number, this is a **halting fault** (see [Halting
-      Faults](#halting-faults)).
-   b. If `key` is not integer-valued (i.e., `key ≠ floor(key)`), this is a
-      **halting fault**.
+   a. If `key` is neither a Number nor an Int, this is a **halting fault**
+      (see [Halting Faults](#halting-faults)).
+   b. If `key` is a Number and not integer-valued (i.e., `key ≠ floor(key)`),
+      this is a **halting fault**.
    c. Let `i` be the integer value of `key`.
    d. If `i < 0` or `i ≥` the number of fields of the Enum value, this is a
       **halting fault**.
@@ -1221,8 +1334,10 @@ collection[key]
    method's return value.
 7. Otherwise, this is a **runtime error**.
 
-Note: since there is no separate integer type, `list[1]` and `list[1.0]` are
-identical — both are the same Number value used as index 1.
+Note: `list[1]` and `list[1.0]` are identical — both are the same Number value
+used as index 1 — and `list[1i]` reads the same element. A Map key is not an
+index: `m[1]` and `m[1i]` are two different keys (see [§03-types,
+Int](03-types.md#int)).
 
 ### Index Set
 
@@ -1272,14 +1387,14 @@ the built-in behaviour below does not apply. Otherwise, if `seq` is not a List
 or String, this is a **runtime error**.
 
 **Step 3 — Validate `start`.**
-- If `start` is not a Number → runtime error.
-- If `start` is not integer-valued (i.e., `start ≠ floor(start)`) → runtime error.
+- If `start` is neither a Number nor an Int → runtime error.
+- If `start` is a Number and not integer-valued (i.e., `start ≠ floor(start)`) → runtime error.
 - If `start < 0` → runtime error.
 - Let `s = integer value of start`.
 
 **Step 4 — Validate `end`.**
-- If `end` is not a Number → runtime error.
-- If `end` is not integer-valued → runtime error.
+- If `end` is neither a Number nor an Int → runtime error.
+- If `end` is a Number and not integer-valued → runtime error.
 - If `end < 0` → runtime error.
 - Let `e = integer value of end`.
 
@@ -1287,6 +1402,9 @@ or String, this is a **runtime error**.
 Let `n = len(seq)`.
 - `s = min(s, n)`
 - `e = min(e, n)`
+
+The clamp is exact for every Int, so `[1, 2][0i:9223372036854775807i]` is
+`[1, 2]`.
 
 **Step 6 — Collect and return.**
 - If `s >= e`, return an empty List (`[]`) or empty String (`""`).
@@ -1794,15 +1912,18 @@ whose text is implementation-defined.
 
 | Cause | Example | `Error.kind` |
 |---|---|---|
-| Arithmetic on non-Numbers | `"a" - 1` | `"ArithmeticTypeError"` |
-| Comparison on non-Numbers | `"a" < 1` | `"ComparisonTypeError"` |
-| `+` on incompatible types | `1 + "a"` | `"ConcatenationTypeError"` |
+| Arithmetic on non-Numbers, or on a Number together with an Int | `"a" - 1`, `1i - 1` | `"ArithmeticTypeError"` |
+| Comparison on non-Numbers, or of a Number with an Int | `"a" < 1`, `1i < 1` | `"ComparisonTypeError"` |
+| `+` on incompatible types, a Number together with an Int included | `1 + "a"`, `1i + 1` | `"ConcatenationTypeError"` |
+| A bit operator with an operand that is not an Int, a shift count included | `1i & 1`, `1i << 1`, `class C {} C() & 1i` | `"BitwiseTypeError"` |
+| A shift count outside `0i` to `63i` | `1i << 64i` | `"ShiftCountError"` |
+| Int `/` or `%` with a zero divisor | `1i / 0i`, `1i % 0i` | `"DivisionByZeroError"` |
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
 | Wrong argument count | `fun f(a) {} f(1, 2)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
-| Non-Number List or String index | `list["a"]` | `"IndexTypeError"` |
+| List or String index that is neither a Number nor an Int | `list["a"]` | `"IndexTypeError"` |
 | Fractional List or String index | `list[1.5]` | `"IndexNotIntegerError"` |
 | List or String index out of bounds | `[][0]` | `"IndexOutOfBoundsError"` |
 | `pop` on empty list | `[].pop()` | `"EmptyListError"` |
@@ -1813,7 +1934,7 @@ whose text is implementation-defined.
 | Constructor called with wrong arity | `Result.Ok(1, 2)` when `Ok` takes one field | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
-| Operator method returned a non-Number | `class C { __len__() { return "x"; } } len(C())` or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
+| Operator method returned a non-Number, an Int included | `class C { __len__() { return "x"; } } len(C())`, `class C { __len__() { return 1i; } } len(C())`, or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
 | A key's `__hash__` or `__eq__` writes to the Map it keys | `var m = {}; class K { __hash__() { m[1] = 1; return 1; } __eq__(o) { return true; } } m[K()] = 1;` | `"MapChangedError"` |
 | `resume` on a dead coroutine | `fun f() { return 1; } var co = coroutine.create(f); co.resume(); co.resume();` | `"DeadCoroutineError"` |
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
@@ -1865,21 +1986,32 @@ run before the program ends is implementation-defined, as for every halt.
 | Undefined method invoked on a Map | `var m = {}; m.bogus();` |
 | `class Sub < Super {}` where `Super` is not a Class | `var NotAClass = 1; class Sub < NotAClass {}` |
 | `super.method(...)` where `method` is not found on the superclass | `class A {} class B < A { m() { super.zzz(); } } B().m();` |
-| Enum field indexed (`enumVal[i]`) with a non-Number index | `enum E { A(x) } var v = E.A(1); v["a"];` |
+| Enum field indexed (`enumVal[i]`) with an index that is neither a Number nor an Int | `enum E { A(x) } var v = E.A(1); v["a"];` |
 | Enum field indexed with a fractional index | `enum E { A(x) } var v = E.A(1); v[0.5];` |
 | Enum field indexed with an out-of-range index | `enum E { A(x) } var v = E.A(1); v[3];` |
 | Index-assignment on a String | `"abc"[0] = "x";` (strings are immutable — see [§03-types, String](03-types.md#string)) |
 | `seq[start:end]` where `seq` is not a List or String | `(42)[0:1];` |
-| `seq[start:end]` where `start` is not a Number | `[1, 2]["a":2];` |
+| `seq[start:end]` where `start` is neither a Number nor an Int | `[1, 2]["a":2];` |
 | `seq[start:end]` where `start` is not integer-valued | `[1, 2][1.5:2];` |
 | `seq[start:end]` where `start` is negative | `[1, 2][-1:2];` |
-| `seq[start:end]` where `end` is not a Number | `[1, 2][0:"a"];` |
+| `seq[start:end]` where `end` is neither a Number nor an Int | `[1, 2][0:"a"];` |
 | `seq[start:end]` where `end` is not integer-valued | `[1, 2][0:1.5];` |
 | `seq[start:end]` where `end` is negative | `[1, 2][0:-1];` |
 | `elem in seq` where `seq` is a String and `elem` is not a String | `1 in "abc";` |
 | `elem in seq` where `seq` is not a List, String, or Map | `1 in 42;` |
 | `for (var x in expr)` where `expr` is not a List, String, Map, or Coroutine | `for (var x in 42) {}` |
 | Map size changed during `for`-in iteration | `var m = {1: 1}; for (var k in m) { m[2] = 2; }` |
+| `int(x)` where `x` is a fractional Number | `int(1.5);` |
+| `int(x)` where `x` is a NaN | `int(math.nan);` |
+| `int(x)` where `x` is an infinity | `int(math.inf);` |
+| `int(x)` where `x` is a Number outside the Int range | `int(9223372036854775808.0);` |
+| `int(s)` where `s` is a String that is not an optionally signed decimal integer in the Int range | `int("1.5");` |
+| `int(x)` where `x` is not an Int, a Number, or a String | `int(nil);` |
+| `float(s)` where `s` is a String that is not a decimal number | `float("abc");` |
+| `float(x)` where `x` is not an Int, a Number, or a String | `float(nil);` |
+| A function of the `integer` module called with an argument that is not an Int (a String for `parse_unsigned`) | `integer.abs(1);` |
+| `integer.udiv(a, b)` or `integer.urem(a, b)` with `b == 0i` | `integer.udiv(1i, 0i);` |
+| `integer.parse_unsigned(s)` where `s` is not an unsigned decimal integer, or is above 18446744073709551615 | `integer.parse_unsigned("18446744073709551616");` |
 
 ---
 

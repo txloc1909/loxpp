@@ -1,0 +1,227 @@
+// The operand-kind table of spec/04-semantics.md: an Int together with a
+// Number is a catchable fault, in either order, with the kind of the operator
+// (`ConcatenationTypeError` for `+`, `ArithmeticTypeError` for `-` `*` `/`
+// `%`, `ComparisonTypeError` for the comparisons, `BitwiseTypeError` for the
+// bit operators). `==` and `!=` never fault: `1 == 1i` is `false` and `1 !=
+// 1i` is `true`. A bit operator also faults on two Numbers, and on a String,
+// `nil`, or a Boolean. The first line is a control: an operation on two Ints
+// runs.
+
+print 2i + 3i;
+try { print 1i + 1; } catch (e) { print e.kind; }
+try { print 1 + 1i; } catch (e) { print e.kind; }
+try { print 1i + 1.5; } catch (e) { print e.kind; }
+try { print 1i - 1; } catch (e) { print e.kind; }
+try { print 1 - 1i; } catch (e) { print e.kind; }
+try { print 1i - 1.5; } catch (e) { print e.kind; }
+try { print 1i * 1; } catch (e) { print e.kind; }
+try { print 1 * 1i; } catch (e) { print e.kind; }
+try { print 1i * 1.5; } catch (e) { print e.kind; }
+try { print 1i / 1; } catch (e) { print e.kind; }
+try { print 1 / 1i; } catch (e) { print e.kind; }
+try { print 1i / 1.5; } catch (e) { print e.kind; }
+try { print 1i % 1; } catch (e) { print e.kind; }
+try { print 1 % 1i; } catch (e) { print e.kind; }
+try { print 1i % 1.5; } catch (e) { print e.kind; }
+try { print 1i < 1; } catch (e) { print e.kind; }
+try { print 1 < 1i; } catch (e) { print e.kind; }
+try { print 1i < 1.5; } catch (e) { print e.kind; }
+try { print 1i <= 1; } catch (e) { print e.kind; }
+try { print 1 <= 1i; } catch (e) { print e.kind; }
+try { print 1i <= 1.5; } catch (e) { print e.kind; }
+try { print 1i > 1; } catch (e) { print e.kind; }
+try { print 1 > 1i; } catch (e) { print e.kind; }
+try { print 1i > 1.5; } catch (e) { print e.kind; }
+try { print 1i >= 1; } catch (e) { print e.kind; }
+try { print 1 >= 1i; } catch (e) { print e.kind; }
+try { print 1i >= 1.5; } catch (e) { print e.kind; }
+try { print 1i + "a"; } catch (e) { print e.kind; }
+try { print "a" + 1i; } catch (e) { print e.kind; }
+try { print 1i - "a"; } catch (e) { print e.kind; }
+try { print "a" * 1i; } catch (e) { print e.kind; }
+try { print 1i < "a"; } catch (e) { print e.kind; }
+try { print "a" >= 1i; } catch (e) { print e.kind; }
+print 1i == 1;
+print 1 == 1i;
+print 1i != 1;
+print 1 != 1i;
+print 1i == 1.0;
+print 1.0 == 1i;
+print 1i == "1";
+print "1" != 1i;
+try { print 1i & 1; } catch (e) { print e.kind; }
+try { print 1 & 1i; } catch (e) { print e.kind; }
+try { print 1 & 1; } catch (e) { print e.kind; }
+try { print 1.5 & 1.5; } catch (e) { print e.kind; }
+try { print 1i & "a"; } catch (e) { print e.kind; }
+try { print "a" & 1i; } catch (e) { print e.kind; }
+try { print nil & 1i; } catch (e) { print e.kind; }
+try { print true & 1i; } catch (e) { print e.kind; }
+try { print 1i | 1; } catch (e) { print e.kind; }
+try { print 1 | 1i; } catch (e) { print e.kind; }
+try { print 1 | 1; } catch (e) { print e.kind; }
+try { print 1.5 | 1.5; } catch (e) { print e.kind; }
+try { print 1i | "a"; } catch (e) { print e.kind; }
+try { print "a" | 1i; } catch (e) { print e.kind; }
+try { print nil | 1i; } catch (e) { print e.kind; }
+try { print true | 1i; } catch (e) { print e.kind; }
+try { print 1i ^ 1; } catch (e) { print e.kind; }
+try { print 1 ^ 1i; } catch (e) { print e.kind; }
+try { print 1 ^ 1; } catch (e) { print e.kind; }
+try { print 1.5 ^ 1.5; } catch (e) { print e.kind; }
+try { print 1i ^ "a"; } catch (e) { print e.kind; }
+try { print "a" ^ 1i; } catch (e) { print e.kind; }
+try { print nil ^ 1i; } catch (e) { print e.kind; }
+try { print true ^ 1i; } catch (e) { print e.kind; }
+try { print 1i << 1; } catch (e) { print e.kind; }
+try { print 1 << 1i; } catch (e) { print e.kind; }
+try { print 1 << 1; } catch (e) { print e.kind; }
+try { print 1.5 << 1.5; } catch (e) { print e.kind; }
+try { print 1i << "a"; } catch (e) { print e.kind; }
+try { print "a" << 1i; } catch (e) { print e.kind; }
+try { print nil << 1i; } catch (e) { print e.kind; }
+try { print true << 1i; } catch (e) { print e.kind; }
+try { print 1i >> 1; } catch (e) { print e.kind; }
+try { print 1 >> 1i; } catch (e) { print e.kind; }
+try { print 1 >> 1; } catch (e) { print e.kind; }
+try { print 1.5 >> 1.5; } catch (e) { print e.kind; }
+try { print 1i >> "a"; } catch (e) { print e.kind; }
+try { print "a" >> 1i; } catch (e) { print e.kind; }
+try { print nil >> 1i; } catch (e) { print e.kind; }
+try { print true >> 1i; } catch (e) { print e.kind; }
+try { print 1i >>> 1; } catch (e) { print e.kind; }
+try { print 1 >>> 1i; } catch (e) { print e.kind; }
+try { print 1 >>> 1; } catch (e) { print e.kind; }
+try { print 1.5 >>> 1.5; } catch (e) { print e.kind; }
+try { print 1i >>> "a"; } catch (e) { print e.kind; }
+try { print "a" >>> 1i; } catch (e) { print e.kind; }
+try { print nil >>> 1i; } catch (e) { print e.kind; }
+try { print true >>> 1i; } catch (e) { print e.kind; }
+try { print ~1; } catch (e) { print e.kind; }
+try { print ~1.5; } catch (e) { print e.kind; }
+try { print ~"a"; } catch (e) { print e.kind; }
+try { print ~nil; } catch (e) { print e.kind; }
+
+// STATUS: ok
+// CHECK: 5
+// CHECK: ConcatenationTypeError
+// CHECK: ConcatenationTypeError
+// CHECK: ConcatenationTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ConcatenationTypeError
+// CHECK: ConcatenationTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ArithmeticTypeError
+// CHECK: ComparisonTypeError
+// CHECK: ComparisonTypeError
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// COVERS: operand-kind + mixed
+// COVERS: operand-kind - mixed
+// COVERS: operand-kind * mixed
+// COVERS: operand-kind / mixed
+// COVERS: operand-kind % mixed
+// COVERS: operand-kind < mixed
+// COVERS: operand-kind <= mixed
+// COVERS: operand-kind > mixed
+// COVERS: operand-kind >= mixed
+// COVERS: operand-kind == mixed
+// COVERS: operand-kind != mixed
+// COVERS: operand-kind & mixed
+// COVERS: operand-kind & number
+// COVERS: operand-kind | mixed
+// COVERS: operand-kind | number
+// COVERS: operand-kind ^ mixed
+// COVERS: operand-kind ^ number
+// COVERS: operand-kind << mixed
+// COVERS: operand-kind << number
+// COVERS: operand-kind >> mixed
+// COVERS: operand-kind >> number
+// COVERS: operand-kind >>> mixed
+// COVERS: operand-kind >>> number
+// COVERS: operand-kind ~ number
+// COVERS: fault arithmetic_type_error_mixed_int
+// COVERS: fault comparison_type_error_mixed_int
+// COVERS: fault concatenation_type_error_mixed_int
+// COVERS: fault bitwise_type_error

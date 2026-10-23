@@ -1,0 +1,57 @@
+// A flag set held in one Int: set, clear, toggle, and test, with a flag in
+// each of the bits 0, 1, 2, 62, and 63. `x & m == 0i` groups as `(x & m) ==
+// 0i`, so the test needs no parentheses. The expected values come from the
+// same steps in Python.
+
+var READ = 1i;
+var WRITE = 2i;
+var EXEC = 4i;
+var HIDDEN = 1i << 62i;
+var SYSTEM = 1i << 63i;
+fun has(flags, f) { return (flags & f) == f; }
+fun set(flags, f) { return flags | f; }
+fun clear(flags, f) { return flags & ~f; }
+fun toggle(flags, f) { return flags ^ f; }
+var f = 0i;
+f = set(f, READ | EXEC);
+print f;
+print has(f, READ);
+print has(f, WRITE);
+print has(f, READ | EXEC);
+f = set(f, SYSTEM);
+print f;
+print has(f, SYSTEM);
+print f < 0i;
+f = clear(f, READ);
+print f;
+print has(f, READ);
+f = toggle(f, HIDDEN);
+print f;
+print f & HIDDEN == 0i;
+print f & WRITE == 0i;
+print (f >>> 62i);
+print (f >> 62i);
+f = toggle(f, HIDDEN);
+print f & HIDDEN == 0i;
+f = clear(f, SYSTEM);
+print f;
+print f == EXEC;
+
+// STATUS: ok
+// CHECK: 5
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: -9223372036854775803
+// CHECK: true
+// CHECK: true
+// CHECK: -9223372036854775804
+// CHECK: false
+// CHECK: -4611686018427387900
+// CHECK: false
+// CHECK: true
+// CHECK: 3
+// CHECK: -1
+// CHECK: true
+// CHECK: 4
+// CHECK: true

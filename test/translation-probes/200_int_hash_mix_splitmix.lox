@@ -1,0 +1,30 @@
+// splitmix64 is a hash mix on the full 64 bits: it adds a constant with a
+// wrap, then alternates `^` of a right shift with a multiplication that wraps.
+// The first outputs for the seed 0 are the published values 0xE220A8397B1DCDAF
+// and 0x6E789E6AA1B965F4. The output is the signed decimal value of each
+// 64-bit result.
+
+var state = 0i;
+fun next() {
+    state = state + 0x9E3779B97F4A7C15;
+    var z = state;
+    z = (z ^ (z >>> 30i)) * 0xBF58476D1CE4E5B9;
+    z = (z ^ (z >>> 27i)) * 0x94D049BB133111EB;
+    return z ^ (z >>> 31i);
+}
+print next();
+print next();
+print next();
+print next();
+print next();
+print next();
+print state == 0x9E3779B97F4A7C15 * 6i;
+
+// STATUS: ok
+// CHECK: -2152535657050944081
+// CHECK: 7960286522194355700
+// CHECK: 487617019471545679
+// CHECK: -537132696929009172
+// CHECK: 1961750202426094747
+// CHECK: 6038094601263162090
+// CHECK: true

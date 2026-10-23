@@ -1,0 +1,29 @@
+// FNV-1a on 64 bits hashes a String byte by byte: `h ^ byte`, then `h *
+// 0x100000001B3`, which wraps. `ord` gives a Number and the bit operators need
+// an Int, so each byte goes through `int(ord(c))`. The hash of `foobar` is the
+// published value 0x85944171F73967E8. The output is the signed decimal value.
+
+fun fnv1a(text) {
+    var h = 0xCBF29CE484222325;
+    for (var c in text) {
+        h = h ^ int(ord(c));
+        h = h * 0x100000001B3;
+    }
+    return h;
+}
+print fnv1a("");
+print fnv1a("a");
+print fnv1a("foobar");
+print fnv1a("hello");
+print fnv1a("Lox++ Int kind");
+print fnv1a("foobar") == 0x85944171F73967E8;
+print integer.ustr(fnv1a("foobar"));
+
+// STATUS: ok
+// CHECK: -3750763034362895579
+// CHECK: -5808556873153909620
+// CHECK: -8821353812377114648
+// CHECK: -6615550055289275125
+// CHECK: -5544926945248167845
+// CHECK: true
+// CHECK: 9625390261332436968

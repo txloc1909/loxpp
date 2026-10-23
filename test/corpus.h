@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -47,6 +48,33 @@ listLoxFiles(const std::filesystem::path& dir) {
     return files;
 }
 
+// The names of the spec probes that one consumer does not pass yet: the first
+// field of each line of tools/spec-probe-xfail/<consumer>.txt, the file that
+// tools/check_spec_probes.py reads with --xfail. Blank lines and lines that
+// start with '#' are comments. A missing file is an error, and so is a name
+// that is not a probe file, so a rename cannot turn a sweep that skips these
+// names into one that skips fewer.
+inline std::set<std::string> specProbeXfail(const std::string& consumer) {
+    const std::filesystem::path path =
+        projectRoot() / "tools" / "spec-probe-xfail" / (consumer + ".txt");
+    std::istringstream lines(readFile(path));
+    std::set<std::string> names;
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::istringstream fields(line);
+        std::string name;
+        if (fields >> name && name[0] != '#') {
+            if (!std::filesystem::is_regular_file(
+                    projectRoot() / "test" / "translation-probes" / name)) {
+                throw std::runtime_error(path.string() + " lists " + name +
+                                         ", which is not a probe file");
+            }
+            names.insert(name);
+        }
+    }
+    return names;
+}
+
 // The directories the tooling tests sweep. The parser test guards each one
 // separately, so a renamed directory cannot turn the sweep into a silent
 // no-op hidden behind the others.
@@ -56,15 +84,23 @@ inline const std::vector<std::string>& corpusDirectories() {
     return dirs;
 }
 
+// The files the tooling tests parse. It leaves out the spec probes that the
+// tooling does not handle yet (tools/spec-probe-xfail/tooling.txt).
 inline std::vector<std::filesystem::path> corpusFiles() {
+    const std::set<std::string> notYet = specProbeXfail("tooling");
     std::vector<std::filesystem::path> files;
     for (const std::string& dir : corpusDirectories()) {
         const std::filesystem::path base = projectRoot() / dir;
         if (!std::filesystem::is_directory(base)) {
             continue;
         }
-        const std::vector<std::filesystem::path> dirFiles = listLoxFiles(base);
-        files.insert(files.end(), dirFiles.begin(), dirFiles.end());
+        for (const std::filesystem::path& file : listLoxFiles(base)) {
+            if (dir == "test/translation-probes" &&
+                notYet.count(file.filename().string()) != 0) {
+                continue;
+            }
+            files.push_back(file);
+        }
     }
     std::sort(files.begin(), files.end());
     return files;
@@ -86,12 +122,16 @@ inline bool hasStaticErrorMarker(const std::filesystem::path& probe) {
 // The translation probes that the native compiler must compile. A test that
 // compiles every probe and inspects its bytecode sweeps these. It leaves out
 // the static-error probes; ChunkDecoderTest.StaticErrorProbesDoNotCompile
-// checks them.
+// checks them. It also leaves out the spec probes that native does not pass
+// yet (tools/spec-probe-xfail/native.txt): such a probe can use a form that
+// the native compiler does not accept yet.
 inline std::vector<std::filesystem::path> compiledTranslationProbes() {
+    const std::set<std::string> notYet = specProbeXfail("native");
     std::vector<std::filesystem::path> probes;
     for (const std::filesystem::path& probe :
          listLoxFiles(projectRoot() / "test" / "translation-probes")) {
-        if (hasStaticErrorMarker(probe)) {
+        if (hasStaticErrorMarker(probe) ||
+            notYet.count(probe.filename().string()) != 0) {
             continue;
         }
         probes.push_back(probe);

@@ -1,0 +1,61 @@
+// The forms of an Int literal (spec/01-lexical.md, Number and Int Literals):
+// decimal digits with the suffix `i`, `0x` and `0b` with no suffix, leading
+// zeros, and a 64-bit pattern that reads as a negative Int. Each literal
+// prints as its exact decimal digits. A Number literal stays a Number, and
+// `str` and `type` see an Int.
+
+print 0i;
+print 1i;
+print 255i;
+print 007i;
+print 1234567890123456789i;
+print 0xff;
+print 0xFF;
+print 0xAbCd;
+print 0x0;
+print 0x00000000000000000000FF;
+print 0b0;
+print 0b1010;
+print 0b000000000000000000000000000000000000000000000000000000000000000000101;
+print 0x7FFFFFFFFFFFFFFF;
+print 0xFFFFFFFFFFFFFFFF;
+print 0x8000000000000000;
+print 0b1111111111111111111111111111111111111111111111111111111111111111;
+print 0b1000000000000000000000000000000000000000000000000000000000000000;
+print 0xDEADBEEFCAFEBABE;
+print str(42i);
+print str(42i) + "!";
+print type(42i);
+print type(42);
+print type(0xFF);
+print 1.5;
+print 15i;
+
+// STATUS: ok
+// CHECK: 0
+// CHECK: 1
+// CHECK: 255
+// CHECK: 7
+// CHECK: 1234567890123456789
+// CHECK: 255
+// CHECK: 255
+// CHECK: 43981
+// CHECK: 0
+// CHECK: 255
+// CHECK: 0
+// CHECK: 10
+// CHECK: 5
+// CHECK: 9223372036854775807
+// CHECK: -1
+// CHECK: -9223372036854775808
+// CHECK: -1
+// CHECK: -9223372036854775808
+// CHECK: -2401053089206453570
+// CHECK: 42
+// CHECK: 42!
+// CHECK: Int
+// CHECK: Number
+// CHECK: Int
+// CHECK: 1.5
+// CHECK: 15
+// COVERS: literal-accepts fractional-suffix

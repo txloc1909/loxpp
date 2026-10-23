@@ -1,0 +1,16 @@
+// `float(s)` needs one or more digits (spec/05-stdlib.md).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print float(2i) == 2;
+float("");
+print "unreachable";
+
+// STATUS: error
+// CHECK: true
+// COVERS: fault float_string_not_number

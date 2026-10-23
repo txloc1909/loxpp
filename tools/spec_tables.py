@@ -1,8 +1,9 @@
 """Shared readers for the countable tables in spec/.
 
 The table check scripts (check_sendable_table.py, check_worker_error_kinds.py,
-check_suspend_points.py, check_blocking_calls.py) import this module. It
-reads Markdown sections and pipe tables, and nothing else, so a check script
+check_suspend_points.py, check_blocking_calls.py, and the check scripts of the
+Int kind) import this module. It reads Markdown sections and pipe tables, and
+the `// COVERS:` lines of the spec probes, and nothing else, so a check script
 states its own rule and this module states none.
 """
 
@@ -12,6 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPEC_DIR = REPO_ROOT / "spec"
+PROBE_DIR = REPO_ROOT / "test" / "translation-probes"
 
 
 class SpecError(Exception):
@@ -47,13 +49,18 @@ def section(text: str, heading: str) -> str:
 
 
 def split_row(line: str) -> list[str]:
-    """Splits one pipe-table row into its stripped cells."""
+    """Splits one pipe-table row into its stripped cells.
+
+    A backslash-escaped pipe (`\\|`) is part of a cell, as in the cell of
+    the `|` operator.
+    """
     inner = line.strip()
     if inner.startswith("|"):
         inner = inner[1:]
-    if inner.endswith("|"):
+    if inner.endswith("|") and not inner.endswith("\\|"):
         inner = inner[:-1]
-    return [cell.strip() for cell in inner.split("|")]
+    cells = re.split(r"(?<!\\)\|", inner)
+    return [cell.replace("\\|", "|").strip() for cell in cells]
 
 
 def table(body: str, first_header: str) -> list[dict[str, str]]:
@@ -89,6 +96,39 @@ def code(cell: str) -> str:
     if not m:
         raise SpecError(f"cell is not one code span: {cell!r}")
     return m.group(1)
+
+
+COVERS_RE = re.compile(r"^\s*//\s*COVERS:\s*(.+?)\s*$")
+
+
+def probe_covers(probe_dir: Path) -> dict[tuple[str, ...], list[Path]]:
+    """Returns the `// COVERS: <set> <id>...` lines of the spec probes of a
+    directory: each line as a tuple of its whitespace-separated words, mapped
+    to the probes that carry it.
+
+    A probe says which row of a spec table it checks with a COVERS line, for
+    example `// COVERS: operand-kind | int` or `// COVERS: fault shift_count_error`.
+    The check script of a table reads these lines to learn which row has a
+    probe. A COVERS line in a file that is not a spec probe (it has no STATUS
+    line, see tools/check_spec_probes.py) is an error, because no gate runs
+    that file.
+    """
+    from check_spec_probes import parse_probe
+
+    found: dict[tuple[str, ...], list[Path]] = {}
+    for path in sorted(probe_dir.glob("*.lox")):
+        lines = [
+            m.group(1)
+            for m in map(COVERS_RE.match, path.read_text(encoding="utf-8").splitlines())
+            if m
+        ]
+        if not lines:
+            continue
+        if parse_probe(path) is None:
+            raise SpecError(f"{path}: a COVERS line in a file that has no STATUS line")
+        for words in lines:
+            found.setdefault(tuple(words.split()), []).append(path)
+    return found
 
 
 def report(script: str, problems: list[str], ok_line: str) -> None:

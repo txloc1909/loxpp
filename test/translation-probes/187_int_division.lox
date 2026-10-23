@@ -1,0 +1,188 @@
+// On two Ints, `a / b` rounds toward negative infinity and `a % b` has the
+// sign of `b`, so `a == (a / b) * b + a % b` for every `a` and every `b` other
+// than `0i` (spec/04-semantics.md, Arithmetic). The smallest Int divided by
+// `-1i` wraps to itself and the smallest Int modulo `-1i` is `0i`; neither is
+// a fault. The operands are held in variables, so the operation runs at run
+// time.
+
+fun div(a, b) { return a / b; }
+fun mod(a, b) { return a % b; }
+fun ident(a, b) { return a == (a / b) * b + a % b; }
+print div(7i, 2i);
+print div(-7i, 2i);
+print div(7i, -2i);
+print div(-7i, -2i);
+print div(0i, 5i);
+print div(0i, -5i);
+print div(5i, 1i);
+print div(5i, -1i);
+print div(1i, 2i);
+print div(-1i, 2i);
+print div(1i, -2i);
+print div(-1i, -2i);
+print div(9223372036854775807i, 2i);
+print div(-9223372036854775808i, 2i);
+print div(-9223372036854775808i, -2i);
+print div(-9223372036854775808i, 1i);
+print div(-9223372036854775808i, -1i);
+print div(9223372036854775807i, -1i);
+print div(-9223372036854775807i, -1i);
+print div(9223372036854775807i, 9223372036854775807i);
+print div(-9223372036854775808i, -9223372036854775808i);
+print div(1i, -9223372036854775808i);
+print div(-1i, 9223372036854775807i);
+print div(9007199254740993i, 2i);
+print div(123456789012345678i, 1000i);
+print div(-123456789012345678i, 1000i);
+print div(-123456789012345678i, -1000i);
+print mod(7i, 2i);
+print mod(-7i, 2i);
+print mod(7i, -2i);
+print mod(-7i, -2i);
+print mod(0i, 5i);
+print mod(0i, -5i);
+print mod(5i, 1i);
+print mod(5i, -1i);
+print mod(1i, 2i);
+print mod(-1i, 2i);
+print mod(1i, -2i);
+print mod(-1i, -2i);
+print mod(9223372036854775807i, 2i);
+print mod(-9223372036854775808i, 2i);
+print mod(-9223372036854775808i, -2i);
+print mod(-9223372036854775808i, 1i);
+print mod(-9223372036854775808i, -1i);
+print mod(9223372036854775807i, -1i);
+print mod(-9223372036854775807i, -1i);
+print mod(9223372036854775807i, 9223372036854775807i);
+print mod(-9223372036854775808i, -9223372036854775808i);
+print mod(1i, -9223372036854775808i);
+print mod(-1i, 9223372036854775807i);
+print mod(9007199254740993i, 2i);
+print mod(123456789012345678i, 1000i);
+print mod(-123456789012345678i, 1000i);
+print mod(-123456789012345678i, -1000i);
+print ident(7i, 2i);
+print ident(-7i, 2i);
+print ident(7i, -2i);
+print ident(-7i, -2i);
+print ident(0i, 5i);
+print ident(0i, -5i);
+print ident(5i, 1i);
+print ident(5i, -1i);
+print ident(1i, 2i);
+print ident(-1i, 2i);
+print ident(1i, -2i);
+print ident(-1i, -2i);
+print ident(9223372036854775807i, 2i);
+print ident(-9223372036854775808i, 2i);
+print ident(-9223372036854775808i, -2i);
+print ident(-9223372036854775808i, 1i);
+print ident(-9223372036854775808i, -1i);
+print ident(9223372036854775807i, -1i);
+print ident(-9223372036854775807i, -1i);
+print ident(9223372036854775807i, 9223372036854775807i);
+print ident(-9223372036854775808i, -9223372036854775808i);
+print ident(1i, -9223372036854775808i);
+print ident(-1i, 9223372036854775807i);
+print ident(9007199254740993i, 2i);
+print ident(123456789012345678i, 1000i);
+print ident(-123456789012345678i, 1000i);
+print ident(-123456789012345678i, -1000i);
+print -7i / 2i;
+print -7i % 2i;
+print 7i / -2i;
+print 7i % -2i;
+print -9223372036854775808i / -1i;
+print -9223372036854775808i % -1i;
+
+// STATUS: ok
+// CHECK: 3
+// CHECK: -4
+// CHECK: -4
+// CHECK: 3
+// CHECK: 0
+// CHECK: 0
+// CHECK: 5
+// CHECK: -5
+// CHECK: 0
+// CHECK: -1
+// CHECK: -1
+// CHECK: 0
+// CHECK: 4611686018427387903
+// CHECK: -4611686018427387904
+// CHECK: 4611686018427387904
+// CHECK: -9223372036854775808
+// CHECK: -9223372036854775808
+// CHECK: -9223372036854775807
+// CHECK: 9223372036854775807
+// CHECK: 1
+// CHECK: 1
+// CHECK: -1
+// CHECK: -1
+// CHECK: 4503599627370496
+// CHECK: 123456789012345
+// CHECK: -123456789012346
+// CHECK: 123456789012345
+// CHECK: 1
+// CHECK: 1
+// CHECK: -1
+// CHECK: -1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 1
+// CHECK: 1
+// CHECK: -1
+// CHECK: -1
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: -9223372036854775807
+// CHECK: 9223372036854775806
+// CHECK: 1
+// CHECK: 678
+// CHECK: 322
+// CHECK: -678
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: -4
+// CHECK: 1
+// CHECK: -4
+// CHECK: -1
+// CHECK: -9223372036854775808
+// CHECK: 0
+// COVERS: operand-kind / int
+// COVERS: operand-kind % int

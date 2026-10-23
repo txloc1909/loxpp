@@ -41,9 +41,12 @@ run_diff() {
     fi
 }
 
+# The expected-failure lists are those of tools/check_qbe_probes.sh.
 run_diff "test/translation-probes/ + qbe-only/ (stress GC)" \
     "$root/test/translation-probes/" \
-    "$root/test/translation-probes/qbe-only/"
+    "$root/test/translation-probes/qbe-only/" \
+    --xfail "$root/tools/spec-probe-xfail/qbe.txt" \
+    --oracle-xfail "$root/tools/spec-probe-xfail/native.txt"
 
 run_diff "jvm-only/61_operator_overload.lox (stress GC)" \
     "$root/test/translation-probes/jvm-only/61_operator_overload.lox"

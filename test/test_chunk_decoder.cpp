@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -313,18 +314,30 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
 }
 
 // The bytecode sweeps leave out every probe marked `// STATIC-ERROR`, so a
-// marker on a probe that native compiles would hide that probe from them.
+// marker on a probe that native compiles would hide that probe from them. A
+// static-error probe that native does not reject yet is on
+// tools/spec-probe-xfail/native.txt, and then the check turns round: native
+// must still compile it, so that the node that makes native reject it deletes
+// the line, as check_spec_probes.py asks for a listed probe that passes.
 TEST(ChunkDecoderTest, StaticErrorProbesDoNotCompile) {
+    const std::set<std::string> notYet = loxpp_test::specProbeXfail("native");
     int checked = 0;
     for (const fs::path& probe :
          listLoxFiles(projectRoot() / "test" / "translation-probes")) {
         if (!loxpp_test::hasStaticErrorMarker(probe)) {
             continue;
         }
+        const std::string name = probe.filename().string();
         MemoryManager mm;
-        EXPECT_EQ(compile(readFile(probe), &mm), nullptr)
-            << probe.filename().string()
-            << " carries // STATIC-ERROR, but native compiles it";
+        ObjFunction* script = compile(readFile(probe), &mm);
+        if (notYet.count(name) != 0) {
+            EXPECT_NE(script, nullptr)
+                << name << " is on native.txt, but native rejects it now: "
+                << "delete its line";
+        } else {
+            EXPECT_EQ(script, nullptr)
+                << name << " carries // STATIC-ERROR, but native compiles it";
+        }
         checked++;
     }
     EXPECT_GT(checked, 0) << "no static-error probe is checked";

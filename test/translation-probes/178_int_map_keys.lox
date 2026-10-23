@@ -1,0 +1,60 @@
+// An Int is a valid map key, and it hashes by its value, so two Ints that hold
+// the same value are one key, an inline one or a heap-held one. `1` and `1i`
+// are two different keys of one Map (spec/03-types.md, Int). Each lookup below
+// spells the key a second way, so no lookup can pass by address. The output
+// does not print a Map, because the order of its entries is not defined.
+
+var m = {};
+m[1] = "number";
+m[1i] = "int";
+print len(m);
+print m[1];
+print m[1i];
+print 1 in m;
+print 1i in m;
+print 2i in m;
+m[9223372036854775807i] = "max";
+print m[0x7FFFFFFFFFFFFFFF];
+m[-9223372036854775808i] = "min";
+print m[0x8000000000000000];
+m[140737488355328i] = "2^47";
+print m[0x800000000000];
+m[9007199254740992i] = "2^53";
+print m[9007199254740993i];
+print m[9007199254740992i];
+print len(m);
+print m.has(1i);
+m.del(1i);
+print 1i in m;
+print 1 in m;
+var lit = {1i: "a", 2i: "b", 1: "c", 0xFF: "d"};
+print len(lit);
+print lit[1i];
+print lit[1];
+print lit[255i];
+lit[1i] = "updated";
+print len(lit);
+print lit[1i];
+
+// STATUS: ok
+// CHECK: 2
+// CHECK: number
+// CHECK: int
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: max
+// CHECK: min
+// CHECK: 2^47
+// CHECK: nil
+// CHECK: 2^53
+// CHECK: 6
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: 4
+// CHECK: a
+// CHECK: c
+// CHECK: d
+// CHECK: 4
+// CHECK: updated

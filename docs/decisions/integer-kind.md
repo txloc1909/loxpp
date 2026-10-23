@@ -48,8 +48,10 @@ needs: no implicit coercion. `1 + "1"` is a type fault today
 What the model keeps untouched: every existing program, every `CHECK` line,
 the Number print format, the index rules, `len`, `ord`, `math.floor`, the
 jlox suite that runs through `bootstrap/lox_interpreter.lox`, and the four
-backends' Number paths. The change is additive. A program that runs today
-has the same meaning after it.
+backends' Number paths. The change is additive, with one lexical exception:
+a decimal literal, whole or fractional, written directly before `in` or `if`
+(constraint 4). A program that does not have that form has the same meaning
+after the change as before it.
 
 What the model costs: an Int literal needs its suffix, so `x & (x - 1i)` and
 not `x & (x - 1)`, and a hash-mix loop over bytes writes `int(ord(c))`. The
@@ -116,9 +118,10 @@ does not apply. `VISION.md` needs no change for this model.
   error. The suffix is part of the token, so `1 i` is two tokens and a syntax
   error, as it is today.
 - A decimal Int literal outside the int64 range is a compile-time error, with
-  one exception, as in Java: the literal `9223372036854775808i` is valid when
-  it is the direct operand of a unary `-`. So `-9223372036854775808i` is the
-  smallest Int, and `-(9223372036854775808i)` is an error.
+  one exception, as in Java: a decimal Int literal whose value is
+  9223372036854775808 is valid when it is the direct operand of a unary `-`.
+  So `-9223372036854775808i` is the smallest Int, and
+  `-(9223372036854775808i)` is an error.
 - `0x` followed by hex digits, and `0b` followed by binary digits, are Int
   literals and take no suffix. Each gives a 64-bit pattern, as in Java:
   `0xFFFFFFFFFFFFFFFF` is `-1i` and `0x8000000000000000` is the smallest
@@ -308,9 +311,14 @@ the table is complete, before backend work starts:
 - the precedence table;
 - the operator protocol table, with a row for the bit operators that says
   "no protocol";
-- the compile-time rejections: a decimal Int literal outside the int64 range
-  except the unary-minus case, a hex or binary literal of more than 64 bits,
-  and a fractional literal with the suffix;
+- the compile-time rejections, five rows in `spec/01-lexical.md`: a decimal
+  Int literal above the int64 range, except under the unary-minus exception; a
+  hex or binary literal above 64 bits; a fractional literal with the suffix,
+  which is a `BADINT` token; and a name after a literal. The table of examples
+  in the same file lists each form that follows from the three rules of the
+  section, with its tokens and its result, and
+  `tools/check_int_literal_rejections.py` requires a spec probe for each row of
+  it;
 - the runtime fault rows: a mixed-kind operand, a bit operator on a Number
   or an Instance, a shift count that is not an Int or is out of range, Int
   `/ 0i` and `% 0i`, `int()` on a fractional Number, a NaN, an infinity, a
@@ -339,17 +347,37 @@ checks them.
 3. **The constant pool keys by bit pattern, not by `==`.** This is true
    today and must stay true. `1` and `1i` have different bits, so they are
    different constants.
-4. **The suffix is part of the token.** The scanner reads an `i` directly
-   after the digits as the suffix, so `1i` is one token. `1 i` and `1if` are
-   syntax errors today and stay syntax errors, so no existing program changes
-   meaning.
+4. **Four forms change meaning, as a consequence of the longest match.**
+   `1in`, `1if`, `1.5in` and `1.5if` were valid before the suffix existed, and
+   now the `i` is the suffix, so each is a syntax error; probes `240` to `242` and `244`
+   of `test/translation-probes/` pin them. No program in this repository
+   writes one of the four, so no program here changes meaning, and a program
+   elsewhere puts a space before the keyword.
+5. **One normative statement per lexical question.** Tokenization is the
+   longest match over the lexical grammar. The range of a literal is by value,
+   never by spelling. The unary-minus exception is by value and on the
+   grammar. Every other sentence about a literal is an example in the table of
+   examples of `spec/01-lexical.md`. A scanner consumer (the native scanner at
+   N2, the bootstrap interpreter at N6, the tree-sitter grammar and the
+   tooling parser at N7) implements the three rules, not the list of examples,
+   and its review checks each row of the table against them.
+6. **A check reads one object, never prose.** A check in a `tools/check_*.py`
+   script names one object: a table row or cell, a `// COVERS:` tuple, or one
+   named line of a probe. Its evidence comes from that object only. A check
+   that searches a file or a section for a phrase is not a check of a
+   countable set: another occurrence satisfies it, or an equal-meaning edit
+   breaks it. No script checks that a sentence of prose is present. Every site
+   that adds a problem has one mutation on record that makes it fire, and a
+   node that adds a site adds its mutation to the record. The shared layer is
+   the check scripts on `tools/spec_tables.py`.
 
 ## Program impact
 
-No existing program changes. The mission adds programs that use masks as
-probes of the purpose: a flag set, a bitboard, a hash mix. During the
-mission these programs live under `test/translation-probes/` as spec probes,
-so each consumer's expected-failure file covers them until its node merges.
+No existing program in this repository changes. The mission adds programs
+that use masks as probes of the purpose: a flag set, a bitboard, a hash mix.
+During the mission these programs live under `test/translation-probes/` as
+spec probes, so each consumer's expected-failure file covers them until its
+node merges.
 An example under `examples/` that uses Int lands at mission close, when every
 corpus gate is green.
 

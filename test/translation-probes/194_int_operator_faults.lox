@@ -1,0 +1,109 @@
+// `a / b` and `a % b` on two Ints with `b == 0i` raise DivisionByZeroError. A
+// shift count outside `0i` to `63i` raises ShiftCountError, and a count that
+// is not an Int raises BitwiseTypeError (spec/04-semantics.md, Runtime
+// Errors). The kind of both operands is checked before the range of the count.
+// The counts 0 and 63 are valid and do not fault. The first line is a control:
+// an operation on two Ints runs.
+
+print 7i / 2i;
+try { print 1i / 0i; } catch (e) { print e.kind; }
+try { print 1i % 0i; } catch (e) { print e.kind; }
+try { print 0i / 0i; } catch (e) { print e.kind; }
+try { print 0i % 0i; } catch (e) { print e.kind; }
+try { print -5i / 0i; } catch (e) { print e.kind; }
+try { print -5i % 0i; } catch (e) { print e.kind; }
+try { print -9223372036854775808i / 0i; } catch (e) { print e.kind; }
+try { print 9223372036854775807i % 0i; } catch (e) { print e.kind; }
+try { print 1i << 64i; } catch (e) { print e.kind; }
+try { print 1i << -1i; } catch (e) { print e.kind; }
+try { print 1i << 100i; } catch (e) { print e.kind; }
+try { print 1i << 9223372036854775807i; } catch (e) { print e.kind; }
+try { print 1i << -9223372036854775808i; } catch (e) { print e.kind; }
+print 1i << 0i;
+print -1i << 63i;
+try { print 1i << 1; } catch (e) { print e.kind; }
+try { print 1i << 1.0; } catch (e) { print e.kind; }
+try { print 1i << "a"; } catch (e) { print e.kind; }
+try { print 1i << nil; } catch (e) { print e.kind; }
+try { print 1 << 64i; } catch (e) { print e.kind; }
+try { print 1i << 64.5; } catch (e) { print e.kind; }
+try { print 1i >> 64i; } catch (e) { print e.kind; }
+try { print 1i >> -1i; } catch (e) { print e.kind; }
+try { print 1i >> 100i; } catch (e) { print e.kind; }
+try { print 1i >> 9223372036854775807i; } catch (e) { print e.kind; }
+try { print 1i >> -9223372036854775808i; } catch (e) { print e.kind; }
+print 1i >> 0i;
+print -1i >> 63i;
+try { print 1i >> 1; } catch (e) { print e.kind; }
+try { print 1i >> 1.0; } catch (e) { print e.kind; }
+try { print 1i >> "a"; } catch (e) { print e.kind; }
+try { print 1i >> nil; } catch (e) { print e.kind; }
+try { print 1 >> 64i; } catch (e) { print e.kind; }
+try { print 1i >> 64.5; } catch (e) { print e.kind; }
+try { print 1i >>> 64i; } catch (e) { print e.kind; }
+try { print 1i >>> -1i; } catch (e) { print e.kind; }
+try { print 1i >>> 100i; } catch (e) { print e.kind; }
+try { print 1i >>> 9223372036854775807i; } catch (e) { print e.kind; }
+try { print 1i >>> -9223372036854775808i; } catch (e) { print e.kind; }
+print 1i >>> 0i;
+print -1i >>> 63i;
+try { print 1i >>> 1; } catch (e) { print e.kind; }
+try { print 1i >>> 1.0; } catch (e) { print e.kind; }
+try { print 1i >>> "a"; } catch (e) { print e.kind; }
+try { print 1i >>> nil; } catch (e) { print e.kind; }
+try { print 1 >>> 64i; } catch (e) { print e.kind; }
+try { print 1i >>> 64.5; } catch (e) { print e.kind; }
+
+// STATUS: ok
+// CHECK: 3
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: DivisionByZeroError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: 1
+// CHECK: -9223372036854775808
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: 1
+// CHECK: -1
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: ShiftCountError
+// CHECK: 1
+// CHECK: 1
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// COVERS: fault division_by_zero_error
+// COVERS: fault division_by_zero_error_modulo
+// COVERS: fault shift_count_error
+// COVERS: fault bitwise_type_error_shift_count

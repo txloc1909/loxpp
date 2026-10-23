@@ -1,0 +1,14 @@
+// A decimal Int literal above 9223372036854775807 is a static error
+// (spec/01-lexical.md, row `decimal-range`).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 9223372036854775808i;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal decimal-range

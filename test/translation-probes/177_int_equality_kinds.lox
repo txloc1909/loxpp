@@ -1,0 +1,76 @@
+// Two Ints are equal when they hold the same value, for every value of the 64
+// bits, an inline or a heap-held one alike. An Int and a value of another kind
+// are never equal, a Number included (spec/03-types.md, Equality). `1` and
+// `1i` are two different constants of one function. `in` and `remove` on a
+// List use the same equality.
+
+print 1 == 1i;
+print 1 != 1i;
+print 1i == 1;
+print 0 == 0i;
+print 1.0 == 1i;
+print 1i == 1i;
+print 1i != 2i;
+print 0xFF == 255i;
+print 9007199254740993i == 9007199254740992i;
+print 9007199254740993i == 9007199254740993i;
+print 9223372036854775807i == 0x7FFFFFFFFFFFFFFF;
+print 9223372036854775807i != 0x7FFFFFFFFFFFFFFF;
+print 9223372036854775807i == 9223372036854775806i;
+print -9223372036854775808i == 0x8000000000000000;
+print 140737488355327i == 140737488355327i;
+print 140737488355328i == 140737488355328i;
+print 140737488355328i == 140737488355327i;
+print 140737488355329i != 140737488355328i;
+print 1i == "1";
+print 1i == nil;
+print 1i == true;
+print 1i == [1i];
+print 1i in [1i, 2i];
+print 1 in [1i];
+print 9223372036854775807i in [0x7FFFFFFFFFFFFFFF];
+print 3i in [1, 2, 3];
+var l = [1i, 2i];
+l.remove(1i);
+print l;
+var a = 1;
+var b = 1i;
+print a == b;
+print [a, b];
+print type(a) == type(b);
+
+// STATUS: ok
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: [2]
+// CHECK: false
+// CHECK: [1, 1]
+// CHECK: false
+// COVERS: operand-kind == int
+// COVERS: operand-kind != int
+// COVERS: operand-kind == mixed
+// COVERS: operand-kind != mixed
