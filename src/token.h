@@ -23,6 +23,10 @@ enum class TokenType : std::uint8_t {
     STAR,
     PERCENT,
     AT,
+    AMPERSAND,
+    PIPE,
+    CARET,
+    TILDE,
 
     // One or two character tokens.
     BANG,
@@ -34,11 +38,15 @@ enum class TokenType : std::uint8_t {
     GREATER_EQUAL,
     LESS,
     LESS_EQUAL,
+    LESS_LESS,
+    GREATER_GREATER,
+    GREATER_GREATER_GREATER,
 
     // Literals.
     IDENTIFIER,
     STRING,
     NUMBER,
+    INT,
 
     // Keywords.
     AND,

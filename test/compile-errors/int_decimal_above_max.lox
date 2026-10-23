@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Decimal Int literal is above the largest Int.
+// Compile error: the range of a decimal Int literal is by value
+// (spec/01-lexical.md, row decimal-range).
+print 9223372036854775808i;

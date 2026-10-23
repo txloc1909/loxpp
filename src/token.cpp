@@ -31,6 +31,14 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "STAR";
     case TokenType::AT:
         return os << "AT";
+    case TokenType::AMPERSAND:
+        return os << "AMPERSAND";
+    case TokenType::PIPE:
+        return os << "PIPE";
+    case TokenType::CARET:
+        return os << "CARET";
+    case TokenType::TILDE:
+        return os << "TILDE";
     case TokenType::BANG:
         return os << "BANG";
     case TokenType::BANG_EQUAL:
@@ -49,12 +57,20 @@ std::ostream& operator<<(std::ostream& os, const TokenType& type) {
         return os << "LESS";
     case TokenType::LESS_EQUAL:
         return os << "LESS_EQUAL";
+    case TokenType::LESS_LESS:
+        return os << "LESS_LESS";
+    case TokenType::GREATER_GREATER:
+        return os << "GREATER_GREATER";
+    case TokenType::GREATER_GREATER_GREATER:
+        return os << "GREATER_GREATER_GREATER";
     case TokenType::IDENTIFIER:
         return os << "IDENTIFIER";
     case TokenType::STRING:
         return os << "STRING";
     case TokenType::NUMBER:
         return os << "NUMBER";
+    case TokenType::INT:
+        return os << "INT";
     case TokenType::AND:
         return os << "AND";
     case TokenType::CLASS:

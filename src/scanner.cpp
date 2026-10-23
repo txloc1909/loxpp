@@ -16,6 +16,12 @@ const char* const* lox_keywords() {
 
 static bool isDigit(char c) { return c >= '0' && c <= '9'; }
 
+static bool isHexDigit(char c) {
+    return isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static bool isBinaryDigit(char c) { return c == '0' || c == '1'; }
+
 static bool isAlpha(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
@@ -85,6 +91,14 @@ Token Scanner::scanOneToken() {
         return makeToken(TokenType::PERCENT);
     case '@':
         return makeToken(TokenType::AT);
+    case '&':
+        return makeToken(TokenType::AMPERSAND);
+    case '|':
+        return makeToken(TokenType::PIPE);
+    case '^':
+        return makeToken(TokenType::CARET);
+    case '~':
+        return makeToken(TokenType::TILDE);
     case '!':
         return makeToken(match('=') ? TokenType::BANG_EQUAL : TokenType::BANG);
     case '=':
@@ -94,9 +108,17 @@ Token Scanner::scanOneToken() {
         return makeToken(match('=') ? TokenType::EQUAL_EQUAL
                                     : TokenType::EQUAL);
     case '>':
+        // `>>>` is the longest match, then `>>`, then `>=`, then `>`.
+        if (match('>')) {
+            return makeToken(match('>') ? TokenType::GREATER_GREATER_GREATER
+                                        : TokenType::GREATER_GREATER);
+        }
         return makeToken(match('=') ? TokenType::GREATER_EQUAL
                                     : TokenType::GREATER);
     case '<':
+        if (match('<')) {
+            return makeToken(TokenType::LESS_LESS);
+        }
         return makeToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
     case '"':
         return consumeString();
@@ -284,6 +306,20 @@ TokenType Scanner::identifierType() {
 }
 
 Token Scanner::consumeNumber() {
+    // A `0x` or `0b` literal is an Int with no suffix. The prefix is lower
+    // case only, so `0XFF` is the NUMBER `0` and the name `XFF`
+    // (spec/01-lexical.md, Examples of the literal rules).
+    if (m_start[0] == '0' && (peek() == 'x' || peek() == 'b')) {
+        const bool hex = peek() == 'x';
+        advance(); // the base letter
+        while (hex ? isHexDigit(peek()) : isBinaryDigit(peek())) {
+            advance();
+        }
+        // No suffix: the literal ends at its last digit of its base, so `in`
+        // or `if` may follow it directly (`0x1in [1i]`).
+        return makeToken(TokenType::INT);
+    }
+
     while (isDigit(peek())) {
         advance();
     }
@@ -295,6 +331,21 @@ Token Scanner::consumeNumber() {
         while (isDigit(peek())) {
             advance();
         }
+        // A fractional literal with the suffix is one rejected lexeme
+        // (BADINT): the `i` belongs to it, so `1.5in` is `1.5i` then `n`.
+        if (peek() == 'i') {
+            advance();
+            return createErrorToken(
+                "Int literal cannot have a fractional part.");
+        }
+        return makeToken(TokenType::NUMBER);
+    }
+
+    // The suffix is part of the token. Whatever follows it starts the next
+    // token, so `1i in` and `1iin [1i]` both read the suffix first.
+    if (peek() == 'i') {
+        advance();
+        return makeToken(TokenType::INT);
     }
     return makeToken(TokenType::NUMBER);
 }

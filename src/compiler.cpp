@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <set>
@@ -182,7 +183,24 @@ void Compiler::yieldExpr() {
 void Compiler::unary() {
     TokenType operatorType = m_parser->m_previous.type;
 
+    // The unary-minus exception (spec/01-lexical.md): the literal
+    // 9223372036854775808i is valid only as the direct operand of a unary '-'.
+    // The INT rule reads this flag and decides whether it applies.
+    m_parser->m_intMinusOperand = operatorType == TokenType::MINUS &&
+                                  m_parser->m_current.type == TokenType::INT;
+    m_parser->m_intMinusConsumed = false;
+
     m_parser->parsePrecedence(Precedence::UNARY, this);
+
+    const bool literalWasNegated = m_parser->m_intMinusConsumed;
+    m_parser->m_intMinusOperand = false;
+    m_parser->m_intMinusConsumed = false;
+    if (literalWasNegated) {
+        // The INT rule emitted the smallest Int, which is its own negation, so
+        // no NEGATE may follow it.
+        markNotAssignable();
+        return;
+    }
 
     switch (operatorType) {
     case TokenType::MINUS:
@@ -190,6 +208,9 @@ void Compiler::unary() {
         break;
     case TokenType::BANG:
         emitByte(Op::NOT);
+        break;
+    case TokenType::TILDE:
+        // The bit operators land with the operator node (N3, #827).
         break;
     default:
         return; // Unreachable.
@@ -278,6 +299,114 @@ void Compiler::number() {
     // source — O(source length) per literal, i.e. O(N^2) over a large program.
     double num = std::stod(std::string(m_parser->m_previous.lexeme));
     emitConstantOp(Op::CONSTANT, makeConstant(from<Number>(num)));
+}
+
+// Reinterprets a 64-bit magnitude as the two's-complement Int of that bit
+// pattern, without an out-of-range conversion.
+static Int intFromBitPattern(std::uint64_t bits) {
+    constexpr std::uint64_t kLargestInt =
+        static_cast<std::uint64_t>(std::numeric_limits<Int>::max());
+    if (bits <= kLargestInt) {
+        return static_cast<Int>(bits);
+    }
+    return std::numeric_limits<Int>::min() +
+           static_cast<Int>(bits - (std::uint64_t{1} << 63));
+}
+
+void Compiler::emitIntConstant(Int value) {
+    const Value constant =
+        intFitsInline(value)
+            ? inlineIntValue(value)
+            : Value{static_cast<Obj*>(m_mm->create<ObjInt>(value))};
+    emitConstantOp(Op::CONSTANT, makeConstant(constant));
+}
+
+// A decimal Int literal is valid up to 9223372036854775807, and
+// 9223372036854775808 only as the direct operand of a unary '-' (the
+// unary-minus exception of spec/01-lexical.md). A hexadecimal or binary
+// literal is a 64-bit pattern, so it is valid up to 18446744073709551615.
+// Every range is by value: leading zeros never count.
+void Compiler::intLiteral() {
+    const std::string_view lexeme = m_parser->m_previous.lexeme;
+
+    // A call, property read, or index binds to the literal first, so the
+    // operand of the '-' is that larger expression. Only a literal that the
+    // '-' takes whole can break the range.
+    bool minusOperand = m_parser->m_intMinusOperand;
+    m_parser->m_intMinusOperand = false;
+    switch (m_parser->m_current.type) {
+    case TokenType::LEFT_PAREN:
+    case TokenType::DOT:
+    case TokenType::LEFT_BRACKET:
+        minusOperand = false;
+        break;
+    default:
+        break;
+    }
+
+    const std::string text(lexeme);
+    std::uint64_t magnitude = 0;
+    bool tooWide = false;
+
+    if (text.size() > 1 && text[0] == '0' &&
+        (text[1] == 'x' || text[1] == 'b')) {
+        const bool hex = text[1] == 'x';
+        const std::uint64_t base = hex ? 16U : 2U;
+        for (std::size_t i = 2; i < text.size(); ++i) {
+            const char c = text[i];
+            std::uint64_t digit;
+            if (c >= '0' && c <= '9') {
+                digit = static_cast<std::uint64_t>(c - '0');
+            } else if (c >= 'a' && c <= 'f') {
+                digit = static_cast<std::uint64_t>(c - 'a' + 10);
+            } else {
+                digit = static_cast<std::uint64_t>(c - 'A' + 10);
+            }
+            if (magnitude >
+                (std::numeric_limits<std::uint64_t>::max() - digit) / base) {
+                tooWide = true;
+                break;
+            }
+            magnitude = magnitude * base + digit;
+        }
+        if (tooWide) {
+            if (hex) {
+                m_parser->error(
+                    "Hexadecimal Int literal is wider than 64 bits.");
+            } else {
+                m_parser->error("Binary Int literal is wider than 64 bits.");
+            }
+            return;
+        }
+        emitIntConstant(intFromBitPattern(magnitude));
+        return;
+    }
+
+    std::size_t end = text.size();
+    if (end > 0 && text[end - 1] == 'i') {
+        --end;
+    }
+    constexpr std::uint64_t kLargestInt =
+        static_cast<std::uint64_t>(std::numeric_limits<Int>::max());
+    for (std::size_t i = 0; i < end; ++i) {
+        const std::uint64_t digit = static_cast<std::uint64_t>(text[i] - '0');
+        if (magnitude >
+            (std::numeric_limits<std::uint64_t>::max() - digit) / 10U) {
+            tooWide = true;
+            break;
+        }
+        magnitude = magnitude * 10U + digit;
+    }
+    if (!tooWide && magnitude <= kLargestInt) {
+        emitIntConstant(static_cast<Int>(magnitude));
+        return;
+    }
+    if (!tooWide && magnitude == kLargestInt + 1U && minusOperand) {
+        emitIntConstant(std::numeric_limits<Int>::min());
+        m_parser->m_intMinusConsumed = true;
+        return;
+    }
+    m_parser->error("Decimal Int literal is above the largest Int.");
 }
 
 void Compiler::string() {
@@ -1299,6 +1428,9 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         case TokenType::NUMBER:
             number();
             break;
+        case TokenType::INT:
+            intLiteral();
+            break;
         case TokenType::STRING:
             string();
             break;
@@ -1314,6 +1446,7 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
 
     auto isLiteralStart = [&]() {
         return m_parser->check(TokenType::NUMBER) ||
+               m_parser->check(TokenType::INT) ||
                m_parser->check(TokenType::STRING) ||
                m_parser->check(TokenType::TRUE) ||
                m_parser->check(TokenType::FALSE) ||

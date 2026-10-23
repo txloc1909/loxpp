@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Binary Int literal is wider than 64 bits.
+// Compile error: a binary literal is a 64-bit pattern
+// (spec/01-lexical.md, row binary-width).
+print 0b10000000000000000000000000000000000000000000000000000000000000000;
