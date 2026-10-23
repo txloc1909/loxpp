@@ -39,6 +39,18 @@ inline constexpr uint64_t INT_PAYLOAD_MASK = 0x0000FFFFFFFFFFFFULL;
 inline constexpr uint64_t INT_SIGN_BIT = 0x0000800000000000ULL;
 inline constexpr int64_t INT_INLINE_MIN = -(int64_t{1} << 47);
 inline constexpr int64_t INT_INLINE_MAX = (int64_t{1} << 47) - 1;
+
+// The inline tag must not read as an object, a Number, or one of the tags
+// above, or a value of one kind would classify as two.
+static_assert((INT_TAG & INT_TAG_MASK) == INT_TAG, "INT_TAG bits stay clear");
+static_assert((INT_TAG & QNAN) == QNAN, "an inline Int is never a Number");
+static_assert((INT_TAG & OBJ_TAG) != OBJ_TAG,
+              "an inline Int is never an object");
+static_assert((VAL_NIL & INT_TAG_MASK) != INT_TAG &&
+                  (VAL_FALSE & INT_TAG_MASK) != INT_TAG &&
+                  (VAL_TRUE & INT_TAG_MASK) != INT_TAG &&
+                  (VAL_UNBOUND_GLOBAL & INT_TAG_MASK) != INT_TAG,
+              "no existing tag reads as an inline Int");
 } // namespace detail
 
 inline constexpr bool intFitsInline(Int v) {
