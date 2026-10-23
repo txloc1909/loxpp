@@ -141,9 +141,9 @@ A fractional Number, a NaN, an infinity, a Number outside the range, a String
 that is not of that form, and a value of any other kind are runtime errors. A
 String has no white space, no `0x` prefix, no suffix, and no fractional part:
 `int("0x10")`, `int(" 1")`, `int("1i")`, `int("1.0")`, `int("")`, and
-`int("9223372036854775808")` are runtime errors. A hexadecimal String goes
-through `integer.parse_unsigned` for an unsigned decimal, or through a loop
-that the program writes.
+`int("9223372036854775808")` are runtime errors. A program that reads a
+hexadecimal String writes a loop for it. `integer.parse_unsigned` reads an
+unsigned decimal String.
 
 ```lox
 print int(5.0);           // 5
