@@ -77,6 +77,11 @@ probes=(
     # Run-parity proof for normalizeFoldedOperands's own required
     # coverage — the nine folded-operand shapes and a nested match subject.
     "test/translation-probes/28_folded_match_operand_family.lox"
+    # A folded match result with a deficit of two or more (issue #821): the
+    # compiler folds every live sibling operand below the match into a phantom
+    # local, so normalizeFoldedOperands must load all of them back, bottom
+    # first, in ascending slot order.
+    "test/translation-probes/164_folded_match_deficit_two_or_more.lox"
     # RETURN of a folded match (issue #647): the result is a named local, so
     # the JVM backend must load it before areturn.
     "test/translation-probes/105_return_folded_match.lox"

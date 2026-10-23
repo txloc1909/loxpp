@@ -2855,6 +2855,156 @@ TEST(EmitScript,
     expectEveryJumpTargetIsLabeled(j);
 }
 
+// Issue #821: a deficit of two or more. `compileMatchBody` reserves one
+// phantom local per live sibling operand BELOW a `match` (compiler.cpp), so
+// every one of those siblings folds into a named local too — `1 + match ...`
+// folds the `1` and the match result alike, and `normalizeFoldedOperands`
+// must load them all back, bottom first, in ascending slot order. The first
+// three tests use zero genuine operands; the last two add two genuine
+// operands ABOVE the match, which exercise the argScratchBase spill and the
+// computeMaxSpillWidth sizing that supports it. Proved-it-fails: reverted the
+// repair's multi-slot loop to the old deficit >= 2 throw and confirmed the
+// first three fail with the named error; reverted computeMaxSpillWidth's
+// `deficit >= 1` back to `deficit == 1` and confirmed the defer test fails
+// because argScratchBase is never allocated; then restored both.
+
+// ADD with a live sibling operand BELOW the match: both operands fold, so
+// the repair loads slot 3 (the `1`, its phantom local) then slot 4 (the
+// match result), bottom first — [1, result] in source order.
+TEST(EmitScript, AddWithALiveSiblingBelowAFoldedMatchLoadsBothBottomFirst) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("print 1 + match 1 { case 1 => 5 case _ => 6 };\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(j.find("aload 3\n"
+                     "    aload 4\n"
+                     "    invokestatic lox/LoxOps/add(Ljava/lang/Object;Ljava/"
+                     "lang/Object;)Ljava/lang/Object;\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// CALL with the callee and one argument BELOW the match: all three operands
+// fold, so the repair loads slot 3 (callee), slot 4 (the `10`), and slot 5
+// (the match result), bottom first, before CALL's own unrelated arg spill.
+TEST(EmitProgram, CallWithCalleeAndArgBelowAFoldedMatchLoadsAllThree) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun two(a, b) { return a + b; }\n"
+                     "print two(10, match 1 { case 1 => 2 case _ => 3 });\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("aload 3\n"
+                        "    aload 4\n"
+                        "    aload 5\n"
+                        "    astore 10\n"
+                        "    astore 9\n"
+                        "    astore 8\n"
+                        "    aload 8\n"
+                        "    iconst_2\n"
+                        "    anewarray java/lang/Object\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// BUILD_LIST with an element BELOW the match: both elements fold, so the
+// repair loads slot 3 (the `1`) then slot 4 (the match result), bottom
+// first, before BUILD_LIST's own width-2 spill.
+TEST(EmitScript, BuildListWithAnElementBelowAFoldedMatchLoadsBothBottomFirst) {
+    MemoryManager mm;
+    DecodedFunction fn = decodeScript(
+        "print [1, match 1 { case 1 => \"e\" case _ => \"z\" }];\n", mm);
+    FunctionStackAnalysis analysis = analyzeStack(fn);
+    std::string j;
+    ASSERT_NO_THROW(j = jvm::emitScript(fn, analysis, "LoxMain"));
+
+    EXPECT_NE(j.find("aload 3\n"
+                     "    aload 4\n"
+                     "    astore 9\n"
+                     "    astore 8\n"
+                     "    iconst_2\n"
+                     "    anewarray java/lang/Object\n"),
+              std::string::npos)
+        << j;
+    expectEveryJumpTargetIsLabeled(j);
+}
+
+// CALL with two genuine operands ABOVE the match (issue #821, reviewer
+// finding): the callee, `1`, and the match result fold (deficit 3), while
+// `4` and `5` stay genuine, so the repair spills both to argScratchBase
+// (slots 9, 10), loads the three folded locals ascending, then reloads both
+// genuine operands in reverse.
+TEST(EmitProgram, CallWithTwoGenuineOperandsAboveAFoldedMatchSpillsBoth) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun four(a, b, c, d) { return a + b + c + d; }\n"
+                     "print four(1, match 1 { case 1 => 2 case _ => 3 }, 4, "
+                     "5);\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    const std::string& main = classes[0].source;
+    EXPECT_NE(main.find("astore 9\n"
+                        "    astore 10\n"
+                        "    aload 3\n"
+                        "    aload 4\n"
+                        "    aload 5\n"
+                        "    aload 10\n"
+                        "    aload 9\n"),
+              std::string::npos)
+        << main;
+    expectEveryJumpTargetIsLabeled(main);
+}
+
+// DEFER_RECORD with two genuine operands ABOVE the match. DEFER_RECORD is
+// not in computeMaxSpillWidth's own width scan (only CALL/INVOKE/
+// SUPER_INVOKE/BUILD_LIST/BUILD_MAP are), so its argScratchBase comes
+// entirely from the repair term — this is the shape the `deficit >= 1`
+// change exists to support. The repair spills both genuine operands, loads
+// the three folded locals, and reloads the genuine two.
+TEST(EmitProgram, DeferWithTwoGenuineOperandsAboveAFoldedMatchSizesSpill) {
+    MemoryManager mm;
+    DecodedFunction fn =
+        decodeScript("fun four(a, b, c, d) { print a + b + c + d; }\n"
+                     "fun g() { defer four(1, match 1 { case 1 => 2 case _ => "
+                     "3 }, 4, 5); }\n"
+                     "g();\n",
+                     mm);
+    StackAnalysisTree tree = analyzeStackTree(fn);
+    std::vector<jvm::EmittedClass> classes =
+        jvm::emitProgram(fn, tree, "LoxMain");
+
+    // The repair lives in `g` (the second function class, after the script
+    // and `four`); find it by its distinctive spill-then-load shape rather
+    // than hard-coding the defer function's slot numbers, which the try/
+    // catch scaffolding shifts.
+    std::string all;
+    for (const jvm::EmittedClass& cls : classes) {
+        all += cls.source;
+        all += "\n";
+    }
+    EXPECT_NE(all.find("astore 18\n"
+                       "    astore 19\n"
+                       "    aload 5\n"
+                       "    aload 6\n"
+                       "    aload 7\n"
+                       "    aload 19\n"
+                       "    aload 18\n"),
+              std::string::npos)
+        << all;
+}
+
 // Exception handling: PUSH_HANDLER/POP_HANDLER emit .catch directive
 // with correct region boundaries (start and end labels) and handler target.
 TEST(EmitScript, TryCatchEmitsExceptionTableEntry) {
