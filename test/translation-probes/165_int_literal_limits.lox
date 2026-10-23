@@ -3,18 +3,23 @@
 // Int has no literal of its own: `-9223372036854775808i` is a unary minus and
 // the literal `9223372036854775808i`, which the unary-minus exception allows,
 // with or without white space. A binary operator after the literal is valid
-// too, because the unary minus takes only the literal. Leading zeros do not
-// count towards the 64 bits. The suffix boundary has its limit too: a space
-// after the suffix, before `in` and before the `if` of a guard, is valid, and
-// so is a space after a fractional literal there (the limit of `1.5in`). A
-// hexadecimal or binary literal has no suffix, so it ends at its last digit of
-// its base and `in` or `if` may follow it directly: `0x1in [1i]` is `0x1 in
-// [1i]`. Each static-error probe has this file as its twin: a consumer that
-// rejects every Int literal passes the static-error probe and fails this one.
+// too, because the unary minus takes only the literal. The range of a decimal
+// literal is by value, so leading zeros do not change it: `09223372036854775807i`
+// is the largest Int, and `-09223372036854775808i` is the smallest. Leading
+// zeros of a hexadecimal or binary literal do not count towards the 64 bits
+// either. The suffix boundary has its limit too: a space after the suffix,
+// before `in` and before the `if` of a guard, is valid, and so is a space
+// after a fractional literal there (the limit of `1.5in`). A hexadecimal or
+// binary literal has no suffix, so it ends at its last digit of its base and
+// `in` or `if` may follow it directly: `0x1in [1i]` is `0x1 in [1i]`. Each
+// static-error probe has this file as its twin: a consumer that rejects every
+// Int literal passes the static-error probe and fails this one.
 
 print 9223372036854775807i;
 print -9223372036854775808i;
 print - 9223372036854775808i;
+print 09223372036854775807i;
+print -09223372036854775808i;
 print 0xFFFFFFFFFFFFFFFF;
 print 0x0000000000000000FFFFFFFFFFFFFFFF;
 print 0x8000000000000000;
@@ -58,6 +63,8 @@ print pick_hex(1i);
 // STATUS: ok
 // CHECK: 9223372036854775807
 // CHECK: -9223372036854775808
+// CHECK: -9223372036854775808
+// CHECK: 9223372036854775807
 // CHECK: -9223372036854775808
 // CHECK: -1
 // CHECK: -1
