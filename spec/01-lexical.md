@@ -238,6 +238,7 @@ lexeme, and any other token as its lexeme. `Result` is `valid`, or the row of
 | Source | Tokens | Result |
 |---|---|---|
 | `007i` | `INT 007i` | valid |
+| `15i` | `INT 15i` | valid |
 | `9223372036854775807i` | `INT 9223372036854775807i` | valid |
 | `09223372036854775807i` | `INT 09223372036854775807i` | valid |
 | `-9223372036854775808i` | `-` `INT 9223372036854775808i` | valid |

@@ -43,6 +43,11 @@ Then:
 
 The script does not read the `Tokens` column: it is for the reader.
 
+Each cell of the first table that is one code span is a form of the second. The
+`Example` cell is a row whose `Result` is the row of its own, and the
+`Accepted limit` cell is a row whose `Result` is `valid`. A cell of prose, such
+as `0b` followed by 64 ones, is skipped.
+
 The check also runs the other way. Each rejected probe holds the `Source` of a
 row whose `Result` is the row of its COVERS line, so a form that a probe
 rejects cannot be missing from the table. The `valid` rows have no such link,
@@ -67,7 +72,7 @@ SCRIPT = "check_int_literal_rejections.py"
 # and the binary row apart, and the suffix boundary.
 EXPECTED_ROWS = {"decimal-range", "hex-width", "binary-width", "fractional-suffix", "suffix-boundary"}
 # The `valid` rows of the table of examples in spec/01-lexical.md.
-VALID_EXAMPLES = 18
+VALID_EXAMPLES = 19
 VALID = "valid"
 # The first line of code of a rejected probe: a `print` of a String.
 LEADING_PRINT = re.compile(r'^print "[^"\\]+";$')
@@ -218,16 +223,23 @@ def main() -> None:
                 f"{path.name} is a rejected probe of {', '.join(sorted(row_ids))}: "
                 f"no row of the table of examples has a Source that it holds, with that Result"
             )
-    # The Example cell of the first table is a form of the second.
+    # The Example cell and the Accepted limit cell of the first table are forms
+    # of the second: the Example breaks the row, and the Accepted limit is valid.
     for row in rows:
         try:
-            row_id, example_source = code(row["Row"]), code(row["Example"])
+            row_id = code(row["Row"])
         except SpecError:
-            continue  # a cell of prose, such as `0b1` followed by 64 zeros
-        if (example_source, row_id) not in forms:
-            problems.append(
-                f"row {row_id!r}: its Example {example_source!r} is not a row of the table of examples with that Result"
-            )
+            continue  # already reported with the row ids above
+        for column, result in (("Example", row_id), ("Accepted limit", VALID)):
+            try:
+                cell_source = code(row[column])
+            except SpecError:
+                continue  # a cell of prose, such as `0b1` followed by 64 zeros
+            if (cell_source, result) not in forms:
+                problems.append(
+                    f"row {row_id!r}: its {column} {cell_source!r} is not a row of the table of examples "
+                    f"with the Result {result!r}"
+                )
 
     report(
         SCRIPT,
