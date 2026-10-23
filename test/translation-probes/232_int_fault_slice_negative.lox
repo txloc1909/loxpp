@@ -1,0 +1,16 @@
+// A slice bound below zero is a runtime error, an Int bound included
+// (spec/04-semantics.md, Slice Get).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print [1, 2, 3][0i:2i];
+[1, 2][-1i:2i];
+print "unreachable";
+
+// STATUS: error
+// CHECK: [1, 2]

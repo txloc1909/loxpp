@@ -1,0 +1,91 @@
+// The precedence table of spec/02-syntax.md, rows 5 to 12: `|` binds tighter
+// than the comparisons and `==`, `^` tighter than `|`, `&` tighter than `^`,
+// the shifts tighter than `&`, and `+` `-` tighter than the shifts. `~` is a
+// unary operator of the row of `!` and unary `-`. Each expression is chosen so
+// that the grouping of a neighbouring row gives another value. The expected
+// values are the values of the same expressions in Python, whose precedence
+// for these operators is the same.
+
+print 1i | 2i == 3i;
+print 6i & 1i == 0i;
+print 1i | 2i < 4i;
+print 1i | 2i in [3i];
+print 1i << 1i < 3i;
+print 6i & 3i != 2i;
+print 1i | 2i ^ 3i;
+print 5i ^ 3i | 8i;
+print 1i ^ 3i & 2i;
+print 6i & 3i ^ 1i;
+print 1i & 3i << 1i;
+print 6i << 1i & 8i;
+print 6i >> 1i & 2i;
+print 1i << 2i + 1i;
+print 16i >> 2i - 1i;
+print 3i + 1i << 2i;
+print 1i << 2i * 2i;
+print 64i >> 8i / 4i;
+print 1i << 7i % 4i;
+print ~1i + 1i;
+print ~1i << 1i;
+print ~-1i;
+print -~1i;
+print -1i << 1i;
+print ~5i & 12i;
+print ~[5i][0i];
+print (1i | 2i) ^ 3i;
+print (1i | 2i) & 6i;
+print 16i >> 1i >> 2i;
+print 1i << 1i << 2i;
+print 256i >> 4i << 2i;
+print 1i & 3i == 1i and 2i | 4i == 6i;
+print 1i & 2i == 2i or 3i ^ 3i == 0i;
+print -1i >>> 60i >> 1i;
+print -1i >>> 60i + 1i - 1i;
+print 2i + 3i >>> 1i;
+print 12i & 10i >>> 1i;
+print 1i | 2i >>> 1i;
+
+// STATUS: ok
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: 1
+// CHECK: 14
+// CHECK: 3
+// CHECK: 3
+// CHECK: 0
+// CHECK: 8
+// CHECK: 2
+// CHECK: 8
+// CHECK: 8
+// CHECK: 16
+// CHECK: 16
+// CHECK: 16
+// CHECK: 8
+// CHECK: -1
+// CHECK: -4
+// CHECK: 0
+// CHECK: 2
+// CHECK: -2
+// CHECK: 8
+// CHECK: -6
+// CHECK: 0
+// CHECK: 2
+// CHECK: 2
+// CHECK: 8
+// CHECK: 64
+// CHECK: true
+// CHECK: true
+// CHECK: 7
+// CHECK: 15
+// CHECK: 2
+// CHECK: 4
+// CHECK: 1
+// COVERS: precedence 6
+// COVERS: precedence 7
+// COVERS: precedence 8
+// COVERS: precedence 9
+// COVERS: precedence 12

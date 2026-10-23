@@ -145,8 +145,10 @@ jobs:
               tree-sitter test
               # Probes 141 and 142 hold an arm that the grammar rejects on
               # purpose (the comma chain, and a constructor pattern with no
-              # enum name), so they are not in the parse. A spec probe that
-              # the grammar does not parse yet is listed in
+              # enum name), and probes 173 to 175 hold a literal that the
+              # grammar rejects on purpose (`1.5i`, `1.0i`, and `1 i`), so
+              # they are not in the parse. A spec probe that the grammar does
+              # not parse yet is listed in
               # tools/spec-probe-xfail/tree-sitter.txt, and it is left out
               # too. A listed name that is not a probe file fails the step.
               notyet=$(grep -v "^#" ../../tools/spec-probe-xfail/tree-sitter.txt | awk "NF {print \$1}" | tr "\n" " ")
@@ -160,6 +162,8 @@ jobs:
               for f in ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox; do
                 case "$f" in
                   *141_match_comma_chain_rejected*|*142_bare_positional_pattern_rejected*) continue ;;
+                  *173_int_fractional_suffix_rejected*|*174_int_fractional_zero_suffix_rejected*) continue ;;
+                  *175_int_suffix_detached_rejected*) continue ;;
                 esac
                 case " $notyet " in
                   *" $(basename "$f") "*) continue ;;

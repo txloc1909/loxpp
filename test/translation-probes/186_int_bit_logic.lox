@@ -1,0 +1,151 @@
+// `a & b`, `a | b`, and `a ^ b` work on all 64 bits, and `~a` inverts every
+// bit (spec/04-semantics.md, Bit Operators). The operands are written as
+// hexadecimal patterns, and the output is the signed decimal value, so a
+// pattern with bit 63 set prints as a negative Int.
+
+fun band(a, b) { return a & b; }
+fun bor(a, b) { return a | b; }
+fun bxor(a, b) { return a ^ b; }
+fun bnot(a) { return ~a; }
+print band(0x0, 0xFFFFFFFFFFFFFFFF);
+print band(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+print band(0x1, 0x3);
+print band(0x5555555555555555, 0xAAAAAAAAAAAAAAAA);
+print band(0xF0F0F0F0F0F0F0F0, 0xF0F0F0F0F0F0F0F);
+print band(0x8000000000000000, 0x7FFFFFFFFFFFFFFF);
+print band(0x8000000000000000, 0xFFFFFFFFFFFFFFFF);
+print band(0xFFFFFFFF, 0xFFFFFFFF00000000);
+print band(0xDEADBEEFCAFEBABE, 0x123456789ABCDEF);
+print band(0x7FFFFFFFFFFFFFFF, 0x1);
+print band(0x6, 0x3);
+print band(0x3039, 0x0);
+print bor(0x0, 0xFFFFFFFFFFFFFFFF);
+print bor(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+print bor(0x1, 0x3);
+print bor(0x5555555555555555, 0xAAAAAAAAAAAAAAAA);
+print bor(0xF0F0F0F0F0F0F0F0, 0xF0F0F0F0F0F0F0F);
+print bor(0x8000000000000000, 0x7FFFFFFFFFFFFFFF);
+print bor(0x8000000000000000, 0xFFFFFFFFFFFFFFFF);
+print bor(0xFFFFFFFF, 0xFFFFFFFF00000000);
+print bor(0xDEADBEEFCAFEBABE, 0x123456789ABCDEF);
+print bor(0x7FFFFFFFFFFFFFFF, 0x1);
+print bor(0x6, 0x3);
+print bor(0x3039, 0x0);
+print bxor(0x0, 0xFFFFFFFFFFFFFFFF);
+print bxor(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+print bxor(0x1, 0x3);
+print bxor(0x5555555555555555, 0xAAAAAAAAAAAAAAAA);
+print bxor(0xF0F0F0F0F0F0F0F0, 0xF0F0F0F0F0F0F0F);
+print bxor(0x8000000000000000, 0x7FFFFFFFFFFFFFFF);
+print bxor(0x8000000000000000, 0xFFFFFFFFFFFFFFFF);
+print bxor(0xFFFFFFFF, 0xFFFFFFFF00000000);
+print bxor(0xDEADBEEFCAFEBABE, 0x123456789ABCDEF);
+print bxor(0x7FFFFFFFFFFFFFFF, 0x1);
+print bxor(0x6, 0x3);
+print bxor(0x3039, 0x0);
+print bnot(0x0);
+print bnot(0xFFFFFFFFFFFFFFFF);
+print bnot(0x1);
+print bnot(0x5555555555555555);
+print bnot(0xAAAAAAAAAAAAAAAA);
+print bnot(0xF0F0F0F0F0F0F0F0);
+print bnot(0xF0F0F0F0F0F0F0F);
+print bnot(0x8000000000000000);
+print bnot(0x7FFFFFFFFFFFFFFF);
+print bnot(0xFFFFFFFF);
+print bnot(0xFFFFFFFF00000000);
+print bnot(0xDEADBEEFCAFEBABE);
+print 0x0 ^ 0x0;
+print 0xFFFFFFFFFFFFFFFF ^ 0xFFFFFFFFFFFFFFFF;
+print 0x1 ^ 0x1;
+print 0x5555555555555555 ^ 0x5555555555555555;
+print 0xAAAAAAAAAAAAAAAA ^ 0xAAAAAAAAAAAAAAAA;
+print 0xF0F0F0F0F0F0F0F0 ^ 0xF0F0F0F0F0F0F0F0;
+print 0xF0F0F0F0F0F0F0F ^ 0xF0F0F0F0F0F0F0F;
+print 0x8000000000000000 ^ 0x8000000000000000;
+print 0x7FFFFFFFFFFFFFFF ^ 0x7FFFFFFFFFFFFFFF;
+print 0xFFFFFFFF ^ 0xFFFFFFFF;
+print 0xFFFFFFFF00000000 ^ 0xFFFFFFFF00000000;
+print 0xDEADBEEFCAFEBABE ^ 0xDEADBEEFCAFEBABE;
+print ~0i;
+print ~-1i;
+print ~5i;
+print ~-9223372036854775808i;
+print ~9223372036854775807i;
+print 6i & 3i;
+print 6i | 3i;
+print 6i ^ 3i;
+
+// STATUS: ok
+// CHECK: 0
+// CHECK: -1
+// CHECK: 1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: -9223372036854775808
+// CHECK: 0
+// CHECK: 9293516952471726
+// CHECK: 1
+// CHECK: 2
+// CHECK: 0
+// CHECK: -1
+// CHECK: -1
+// CHECK: 3
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -2328361076942438401
+// CHECK: 9223372036854775807
+// CHECK: 7
+// CHECK: 12345
+// CHECK: -1
+// CHECK: 0
+// CHECK: 2
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: 9223372036854775807
+// CHECK: -1
+// CHECK: -2337654593894910127
+// CHECK: 9223372036854775806
+// CHECK: 5
+// CHECK: 12345
+// CHECK: -1
+// CHECK: 0
+// CHECK: -2
+// CHECK: -6148914691236517206
+// CHECK: 6148914691236517205
+// CHECK: 1085102592571150095
+// CHECK: -1085102592571150096
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: -4294967296
+// CHECK: 4294967295
+// CHECK: 2401053089206453569
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: -1
+// CHECK: 0
+// CHECK: -6
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: 2
+// CHECK: 7
+// CHECK: 5
+// COVERS: operand-kind & int
+// COVERS: operand-kind | int
+// COVERS: operand-kind ^ int
+// COVERS: operand-kind ~ int

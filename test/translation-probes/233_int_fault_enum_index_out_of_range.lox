@@ -1,0 +1,17 @@
+// An enum field index outside the fields is a halting fault, an Int index
+// included (spec/04-semantics.md, Index Get).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+enum E { A(x) }
+print E.A(7)[0i];
+E.A(7)[3i];
+print "unreachable";
+
+// STATUS: error
+// CHECK: 7

@@ -1,0 +1,17 @@
+// Every argument of `integer.max` must be an Int. The second argument here is
+// a Number (spec/05-stdlib.md).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print integer.max(1i, 2i);
+integer.max(1i, 2);
+print "unreachable";
+
+// STATUS: error
+// CHECK: 2
+// COVERS: fault integer_module_non_int

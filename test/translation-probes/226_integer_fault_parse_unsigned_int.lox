@@ -1,0 +1,17 @@
+// The argument of `integer.parse_unsigned` must be a String. An Int is a
+// runtime error (spec/05-stdlib.md).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print integer.parse_unsigned("5");
+integer.parse_unsigned(5i);
+print "unreachable";
+
+// STATUS: error
+// CHECK: 5
+// COVERS: fault integer_module_non_int

@@ -1,0 +1,13 @@
+// A binary minus has a left operand, so the literal 9223372036854775808i after
+// it is not the direct operand of a unary minus. It is a static error
+// (spec/01-lexical.md, the unary-minus exception).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). An implementation
+// that runs the program fails this probe.
+
+print 0i - 9223372036854775808i;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal decimal-range

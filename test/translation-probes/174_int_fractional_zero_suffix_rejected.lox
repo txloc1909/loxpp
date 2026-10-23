@@ -1,0 +1,13 @@
+// The rule does not look at the value: `1.0i` has a fractional part and the
+// suffix, so it is a static error (spec/01-lexical.md, row `fractional-
+// suffix`).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). An implementation
+// that runs the program fails this probe.
+
+print 1.0i;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal fractional-suffix

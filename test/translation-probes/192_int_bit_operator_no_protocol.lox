@@ -1,0 +1,112 @@
+// The bit operators have no operator method and no reflected form
+// (spec/04-semantics.md, Operator Overloading). An Instance operand, on either
+// side, raises BitwiseTypeError, even for a class that defines methods named
+// like operators. The arithmetic protocols are unchanged: the same class
+// answers `+` through `__add__` and, on the right of an Int, through
+// `__radd__`.
+
+class C {
+    __add__(o) { return "add"; }
+    __radd__(o) { return "radd"; }
+    __and__(o) { return "and"; }
+    __or__(o) { return "or"; }
+    __xor__(o) { return "xor"; }
+    __lshift__(o) { return "lshift"; }
+    __rshift__(o) { return "rshift"; }
+    __urshift__(o) { return "urshift"; }
+    __invert__(o) { return "invert"; }
+    __rand__(o) { return "rand"; }
+    __ror__(o) { return "ror"; }
+    __rxor__(o) { return "rxor"; }
+    __rlshift__(o) { return "rlshift"; }
+    __rrshift__(o) { return "rrshift"; }
+    __bitand__(o) { return "bitand"; }
+    __bitor__(o) { return "bitor"; }
+    __bitxor__(o) { return "bitxor"; }
+    __shl__(o) { return "shl"; }
+    __shr__(o) { return "shr"; }
+    __not__(o) { return "not"; }
+}
+class Plain {}
+var c = C();
+var plain = Plain();
+print c + 1i;
+print 1i + c;
+print 1 + c;
+try { print c & 1i; } catch (e) { print e.kind; }
+try { print 1i & c; } catch (e) { print e.kind; }
+try { print plain & 1i; } catch (e) { print e.kind; }
+try { print 1i & plain; } catch (e) { print e.kind; }
+try { print c & c; } catch (e) { print e.kind; }
+try { print c | 1i; } catch (e) { print e.kind; }
+try { print 1i | c; } catch (e) { print e.kind; }
+try { print plain | 1i; } catch (e) { print e.kind; }
+try { print 1i | plain; } catch (e) { print e.kind; }
+try { print c | c; } catch (e) { print e.kind; }
+try { print c ^ 1i; } catch (e) { print e.kind; }
+try { print 1i ^ c; } catch (e) { print e.kind; }
+try { print plain ^ 1i; } catch (e) { print e.kind; }
+try { print 1i ^ plain; } catch (e) { print e.kind; }
+try { print c ^ c; } catch (e) { print e.kind; }
+try { print c << 1i; } catch (e) { print e.kind; }
+try { print 1i << c; } catch (e) { print e.kind; }
+try { print plain << 1i; } catch (e) { print e.kind; }
+try { print 1i << plain; } catch (e) { print e.kind; }
+try { print c << c; } catch (e) { print e.kind; }
+try { print c >> 1i; } catch (e) { print e.kind; }
+try { print 1i >> c; } catch (e) { print e.kind; }
+try { print plain >> 1i; } catch (e) { print e.kind; }
+try { print 1i >> plain; } catch (e) { print e.kind; }
+try { print c >> c; } catch (e) { print e.kind; }
+try { print c >>> 1i; } catch (e) { print e.kind; }
+try { print 1i >>> c; } catch (e) { print e.kind; }
+try { print plain >>> 1i; } catch (e) { print e.kind; }
+try { print 1i >>> plain; } catch (e) { print e.kind; }
+try { print c >>> c; } catch (e) { print e.kind; }
+try { print ~c; } catch (e) { print e.kind; }
+try { print ~plain; } catch (e) { print e.kind; }
+
+// STATUS: ok
+// CHECK: add
+// CHECK: radd
+// CHECK: radd
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// CHECK: BitwiseTypeError
+// COVERS: protocol &
+// COVERS: protocol |
+// COVERS: protocol ^
+// COVERS: protocol <<
+// COVERS: protocol >>
+// COVERS: protocol >>>
+// COVERS: protocol ~
+// COVERS: fault bitwise_type_error_instance

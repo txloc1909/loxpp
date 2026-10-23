@@ -1,0 +1,38 @@
+// A literal pattern of a `match` arm follows `==` (spec/03-types.md, Int): the
+// pattern `1i` matches the Int 1 and not the Number 1, and an Int pattern
+// matches an Int of the same value however the literal is spelled, a heap-held
+// value included.
+
+fun classify(x) {
+    return match x {
+        case 1 => "number one"
+        case 1i => "int one"
+        case 0x7FFFFFFFFFFFFFFF => "max"
+        case 2i or 3i => "two or three"
+        case 9007199254740993i => "2^53 + 1"
+        case 9007199254740992i => "2^53"
+        case _ => "other"
+    };
+}
+print classify(1);
+print classify(1i);
+print classify(9223372036854775807i);
+print classify(0x7FFFFFFFFFFFFFFF);
+print classify(3i);
+print classify(3);
+print classify(9007199254740993i);
+print classify(9007199254740992i);
+print classify(4i);
+print classify("1");
+
+// STATUS: ok
+// CHECK: number one
+// CHECK: int one
+// CHECK: max
+// CHECK: max
+// CHECK: two or three
+// CHECK: other
+// CHECK: 2^53 + 1
+// CHECK: 2^53
+// CHECK: other
+// CHECK: other

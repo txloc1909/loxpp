@@ -1,0 +1,32 @@
+// The result of `__len__` and `__hash__` must be a Number, and an Int is not a
+// Number, so a method that returns an Int raises OperatorResultTypeError
+// (spec/04-semantics.md, Operator Overloading). The result of `__add__` is
+// unconstrained, so it may return an Int. The lines that return a Number are
+// controls.
+
+class LenNumber { __len__() { return 3; } }
+class LenInt { __len__() { return 3i; } }
+class HashNumber { __hash__() { return 7; } __eq__(o) { return true; } }
+class HashInt { __hash__() { return 7i; } __eq__(o) { return true; } }
+class AddInt { __add__(o) { return 5i; } }
+print len(LenNumber());
+try { print len(LenInt()); } catch (e) { print e.kind; }
+var m = {};
+m[HashNumber()] = 1;
+print len(m);
+try { m[HashInt()] = 2; } catch (e) { print e.kind; }
+print len(m);
+print AddInt() + 1;
+print type(AddInt() + 1);
+
+// STATUS: ok
+// CHECK: 3
+// CHECK: OperatorResultTypeError
+// CHECK: 1
+// CHECK: OperatorResultTypeError
+// CHECK: 1
+// CHECK: 5
+// CHECK: Int
+// COVERS: protocol-result __len__
+// COVERS: protocol-result __hash__
+// COVERS: fault operator_result_type_error_int

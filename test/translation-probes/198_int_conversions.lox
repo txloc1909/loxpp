@@ -1,0 +1,104 @@
+// `int(x)` gives an Int for an Int, an integer-valued Number in the range of
+// an Int, and a String of an optional sign and decimal digits
+// (spec/05-stdlib.md). `float(x)` gives a Number for a Number, an Int, and a
+// String of the form of a Number literal. `float` of an Int beyond 2^53 rounds
+// to the nearest double, and a tie goes to the even one. The rounding lines
+// compare with `==` against a Number literal, because a Number prints in a
+// format that cuts the digits.
+
+print int(5);
+print type(int(5));
+print int(5.0);
+print int(0);
+print int(-0.0);
+print int(-7.0);
+print int(1234567.0);
+print int(4503599627370496.0);
+print int(9223372036854774784.0);
+print int(-9223372036854775808.0);
+print int(9007199254740992.0 * 2.0);
+print int("42");
+print int("-42");
+print int("+7");
+print int("007");
+print int("0");
+print int("-0");
+print int("9223372036854775807");
+print int("-9223372036854775808");
+print int("-0009223372036854775808");
+print int(123i);
+print int(9223372036854775807i);
+print type(int("1"));
+print int(math.floor(2.7));
+print int(math.round(2.5));
+print int(math.floor(-2.5));
+print float(3i) == 3;
+print type(float(3i));
+print float(0i) == 0;
+print float(9007199254740992i) == 9007199254740992.0;
+print float(9007199254740993i) == 9007199254740992.0;
+print float(9007199254740995i) == 9007199254740996.0;
+print float(9223372036854775807i) == 9223372036854775808.0;
+print float(-9223372036854775808i) == -9223372036854775808.0;
+print float(3i) == 3i;
+print float("2.5");
+print float("-0.25");
+print float("+3");
+print float("007.50");
+print float("0");
+print float("12");
+print float(2.5);
+print type(float("1"));
+print float(1i) + 0.5;
+print int(float(5i));
+print type(int(float(5i)));
+print float(int(2.0)) == 2;
+
+// STATUS: ok
+// CHECK: 5
+// CHECK: Int
+// CHECK: 5
+// CHECK: 0
+// CHECK: 0
+// CHECK: -7
+// CHECK: 1234567
+// CHECK: 4503599627370496
+// CHECK: 9223372036854774784
+// CHECK: -9223372036854775808
+// CHECK: 18014398509481984
+// CHECK: 42
+// CHECK: -42
+// CHECK: 7
+// CHECK: 7
+// CHECK: 0
+// CHECK: 0
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: -9223372036854775808
+// CHECK: 123
+// CHECK: 9223372036854775807
+// CHECK: Int
+// CHECK: 2
+// CHECK: 3
+// CHECK: -3
+// CHECK: true
+// CHECK: Number
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: 2.5
+// CHECK: -0.25
+// CHECK: 3
+// CHECK: 7.5
+// CHECK: 0
+// CHECK: 12
+// CHECK: 2.5
+// CHECK: Number
+// CHECK: 1.5
+// CHECK: 5
+// CHECK: Int
+// CHECK: true

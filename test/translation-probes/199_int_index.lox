@@ -1,0 +1,103 @@
+// A List or String index, a slice bound, and an enum field index accept an
+// integral Number or an Int, with the same range checks (spec/04-semantics.md,
+// Index Get and Slice Get). An Int that no index can reach, such as the
+// largest, the smallest, 2^32, and 2^32 + 1, is out of bounds: it must not be
+// cut to a smaller integer first, because 2^32 cut to 32 bits is the index 0.
+// A Map index is a key, and `1` and `1i` are two keys. `len` gives a Number.
+
+var l = [10, 20, 30];
+var s = "abc";
+print l[0i];
+print l[2i];
+print l[0x2];
+print l[1];
+print l[1.0];
+l[1i] = 99;
+print l;
+print s[1i];
+print s[0x2];
+try { print l[3i]; } catch (e) { print e.kind; }
+try { print l[-1i]; } catch (e) { print e.kind; }
+try { print l[9223372036854775807i]; } catch (e) { print e.kind; }
+try { print l[-9223372036854775808i]; } catch (e) { print e.kind; }
+try { print l[4294967296i]; } catch (e) { print e.kind; }
+try { print l[4294967297i]; } catch (e) { print e.kind; }
+try { print l[0x7FFFFFFF00000000]; } catch (e) { print e.kind; }
+try { print l[0x100000000000000]; } catch (e) { print e.kind; }
+try { print s[3i]; } catch (e) { print e.kind; }
+try { print s[-1i]; } catch (e) { print e.kind; }
+try { print s[4294967296i]; } catch (e) { print e.kind; }
+try { print s[0x7FFFFFFFFFFFFFFF]; } catch (e) { print e.kind; }
+try { print l[3i] = 1; } catch (e) { print e.kind; }
+try { print l[-1i] = 1; } catch (e) { print e.kind; }
+try { print l[4294967296i] = 1; } catch (e) { print e.kind; }
+try { print l["a"]; } catch (e) { print e.kind; }
+try { print l[1.5]; } catch (e) { print e.kind; }
+print l[0i:2i];
+print s[1i:3i];
+print l[0i:9223372036854775807i];
+print s[0i:9223372036854775807i];
+print l[2i:1i];
+print l[5i:7i];
+print l[9223372036854775807i:9223372036854775807i];
+print s[0:2i];
+print s[1i:2];
+enum E { A(x, y) }
+var v = E.A(7, 8);
+print v[0i];
+print v[1i];
+print v[0x1];
+var m = {1: "number", 1i: "int"};
+print m[1];
+print m[1i];
+print m[0x1];
+print len(l);
+print len(l) == 3;
+print len(l) == 3i;
+print type(len(l));
+
+// STATUS: ok
+// CHECK: 10
+// CHECK: 30
+// CHECK: 30
+// CHECK: 20
+// CHECK: 20
+// CHECK: [10, 99, 30]
+// CHECK: b
+// CHECK: c
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexOutOfBoundsError
+// CHECK: IndexTypeError
+// CHECK: IndexNotIntegerError
+// CHECK: [10, 99]
+// CHECK: bc
+// CHECK: [10, 99, 30]
+// CHECK: abc
+// CHECK: []
+// CHECK: []
+// CHECK: []
+// CHECK: ab
+// CHECK: b
+// CHECK: 7
+// CHECK: 8
+// CHECK: 8
+// CHECK: number
+// CHECK: int
+// CHECK: int
+// CHECK: 3
+// CHECK: true
+// CHECK: false
+// CHECK: Number

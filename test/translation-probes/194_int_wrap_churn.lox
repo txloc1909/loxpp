@@ -1,0 +1,22 @@
+// A linear congruential generator over the full 64 bits: each step multiplies
+// and adds with a wrap, so almost every value is outside the range that an
+// implementation may hold inline. The loop makes enough garbage to run the
+// collector, and the final state and the xor of the high halves must be exact
+// (spec/04-semantics.md, Arithmetic and Bit Operators).
+
+var x = 1i;
+var acc = 0i;
+var i = 0;
+while (i < 20000) {
+    x = x * 6364136223846793005i + 1442695040888963407i;
+    acc = acc ^ (x >>> 33i);
+    i = i + 1;
+}
+print x;
+print acc;
+print type(x);
+
+// STATUS: ok
+// CHECK: -7866893968077958367
+// CHECK: 292750075
+// CHECK: Int

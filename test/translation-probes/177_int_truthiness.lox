@@ -1,0 +1,32 @@
+// An Int is always truthy, `0i` and the smallest Int included
+// (spec/03-types.md, Truthiness). `!` of an Int is `false`
+// (spec/04-semantics.md, Operand Kinds).
+
+if (0i) { print "if 0i"; }
+if (0x0) { print "if 0x0"; }
+if (-9223372036854775808i) { print "if min"; }
+var k = 0i;
+while (k) { print "while"; k = nil; }
+print !0i;
+print !1i;
+print !9223372036854775807i;
+print !0;
+print 0i and "kept";
+print 0i or "dropped";
+print nil or 0i;
+print false or 0x7FFFFFFFFFFFFFFF;
+
+// STATUS: ok
+// CHECK: if 0i
+// CHECK: if 0x0
+// CHECK: if min
+// CHECK: while
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: kept
+// CHECK: 0
+// CHECK: 0
+// CHECK: 9223372036854775807
+// COVERS: operand-kind ! int

@@ -1,0 +1,40 @@
+// The literal that sits at the accepted limit of each static error of
+// spec/01-lexical.md, Static errors in Int literals, is valid. The smallest
+// Int has no literal of its own: `-9223372036854775808i` is a unary minus and
+// the literal `9223372036854775808i`, which the unary-minus exception allows,
+// with or without white space. Leading zeros do not count towards the 64 bits.
+// Each static-error probe has this file as its twin: a consumer that rejects
+// every Int literal passes the static-error probe and fails this one.
+
+print 9223372036854775807i;
+print -9223372036854775808i;
+print - 9223372036854775808i;
+print -0i;
+print 0xFFFFFFFFFFFFFFFF;
+print 0x0000000000000000FFFFFFFFFFFFFFFF;
+print 0x8000000000000000;
+print 0b1111111111111111111111111111111111111111111111111111111111111111;
+print 0b000000001111111111111111111111111111111111111111111111111111111111111111;
+print 0b1000000000000000000000000000000000000000000000000000000000000000;
+print 15i;
+print 1.5;
+print 1.0;
+
+// STATUS: ok
+// CHECK: 9223372036854775807
+// CHECK: -9223372036854775808
+// CHECK: -9223372036854775808
+// CHECK: 0
+// CHECK: -1
+// CHECK: -1
+// CHECK: -9223372036854775808
+// CHECK: -1
+// CHECK: -1
+// CHECK: -9223372036854775808
+// CHECK: 15
+// CHECK: 1.5
+// CHECK: 1
+// COVERS: literal-accepts decimal-range
+// COVERS: literal-accepts hex-width
+// COVERS: literal-accepts binary-width
+// COVERS: literal-accepts fractional-suffix

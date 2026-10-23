@@ -1,0 +1,25 @@
+// Each statement is the example of one row of spec/04-semantics.md, Int Edge
+// Cases, and its CHECK line is the result column of that row. No row is a
+// fault. tools/check_int_edge_rows.py reads this file and the table side by
+// side.
+
+print -9223372036854775808i / -1i;
+print -9223372036854775808i % -1i;
+print -(-9223372036854775808i);
+print 9223372036854775807i + 1i;
+print 1 == 1i;
+print 0i and "truthy";
+
+// STATUS: ok
+// CHECK: -9223372036854775808
+// CHECK: 0
+// CHECK: -9223372036854775808
+// CHECK: -9223372036854775808
+// CHECK: false
+// CHECK: truthy
+// COVERS: edge min-div-neg1
+// COVERS: edge min-mod-neg1
+// COVERS: edge neg-min
+// COVERS: edge max-plus-1
+// COVERS: edge int-number-equal
+// COVERS: edge zero-truthy
