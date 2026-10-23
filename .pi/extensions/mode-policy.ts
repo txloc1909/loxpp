@@ -3,14 +3,17 @@
  *
  * A turn is one assistant response plus its tool calls. It is a poor cost unit:
  * one turn can carry a large command output, and a turn that only reads context
- * is cheap but necessary. The policy therefore bills three separate things:
+ * is cheap but necessary. The policy therefore bills separate things:
  *
  * - gate runs: the expensive, deliberate attempt at the gate;
  * - idle turns: turns after the first change that changed nothing. A worktree
  *   that does not move is the signal, not a turn count;
  * - pre-mutation turns: reading turns. They have a generous ceiling and no
  *   other cap, because reading the issue, the decision, and the spec is the
- *   work, not a delay.
+ *   work, not a delay;
+ * - done attempts: `loxpp_done` retries wait for CI and review, not for a fix,
+ *   so they have their own budget;
+ * - total turns: a backstop for a mode that keeps acting but never finishes.
  */
 
 export type Mode = "goal" | "loop" | "resolve-issue";
@@ -18,16 +21,20 @@ export type Mode = "goal" | "loop" | "resolve-issue";
 export interface Policy {
   /** Gate runs allowed before the mode stops. */
   gateBudget: number;
+  /** `loxpp_done` attempts allowed, counted apart from the fix attempts. */
+  doneBudget: number;
   /** Turns without progress, after the first change, before the mode stops. */
   idleTurnsMax: number;
   /** Turns allowed before the first change. Reading below it is free. */
   preMutationTurnsMax: number;
+  /** Backstop for a mode that keeps changing the tree and never finishes. */
+  totalTurnsMax: number;
 }
 
 export const POLICY: Record<Mode, Policy> = {
-  goal: { gateBudget: 20, idleTurnsMax: 10, preMutationTurnsMax: 40 },
-  loop: { gateBudget: 12, idleTurnsMax: 10, preMutationTurnsMax: 40 },
-  "resolve-issue": { gateBudget: 20, idleTurnsMax: 10, preMutationTurnsMax: 40 },
+  goal: { gateBudget: 20, doneBudget: 12, idleTurnsMax: 10, preMutationTurnsMax: 40, totalTurnsMax: 120 },
+  loop: { gateBudget: 12, doneBudget: 12, idleTurnsMax: 10, preMutationTurnsMax: 40, totalTurnsMax: 80 },
+  "resolve-issue": { gateBudget: 20, doneBudget: 12, idleTurnsMax: 10, preMutationTurnsMax: 40, totalTurnsMax: 150 },
 };
 
 export interface PolicyState {
@@ -37,14 +44,26 @@ export interface PolicyState {
   idleTurns: number;
   /** Turns counted before the first change. */
   preMutationTurns: number;
-  /** loxpp_gate and loxpp_done invocations. */
+  /** All turns in this mode run. */
+  turns: number;
+  /** loxpp_gate invocations. */
   gateRuns: number;
+  /** loxpp_done invocations. */
+  doneRuns: number;
   /** The one grace turn after a green gate at the budget was already given. */
   graceUsed: boolean;
 }
 
 export function freshPolicyState(): PolicyState {
-  return { started: false, idleTurns: 0, preMutationTurns: 0, gateRuns: 0, graceUsed: false };
+  return {
+    started: false,
+    idleTurns: 0,
+    preMutationTurns: 0,
+    turns: 0,
+    gateRuns: 0,
+    doneRuns: 0,
+    graceUsed: false,
+  };
 }
 
 /** Fill in fields a state persisted by an older version of the extension lacks. */
@@ -78,6 +97,7 @@ export function decideTurn(
   mode: Mode,
 ): TurnDecision {
   const next = { ...state };
+  next.turns += 1;
 
   // Before the first change, no turn is billed against the idle cap. Only a
   // generous ceiling applies, so a read loop still ends.
@@ -102,6 +122,25 @@ export function decideTurn(
       reason: `${mode} mode stopped after ${policy.gateBudget} gate runs without completion. Last gate: ${
         signals.gatePassed ? "green, but loxpp_done was not called" : "failed"
       }. Continue by hand or re-run the mode.`,
+    };
+  }
+
+  // A done retry waits for CI and review, so it must not spend the fix attempts.
+  if (next.doneRuns >= policy.doneBudget) {
+    return {
+      stop: true,
+      state: next,
+      reason: `${mode} mode stopped after ${policy.doneBudget} loxpp_done attempts without completion. CI or review did not settle. Continue by hand or re-run the mode.`,
+    };
+  }
+
+  // Backstop: a mode that keeps changing the tree and never runs the gate is
+  // not idle, but it is still spending without end.
+  if (next.turns >= policy.totalTurnsMax) {
+    return {
+      stop: true,
+      state: next,
+      reason: `${mode} mode stopped at ${policy.totalTurnsMax} turns without completion. Make the next step a gate run or loxpp_done, or continue by hand.`,
     };
   }
 
@@ -130,11 +169,12 @@ export function decideTurn(
     };
   }
 
+  const done = next.doneRuns > 0 ? `, ${next.doneRuns}/${policy.doneBudget} done attempts` : "";
   return {
     stop: false,
     state: next,
     nudge: signals.progress
-      ? `[${mode}] ${next.gateRuns}/${policy.gateBudget} gate runs: progress. Continue; run loxpp_gate when the change is ready.`
-      : `[${mode}] ${next.gateRuns}/${policy.gateBudget} gate runs, ${next.idleTurns}/${policy.idleTurnsMax} turns without a change. Confirm the change, then run loxpp_gate.`,
+      ? `[${mode}] ${next.gateRuns}/${policy.gateBudget} gate runs${done}: progress. Continue; run loxpp_gate when the change is ready.`
+      : `[${mode}] ${next.gateRuns}/${policy.gateBudget} gate runs${done}, ${next.idleTurns}/${policy.idleTurnsMax} turns without a change. Confirm the change, then run loxpp_gate.`,
   };
 }

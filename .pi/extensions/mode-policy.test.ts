@@ -125,9 +125,47 @@ test("the attempt budget also bounds gate runs before the first change", () => {
   assert.match(d.stop === true ? d.reason : "", /after \d+ gate runs/);
 });
 
+test("done retries have their own budget and do not spend gate attempts", () => {
+  // A waiting CI run costs done attempts, not fix attempts.
+  const policy = { ...POLICY_UNDER_TEST, doneBudget: 3 };
+  let state = { ...freshPolicyState(), started: true };
+  const decisions = [];
+  for (let i = 0; i < 6; i += 1) {
+    state = { ...state, doneRuns: state.doneRuns + 1 };
+    const d = decideTurn(state, policy, progress, MODE);
+    state = d.state;
+    decisions.push(d);
+    if (d.stop) break;
+  }
+  const stop = decisions.at(-1);
+  assert.ok(stop && stop.stop, "the done budget must stop the mode");
+  assert.match(stop.reason, /loxpp_done attempts/);
+  assert.equal(state.gateRuns, 0, "a done attempt is not a gate attempt");
+  assert.equal(state.doneRuns, policy.doneBudget);
+});
+
+test("the total-turn ceiling bounds a mode that keeps making progress", () => {
+  // Progress on every turn resets the idle counter and never runs the gate, so
+  // only the total-turn backstop bounds it.
+  const policy = { ...POLICY_UNDER_TEST, totalTurnsMax: 5 };
+  const { decisions } = run({ ...freshPolicyState(), started: true }, Array(20).fill(progress), policy);
+  const stop = decisions.at(-1);
+  assert.ok(stop && stop.stop, "the total-turn ceiling must stop the mode");
+  assert.match(stop.reason, /stopped at 5 turns/);
+  assert.equal(decisions.length, policy.totalTurnsMax, "stop at the ceiling, not after it");
+});
+
+test("the progress nudge reports done attempts once they happen", () => {
+  const d = decideTurn({ ...freshPolicyState(), started: true, doneRuns: 2 }, POLICY_UNDER_TEST, progress, MODE);
+  assert.equal(d.stop, false);
+  assert.match(d.stop === false ? d.nudge : "", /2\/\d+ done attempts/);
+});
+
 test("state from an older session restores with defaults", () => {
   const restored = normalizePolicyState({ started: true } as Partial<PolicyState>);
   assert.equal(restored.gateRuns, 0);
+  assert.equal(restored.doneRuns, 0);
+  assert.equal(restored.turns, 0);
   assert.equal(restored.idleTurns, 0);
   assert.equal(restored.graceUsed, false);
   assert.equal(normalizePolicyState(undefined).started, false);

@@ -27,9 +27,12 @@
  * stale green gate can never end a mode, and it widens "done" beyond a local
  * green gate to CI status and reviewer approval whenever a PR number is given.
  * turn_end continues the mode under the policy in mode-policy.ts: turns before
- * the first change are free, gate runs are the attempt budget, and a run of
- * turns that moves nothing stops the mode. A mode also stops early when the
- * gate fails identically on an unchanged tree three times in a row.
+ * the first change are free, gate runs are the attempt budget, done retries
+ * have their own budget, a run of turns that moves nothing stops the mode, and
+ * a total-turn ceiling bounds a mode that keeps acting. The progress signal
+ * covers every checkout the mode touches: the session cwd, each worktree the
+ * agent edits, and each checkout a gate run names. A mode also stops early when
+ * the gate fails identically on an unchanged tree three times in a row.
  */
 
 import { spawn } from "node:child_process";
@@ -130,6 +133,10 @@ interface AutonomyState {
   lastTreeSignature: string | undefined;
   /** The current turn changed the tree or produced a new gate result. */
   progressThisTurn: boolean;
+  /** Checkouts the mode watches: the session cwd, edited worktrees, gate cwds. */
+  roots: string[];
+  /** The turn ran a mutating shell command, whose target is not knowable. */
+  shellMutation: boolean;
 }
 
 interface PlanState {
@@ -182,30 +189,54 @@ async function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefi
   return { ...r, output: r.stdout + r.stderr };
 }
 
-// A stable picture of the worktree: HEAD plus the content hash of every path
+// The repo root that owns `dir`, so a signature follows the agent into a
+// worktree instead of watching the checkout the session started in.
+async function repoRoot(dir: string): Promise<string | undefined> {
+  const r = await runArgv(["git", "-C", dir, "rev-parse", "--show-toplevel"], dir, undefined);
+  if (r.code !== 0) return undefined;
+  const root = r.stdout.trim();
+  return root.length > 0 ? root : undefined;
+}
+
+// A stable picture of one checkout: HEAD plus the content hash of every path
 // `git status` reports. Content, not mtime, so a rewrite with identical bytes
-// is not progress. Returns undefined outside a git checkout, where the gate
-// result becomes the only progress signal.
-async function treeSignature(cwd: string): Promise<string | undefined> {
-  const head = await runArgv(["git", "-C", cwd, "rev-parse", "HEAD"], cwd, undefined);
+// is not progress. `-z` gives raw paths, so a name with a space or a non-ASCII
+// character is the path on disk and not a quoted form that `hash-object` cannot
+// open. Returns undefined outside a git checkout.
+async function checkoutSignature(root: string): Promise<string | undefined> {
+  const head = await runArgv(["git", "-C", root, "rev-parse", "HEAD"], root, undefined);
   if (head.code !== 0) return undefined;
-  const status = await runArgv(["git", "-C", cwd, "status", "--porcelain"], cwd, undefined);
+  const status = await runArgv(["git", "-C", root, "status", "--porcelain", "-z"], root, undefined);
   if (status.code !== 0) return undefined;
-  const paths = status.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const rest = line.slice(3);
-      const renamed = rest.lastIndexOf(" -> ");
-      return renamed === -1 ? rest : rest.slice(renamed + 4);
-    })
-    .filter(Boolean)
-    .slice(0, 200);
+  const entries: string[] = [];
+  const paths: string[] = [];
+  const fields = status.stdout.split("\u0000");
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i];
+    if (!field) continue;
+    const statusCode = field.slice(0, 2);
+    const file = field.slice(3);
+    entries.push(`${statusCode} ${file}`);
+    if (file) paths.push(file);
+    // A rename or copy record is followed by its original path as its own field.
+    if (statusCode.startsWith("R") || statusCode.startsWith("C")) i += 1;
+  }
   const hashed =
     paths.length > 0
-      ? await runArgv(["git", "-C", cwd, "hash-object", "--", ...paths], cwd, undefined)
+      ? await runArgv(["git", "-C", root, "hash-object", "--", ...paths.slice(0, 200)], root, undefined)
       : { stdout: "" };
-  return `${head.stdout.trim()}\n${status.stdout}${hashed.stdout}`;
+  return `${head.stdout.trim()}\n${entries.join("\n")}\n${hashed.stdout}`;
+}
+
+// A mode can span checkouts: the session cwd, each worktree the agent edits,
+// and each checkout a gate run names. Combine them so a change anywhere counts.
+async function treeSignature(roots: readonly string[]): Promise<string | undefined> {
+  const parts: string[] = [];
+  for (const root of [...roots].sort()) {
+    const one = await checkoutSignature(root);
+    if (one !== undefined) parts.push(`${root}\n${one}`);
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 // The agent runs on the host; program execution runs inside the dev container
@@ -315,6 +346,26 @@ function isMutatingCommand(command: string): boolean {
   return false;
 }
 
+// A redirection to a file writes without a write tool, so the reading phase must
+// end for it too. A descriptor target, `/dev/null`, and `-` write no file. This
+// is a heuristic: a write from inside an interpreter is missed, and a miss only
+// delays the phase switch to the reading ceiling.
+function redirectsToFile(command: string): boolean {
+  const pattern = /(?:^|[^>&|])\d?>>?\s*([^\s;&|]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null) {
+    const target = match[1];
+    if (target.startsWith("&")) continue;
+    if (/^\/dev\/(null|stdout|stderr|tty)$/.test(target)) continue;
+    return true;
+  }
+  return /\btee\b/.test(command) && !/tee\s+-a?\s*\/dev\/null/.test(command);
+}
+
+function looksLikeWrite(command: string): boolean {
+  return isMutatingCommand(command) || redirectsToFile(command);
+}
+
 function parseHandoff(args: string): { handoff: boolean; rest: string } {
   const parts = args.split(/\s+/).filter(Boolean);
   let handoff = HANDOFF;
@@ -336,6 +387,8 @@ export default function loxppModes(pi: ExtensionAPI): void {
     lastFailureSignature: undefined,
     lastTreeSignature: undefined,
     progressThisTurn: false,
+    roots: [],
+    shellMutation: false,
   };
   let plan: PlanState = { active: false, goal: "", toolsBefore: undefined };
 
@@ -345,17 +398,29 @@ export default function loxppModes(pi: ExtensionAPI): void {
     pi.appendEntry("loxpp-modes", { autonomy, plan } satisfies PersistedState);
   }
 
+  // Watch the checkout that owns `dir`. A mode moves into a worktree before its
+  // first gate run, so the session cwd alone does not see the agent's edits.
+  async function addRoot(dir: string): Promise<void> {
+    const root = await repoRoot(dir);
+    if (root && !autonomy.roots.includes(root)) autonomy.roots.push(root);
+  }
+
   async function recordGate(
     scope: "native" | "backend",
     cwd: string,
     passed: boolean,
     output: string,
+    kind: "gate" | "done",
   ): Promise<void> {
     autonomy.lastGatePassed = passed;
     autonomy.lastScope = scope;
     autonomy.lastCwd = cwd;
-    autonomy.policy.gateRuns += 1;
-    const tree = await treeSignature(cwd);
+    // A done attempt waits for CI and review, not for a fix, so it is bounded
+    // by its own budget.
+    if (kind === "gate") autonomy.policy.gateRuns += 1;
+    else autonomy.policy.doneRuns += 1;
+    await addRoot(cwd);
+    const tree = await treeSignature(autonomy.roots);
     if (tree !== autonomy.lastTreeSignature) autonomy.progressThisTurn = true;
     if (tree !== undefined) autonomy.lastTreeSignature = tree;
     if (passed) {
@@ -389,6 +454,8 @@ export default function loxppModes(pi: ExtensionAPI): void {
       lastFailureSignature: undefined,
       lastTreeSignature: undefined,
       progressThisTurn: false,
+      roots: [],
+      shellMutation: false,
     };
     persist();
     pi.sendUserMessage(prompt);
@@ -425,7 +492,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
       const scope: "native" | "backend" = params.scope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
       const r = await runGate(scope, cwd, signal);
-      await recordGate(scope, cwd, r.passed, r.output);
+      await recordGate(scope, cwd, r.passed, r.output, "gate");
       persist();
       return {
         content: [
@@ -464,7 +531,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
 
       const failures: string[] = [];
       const r = await runGate(scope, cwd, signal);
-      await recordGate(scope, cwd, r.passed, r.output);
+      await recordGate(scope, cwd, r.passed, r.output, "done");
       if (!r.passed) {
         failures.push(`gate not green:\n${r.output}`);
       } else if (pr) {
@@ -697,13 +764,21 @@ export default function loxppModes(pi: ExtensionAPI): void {
 
   // The policy leaves its reading phase on the first call that can change the
   // tree. Plan mode blocks those calls, and it runs with no active mode.
-  pi.on("tool_call", async (event) => {
+  pi.on("tool_call", async (event, ctx) => {
     if (autonomy.mode) {
-      const mutating =
-        event.toolName === "edit" ||
-        event.toolName === "write" ||
-        (event.toolName === "bash" && isMutatingCommand(String((event.input as { command?: unknown }).command ?? "")));
-      if (mutating) autonomy.policy.started = true;
+      if (event.toolName === "edit" || event.toolName === "write") {
+        autonomy.policy.started = true;
+        const target = String((event.input as { path?: unknown }).path ?? "");
+        if (target) await addRoot(path.dirname(path.resolve(ctx.cwd, target)));
+      } else if (event.toolName === "bash") {
+        const command = String((event.input as { command?: unknown }).command ?? "");
+        if (looksLikeWrite(command)) {
+          autonomy.policy.started = true;
+          // The target of a shell mutation is not knowable, so the command is
+          // the progress signal for this turn.
+          autonomy.shellMutation = true;
+        }
+      }
     }
     // The /goal plan phase blocks writes; the working modes rely on loxpp_done
     // to re-verify the gate, so no edit/write invalidation is needed here.
@@ -748,9 +823,14 @@ export default function loxppModes(pi: ExtensionAPI): void {
 
     // Tree progress since the last turn. The gate's own record may already have
     // seen the change; this covers turns that edit without running the gate.
-    const tree = await treeSignature(autonomy.lastCwd ?? ctx.cwd);
+    // The session cwd is added here because a mode starts before its first gate
+    // run names a checkout.
+    await addRoot(ctx.cwd);
+    const tree = await treeSignature(autonomy.roots);
     if (tree !== undefined && tree !== autonomy.lastTreeSignature) autonomy.progressThisTurn = true;
     if (tree !== undefined) autonomy.lastTreeSignature = tree;
+    if (autonomy.shellMutation) autonomy.progressThisTurn = true;
+    autonomy.shellMutation = false;
 
     const decision = decideTurn(
       autonomy.policy,
@@ -794,10 +874,13 @@ export default function loxppModes(pi: ExtensionAPI): void {
           e.type === "custom" && e.customType === "loxpp-modes",
       ) as { data?: PersistedState } | undefined;
     if (last?.data) {
+      const saved = last.data.autonomy as Partial<AutonomyState> | undefined;
       autonomy = {
         ...autonomy,
-        ...last.data.autonomy,
-        policy: normalizePolicyState(last.data.autonomy?.policy),
+        ...saved,
+        policy: normalizePolicyState(saved?.policy),
+        roots: saved?.roots ?? [],
+        shellMutation: false,
       };
       plan = { ...plan, ...last.data.plan };
     }

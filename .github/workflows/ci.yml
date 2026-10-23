@@ -80,8 +80,10 @@ jobs:
         with:
           node-version: "24"
 
+      # Pinned: a new pi release can change the extension API. Bump this with
+      # the extension, not on its own.
       - name: Install pi
-        run: npm install -g @earendil-works/pi-coding-agent
+        run: npm install -g @earendil-works/pi-coding-agent@1.4.0
 
       # Each guard of the autonomous-mode policy has a unit test, so a broken
       # guard fails by name. Pure node, so it needs no build.

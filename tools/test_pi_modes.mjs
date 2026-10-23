@@ -71,7 +71,7 @@ const SCENARIOS = {
           ? { text: `thinking ${turn}` }
           : { tool: { name: "loxpp_gate", args: { scope: "native" } } },
     gate: "fail-each",
-    expect: { stop: "after 12 gate runs", gateRuns: 12, minTurns: 24 },
+    expect: { stop: "after 12 gate runs", gateRuns: 12, shimRuns: 12, minTurns: 24 },
   },
   // The same, but the last allowed gate run passes: one grace turn tells the
   // agent to call loxpp_done.
@@ -83,11 +83,56 @@ const SCENARIOS = {
           ? { text: `thinking ${turn}` }
           : { tool: { name: "loxpp_gate", args: { scope: "native" } } },
     gate: "fail-then-pass",
-    expect: { stop: "green, but loxpp_done was not called", gateRuns: 12, graceSeen: true },
+    expect: { stop: "green, but loxpp_done was not called", gateRuns: 12, shimRuns: 12, graceSeen: true },
+  },
+  // /resolve-issue edits a worktree while the session stays in the main
+  // checkout, before the first gate run names that checkout. The writes are
+  // real, so the mode must not count them as idle.
+  outside_write: {
+    turns: 12,
+    step: (turn, dirs) => ({
+      tool: { name: "write", args: { path: path.join(dirs.other, "work.txt"), content: `v${turn}` } },
+    }),
+    expect: { stop: false, started: true, gateRuns: 0 },
+  },
+  // The same with a shell mutation, whose target the extension cannot know.
+  outside_bash: {
+    turns: 12,
+    step: (turn, dirs) => ({
+      tool: {
+        name: "bash",
+        args: { command: `cp ${path.join(dirs.root, "src")} ${path.join(dirs.other, "work.txt")}` },
+      },
+    }),
+    expect: { stop: false, started: true, gateRuns: 0 },
+  },
+  // A name that git has to quote. `-z` keeps the raw path, so the content is
+  // hashed and a change counts as progress.
+  quoted: {
+    turns: 12,
+    step: (turn) => ({ tool: { name: "write", args: { path: "a b.txt", content: `v${turn}` } } }),
+    expect: { stop: false, started: true, gateRuns: 0 },
+  },
+  // A tree-changing turn on every turn with no gate run: the idle cap never
+  // fires, so only the total-turn backstop can stop it.
+  endless_edits: {
+    turns: 80,
+    step: (turn) => ({ tool: { name: "write", args: { path: "work.txt", content: `v${turn}` } } }),
+    expect: { stop: "stopped at 80 turns", gateRuns: 0 },
+  },
+  // A done retry waits for CI. It must not spend the gate attempts, and its own
+  // budget must stop a loop of retries. The gate fails, so every done fails.
+  done_retries: {
+    step: (turn) =>
+      turn % 2 === 0
+        ? { tool: { name: "loxpp_done", args: { summary: `waiting ${turn}` } } }
+        : { text: `waiting ${turn}` },
+    gate: "fail-each",
+    expect: { stop: "loxpp_done attempts", gateRuns: 0, shimRuns: 12, doneRuns: 12 },
   },
 };
 
-function startProvider(scenario) {
+function startProvider(scenario, dirs) {
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (d) => (body += d));
@@ -98,7 +143,7 @@ function startProvider(scenario) {
       }
       const parsed = JSON.parse(body);
       const turn = (parsed.messages ?? []).filter((m) => m.role === "assistant").length;
-      const reply = scenario.step(turn);
+      const reply = scenario.step(turn, dirs);
       res.writeHead(200, { "content-type": "text/event-stream", connection: "keep-alive" });
       const base = { id: "chatcmpl-1", object: "chat.completion.chunk", created: 0, model: "dummy" };
       const send = (o) => res.write(`data: ${JSON.stringify({ ...base, ...o })}\n\n`);
@@ -275,11 +320,16 @@ async function run(name) {
   const repo = path.join(root, "repo");
   const bin = path.join(root, "bin");
   const agentDir = path.join(root, "agent");
-  for (const dir of [repo, bin, agentDir]) mkdirSync(dir, { recursive: true });
+  // A second checkout stands in for the worktree /resolve-issue creates. The
+  // session stays in `repo`, as it does when pi starts in the main checkout.
+  const other = path.join(root, "other");
+  for (const dir of [repo, bin, agentDir, other]) mkdirSync(dir, { recursive: true });
   writeRepo(repo);
+  writeRepo(other);
+  writeFileSync(path.join(root, "src"), "shell source\n");
   const gateCounter = writePodmanShim(bin, scenario.gate ?? "always-pass");
 
-  const { server, port } = await startProvider(scenario);
+  const { server, port } = await startProvider(scenario, { root, repo, other });
   writeFileSync(
     path.join(agentDir, "models.json"),
     JSON.stringify({
@@ -347,11 +397,16 @@ for (const name of only ? [only] : Object.keys(SCENARIOS)) {
   if (expect.minTurns !== undefined && result.turns < expect.minTurns) {
     failures.push(`expected at least ${expect.minTurns} assistant turns, got ${result.turns}`);
   }
-  if (expect.gateRuns !== undefined) {
-    if (result.gateRuns !== expect.gateRuns) failures.push(`expected ${expect.gateRuns} gate runs, got ${result.gateRuns}`);
-    if (result.state?.gateRuns !== expect.gateRuns) {
-      failures.push(`expected the persisted gateRuns to be ${expect.gateRuns}, got ${result.state?.gateRuns}`);
-    }
+  if (expect.gateRuns !== undefined && result.state?.gateRuns !== expect.gateRuns) {
+    failures.push(`expected the persisted gateRuns to be ${expect.gateRuns}, got ${result.state?.gateRuns}`);
+  }
+  // The shim counts container runs, so it also sees the gate that loxpp_done
+  // executes. It proves the gate really ran, separately from the policy counter.
+  if (expect.shimRuns !== undefined && result.gateRuns !== expect.shimRuns) {
+    failures.push(`expected ${expect.shimRuns} gate container runs, got ${result.gateRuns}`);
+  }
+  if (expect.doneRuns !== undefined && result.state?.doneRuns !== expect.doneRuns) {
+    failures.push(`expected the persisted doneRuns to be ${expect.doneRuns}, got ${result.state?.doneRuns}`);
   }
   if (expect.idleTurns !== undefined && result.state?.idleTurns !== expect.idleTurns) {
     failures.push(`expected the persisted idleTurns to be ${expect.idleTurns}, got ${result.state?.idleTurns}`);
@@ -375,7 +430,9 @@ for (const name of only ? [only] : Object.keys(SCENARIOS)) {
     for (const f of failures) console.error(`  - ${f}`);
     if (result.stderr.trim()) console.error(`  stderr: ${result.stderr.trim().split("\n").slice(-3).join(" | ")}`);
   } else {
-    console.log(`ok   ${name} (${result.turns} turns, ${result.gateRuns} gate runs)`);
+    console.log(
+      `ok   ${name} (${result.turns} turns, ${result.state?.gateRuns ?? 0} gate runs, ${result.state?.doneRuns ?? 0} done attempts, ${result.gateRuns} container runs)`,
+    );
   }
 }
 
