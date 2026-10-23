@@ -167,6 +167,7 @@ variant) and adds the following:
 | `enum` declaration with constructor variants | Added in Lox++ |
 | Constructor patterns and class (instanceof) patterns in `match` | Added in Lox++ |
 | `try`/`catch`, `throw`, `defer` non-local control flow + built-in `Error` type | Added in Lox++ |
+| `Int` kind (signed 64-bit integer, literals with the suffix `i` and `0x` and `0b` literals), bit operators `& \| ^ ~ << >> >>>`, `int` and `float` conversions, `integer` module | Added in Lox++ |
 
 ---
 
