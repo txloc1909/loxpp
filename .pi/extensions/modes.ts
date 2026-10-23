@@ -26,8 +26,13 @@
  * loxpp_done is the single termination point. It always re-runs the gate, so a
  * stale green gate can never end a mode, and it widens "done" beyond a local
  * green gate to CI status and reviewer approval whenever a PR number is given.
- * The turn_end continuation is bounded by a per-mode budget and stops early when
- * the gate fails identically three times in a row.
+ * turn_end continues the mode under the policy in mode-policy.ts: turns before
+ * the first change are free, gate runs are the attempt budget, done retries
+ * have their own budget, a run of turns that moves nothing stops the mode, and
+ * a total-turn ceiling bounds a mode that keeps acting. The progress signal
+ * covers every checkout the mode touches: the session cwd, each worktree the
+ * agent edits, and each checkout a gate run names. A mode also stops early when
+ * the gate fails identically on an unchanged tree three times in a row.
  */
 
 import { spawn } from "node:child_process";
@@ -35,6 +40,14 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import {
+  POLICY,
+  decideTurn,
+  freshPolicyState,
+  normalizePolicyState,
+  type Mode,
+  type PolicyState,
+} from "./mode-policy.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
 // the approval decision to the agent for /goal. A per-command --handoff /
@@ -45,15 +58,7 @@ const REPO = "txloc1909/loxpp";
 const GATE_OUTPUT_CAP = 8000;
 const READ_OUTPUT_CAP = 12000;
 const STATUS_OUTPUT_CAP = 2000;
-const STAGNATION_LIMIT = 3; // identical gate failures in a row before a mode stops
-
-// Per-mode iteration budget. Goal/resolve-issue implement a feature and need more
-// room than a fix-until-green loop.
-const BUDGET: Record<"goal" | "loop" | "resolve-issue", number> = {
-  goal: 20,
-  loop: 12,
-  "resolve-issue": 20,
-};
+const STAGNATION_LIMIT = 3; // identical gate failures on an unchanged tree before a mode stops
 
 // The gate always runs inside the dev container: AGENTS.md's dev model puts the
 // agent on the host and program execution in the container, where the toolchain
@@ -116,14 +121,22 @@ const LOOP_PROMPT = (goal: string) => `[LOOP MODE — hand-off]\n\nGoal: ${goal}
 const NODE_PROMPT = (n: string) => `[RESOLVE-ISSUE MODE — implementer, hand-off]\n\nNode issue: #${n}\n\n1. Read the node spec with loxpp_issue (full form — a hazard may live in a comment).\n2. Read docs/process/multi-agent-playbook.md, the decision in docs/decisions/ this node serves, and the spec/reference docs the issue names.\n3. Create a worktree and branch per AGENTS.md's task loop. Pass the checkout you work in to loxpp_gate and loxpp_done via their cwd argument, so the gate builds and tests that tree inside the dev container, not the main checkout.\n4. Implement the deliverable; respect the issue's Scope section — out-of-scope cases fail loudly and name this node.\n5. Checkpoint: rebuild fully, then run loxpp_gate until green (ctest does not rebuild).\n6. Commit atomically with conventional commits; push after each commit.\n7. Open a PR whose body contains \`Closes #${n}\`, and tag yourself \`[Implementer]\`. Do not poll CI.\n8. Call loxpp_done with the PR number. Done requires the local gate green, CI green, and the reviewer approved.\n\nEnd only by calling loxpp_done once every done criterion holds.`;
 
 interface AutonomyState {
-  mode: "goal" | "loop" | "resolve-issue" | null;
-  iterations: number;
+  mode: Mode | null;
+  policy: PolicyState;
   lastGatePassed: boolean | undefined;
   lastScope: "native" | "backend";
   lastCwd: string | undefined;
   declaredDone: boolean;
   sameFailureCount: number;
-  lastGateOutput: string | undefined;
+  lastFailureSignature: string | undefined;
+  /** Worktree signature at the last turn or gate run, for the progress signal. */
+  lastTreeSignature: string | undefined;
+  /** The current turn changed the tree or produced a new gate result. */
+  progressThisTurn: boolean;
+  /** Checkouts the mode watches: the session cwd, edited worktrees, gate cwds. */
+  roots: string[];
+  /** The turn ran a mutating shell command, whose target is not knowable. */
+  shellMutation: boolean;
 }
 
 interface PlanState {
@@ -174,6 +187,56 @@ function collect(
 async function runArgv(argv: string[], cwd: string, signal: AbortSignal | undefined) {
   const r = await collect(spawn(argv[0], argv.slice(1), { cwd }), signal);
   return { ...r, output: r.stdout + r.stderr };
+}
+
+// The repo root that owns `dir`, so a signature follows the agent into a
+// worktree instead of watching the checkout the session started in.
+async function repoRoot(dir: string): Promise<string | undefined> {
+  const r = await runArgv(["git", "-C", dir, "rev-parse", "--show-toplevel"], dir, undefined);
+  if (r.code !== 0) return undefined;
+  const root = r.stdout.trim();
+  return root.length > 0 ? root : undefined;
+}
+
+// A stable picture of one checkout: HEAD plus the content hash of every path
+// `git status` reports. Content, not mtime, so a rewrite with identical bytes
+// is not progress. `-z` gives raw paths, so a name with a space or a non-ASCII
+// character is the path on disk and not a quoted form that `hash-object` cannot
+// open. Returns undefined outside a git checkout.
+async function checkoutSignature(root: string): Promise<string | undefined> {
+  const head = await runArgv(["git", "-C", root, "rev-parse", "HEAD"], root, undefined);
+  if (head.code !== 0) return undefined;
+  const status = await runArgv(["git", "-C", root, "status", "--porcelain", "-z"], root, undefined);
+  if (status.code !== 0) return undefined;
+  const entries: string[] = [];
+  const paths: string[] = [];
+  const fields = status.stdout.split("\u0000");
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i];
+    if (!field) continue;
+    const statusCode = field.slice(0, 2);
+    const file = field.slice(3);
+    entries.push(`${statusCode} ${file}`);
+    if (file) paths.push(file);
+    // A rename or copy record is followed by its original path as its own field.
+    if (statusCode.startsWith("R") || statusCode.startsWith("C")) i += 1;
+  }
+  const hashed =
+    paths.length > 0
+      ? await runArgv(["git", "-C", root, "hash-object", "--", ...paths.slice(0, 200)], root, undefined)
+      : { stdout: "" };
+  return `${head.stdout.trim()}\n${entries.join("\n")}\n${hashed.stdout}`;
+}
+
+// A mode can span checkouts: the session cwd, each worktree the agent edits,
+// and each checkout a gate run names. Combine them so a change anywhere counts.
+async function treeSignature(roots: readonly string[]): Promise<string | undefined> {
+  const parts: string[] = [];
+  for (const root of [...roots].sort()) {
+    const one = await checkoutSignature(root);
+    if (one !== undefined) parts.push(`${root}\n${one}`);
+  }
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
 // The agent runs on the host; program execution runs inside the dev container
@@ -283,6 +346,26 @@ function isMutatingCommand(command: string): boolean {
   return false;
 }
 
+// A redirection to a file writes without a write tool, so the reading phase must
+// end for it too. A descriptor target, `/dev/null`, and `-` write no file. This
+// is a heuristic: a write from inside an interpreter is missed, and a miss only
+// delays the phase switch to the reading ceiling.
+function redirectsToFile(command: string): boolean {
+  const pattern = /(?:^|[^>&|])\d?>>?\s*([^\s;&|]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null) {
+    const target = match[1];
+    if (target.startsWith("&")) continue;
+    if (/^\/dev\/(null|stdout|stderr|tty)$/.test(target)) continue;
+    return true;
+  }
+  return /\btee\b/.test(command) && !/tee\s+-a?\s*\/dev\/null/.test(command);
+}
+
+function looksLikeWrite(command: string): boolean {
+  return isMutatingCommand(command) || redirectsToFile(command);
+}
+
 function parseHandoff(args: string): { handoff: boolean; rest: string } {
   const parts = args.split(/\s+/).filter(Boolean);
   let handoff = HANDOFF;
@@ -295,13 +378,17 @@ function parseHandoff(args: string): { handoff: boolean; rest: string } {
 export default function loxppModes(pi: ExtensionAPI): void {
   let autonomy: AutonomyState = {
     mode: null,
-    iterations: 0,
+    policy: freshPolicyState(),
     lastGatePassed: undefined,
     lastScope: "native",
     lastCwd: undefined,
     declaredDone: false,
     sameFailureCount: 0,
-    lastGateOutput: undefined,
+    lastFailureSignature: undefined,
+    lastTreeSignature: undefined,
+    progressThisTurn: false,
+    roots: [],
+    shellMutation: false,
   };
   let plan: PlanState = { active: false, goal: "", toolsBefore: undefined };
 
@@ -311,17 +398,43 @@ export default function loxppModes(pi: ExtensionAPI): void {
     pi.appendEntry("loxpp-modes", { autonomy, plan } satisfies PersistedState);
   }
 
-  function recordGate(scope: "native" | "backend", cwd: string, passed: boolean, output: string): void {
+  // Watch the checkout that owns `dir`. A mode moves into a worktree before its
+  // first gate run, so the session cwd alone does not see the agent's edits.
+  async function addRoot(dir: string): Promise<void> {
+    const root = await repoRoot(dir);
+    if (root && !autonomy.roots.includes(root)) autonomy.roots.push(root);
+  }
+
+  async function recordGate(
+    scope: "native" | "backend",
+    cwd: string,
+    passed: boolean,
+    output: string,
+    kind: "gate" | "done",
+  ): Promise<void> {
     autonomy.lastGatePassed = passed;
     autonomy.lastScope = scope;
     autonomy.lastCwd = cwd;
+    // A done attempt waits for CI and review, not for a fix, so it is bounded
+    // by its own budget.
+    if (kind === "gate") autonomy.policy.gateRuns += 1;
+    else autonomy.policy.doneRuns += 1;
+    await addRoot(cwd);
+    const tree = await treeSignature(autonomy.roots);
+    if (tree !== autonomy.lastTreeSignature) autonomy.progressThisTurn = true;
+    if (tree !== undefined) autonomy.lastTreeSignature = tree;
     if (passed) {
       autonomy.sameFailureCount = 0;
-      autonomy.lastGateOutput = undefined;
+      autonomy.lastFailureSignature = undefined;
+      autonomy.progressThisTurn = true;
     } else {
-      const sig = output.slice(-800);
-      autonomy.sameFailureCount = sig === autonomy.lastGateOutput ? autonomy.sameFailureCount + 1 : 1;
-      autonomy.lastGateOutput = sig;
+      // The tree is part of the signature: the same failure on a changed tree
+      // is a new attempt, not stagnation.
+      const sig = `${output.slice(-800)}\n${tree ?? ""}`;
+      if (sig !== autonomy.lastFailureSignature) autonomy.progressThisTurn = true;
+      autonomy.sameFailureCount =
+        sig === autonomy.lastFailureSignature ? autonomy.sameFailureCount + 1 : 1;
+      autonomy.lastFailureSignature = sig;
     }
   }
 
@@ -329,16 +442,20 @@ export default function loxppModes(pi: ExtensionAPI): void {
     if (ctx.hasUI) ctx.ui.notify(text, kind);
   }
 
-  function startWorking(mode: "goal" | "loop" | "resolve-issue", prompt: string): void {
+  function startWorking(mode: Mode, prompt: string): void {
     autonomy = {
       mode,
-      iterations: 0,
+      policy: freshPolicyState(),
       lastGatePassed: undefined,
       lastScope: "native",
       lastCwd: undefined,
       declaredDone: false,
       sameFailureCount: 0,
-      lastGateOutput: undefined,
+      lastFailureSignature: undefined,
+      lastTreeSignature: undefined,
+      progressThisTurn: false,
+      roots: [],
+      shellMutation: false,
     };
     persist();
     pi.sendUserMessage(prompt);
@@ -375,7 +492,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
       const scope: "native" | "backend" = params.scope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
       const r = await runGate(scope, cwd, signal);
-      recordGate(scope, cwd, r.passed, r.output);
+      await recordGate(scope, cwd, r.passed, r.output, "gate");
       persist();
       return {
         content: [
@@ -414,7 +531,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
 
       const failures: string[] = [];
       const r = await runGate(scope, cwd, signal);
-      recordGate(scope, cwd, r.passed, r.output);
+      await recordGate(scope, cwd, r.passed, r.output, "done");
       if (!r.passed) {
         failures.push(`gate not green:\n${r.output}`);
       } else if (pr) {
@@ -645,9 +762,26 @@ export default function loxppModes(pi: ExtensionAPI): void {
 
   // ---- engine ---------------------------------------------------------------
 
-  // The /goal plan phase blocks writes; the working modes rely on loxpp_done to
-  // re-verify the gate, so no edit/write invalidation is needed here.
-  pi.on("tool_call", async (event) => {
+  // The policy leaves its reading phase on the first call that can change the
+  // tree. Plan mode blocks those calls, and it runs with no active mode.
+  pi.on("tool_call", async (event, ctx) => {
+    if (autonomy.mode) {
+      if (event.toolName === "edit" || event.toolName === "write") {
+        autonomy.policy.started = true;
+        const target = String((event.input as { path?: unknown }).path ?? "");
+        if (target) await addRoot(path.dirname(path.resolve(ctx.cwd, target)));
+      } else if (event.toolName === "bash") {
+        const command = String((event.input as { command?: unknown }).command ?? "");
+        if (looksLikeWrite(command)) {
+          autonomy.policy.started = true;
+          // The target of a shell mutation is not knowable, so the command is
+          // the progress signal for this turn.
+          autonomy.shellMutation = true;
+        }
+      }
+    }
+    // The /goal plan phase blocks writes; the working modes rely on loxpp_done
+    // to re-verify the gate, so no edit/write invalidation is needed here.
     if (!plan.active) return;
     if (event.toolName === "edit" || event.toolName === "write") {
       return {
@@ -663,7 +797,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("turn_end", async () => {
+  pi.on("turn_end", async (_event, ctx) => {
     const mode = autonomy.mode;
     if (!mode) return;
     if (autonomy.declaredDone) {
@@ -671,7 +805,6 @@ export default function loxppModes(pi: ExtensionAPI): void {
       persist();
       return;
     }
-    autonomy.iterations += 1;
 
     if (autonomy.sameFailureCount >= STAGNATION_LIMIT) {
       autonomy.mode = null;
@@ -681,38 +814,51 @@ export default function loxppModes(pi: ExtensionAPI): void {
           {
             type: "custom_message",
             customType: "mode-stagnant",
-            content: `${mode} mode stopped: the gate failed the same way ${STAGNATION_LIMIT} times in a row. This is likely an environment or toolchain problem, not the code. Fix the environment, then re-run the mode.`,
+            content: `${mode} mode stopped: the gate failed the same way ${STAGNATION_LIMIT} times in a row on an unchanged tree. This is likely an environment or toolchain problem, not the code. Fix the environment, then re-run the mode.`,
             display: true,
           },
         ],
       };
     }
 
-    const budget = BUDGET[mode];
-    if (autonomy.iterations >= budget) {
+    // Tree progress since the last turn. The gate's own record may already have
+    // seen the change; this covers turns that edit without running the gate.
+    // The session cwd is added here because a mode starts before its first gate
+    // run names a checkout.
+    await addRoot(ctx.cwd);
+    const tree = await treeSignature(autonomy.roots);
+    if (tree !== undefined && tree !== autonomy.lastTreeSignature) autonomy.progressThisTurn = true;
+    if (tree !== undefined) autonomy.lastTreeSignature = tree;
+    if (autonomy.shellMutation) autonomy.progressThisTurn = true;
+    autonomy.shellMutation = false;
+
+    const decision = decideTurn(
+      autonomy.policy,
+      POLICY[mode],
+      { progress: autonomy.progressThisTurn, gatePassed: autonomy.lastGatePassed === true },
+      mode,
+    );
+    autonomy.policy = decision.state;
+    autonomy.progressThisTurn = false;
+    persist();
+
+    if (decision.stop) {
       autonomy.mode = null;
       persist();
       return {
         entries: [
           {
             type: "custom_message",
-            customType: "mode-limit",
-            content: `${mode} mode stopped after ${budget} iterations without completion. Continue by hand or re-run the mode.`,
+            customType: "mode-stop",
+            content: decision.reason,
             display: true,
           },
         ],
       };
     }
 
-    const nudge =
-      autonomy.lastGatePassed === true
-        ? `[${mode} mode] ${autonomy.iterations}/${budget}: the local gate is green. Verify any remaining done criteria (CI, review) and call loxpp_done.`
-        : autonomy.lastGatePassed === false
-          ? `[${mode} mode] ${autonomy.iterations}/${budget}: the gate failed. Read the latest failure output, fix it, then call loxpp_gate again.`
-          : `[${mode} mode] ${autonomy.iterations}/${budget}: make a change and run loxpp_gate.`;
-    persist();
     return {
-      entries: [{ type: "custom_message", customType: "mode-continue", content: nudge, display: true }],
+      entries: [{ type: "custom_message", customType: "mode-continue", content: decision.nudge, display: true }],
       continue: true,
     };
   });
@@ -728,7 +874,14 @@ export default function loxppModes(pi: ExtensionAPI): void {
           e.type === "custom" && e.customType === "loxpp-modes",
       ) as { data?: PersistedState } | undefined;
     if (last?.data) {
-      autonomy = { ...autonomy, ...last.data.autonomy };
+      const saved = last.data.autonomy as Partial<AutonomyState> | undefined;
+      autonomy = {
+        ...autonomy,
+        ...saved,
+        policy: normalizePolicyState(saved?.policy),
+        roots: saved?.roots ?? [],
+        shellMutation: false,
+      };
       plan = { ...plan, ...last.data.plan };
     }
     if (plan.active) {
