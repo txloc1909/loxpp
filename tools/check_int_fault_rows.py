@@ -39,7 +39,15 @@ spec/05-stdlib.md (a function is a member written `integer.<name>(`). The
 decision names eight functions, MODULE_FUNCTIONS, and two of them divide,
 DIVIDING_FUNCTIONS. A function in the member table with no probe fails, so
 does a function of the decision that the table lost, and so does a probe that
-names a function it does not call.
+names a function that its line of the fault does not call.
+
+Such a probe has the shape of the probes 221 to 233: a control line that
+calls the function on valid arguments, the line of the fault, and the line
+`print "unreachable";`. The line of the fault is the last line of code before
+the `print`. It must call the function that the COVERS line names, and it must
+not repeat the control line, because a call that repeats a call which runs
+does not fault. The control line calls the function too, so a check of every
+line of code could not see a change to the line of the fault alone.
 
 Usage:
     tools/check_int_fault_rows.py [--semantics PATH] [--stdlib PATH] [--probes DIR]
@@ -123,8 +131,26 @@ def squash(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+UNREACHABLE = 'print "unreachable";'
+
+
 def code_lines(path: Path) -> list[str]:
-    return [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("//")]
+    return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip() and not l.lstrip().startswith("//")]
+
+
+def fault_line(lines: list[str]) -> tuple[str, list[str]] | None:
+    """Returns the line of the fault, the last line of code before the line
+    that prints "unreachable", and the lines of code before it. None when the
+    probe has no such line, or has no line before it."""
+    if UNREACHABLE not in lines:
+        return None
+    at = lines.index(UNREACHABLE)
+    return (lines[at - 1], lines[: at - 1]) if at else None
+
+
+def statement(line: str) -> str:
+    """Returns a line of code without a leading `print` and the final `;`."""
+    return line.removeprefix("print ").removesuffix(";").strip()
 
 
 def module_functions(stdlib: str) -> tuple[set[str], set[str]]:
@@ -223,8 +249,25 @@ def main() -> None:
                         f"{path.name} covers {row.id}: a probe of a "
                         f"{'halting' if halting else 'catchable'} fault needs `// STATUS: {want_status}`"
                     )
-                if name and not any(f"integer.{name}(" in line for line in code_lines(path)):
-                    problems.append(f"{path.name} covers {row.id} for {name!r} and does not call integer.{name}(")
+                if name:
+                    found_fault = fault_line(code_lines(path))
+                    if found_fault is None:
+                        problems.append(
+                            f"{path.name} covers {row.id} for {name!r}: it has no line of the fault "
+                            f"before `{UNREACHABLE}`"
+                        )
+                        continue
+                    line, before = found_fault
+                    if not line.startswith(f"integer.{name}("):
+                        problems.append(
+                            f"{path.name} covers {row.id} for {name!r}: its line of the fault, "
+                            f"`{line}`, does not call integer.{name}("
+                        )
+                    elif statement(line) in [statement(b) for b in before]:
+                        problems.append(
+                            f"{path.name} covers {row.id} for {name!r}: its line of the fault, "
+                            f"`{line}`, repeats a line that runs before it, so it does not fault"
+                        )
 
     for words in sorted(w for w in covers if w[0] == "fault"):
         if words not in known:
