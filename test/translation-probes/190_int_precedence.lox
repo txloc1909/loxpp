@@ -13,7 +13,7 @@ print 1i | 2i in [3i];
 print 1i << 1i < 3i;
 print 6i & 3i != 2i;
 print 1i | 2i ^ 3i;
-print 5i ^ 3i | 8i;
+print 1i ^ 1i | 1i;
 print 1i ^ 3i & 2i;
 print 6i & 3i ^ 1i;
 print 1i & 3i << 1i;
@@ -42,8 +42,8 @@ print 1i & 2i == 2i or 3i ^ 3i == 0i;
 print -1i >>> 60i >> 1i;
 print -1i >>> 60i + 1i - 1i;
 print 2i + 3i >>> 1i;
-print 12i & 10i >>> 1i;
-print 1i | 2i >>> 1i;
+print 2i & 3i >>> 1i;
+print 2i | 1i >>> 1i;
 
 // STATUS: ok
 // CHECK: true
@@ -53,7 +53,7 @@ print 1i | 2i >>> 1i;
 // CHECK: true
 // CHECK: false
 // CHECK: 1
-// CHECK: 14
+// CHECK: 1
 // CHECK: 3
 // CHECK: 3
 // CHECK: 0
@@ -82,8 +82,8 @@ print 1i | 2i >>> 1i;
 // CHECK: 7
 // CHECK: 15
 // CHECK: 2
-// CHECK: 4
-// CHECK: 1
+// CHECK: 0
+// CHECK: 2
 // COVERS: precedence 6
 // COVERS: precedence 7
 // COVERS: precedence 8
