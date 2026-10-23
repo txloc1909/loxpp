@@ -1,0 +1,59 @@
+// A folded `match` result with a deficit of two or more (issue #821): a live
+// sibling operand BELOW the match folds into a phantom local too
+// (compiler.cpp reserves one per live sibling), so `normalizeFoldedOperands`
+// must load every missing operand back, bottom first, in ascending slot
+// order. Native and QBE already answer these; the JVM backend used to throw
+// "needs N operands ... does not repair a deficit above one" at emit time.
+// Each line below is native-correct and, after the fix, byte-identical on the
+// JVM. `tools/diff_runtimes.py` sweeps this file against `build/loxpp`.
+
+// ADD with the left operand below the match: both operands fold (deficit 2).
+print 1 + match 1 { case 1 => 5 case _ => 6 };
+
+// CALL with the callee and one argument below the match (deficit 3).
+fun two(a, b) { return a + b; }
+print two(10, match 1 { case 1 => 2 case _ => 3 });
+
+// BUILD_LIST with the first element below the match (deficit 2).
+print [1, match 1 { case 1 => "e" case _ => "z" }];
+
+// A class constructor call with the callee below the match (deficit 2).
+class B { init(v) { this.v = v; } }
+var b = B(match 1 { case 1 => 5 case _ => 8 });
+
+// SET_PROPERTY with the receiver below the match (deficit 2).
+var c = B(0);
+c.v = match 1 { case 1 => 5 case _ => 9 };
+
+// SET_INDEX with the collection and index below the match (deficit 3).
+var l = [0, 0];
+l[1] = match 1 { case 1 => 5 case _ => 10 };
+
+// A deferred call with the callee below the match (deficit 2).
+fun note(v) { print v; }
+fun f() { defer note(match 1 { case 1 => 5 case _ => 6 }); }
+f();
+
+// The same shapes with an `and`/`or` result (issue #817 made that result a
+// named local, so it inherits this ceiling).
+print 1 + ((match 1 { case 1 => nil case _ => 5 }) or 6);
+print two(10, (match 1 { case 1 => nil case _ => 2 }) or 3);
+print [1, (match 1 { case 1 => nil case _ => "e" }) or "z"];
+
+// A later sibling operand: the match is sandwiched, so a genuine operand sits
+// ABOVE the fold while two or more still fold below it (deficit 3, one
+// genuine operand to spill and reload).
+fun three(a, b, c) { return a + b + c; }
+print three(1, match 1 { case 1 => 2 case _ => 3 }, 9);
+
+// Two genuine operands above the fold (deficit 3, two to spill and reload
+// through argScratchBase) — a CALL and a DEFER_RECORD, the latter not in
+// computeMaxSpillWidth's own width scan, so its spill area comes from the
+// repair term alone.
+fun four(a, b, c, d) { return a + b + c + d; }
+print four(1, match 1 { case 1 => 2 case _ => 3 }, 4, 5);
+fun g() { defer four(1, match 1 { case 1 => 2 case _ => 3 }, 4, 5); }
+g();
+
+// Both sides folded: two matches, no genuine operand at all (deficit 2).
+print (match 1 { case 1 => 2 case _ => 3 }) + (match 1 { case 1 => 10 case _ => 20 });
