@@ -24,7 +24,7 @@ import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } fr
 import { childArgs, childEnv, type Dispatch, piInvocation } from "./child.ts";
 import { detectKitty, type KittySession } from "./kitty.ts";
 import { addUsage, finalOutput, formatUsage, type StreamState, type UsageStats } from "./stream.ts";
-import { checkRemoteControl, describeControlProblem, runInKittyWindow } from "./window.ts";
+import { checkRemoteControl, runInKittyWindow } from "./window.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -208,8 +208,8 @@ export default function kittySubagent(pi: ExtensionAPI): void {
   if (!session) return;
 
   pi.on("session_start", async (_event, ctx) => {
-    const problem = describeControlProblem(await checkRemoteControl(), session);
-    if (problem && ctx.hasUI) ctx.ui.notify(problem, "error");
+    const check = await checkRemoteControl(session);
+    if (!check.ok && ctx.hasUI) ctx.ui.notify(check.problem, "error");
   });
 
   pi.registerTool({
@@ -225,8 +225,8 @@ export default function kittySubagent(pi: ExtensionAPI): void {
     parameters: SubagentParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const problem = describeControlProblem(await checkRemoteControl(), session);
-      if (problem) return { content: [{ type: "text" as const, text: problem }], details: undefined, isError: true };
+      const check = await checkRemoteControl(session);
+      if (!check.ok) return { content: [{ type: "text" as const, text: check.problem }], details: undefined, isError: true };
 
       const agentScope: AgentScope = params.agentScope ?? "user";
       const hold = params.hold ?? false;
