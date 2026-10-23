@@ -1085,10 +1085,9 @@ void Compiler::compileMatchBody() {
     // Stack: [..., result_value(resultSlot), subject(subjectSlot)]
     // Pop the subject; result_value becomes the match expression result.
     emitByte(Op::POP);
-    // `and`/`or` may need this cell's own identity later: see
-    // lastOperandWasFoldedMatch.
+    // `and`/`or` may need to know this expression ended a folded local later:
+    // see lastOperandWasFoldedMatch.
     m_lastMatchFoldOffset = static_cast<int>(getCurrentChunk()->size());
-    m_lastMatchFoldSlot = resultSlot;
     m_localCount--; // retire subject from tracking
     m_scopeDepth--;
     while (m_localCount > 0 &&
@@ -2769,11 +2768,9 @@ void Compiler::recordShortCircuitJoinIfFoldedMatchOperand(bool folded) {
     if (!folded) {
         return;
     }
-    int slot = m_stackHeight - 1;
     getCurrentChunk()->recordShortCircuitJoin(
-        static_cast<int>(getCurrentChunk()->size()), slot);
+        static_cast<int>(getCurrentChunk()->size()), m_stackHeight - 1);
     m_lastMatchFoldOffset = static_cast<int>(getCurrentChunk()->size());
-    m_lastMatchFoldSlot = slot;
 }
 
 void Compiler::and_() {
