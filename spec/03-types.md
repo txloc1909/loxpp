@@ -371,7 +371,9 @@ program reaches a worker only through a handle to one of its tasks.
 
 **List**, **String**, and **Map** implement the sequence protocol: they support
 `len()`, `[]` access, membership testing with `in`, and `for-in` iteration.
-List and String use integer indexing; Map uses key-based access. String is
+List and String use integer indexing; Map uses key-based access. An integer
+index, and a slice bound, is an integer-valued Number or an Int (see
+[§04-semantics, Index Get](04-semantics.md#index-get)). String is
 immutable — index assignment (`s[i] = v`) is always a runtime error.
 
 A **Coroutine** is iterable by `for-in` (the loop resumes it one element at a
