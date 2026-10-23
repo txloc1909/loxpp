@@ -266,6 +266,9 @@ each has an off-the-shelf solution.
 | `240_int_suffix_before_if_rejected` | the same for the guard `case 1if t` | none (spec probe of the Int kind, N2 #826) |
 | `241_int_fractional_suffix_before_in_rejected` | the same rule for a fractional literal: `1.5in [1.5]`, a valid program before the suffix existed, is the literal `1.5i` and a name, a static error; a valid program today, so it fails on every consumer | none (spec probe of the Int kind, N2 #826) |
 | `242_int_fractional_suffix_before_if_rejected` | the same for the guard `case 1.5if t` | none (spec probe of the Int kind, N2 #826) |
+| `243_int_uppercase_hex_prefix_rejected` | the hexadecimal prefix is `0x` in lower case only: `0XFF` is the Number `0` and the name `XFF`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `244_int_hex_suffix_rejected` | a hexadecimal literal takes no suffix: `0xFFi` is the Int `0xFF` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
+| `245_int_binary_suffix_rejected` | a binary literal takes no suffix: `0b1i` is the Int `0b1` and the name `i`, a static error; every consumer rejects it today | none (spec probe of the Int kind, static error) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
@@ -356,7 +359,7 @@ divergence. Two more files serve the walkers that are not a consumer's own gate:
 `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
 that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
 
-The probes `164` to `242` are the spec probes of the Int kind
+The probes `164` to `245` are the spec probes of the Int kind
 (`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
 lines. They say which row of which spec table the probe checks. Six scripts
 read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
@@ -411,6 +414,14 @@ and QBE files in one pull request. The bootstrap interpreter has its own
 scanner, so N6 deletes its lines. The tree-sitter step of CI leaves the four
 probes out for good, because the grammar will reject them, and the tooling list
 needs no line.
+
+Three more static-error probes, `243` to `245`, are on no list, and they are
+a real check from the start. `0XFF`, `0xFFi`, and `0b1i` are syntax errors
+under the longest match, and every consumer rejects them today. A scanner that
+a later node writes can accept them by mistake: it reads `0X` as a prefix, as C
+and Java do, or it reads an optional `i` after each literal. Such a scanner
+fails the probe, and no node has to delete a line. The tree-sitter step of CI
+leaves them out for good, as it does for `173` to `175`.
 
 The twins of the suffix rule are in `165`: `1i in [1i, 2i]`, `case 1i if t`,
 `1.5 in [1.5]`, and `case 1.5 if t` with a space. The same probe pins the

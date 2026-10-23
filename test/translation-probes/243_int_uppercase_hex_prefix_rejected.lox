@@ -1,0 +1,16 @@
+// A hexadecimal prefix is `0x` in lower case only. At `0XFF` the longest match
+// is the NUMBER `0`, and `XFF` is a name, so the program has a name directly
+// after a literal, a syntax error (spec/01-lexical.md, row `suffix-boundary`).
+// A scanner that reads `0X` as a prefix, as C, Java, and Python do, accepts it.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 0XFF;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal suffix-boundary
