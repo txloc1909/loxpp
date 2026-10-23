@@ -82,7 +82,7 @@ printList(map(negate, nums));
 print "reduce(add, 0) =         " + str(reduce(add, nums, 0));
 // CHECK: reduce(add, 0) =         55
 print "reduce(mul, 1) =         " + str(reduce(mul, nums, 1));
-// CHECK: reduce(mul, 1) =         3.6288e+06
+// CHECK: reduce(mul, 1) =         3628800
 
 // Chaining: sum of squares of odd numbers
 var oddSquareSum = reduce(add, map(square, filter(isOdd, nums)), 0);

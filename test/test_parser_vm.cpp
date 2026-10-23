@@ -47,8 +47,8 @@ TEST_F(ParserVMTest, NumberLiterals) {
     expect_num("987654", 987654);
     expect_num("123.456", 123.456);
     expect_num("-0.001", -0.001);
-    // Negative zero is numerically == 0 but must display as "-0".
-    expect_str("-0", "-0");
+    // Negative zero is numerically == 0 and displays as "0" (issue #834).
+    expect_str("-0", "0");
 }
 
 TEST_F(ParserVMTest, BoolLiterals) {

@@ -1,12 +1,12 @@
 // RUN: loxpp %s | FileCheck %s
 
-// CHECK: 1.41421
+// CHECK: 1.4142135623730951
 print math.sqrt(2);
 
 // CHECK: 1024
 print math.pow(2, 10);
 
-// CHECK: 3.14159
+// CHECK: 3.141592653589793
 print math.pi;
 
 // CHECK: 1

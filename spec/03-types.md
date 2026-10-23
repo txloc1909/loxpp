@@ -462,8 +462,7 @@ Every value has a canonical string form, produced by `print` and by the
 | `nil` | `nil` |
 | `true` | `true` |
 | `false` | `false` |
-| Number (integer-valued) | Digits, no decimal point — `42`, `-3`, `0` |
-| Number (fractional) | Shortest decimal representation — `3.14`, `1.5` |
+| Number | The shortest decimal that round-trips to the same IEEE 754 double (ECMAScript `Number::toString`, radix 10). An integral value below `1e21` prints its bare digits (`42`, `-3`, `1000000`); a fraction prints with a decimal point (`3.14`, `0.30000000000000004`); a value outside `[1e-6, 1e21)` prints in scientific notation (`1e+21`, `1e-7`). The special values print `inf`, `-inf`, and `nan`, and both zeroes print `0`. |
 | String | The string content itself (no surrounding quotes) |
 | Function / BoundMethod | `<fn name>` where *name* is the declared function name |
 | Native function | `<native fn>` |
@@ -481,6 +480,28 @@ Every value has a canonical string form, produced by `print` and by the
 | Error | `kind: message` — the value of the `kind` field, then `": "`, then the value of the `message` field. |
 | Coroutine | `<coroutine>` |
 | Task | `<task>` |
+
+The Number form is pinned by this edge table; a row added or removed is a
+language change. `tools/check_number_format.py` proves the table complete.
+
+| Case | Example | String |
+|---|---|---|
+| positive-zero | `0.0` | `0` |
+| negative-zero | `-0.0` | `0` |
+| small-integer | `42.0` | `42` |
+| negative-integer | `-3.0` | `-3` |
+| fraction | `3.14` | `3.14` |
+| half | `0.5` | `0.5` |
+| imprecise-sum | `0.1 + 0.2` | `0.30000000000000004` |
+| seven-digits | `1000000.0` | `1000000` |
+| nine-digits | `123456789.0` | `123456789` |
+| fixed-upper-bound | `100000000000000000000` | `100000000000000000000` |
+| scientific-lower-bound | `1000000000000000000000` | `1e+21` |
+| fixed-lower-bound | `0.000001` | `0.000001` |
+| scientific-upper-bound | `0.0000001` | `1e-7` |
+| positive-infinity | `math.inf` | `inf` |
+| negative-infinity | `-math.inf` | `-inf` |
+| not-a-number | `math.nan` | `nan` |
 
 The nesting depth of a value that a canonical string form can hold is
 implementation-defined (see [Conformance](README.md#conformance)). A value

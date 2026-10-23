@@ -55,7 +55,7 @@ while (i <= 10) {
 print "";
 // CHECK: fib(30) = 832040
 print "fib(30) = " + str(fastFib(30));
-// CHECK: fib(35) = 9.22746e+06
+// CHECK: fib(35) = 9227465
 print "fib(35) = " + str(fastFib(35));
 
 // The cache is a field of the callable object, not a global.
