@@ -35,6 +35,15 @@ bool operator==(const Value& a, const Value& b) {
     if (is<Number>(a) || is<Number>(b)) {
         return false; // a number is never equal to a non-number
     }
+    // An Int and a Number are never equal, so the two checks above already
+    // answer every mixed pair. Two Ints compare by value, whether one of them
+    // is heap-held or both are inline.
+    if (is<Int>(a) && is<Int>(b)) {
+        return as<Int>(a) == as<Int>(b);
+    }
+    if (is<Int>(a) || is<Int>(b)) {
+        return false;
+    }
     if (is<bool>(a) && is<bool>(b)) {
         return as<bool>(a) == as<bool>(b);
     }
@@ -147,6 +156,11 @@ std::string stringify(const Value& value) {
     if (is<Nil>(value)) {
         return "nil";
     }
+    // Before the Obj* branch: a heap-held Int is an object, and it prints by
+    // value, never as the address behind the tag.
+    if (is<Int>(value)) {
+        return std::to_string(as<Int>(value));
+    }
     if (is<Obj*>(value)) {
         return stringifyObj(as<Obj*>(value));
     }
@@ -172,6 +186,13 @@ uint32_t hashValue(const Value& v) {
     if (is<Nil>(v)) {
         return 0U;
     }
+    // An Int hashes by value and never as an ObjString pointer. It needs no
+    // shared hash with the equal Number, because the two kinds are never equal
+    // (docs/decisions/integer-kind.md, Equality, ordering and hashing).
+    if (is<Int>(v)) {
+        const uint64_t bits = static_cast<uint64_t>(as<Int>(v));
+        return static_cast<uint32_t>(bits ^ (bits >> 32));
+    }
     if (is<Obj*>(v)) {
         return static_cast<ObjString*>(as<Obj*>(v))->hash;
     }
@@ -188,6 +209,11 @@ bool isValidMapKey(const Value& v) {
     if (is<Number>(v)) {
         return !std::isnan(as<Number>(v));
     }
+    // No Int is NaN, so every Int is a valid key (docs/decisions/
+    // integer-kind.md, Equality, ordering and hashing).
+    if (is<Int>(v)) {
+        return true;
+    }
     if (is<Obj*>(v)) {
         return as<Obj*>(v)->type == ObjType::STRING;
     }
@@ -200,6 +226,11 @@ size_t ValueHash::operator()(const Value& v) const {
     }
     if (is<Nil>(v)) {
         return 0U;
+    }
+    // By value, never by address: it agrees with operator== for an inline and
+    // a heap-held Int alike, including in the compiler's constant pool.
+    if (is<Int>(v)) {
+        return std::hash<uint64_t>{}(static_cast<uint64_t>(as<Int>(v)));
     }
     if (is<Obj*>(v)) {
         // Pointer identity. It agrees with operator== only for objects of one

@@ -7,6 +7,7 @@
 #include <vector>
 
 using Number = double;
+using Int = int64_t;
 
 // ---- NaN-boxing -----------------------------------------------------------
 // All Value types are packed into a single 8-byte word using quiet-NaN bit
@@ -26,7 +27,23 @@ inline constexpr uint64_t VAL_TRUE = QNAN | 0x03ULL;
 // throws, and the declare/assign paths overwrite it. The payload 0x04 is
 // unused by the tags above, and the QNAN bit 50 keeps a hardware NaN out.
 inline constexpr uint64_t VAL_UNBOUND_GLOBAL = QNAN | 0x04ULL;
+
+// An Int that fits inline (docs/decisions/integer-kind.md, Native layout):
+// tag bit 49 of the positive quiet-NaN space and a signed 48-bit payload in
+// bits 47..0. Bit 48 stays clear, reserved for a later UInt kind. The two tag
+// bits are part of INT_TAG_MASK so a value with bit 48 set never reads as an
+// Int, and a value with bit 49 clear is one of the tags above.
+inline constexpr uint64_t INT_TAG = QNAN | 0x0002000000000000ULL;
+inline constexpr uint64_t INT_TAG_MASK = 0xFFFF000000000000ULL;
+inline constexpr uint64_t INT_PAYLOAD_MASK = 0x0000FFFFFFFFFFFFULL;
+inline constexpr uint64_t INT_SIGN_BIT = 0x0000800000000000ULL;
+inline constexpr int64_t INT_INLINE_MIN = -(int64_t{1} << 47);
+inline constexpr int64_t INT_INLINE_MAX = (int64_t{1} << 47) - 1;
 } // namespace detail
+
+inline constexpr bool intFitsInline(Int v) {
+    return v >= detail::INT_INLINE_MIN && v <= detail::INT_INLINE_MAX;
+}
 
 // The OBJ_TAG pattern leaves this many low bits for an object pointer. Every
 // boxed Obj* must pass pointerFitsInValue() first; MemoryManager::create
@@ -69,6 +86,16 @@ static_assert(sizeof(double) == 8, "Platform must have 64-bit double");
 static_assert(sizeof(uint64_t) == 8, "Platform must have 64-bit uint64_t");
 static_assert(sizeof(Value) == 8, "NaN-boxed Value must be 8 bytes");
 
+// The inline Int form. Precondition: intFitsInline(v). A value outside that
+// range is an ObjInt in the heap; the compiler and the VM make that object
+// (MemoryManager::create<ObjInt>), so an Int inside the range never allocates.
+inline Value inlineIntValue(Int v) {
+    Value value;
+    value.bits =
+        detail::INT_TAG | (static_cast<uint64_t>(v) & detail::INT_PAYLOAD_MASK);
+    return value;
+}
+
 template <typename T>
 bool is(const Value& v);
 template <>
@@ -86,6 +113,15 @@ inline bool is<Nil>(const Value& v) {
 template <>
 inline bool is<Obj*>(const Value& v) {
     return (v.bits & detail::OBJ_TAG) == detail::OBJ_TAG;
+}
+template <>
+inline bool is<Int>(const Value& v) {
+    if ((v.bits & detail::INT_TAG_MASK) == detail::INT_TAG) {
+        return true;
+    }
+    return (v.bits & detail::OBJ_TAG) == detail::OBJ_TAG &&
+           reinterpret_cast<Obj*>(v.bits & ~detail::OBJ_TAG)->type ==
+               ObjType::INT;
 }
 
 // A global slot's empty state (src/runtime.h's m_globalSlots). Not one of the
@@ -118,6 +154,20 @@ inline Nil as<Nil>(const Value&) {
 template <>
 inline Obj* as<Obj*>(const Value& v) {
     return reinterpret_cast<Obj*>(v.bits & ~detail::OBJ_TAG);
+}
+// No type check: every call site guards with is<Int>. A boxed Int is read
+// through its own field, so equality, hashing and printing see the value and
+// never the address.
+template <>
+inline Int as<Int>(const Value& v) {
+    if ((v.bits & detail::INT_TAG_MASK) == detail::INT_TAG) {
+        int64_t raw = static_cast<int64_t>(v.bits & detail::INT_PAYLOAD_MASK);
+        if ((raw & static_cast<int64_t>(detail::INT_SIGN_BIT)) != 0) {
+            raw |= ~static_cast<int64_t>(detail::INT_PAYLOAD_MASK);
+        }
+        return raw;
+    }
+    return static_cast<ObjInt*>(as<Obj*>(v))->value;
 }
 
 template <typename T>

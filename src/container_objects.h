@@ -475,6 +475,12 @@ inline bool isTask(const Value& v) { return isValueOfType<ObjType::TASK>(v); }
 // other kind is never one. Constant time: an Enum's bit was fixed when it was
 // constructed.
 inline bool isMessage(const Value& v) {
+    // An Int is always a message, inline or heap-held. It is checked before
+    // isObj() because a heap-held one is an object, and no other object kind
+    // is always a message.
+    if (is<Int>(v)) {
+        return true;
+    }
     if (!isObj(v)) {
         return true;
     }

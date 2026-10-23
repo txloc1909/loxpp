@@ -62,6 +62,8 @@ static const char* objTypeName(ObjType type) {
         return "coroutine";
     case ObjType::TASK:
         return "task";
+    case ObjType::INT:
+        return "int";
     }
     return "?";
 }
@@ -421,6 +423,11 @@ void MemoryManager::traceObject(Obj* obj) {
         markValue(task->startArg);
         break;
     }
+    case ObjType::INT:
+        // An Int holds no reference. Missing this case would leave the box
+        // unmarked and free it under a live constant, so the probe that keeps
+        // a heap-held Int in a List across many collections pins it.
+        break;
     }
 }
 
@@ -485,6 +492,8 @@ static std::size_t objAllocatedSize(Obj* obj) {
         return sizeof(ObjCoroutine);
     case ObjType::TASK:
         return sizeof(ObjTask);
+    case ObjType::INT:
+        return sizeof(ObjInt);
     }
     return 0;
 }

@@ -62,6 +62,8 @@ static const char* typeNameOf(Obj* obj) {
     case ObjType::DEFERRED_CALL:
         // Internal implementation detail, never directly observable from Lox++
         return "DeferredCall";
+    case ObjType::INT:
+        return "Int";
     }
     return "Unknown";
 }
@@ -75,6 +77,11 @@ const char* valueTypeName(const Value& v) {
     }
     if (is<Number>(v)) {
         return "Number";
+    }
+    // Before the Obj* branch: a heap-held Int is an object with no visible
+    // address, and it reports the same kind as an inline one.
+    if (is<Int>(v)) {
+        return "Int";
     }
     return typeNameOf(as<Obj*>(v));
 }

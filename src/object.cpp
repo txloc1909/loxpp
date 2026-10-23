@@ -162,6 +162,10 @@ std::string stringifyObj(Obj* obj) {
         // Deferred calls are internal VM details and should never be
         // user-visible. This is a defensive stringification only.
         return "<deferred-call>";
+    case ObjType::INT:
+        // stringify() prints an Int before it reaches this switch, by value.
+        // Reaching here would print an address, so render the value instead.
+        return std::to_string(static_cast<ObjInt*>(obj)->value);
     }
     return "<obj>";
 }
