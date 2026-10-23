@@ -26,7 +26,7 @@
  * loxpp_done is the single termination point. It always re-runs the gate, so a
  * stale green gate can never end a mode, and it widens "done" beyond a local
  * green gate to CI status and reviewer approval whenever a PR number is given.
- * turn_end continues the mode under the policy in mode-policy.ts: turns before
+ * turn_end continues the mode under the policy in lib/mode-policy.ts: turns before
  * the first change are free, gate runs are the attempt budget, done retries
  * have their own budget, a run of turns that moves nothing stops the mode, and
  * a total-turn ceiling bounds a mode that keeps acting. The progress signal
@@ -47,7 +47,7 @@ import {
   normalizePolicyState,
   type Mode,
   type PolicyState,
-} from "./mode-policy.ts";
+} from "./lib/mode-policy.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
 // the approval decision to the agent for /goal. A per-command --handoff /

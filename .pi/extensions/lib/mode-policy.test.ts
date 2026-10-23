@@ -1,6 +1,6 @@
 /**
  * Tests for the mode turn policy. Run with:
- *   node --test .pi/extensions/mode-policy.test.ts
+ *   node --test .pi/extensions/lib/mode-policy.test.ts
  *
  * Each test states one property the policy must hold, so a regression in one
  * guard fails one test by name.
