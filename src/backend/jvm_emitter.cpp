@@ -2003,12 +2003,12 @@ bool usesDefer(const DecodedFunction& fn) {
 // argCount, or BUILD_LIST's/BUILD_MAP's own element width, scanned below
 // exactly as before match/enum dispatch support existed), or from
 // normalizeFoldedOperands's own deficit >= 1
-// repair, when it needs two or more genuine operands spilled (zero or one
-// genuine operand reuses e.scratchSlot instead — see normalizeFoldedOperands's
-// own note). The second term only ever adds width to a chunk that actually
-// contains an instruction whose folded-operand deficit is at least 1, so a
-// chunk with no such shape gets byte-identical `.limit locals` to before
-// this round.
+// repair, when it needs two or more genuine operands spilled (fewer than two
+// genuine operands spill nothing or reuse e.scratchSlot — see
+// normalizeFoldedOperands's own note). The second term only ever adds width to
+// a chunk that actually contains an instruction whose folded-operand deficit is
+// at least 1, so a chunk with no such shape gets byte-identical `.limit locals`
+// to before this round.
 int computeMaxSpillWidth(const DecodedFunction& fn,
                          const FunctionStackAnalysis& analysis) {
     int maxWidth = 0;
@@ -2237,15 +2237,15 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // row gets unconditionally — this function never computes a deficit for one.
 //
 // deficit >= 1: `genuineCount = nativePops - deficit` operands are still
-// genuinely on the stack, on top of where the folded ones belong. Zero or
-// one genuine operand reuses `e.scratchSlot` (the single slot `emitGetIndex`
-// already spilled into for this exact shape); two or more spill into
-// `e.argScratchBase`, `computeMaxSpillWidth`'s own spill area, sized for
-// exactly this by its own scan. Once spilled, the `deficit` folded locals
-// load in ascending slot order — `resolveTopLoxSlot` names the topmost one,
-// cross-checked the same way every other zero-depth consumer's slot is; the
-// rest sit contiguously beneath it, LIFO, per abstract_stack.h's own
-// local/temporary boundary — then the genuine operands reload on top, in
+// genuinely on the stack, on top of where the folded ones belong. Zero
+// genuine operands spill nothing; one reuses `e.scratchSlot` (the single
+// slot `emitGetIndex` already spilled into for this exact shape); two or
+// more spill into `e.argScratchBase`, `computeMaxSpillWidth`'s own spill
+// area, sized for exactly this by its own scan. Once spilled, the `deficit`
+// folded locals load in ascending slot order — `resolveTopLoxSlot` names the
+// topmost one, cross-checked the same way every other zero-depth consumer's
+// slot is; the rest sit contiguously beneath it, LIFO, per abstract_stack.h's
+// own local/temporary boundary — then the genuine operands reload on top, in
 // their original order.
 //
 // This does not stop at a deficit of 1: a live sibling operand BELOW a
