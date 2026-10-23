@@ -200,65 +200,65 @@ each has an off-the-shelf solution.
 | `174_int_fractional_zero_suffix_rejected` | an integer-valued fractional literal with the suffix is a static error | none (spec probe of the Int kind, static error) |
 | `175_int_suffix_detached_rejected` | the suffix is part of the token: a space before it is a syntax error | none (spec probe of the Int kind, static error) |
 | `176_int_equality_kinds` | `==` and `!=` on Ints compare by value, never across kinds; the constant pool keeps `1` and `1i` apart; `in` and `remove` follow `==` | none (spec probe of the Int kind, N2 #826) |
-| `177_int_truthiness` | an Int is always truthy, `0i` included; `!` of an Int is `false` | none (spec probe of the Int kind, N2 #826) |
-| `178_int_map_keys` | an Int is a valid map key that hashes by value: `1` and `1i` are two keys, and two Ints of one value are one key | none (spec probe of the Int kind, N2 #826) |
-| `179_int_printing` | an Int prints as its exact decimal digits, alone and nested in a List, a Map and an Enum; `type` names the kind | none (spec probe of the Int kind, N2 #826) |
-| `180_int_match_patterns` | a literal pattern of `match` follows `==`: `1i` matches the Int and not the Number, for inline and heap-held Ints | none (spec probe of the Int kind, N2 #826) |
-| `181_int_messages` | an Int is always a message, inline or heap-held, alone or as a field of an Enum, and it arrives equal to what was sent | none (spec probe of the Int kind, N2 #826) |
-| `182_int_boxed_gc` | Ints that an implementation may hold in the heap survive collections and stay equal to their literals | none (spec probe of the Int kind, N2 #826) |
-| `183_int_arithmetic` | `+`, `-`, `*` and unary `-` on two Ints wrap in two's complement, for values inside and outside the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
-| `184_int_division` | `/` is floor division and `%` is floor modulo on two Ints, with the sign cases, the smallest Int, and `a == (a / b) * b + a % b` | none (spec probe of the Int kind, N3 #827) |
-| `185_int_comparison` | `<`, `<=`, `>` and `>=` on two Ints compare by signed value across the whole range, including neighbours of the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
-| `186_int_bit_logic` | `&`, `|`, `^` and `~` work on all 64 bits, the sign bit included | none (spec probe of the Int kind, N3 #827) |
-| `187_int_shifts` | `<<` shifts left and wraps, `>>` keeps the sign bit, `>>>` fills with zero bits; counts from 0 to 63 | none (spec probe of the Int kind, N3 #827) |
-| `188_int_precedence` | the bit operators sit between the comparisons and `+` `-`, in the order of Python; the shifts associate to the left; `~` is unary | none (spec probe of the Int kind, N3 #827) |
-| `189_int_edge_cases` | the rows of the Int edge-case table: the smallest Int `/ -1i` and `% -1i`, its negation, the largest Int `+ 1i`, `1 == 1i`, and a truthy `0i` | none (spec probe of the Int kind, N3 #827) |
-| `190_int_mixed_kind_faults` | an Int with a Number, in either order, is a type fault on every operator but `==` and `!=`; a bit operator faults on a Number or any other kind | none (spec probe of the Int kind, N3 #827) |
-| `191_int_operator_faults` | a zero divisor, a shift count outside 0 to 63, and a shift count or operand that is not an Int are catchable faults with their own kinds | none (spec probe of the Int kind, N3 #827) |
-| `192_int_bit_operator_no_protocol` | a bit operator has no operator protocol: an Instance operand is a BitwiseTypeError on either side, whatever methods its class defines | none (spec probe of the Int kind, N3 #827) |
-| `193_int_operator_result_check` | the result check of an operator method does not change: an Int is not a Number, so `__len__` and `__hash__` may not return one | none (spec probe of the Int kind, N3 #827) |
-| `194_int_wrap_churn` | a loop that makes thousands of Ints outside the inline range, mixing them with `*`, `+`, `^`, and `>>>`, keeps exact bits across collections | none (spec probe of the Int kind, N3 #827) |
-| `195_int_flag_set` | purpose: a flag set in one Int, with flags in the top two bits | none (spec probe of the Int kind, N3 #827) |
-| `196_int_bitboard` | purpose: a 64-square bitboard, with popcount by `b & (b - 1i)` and knight moves by shifts and masks | none (spec probe of the Int kind, N3 #827) |
-| `197_int_hash_mix_splitmix` | purpose: a 64-bit hash mix (splitmix64), with the wrap in `*` and `+`, `>>>`, and `^`, over hexadecimal constants | none (spec probe of the Int kind, N3 #827) |
-| `198_int_conversions` | `int` converts an integral Number or a decimal String to an Int, `float` converts an Int or a String to a Number; the range ends and the rounding of `float` | none (spec probe of the Int kind, N4 #828) |
-| `199_int_index` | a List or String index, a slice bound, and an enum field index accept an Int; a Map index is a key; an Int that no index reaches is out of bounds | none (spec probe of the Int kind, N4 #828) |
-| `200_integer_module` | the `integer` module: `min_value`, `max_value`, `abs`, `min`, `max`, `udiv`, `urem`, `ult`, `ustr`, and `parse_unsigned` | none (spec probe of the Int kind, N4 #828) |
-| `201_int_hash_mix_fnv` | purpose: FNV-1a over the bytes of a String, with `int(ord(c))`, `^`, and a `*` that wraps | none (spec probe of the Int kind, N4 #828) |
-| `202_int_fault_fractional` | `int` of a fractional Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `203_int_fault_nan` | `int` of a NaN is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `204_int_fault_infinity` | `int` of an infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `205_int_fault_negative_infinity` | `int` of a negative infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `206_int_fault_out_of_range` | `int` of the Number 2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `207_int_fault_below_range` | `int` of a Number below -2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `208_int_fault_string_fractional` | `int` of the String "1.5" is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `209_int_fault_string_trailing_text` | `int` of a String with text after the digits is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `210_int_fault_string_hex` | `int` of a hex String is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `211_int_fault_string_overflow` | `int` of a decimal String above the largest Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `212_int_fault_string_empty` | `int` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `213_int_fault_string_space` | `int` of a String with a space is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `214_int_fault_other_kind` | `int` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `215_float_fault_string_not_number` | `float` of a String that is not a number is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `216_float_fault_string_exponent` | `float` of a String in exponent form is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `217_float_fault_string_empty` | `float` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `218_float_fault_other_kind` | `float` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `219_integer_fault_abs_number` | `integer.abs` of a Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `220_integer_fault_min_number` | `integer.min` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `221_integer_fault_max_number` | `integer.max` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `222_integer_fault_udiv_number` | `integer.udiv` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `223_integer_fault_urem_number` | `integer.urem` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `224_integer_fault_ult_number` | `integer.ult` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `225_integer_fault_ustr_number` | `integer.ustr` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `226_integer_fault_parse_unsigned_int` | `integer.parse_unsigned` with an Int argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `227_integer_fault_udiv_zero` | `integer.udiv` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `228_integer_fault_urem_zero` | `integer.urem` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `229_integer_fault_parse_unsigned_too_large` | `integer.parse_unsigned` of 2^64 is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `230_integer_fault_parse_unsigned_sign` | `integer.parse_unsigned` of a signed String is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `231_integer_fault_parse_unsigned_empty` | `integer.parse_unsigned` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `232_int_fault_slice_negative` | a slice bound that is a negative Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `233_int_fault_enum_index_out_of_range` | an enum field index that is an Int past the last field is a halting fault | none (spec probe of the Int kind, N4 #828) |
-| `234_int_fault_chr_int` | `chr` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
-| `235_int_fault_math_int` | `math.floor` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
+| `177_int_map_keys` | an Int is a valid map key that hashes by value: `1` and `1i` are two keys, and two Ints of one value are one key | none (spec probe of the Int kind, N2 #826) |
+| `178_int_printing` | an Int prints as its exact decimal digits, alone and nested in a List, a Map and an Enum; `type` names the kind | none (spec probe of the Int kind, N2 #826) |
+| `179_int_match_patterns` | a literal pattern of `match` follows `==`: `1i` matches the Int and not the Number, for inline and heap-held Ints | none (spec probe of the Int kind, N2 #826) |
+| `180_int_messages` | an Int is always a message, inline or heap-held, alone or as a field of an Enum, and it arrives equal to what was sent | none (spec probe of the Int kind, N2 #826) |
+| `181_int_boxed_gc` | Ints that an implementation may hold in the heap survive collections and stay equal to their literals | none (spec probe of the Int kind, N2 #826) |
+| `182_int_fault_chr_int` | `chr` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
+| `183_int_fault_math_int` | `math.floor` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
+| `184_int_truthiness` | an Int is always truthy, `0i` included; `!` of an Int is `false` | none (spec probe of the Int kind, N3 #827) |
+| `185_int_arithmetic` | `+`, `-`, `*` and unary `-` on two Ints wrap in two's complement, for values inside and outside the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
+| `186_int_division` | `/` is floor division and `%` is floor modulo on two Ints, with the sign cases, the smallest Int, and `a == (a / b) * b + a % b` | none (spec probe of the Int kind, N3 #827) |
+| `187_int_comparison` | `<`, `<=`, `>` and `>=` on two Ints compare by signed value across the whole range, including neighbours of the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
+| `188_int_bit_logic` | `&`, `|`, `^` and `~` work on all 64 bits, the sign bit included | none (spec probe of the Int kind, N3 #827) |
+| `189_int_shifts` | `<<` shifts left and wraps, `>>` keeps the sign bit, `>>>` fills with zero bits; counts from 0 to 63 | none (spec probe of the Int kind, N3 #827) |
+| `190_int_precedence` | the bit operators sit between the comparisons and `+` `-`, in the order of Python; the shifts associate to the left; `~` is unary | none (spec probe of the Int kind, N3 #827) |
+| `191_int_edge_cases` | the rows of the Int edge-case table: the smallest Int `/ -1i` and `% -1i`, its negation, the largest Int `+ 1i`, `1 == 1i`, and a truthy `0i` | none (spec probe of the Int kind, N3 #827) |
+| `192_int_mixed_kind_faults` | an Int with a Number, in either order, is a type fault on every operator but `==` and `!=`; a bit operator faults on a Number or any other kind | none (spec probe of the Int kind, N3 #827) |
+| `193_int_operator_faults` | a zero divisor, a shift count outside 0 to 63, and a shift count or operand that is not an Int are catchable faults with their own kinds | none (spec probe of the Int kind, N3 #827) |
+| `194_int_bit_operator_no_protocol` | a bit operator has no operator protocol: an Instance operand is a BitwiseTypeError on either side, whatever methods its class defines | none (spec probe of the Int kind, N3 #827) |
+| `195_int_operator_result_check` | the result check of an operator method does not change: an Int is not a Number, so `__len__` and `__hash__` may not return one | none (spec probe of the Int kind, N3 #827) |
+| `196_int_wrap_churn` | a loop that makes thousands of Ints outside the inline range, mixing them with `*`, `+`, `^`, and `>>>`, keeps exact bits across collections | none (spec probe of the Int kind, N3 #827) |
+| `197_int_flag_set` | purpose: a flag set in one Int, with flags in the top two bits | none (spec probe of the Int kind, N3 #827) |
+| `198_int_bitboard` | purpose: a 64-square bitboard, with popcount by `b & (b - 1i)` and knight moves by shifts and masks | none (spec probe of the Int kind, N3 #827) |
+| `199_int_hash_mix_splitmix` | purpose: a 64-bit hash mix (splitmix64), with the wrap in `*` and `+`, `>>>`, and `^`, over hexadecimal constants | none (spec probe of the Int kind, N3 #827) |
+| `200_int_conversions` | `int` converts an integral Number or a decimal String to an Int, `float` converts an Int or a String to a Number; the range ends and the rounding of `float` | none (spec probe of the Int kind, N4 #828) |
+| `201_int_index` | a List or String index, a slice bound, and an enum field index accept an Int; a Map index is a key; an Int that no index reaches is out of bounds | none (spec probe of the Int kind, N4 #828) |
+| `202_integer_module` | the `integer` module: `min_value`, `max_value`, `abs`, `min`, `max`, `udiv`, `urem`, `ult`, `ustr`, and `parse_unsigned` | none (spec probe of the Int kind, N4 #828) |
+| `203_int_hash_mix_fnv` | purpose: FNV-1a over the bytes of a String, with `int(ord(c))`, `^`, and a `*` that wraps | none (spec probe of the Int kind, N4 #828) |
+| `204_int_fault_fractional` | `int` of a fractional Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `205_int_fault_nan` | `int` of a NaN is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `206_int_fault_infinity` | `int` of an infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `207_int_fault_negative_infinity` | `int` of a negative infinity is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `208_int_fault_out_of_range` | `int` of the Number 2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `209_int_fault_below_range` | `int` of a Number below -2^63 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `210_int_fault_string_fractional` | `int` of the String "1.5" is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `211_int_fault_string_trailing_text` | `int` of a String with text after the digits is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `212_int_fault_string_hex` | `int` of a hex String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `213_int_fault_string_overflow` | `int` of a decimal String above the largest Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `214_int_fault_string_empty` | `int` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `215_int_fault_string_space` | `int` of a String with a space is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `216_int_fault_other_kind` | `int` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `217_float_fault_string_not_number` | `float` of a String that is not a number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `218_float_fault_string_exponent` | `float` of a String in exponent form is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `219_float_fault_string_empty` | `float` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `220_float_fault_other_kind` | `float` of `nil` is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `221_integer_fault_abs_number` | `integer.abs` of a Number is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `222_integer_fault_min_number` | `integer.min` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `223_integer_fault_max_number` | `integer.max` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `224_integer_fault_udiv_number` | `integer.udiv` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `225_integer_fault_urem_number` | `integer.urem` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `226_integer_fault_ult_number` | `integer.ult` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `227_integer_fault_ustr_number` | `integer.ustr` with a Number argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `228_integer_fault_parse_unsigned_int` | `integer.parse_unsigned` with an Int argument is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `229_integer_fault_udiv_zero` | `integer.udiv` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `230_integer_fault_urem_zero` | `integer.urem` with a zero divisor is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `231_integer_fault_parse_unsigned_too_large` | `integer.parse_unsigned` of 2^64 is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `232_integer_fault_parse_unsigned_sign` | `integer.parse_unsigned` of a signed String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `233_integer_fault_parse_unsigned_empty` | `integer.parse_unsigned` of the empty String is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `234_int_fault_slice_negative` | a slice bound that is a negative Int is a halting fault | none (spec probe of the Int kind, N4 #828) |
+| `235_int_fault_enum_index_out_of_range` | an enum field index that is an Int past the last field is a halting fault | none (spec probe of the Int kind, N4 #828) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
 | `bootstrap-only/stdout_carriage_return` | a program prints a carriage return (byte 13) and the bootstrap wrapper passes it on (issue #656); `tools/diff_runtimes.py` and `check_spec_probes.py` read stdout in text mode, which turns each CR into a newline, so `tools/check_cr_bytes.py` compares the raw stdout bytes with native; CI runs it in the bootstrap step "NUL probes". It has no STATUS line, because a CHECK line cannot hold a CR byte | none (parity gate) |
@@ -357,12 +357,12 @@ read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
 `check_int_fault_rows.py`, and `check_int_edge_rows.py`. A row with no probe
 fails its script.
 
-Each native node makes a group of these probes pass. The value layer and the
-literals (`164`, `165`, `176` to `182`, `234`, `235`), the operators (`183` to
-`197`), and the conversions, the `integer` module, and the indexes (`198` to
-`233`). Every one of these probes uses a form that no consumer accepts yet, so
-each is on the expected-failure list of every consumer until the node of that
-consumer lands.
+Each native node makes a group of these probes pass: the value layer and the
+literals (`164`, `165`, and `176` to `183`), the operators (`184` to `199`),
+and the conversions, the `integer` module, and the indexes (`200` to `235`).
+Every one of these probes uses a form that no consumer accepts yet, so each is
+on the expected-failure list of every consumer until the node of that consumer
+lands.
 
 A probe of a halting fault starts with a control line: the same function on a
 valid argument. Without the control line, a consumer that has no `int`

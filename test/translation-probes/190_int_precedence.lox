@@ -31,7 +31,7 @@ print ~-1i;
 print -~1i;
 print -1i << 1i;
 print ~5i & 12i;
-print ~[5i][0i];
+print ~[5i][0];
 print (1i | 2i) ^ 3i;
 print (1i | 2i) & 6i;
 print 16i >> 1i >> 2i;
