@@ -23,24 +23,19 @@
 // `normalizeFoldedOperands`, one pre-dispatch step every instruction gets
 // alike (see its own note, above `emitBody`), compares that count against
 // abstract_stack.cpp's own `operandDepth()` and repairs exactly the deficit.
-// A folded operand can only ever be the BOTTOM-most of an instruction's own
-// operands — `compileMatchBody` folds a `match` expression's result into its
-// own named local before any later sibling operand is even parsed — so a
-// deficit of 1 (the bottom operand missing, every genuine sibling still on
-// the real stack) is repaired for every `nativePops`-covered opcode alike,
-// not site by site — EXCEPT when the consumer sits on a CFG merge where
+// A folded operand can only ever be the BOTTOM-most block of an
+// instruction's own operands — `compileMatchBody` folds a `match`
+// expression's result into its own named local before any later sibling
+// operand is even parsed, and reserves one phantom local per live sibling
+// operand BELOW the match (so each of those folds too) — so a deficit of
+// any size (the bottom operands missing, every genuine sibling still on the
+// real stack) is repaired for every `nativePops`-covered opcode alike, not
+// site by site, by loading the missing locals in ascending slot order —
+// EXCEPT when the consumer sits on a CFG merge where
 // `loadNamedLocalAtZeroDepth`'s own two slot estimates disagree, where it
-// stops loudly instead (see the third GAP residue below).
-//
-// A deficit of 2 or more throws rather than repairing: a program that puts
-// a live sibling operand BELOW a match's own subject/result once collided
-// with `compileMatchBody`'s own slot allocation on `build/loxpp` itself
-// (`compiler.cpp`); that allocation now reserves one phantom local per live
-// sibling operand first, so native answers this shape correctly, but this
-// file's own repair was not extended to match it — `normalizeFoldedOperands`
-// throws a named error citing this file for that case instead of guessing.
-// `docs/reference/bytecode-translation-problems.md`'s own GAP entry records the
-// measurement.
+// stops loudly instead (see the third GAP residue below). A deficit wider
+// than the chunk's own bound locals is not a fold at all; that throws a
+// named underflow error.
 //
 // A separate, REACHABLE gap exists outside this file: `and`/`or` over a
 // folded `match` operand fails at analysis time, in abstract_stack.cpp,

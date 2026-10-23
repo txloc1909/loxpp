@@ -562,9 +562,9 @@ void emitPop(Emitter& e, const DecodedInstruction& in) {
 // itself a bare Object[] (LoxList/LoxMap/LoxEnum all wrap their storage in
 // a named class — runtime/jvm/src), so this test can never mistake a real
 // Lox value for a cell or the reverse.
-void emitCapturedGetLocal(Emitter& e, int slot, int offset) {
-    std::string rawLbl = capLabel("gr", offset);
-    std::string endLbl = capLabel("ge", offset);
+void emitCapturedGetLocal(Emitter& e, int slot, int offset, int sub = -1) {
+    std::string rawLbl = capLabel("gr", offset, sub);
+    std::string endLbl = capLabel("ge", offset, sub);
     int d = e.b.depth;
     e.b.emit("aload " + std::to_string(slot), +1);
     e.b.emit("instanceof [Ljava/lang/Object;", 0);
@@ -666,18 +666,38 @@ int recordedJoinSlotAt(const FunctionStackAnalysis& analysis, int offset) {
     return -1;
 }
 
-int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
-    int loxSlot = resolveZeroDepthLocalSlot(
+// The Lox slot a peek-family consumer at offset `offset` reads once its own
+// operand depth is zero — the SAME topmost slot `loadNamedLocalAtZeroDepth`
+// (below) loads, split out so `normalizeFoldedOperands` can name it without
+// also emitting its load: a deficit above 1 needs every folded slot from
+// here down to `topLoxSlot - (deficit - 1)`, loaded bottom first, not only
+// this one.
+int resolveTopLoxSlot(const Emitter& e, std::size_t i, int offset) {
+    return resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
         e.lastInvisibleVarSlot, recordedJoinSlotAt(e.analysis, offset), offset,
         "jvm_emitter");
+}
+
+// Loads Lox frame slot `loxSlot` onto the JVM operand stack, routed through
+// the same captured-slot test GET_LOCAL/SET_LOCAL use whenever the capture
+// analysis marks that slot captured. Shared by `loadNamedLocalAtZeroDepth`
+// (below) and `normalizeFoldedOperands`'s own multi-slot repair, both of
+// which load a Lox slot they did not reach through an ordinary GET_LOCAL.
+// `sub` forwards to `emitCapturedGetLocal`, so a caller that issues more
+// than one load at the same offset gives each one a distinct label pair.
+int loadLoxSlot(Emitter& e, int loxSlot, int offset, int sub = -1) {
     int slot = e.jvmSlotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
-        emitCapturedGetLocal(e, slot, offset);
+        emitCapturedGetLocal(e, slot, offset, sub);
     } else {
         e.b.emit("aload " + std::to_string(slot), +1);
     }
     return slot;
+}
+
+int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
+    return loadLoxSlot(e, resolveTopLoxSlot(e, i, offset), offset);
 }
 
 // GET_ITER replaces its own operand in place (vm.cpp: `stackTop[-1] = ...`).
@@ -1973,8 +1993,8 @@ bool usesDefer(const DecodedFunction& fn) {
 //
 // `nativePops` (native_pops.h) is the target-independent source for this —
 // computeMaxSpillWidth (immediately below) needs the same per-opcode count,
-// to size the same spill area for normalizeFoldedOperands's own deficit-1
-// shapes (SET_INDEX, SLICE, a folded CALL/INVOKE callee, or a wide
+// to size the same spill area for normalizeFoldedOperands's own folded-
+// operand shapes (SET_INDEX, SLICE, a folded CALL/INVOKE callee, or a wide
 // BUILD_LIST/BUILD_MAP with its first element/key folded) that need two or
 // more scratch slots.
 
@@ -1982,11 +2002,11 @@ bool usesDefer(const DecodedFunction& fn) {
 // from the ordinary P7 calling convention (CALL's/INVOKE's/SUPER_INVOKE's
 // argCount, or BUILD_LIST's/BUILD_MAP's own element width, scanned below
 // exactly as before match/enum dispatch support existed), or from
-// normalizeFoldedOperands's own deficit == 1
-// repair, when it needs two or more genuine operands spilled (one genuine
-// operand reuses e.scratchSlot instead — see normalizeFoldedOperands's own
-// note). The second term only ever adds width to a chunk that actually
-// contains an instruction whose folded-operand deficit is exactly 1, so a
+// normalizeFoldedOperands's own deficit >= 1
+// repair, when it needs two or more genuine operands spilled (zero or one
+// genuine operand reuses e.scratchSlot instead — see normalizeFoldedOperands's
+// own note). The second term only ever adds width to a chunk that actually
+// contains an instruction whose folded-operand deficit is at least 1, so a
 // chunk with no such shape gets byte-identical `.limit locals` to before
 // this round.
 int computeMaxSpillWidth(const DecodedFunction& fn,
@@ -2003,8 +2023,8 @@ int computeMaxSpillWidth(const DecodedFunction& fn,
         std::optional<int> pops = nativePops(instr.op, instr);
         if (pops.has_value()) {
             int deficit = *pops - analysis.before[i].operandDepth();
-            int genuineCount = *pops - 1;
-            if (deficit == 1 && genuineCount >= 2) {
+            int genuineCount = *pops - deficit;
+            if (deficit >= 1 && genuineCount >= 2) {
                 maxWidth = std::max(maxWidth, genuineCount);
             }
         }
@@ -2196,7 +2216,7 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // lives there once rather than once per consumer.
 
 // The one place every `nativePops`-covered consumer gets its folded bottom
-// operand repaired, replacing what used to be one private
+// operand(s) repaired, replacing what used to be one private
 // `if (operandDepth() == ...)` branch per consumer — nine more
 // folded-operand shapes were the last straw: a per-consumer enumeration of
 // this branch kept finding one more missing site each time.
@@ -2204,7 +2224,7 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // `deficit` is how many of this instruction's own `nativePops` cells are
 // genuinely missing from the real JVM operand stack, because
 // `compileMatchBody` folded them into an invisible local instead of leaving
-// them as temps. A folded operand is always the BOTTOM-most of an
+// them as temps. A folded operand is always the BOTTOM-most block of an
 // instruction's own operands — `compileMatchBody` folds a `match`
 // expression's result into its own named local the moment that expression
 // finishes compiling, before any later sibling operand of the same
@@ -2216,26 +2236,23 @@ std::size_t finishInstruction(Emitter& e, std::size_t i,
 // untouched). This is the ordinary case, and it is also what every CUSTOM
 // row gets unconditionally — this function never computes a deficit for one.
 //
-// deficit == 1: spill the genuine operands already on the stack (there are
-// exactly `nativePops - 1` of them), load the missing bottom operand through
-// `loadNamedLocalAtZeroDepth` — the same cross-checked mechanism every
-// CUSTOM row already trusts — then reload the genuine operands on top, in
-// their original order. Zero or one genuine operand reuses `e.scratchSlot`,
-// the single slot `emitGetIndex` already spilled into for this exact shape;
-// two or more (SET_INDEX, SLICE, a folded CALL/INVOKE callee, or a wide
-// BUILD_LIST/BUILD_MAP with its first element/key folded) spill into
+// deficit >= 1: `genuineCount = nativePops - deficit` operands are still
+// genuinely on the stack, on top of where the folded ones belong. Zero or
+// one genuine operand reuses `e.scratchSlot` (the single slot `emitGetIndex`
+// already spilled into for this exact shape); two or more spill into
 // `e.argScratchBase`, `computeMaxSpillWidth`'s own spill area, sized for
-// exactly this by its own `deficit == 1` scan.
+// exactly this by its own scan. Once spilled, the `deficit` folded locals
+// load in ascending slot order — `resolveTopLoxSlot` names the topmost one,
+// cross-checked the same way every other zero-depth consumer's slot is; the
+// rest sit contiguously beneath it, LIFO, per abstract_stack.h's own
+// local/temporary boundary — then the genuine operands reload on top, in
+// their original order.
 //
-// deficit >= 2: two or more of this instruction's own operands are missing
-// at once — a program that puts a live sibling operand BELOW a match's own
-// subject/result. `compileMatchBody`'s own slot allocation now reserves one
-// phantom local per live sibling operand before allocating the match's own
-// result/subject slots (compiler.cpp), so `build/loxpp` itself answers this
-// shape correctly; this function still throws rather than repairing it,
-// because that reservation was not carried into a second, matching load
-// here. `docs/reference/bytecode-translation-problems.md`'s own GAP entry
-// records the measurement.
+// This does not stop at a deficit of 1: a live sibling operand BELOW a
+// match's own subject/result folds every one of those siblings into a
+// phantom local too (compiler.cpp reserves one per live sibling), so a
+// deeper fold now has a correct native answer, and this repair generalizes
+// to `deficit` of any size to match it.
 void normalizeFoldedOperands(Emitter& e, std::size_t i,
                              const DecodedInstruction& in) {
     std::optional<int> pops = nativePops(in.op, in);
@@ -2246,33 +2263,45 @@ void normalizeFoldedOperands(Emitter& e, std::size_t i,
     if (deficit <= 0) {
         return;
     }
-    if (deficit >= 2) {
+    // A fold can only explain a deficit up to how many locals are currently
+    // bound: `compileMatchBody` folds a value INTO a local, never out of thin
+    // air. A deficit wider than that is a genuine operand-stack underflow the
+    // compiler itself would never produce — not a fold at all — so name it
+    // loudly instead of loading a Lox slot that does not exist.
+    if (e.analysis.before[i].localCount < deficit) {
         throw std::runtime_error(
             "jvm_emitter: " + std::string(opName(in.op)) + " at offset " +
-            std::to_string(in.offset) + " needs " + std::to_string(deficit) +
-            " operands compileMatchBody folded below its topmost genuine "
-            "one; this backend does not repair a deficit above one (see "
-            "the GAP entry in "
-            "docs/reference/bytecode-translation-problems.md)");
+            std::to_string(in.offset) + " is missing " +
+            std::to_string(deficit) + " operands but only " +
+            std::to_string(e.analysis.before[i].localCount) +
+            " locals are bound; this is an operand-stack underflow, not a "
+            "folded-operand repair");
     }
-    int genuineCount = *pops - 1;
-    if (genuineCount <= 1) {
-        std::string scratch = std::to_string(e.scratchSlot);
-        if (genuineCount == 1) {
-            e.b.emit("astore " + scratch, -1);
+    int genuineCount = *pops - deficit;
+    if (genuineCount == 1) {
+        e.b.emit("astore " + std::to_string(e.scratchSlot), -1);
+    } else if (genuineCount >= 2) {
+        for (int k = 0; k < genuineCount; k++) {
+            e.b.emit("astore " + std::to_string(e.argScratchBase + k), -1);
         }
-        loadNamedLocalAtZeroDepth(e, i, in.offset);
-        if (genuineCount == 1) {
-            e.b.emit("aload " + scratch, +1);
+    }
+
+    int topLoxSlot = resolveTopLoxSlot(e, i, in.offset);
+    // `k` also serves as the captured-slot label sub-index: this loop can
+    // call loadLoxSlot more than once at this SAME offset, and two of those
+    // calls landing on a captured slot would otherwise both ask
+    // emitCapturedGetLocal for the offset-only label pair ("gr"+offset /
+    // "ge"+offset), which jasmin rejects as a duplicate the second time.
+    for (int k = deficit - 1; k >= 0; k--) {
+        loadLoxSlot(e, topLoxSlot - k, in.offset, k);
+    }
+
+    if (genuineCount == 1) {
+        e.b.emit("aload " + std::to_string(e.scratchSlot), +1);
+    } else if (genuineCount >= 2) {
+        for (int k = genuineCount - 1; k >= 0; k--) {
+            e.b.emit("aload " + std::to_string(e.argScratchBase + k), +1);
         }
-        return;
-    }
-    for (int k = 0; k < genuineCount; k++) {
-        e.b.emit("astore " + std::to_string(e.argScratchBase + k), -1);
-    }
-    loadNamedLocalAtZeroDepth(e, i, in.offset);
-    for (int k = genuineCount - 1; k >= 0; k--) {
-        e.b.emit("aload " + std::to_string(e.argScratchBase + k), +1);
     }
 }
 
