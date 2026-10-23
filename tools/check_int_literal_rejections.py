@@ -51,7 +51,7 @@ as `0b` followed by 64 ones, is skipped.
 The check also runs the other way. Each rejected probe holds the `Source` of a
 row whose `Result` is the row of its COVERS line, so a form that a probe
 rejects cannot be missing from the table. The `valid` rows have no such link,
-because the probes that hold them hold other lines too (every line of probe 164
+because the probes that hold them hold other lines too (every line of probe 165
 prints a literal). The count VALID_EXAMPLES says how many `valid` rows the table
 has, so a `valid` row removed from the table fails. A row added on purpose
 needs a new count in this script.

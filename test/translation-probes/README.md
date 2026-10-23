@@ -360,7 +360,7 @@ divergence. Two more files serve the walkers that are not a consumer's own gate:
 `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
 that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
 
-The probes `164` to `245` are the spec probes of the Int kind
+The probes `165` to `246` are the spec probes of the Int kind
 (`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
 lines. They say which row of which spec table the probe checks. Six scripts
 read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
@@ -374,9 +374,9 @@ it fails for a function that has no probe of its non-Int fault, or, for `udiv`
 and `urem`, of its zero divisor.
 
 Each native node makes a group of these probes pass: the value layer and the
-literals (`164`, `165`, `176` to `183`, and the static-error probes `236` to
-`242`), the operators (`184` to `199`), and the conversions, the `integer`
-module, and the indexes (`200` to `235`).
+literals (`165`, `166`, `177` to `184`, and the static-error probes `237` to
+`243`), the operators (`185` to `200`), and the conversions, the `integer`
+module, and the indexes (`201` to `236`).
 Every one of these probes, except the static-error probes below, uses a form
 that no consumer accepts yet, so each is on the expected-failure list of every
 consumer until the node of that consumer lands.
@@ -386,10 +386,10 @@ valid argument. Without the control line, a consumer that has no `int`
 function would pass the probe, because a call of an unknown name also halts
 the program.
 
-The thirteen static-error probes (`166` to `175` and `236` to `238`, each with
+The thirteen static-error probes (`167` to `176` and `237` to `239`, each with
 a `// STATIC-ERROR` line) are on no list. Every consumer rejects them today,
 because it has no Int literal, so they pass for the wrong reason. The twin of
-each is a probe that must be accepted, in `164` or `165`, and the twin fails
+each is a probe that must be accepted, in `165` or `166`, and the twin fails
 today. A consumer that rejects every Int literal passes a static-error probe
 and fails its twin. A static-error probe is a real check only after its
 consumer has Int literals.
@@ -404,7 +404,7 @@ Without the line, a halt at run time with no output passes both tools.
 `tools/check_int_literal_rejections.py` fails a rejected probe that does not
 start with such a line.
 
-Four more static-error probes, `239` to `242`, are the exception to "on no
+Four more static-error probes, `240` to `243`, are the exception to "on no
 list". Before the suffix existed, `1in [1, 2]`, `case 1if t`, `1.5in [1.5]`,
 and `case 1.5if t` were valid programs, so every consumer runs them and they
 fail today. They are on the
@@ -416,15 +416,15 @@ scanner, so N6 deletes its lines. The tree-sitter step of CI leaves the four
 probes out for good, because the grammar will reject them, and the tooling list
 needs no line.
 
-Three more static-error probes, `243` to `245`, are on no list, and they are
+Three more static-error probes, `244` to `246`, are on no list, and they are
 a real check from the start. `0XFF`, `0xFFi`, and `0b1i` are syntax errors
 under the longest match, and every consumer rejects them today. A scanner that
 a later node writes can accept them by mistake: it reads `0X` as a prefix, as C
 and Java do, or it reads an optional `i` after each literal. Such a scanner
 fails the probe, and no node has to delete a line. The tree-sitter step of CI
-leaves them out for good, as it does for `173` to `175`.
+leaves them out for good, as it does for `174` to `176`.
 
-The twins of the suffix rule are in `165`: `1i in [1i, 2i]`, `case 1i if t`,
+The twins of the suffix rule are in `166`: `1i in [1i, 2i]`, `case 1i if t`,
 `1.5 in [1.5]`, and `case 1.5 if t` with a space. The same probe pins the
 other side of the rule: a hexadecimal or a binary literal has no suffix, so
 `0x1in [1i]`, `0b1in [1i]`, and `case 0x1if t` are valid.

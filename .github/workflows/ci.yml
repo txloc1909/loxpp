@@ -159,11 +159,11 @@ jobs:
               tree-sitter test
               # Probes 141 and 142 hold an arm that the grammar rejects on
               # purpose (the comma chain, and a constructor pattern with no
-              # enum name), probes 173 to 175 hold a literal that the grammar
-              # rejects on purpose (`1.5i`, `1.0i`, and `1 i`), probes 239
-              # to 242 hold `1in`, `1if`, `1.5in`, and `1.5if`, which the
-              # grammar rejects once it reads the suffix, and probes 243 to
-              # 245 hold `0XFF`, `0xFFi`, and `0b1i`, which it rejects too, so
+              # enum name), probes 174 to 176 hold a literal that the grammar
+              # rejects on purpose (`1.5i`, `1.0i`, and `1 i`), probes 240
+              # to 243 hold `1in`, `1if`, `1.5in`, and `1.5if`, which the
+              # grammar rejects once it reads the suffix, and probes 244 to
+              # 246 hold `0XFF`, `0xFFi`, and `0b1i`, which it rejects too, so
               # they are not in the parse. A spec
               # probe that the grammar does not parse yet is listed in
               # tools/spec-probe-xfail/tree-sitter.txt, and it is left out

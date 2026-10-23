@@ -41,7 +41,7 @@ DIVIDING_FUNCTIONS. A function in the member table with no probe fails, so
 does a function of the decision that the table lost, and so does a probe that
 names a function that its line of the fault does not call.
 
-Such a probe has the shape of the probes 221 to 233: a control line that
+Such a probe has the shape of the probes 222 to 234: a control line that
 calls the function on valid arguments, the line of the fault, and the line
 `print "unreachable";`. The line of the fault is the last line of code before
 the `print`. It must call the function that the COVERS line names, and it must

@@ -349,7 +349,7 @@ checks them.
    different constants.
 4. **Four forms change meaning, as a consequence of the longest match.**
    `1in`, `1if`, `1.5in` and `1.5if` were valid before the suffix existed, and
-   now the `i` is the suffix, so each is a syntax error; probes `239` to `242`
+   now the `i` is the suffix, so each is a syntax error; probes `240` to `243`
    of `test/translation-probes/` pin them. No program in this repository
    writes one of the four, so no program here changes meaning, and a program
    elsewhere puts a space before the keyword.
