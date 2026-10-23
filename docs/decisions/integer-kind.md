@@ -48,8 +48,10 @@ needs: no implicit coercion. `1 + "1"` is a type fault today
 What the model keeps untouched: every existing program, every `CHECK` line,
 the Number print format, the index rules, `len`, `ord`, `math.floor`, the
 jlox suite that runs through `bootstrap/lox_interpreter.lox`, and the four
-backends' Number paths. The change is additive. A program that runs today
-has the same meaning after it.
+backends' Number paths. The change is additive, with one lexical exception:
+a decimal literal written directly before `in` or `if` (constraint 4). A
+program that does not have that form has the same meaning after the change as
+before it.
 
 What the model costs: an Int literal needs its suffix, so `x & (x - 1i)` and
 not `x & (x - 1)`, and a hash-mix loop over bytes writes `int(ord(c))`. The
@@ -306,8 +308,11 @@ the table is complete, before backend work starts:
 - the operator protocol table, with a row for the bit operators that says
   "no protocol";
 - the compile-time rejections: a decimal Int literal outside the int64 range
-  except the unary-minus case, a hex or binary literal of more than 64 bits,
-  and a fractional literal with the suffix;
+  except the unary-minus case, where the literal must be the whole operand of
+  the `-`, with no call, property read, or index after it; a hex or binary
+  literal of more than 64 bits; a fractional literal with the suffix; and a
+  decimal literal with the letter `i` in the wrong position (`1in`, `1if`,
+  `1 i`);
 - the runtime fault rows: a mixed-kind operand, a bit operator on a Number
   or an Instance, a shift count that is not an Int or is out of range, Int
   `/ 0i` and `% 0i`, `int()` on a fractional Number, a NaN, an infinity, a
@@ -337,16 +342,23 @@ checks them.
    today and must stay true. `1` and `1i` have different bits, so they are
    different constants.
 4. **The suffix is part of the token.** The scanner reads an `i` directly
-   after the digits as the suffix, so `1i` is one token. `1 i` and `1if` are
-   syntax errors today and stay syntax errors, so no existing program changes
-   meaning.
+   after the digits of a decimal literal as the suffix, whatever follows it,
+   so `1i` is one token. `1 i` is a syntax error today and stays one. `1in`
+   and `1if` are valid today (`1 in xs`, and the guard of `case 1if t`), and
+   they become syntax errors, because the `i` is now the suffix. No program in
+   this repository writes a digit directly before `in` or `if`, so no program
+   here changes meaning. A program elsewhere puts a space before the keyword.
+   Each consumer that scans or parses programs owes this rule: the native
+   scanner, the bootstrap interpreter, the tree-sitter grammar, and the
+   tooling parser. Probes `239` and `240` of `test/translation-probes/` pin it.
 
 ## Program impact
 
-No existing program changes. The mission adds programs that use masks as
-probes of the purpose: a flag set, a bitboard, a hash mix. During the
-mission these programs live under `test/translation-probes/` as spec probes,
-so each consumer's expected-failure file covers them until its node merges.
+No existing program in this repository changes. The mission adds programs
+that use masks as probes of the purpose: a flag set, a bitboard, a hash mix.
+During the mission these programs live under `test/translation-probes/` as
+spec probes, so each consumer's expected-failure file covers them until its
+node merges.
 An example under `examples/` that uses Int lands at mission close, when every
 corpus gate is green.
 
