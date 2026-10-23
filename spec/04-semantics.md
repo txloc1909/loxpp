@@ -194,8 +194,8 @@ and a Number are never equal: `1 == 1i` is `false` and `1 != 1i` is `true`.
 
 The table gives, for every arithmetic, comparison, equality, bit, and
 negation operator, the result for two Ints, for two Numbers, and for an Int
-together with a Number in either order. A fault in the last column is a
-catchable fault of the kind named (see [Runtime Errors](#runtime-errors)). For
+together with a Number in either order. A fault in a cell is a catchable
+fault of the kind named (see [Runtime Errors](#runtime-errors)). For
 a unary operator the first column is an Int operand, the second a Number
 operand, and the third does not apply. A cell that says "as today" is the
 behavior of the Number operators before the Int existed. An operand that is a
