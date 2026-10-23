@@ -314,6 +314,54 @@ TEST(AbstractStackTest, AssignLocalClassifiesBothPopsByReasonNotJustLabel) {
                            << "recognized as slot 1's declaring push";
 }
 
+// An `and`/`or` join with a folded `match` operand (issue #817). The match
+// path already holds the result in its synthetic named local; the other path
+// arrives with an ordinary temporary. The analysis records the compiler's own
+// join (Chunk::shortCircuitJoin) as a reference to that result cell, so it
+// recognizes the other path's declaring push and both paths reach the join at
+// operand depth 0 — the fact the JVM emitter's invisible-var store and the
+// consumer's local load depend on. Without the record the two paths disagree
+// (0 vs 1) and analyzeStack throws.
+TEST(AbstractStackTest, ShortCircuitJoinWithFoldedMatchMakesBothPathsLocal) {
+    MemoryManager mm;
+    DecodedFunction script =
+        decodeSource("var y = (match 1 { case 1 => nil case _ => 1 }) or 4;\n"
+                     "print y;\n",
+                     mm);
+    FunctionStackAnalysis analysis = analyzeStack(script);
+
+    int joinOffset = -1;
+    int constFourOffset = -1;
+    for (const DecodedInstruction& ins : script.instructions) {
+        if (ins.op == Op::DEFINE_GLOBAL) {
+            joinOffset = ins.offset; // `var y` at the top level is a global
+        }
+        if (ins.op == Op::CONSTANT) {
+            Value v = script.function->chunk.getConstant(ins.constantIndex);
+            if (is<Number>(v) && as<Number>(v) == 4.0) {
+                constFourOffset = ins.offset;
+            }
+        }
+    }
+    ASSERT_GE(joinOffset, 0);
+    ASSERT_GE(constFourOffset, 0);
+
+    const StackState& atJoin = stateBeforeOffset(script, analysis, joinOffset);
+    EXPECT_EQ(atJoin.operandDepth(), 0)
+        << "the `or` result must be one named local at its join, not a "
+        << "local on the match path and a temporary on the other";
+
+    bool foundSite = false;
+    for (const InvisibleVarSite& site : analysis.invisibleVars) {
+        if (site.offset == constFourOffset && site.slot == 1) {
+            foundSite = true;
+        }
+    }
+    EXPECT_TRUE(foundSite)
+        << "the right operand's CONSTANT 4 must be slot 1's declaring push, "
+        << "so the JVM emitter stores it into the match result's local slot";
+}
+
 // The max-stack-depth check. `print (1 + 2) * (3 - 4) / 5 - -6;` — hand
 // count below.
 //

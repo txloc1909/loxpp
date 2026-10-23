@@ -302,6 +302,15 @@ class Compiler {
     // when the last operand parsed was not one. deferStatement() compares it
     // with the chunk size to tell a call from an expression ending in CALL.
     int m_lastCallEnd{-1};
+
+    // Where the most recently compiled `match` expression — or the `and`/`or`
+    // join that carries one's result — ended. See lastOperandWasFoldedMatch:
+    // `and`/`or` are the only consumers that need the cell recorded at their
+    // join (Chunk::ShortCircuitJoin); every other consumer reads the cell in
+    // place. -1 once the answer has been consumed.
+    int m_lastMatchFoldOffset{-1};
+    bool lastOperandWasFoldedMatch();
+    void recordShortCircuitJoinIfFoldedMatchOperand(bool folded);
     // Count of handler records open at the current emit point. It matches
     // the runtime handler stack depth on each path: PUSH_HANDLER adds one,
     // the normal-path POP_HANDLER removes one, and catch entry removes one

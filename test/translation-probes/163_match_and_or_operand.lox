@@ -1,0 +1,44 @@
+// A `match` expression as an operand of `and`/`or`, on either side (issue
+// #817). The match's synthetic result cell is a named local while its arms
+// run and the enclosing expression's temporary afterwards; the compiler
+// retires it by bookkeeping alone, so the bytecode marks nothing. `and`/`or`
+// keep that value in place on the short-circuit path and replace it on the
+// other one, so both paths must reach the join at the same operand depth —
+// native shares one cell for locals and temporaries, the JVM does not.
+
+// Left operand: the match is falsy, so `or` yields the right operand.
+print (match 1 { case 1 => nil case _ => "left" }) or "right";
+
+// Left operand, truthy: `and` keeps the match's value.
+print (match 2 { case 1 => "one" case _ => "other" }) and "unused";
+
+// Right operand: the left one is falsy, so `or` evaluates the match.
+var a = nil;
+print a or (match 3 { case 3 => "three" case _ => "no" });
+
+// Right operand: the left one is truthy, so `and` evaluates the match.
+var b = "b";
+print b and (match 4 { case 4 => "four" case _ => "no" });
+
+// Both operands folded, and the result stored in a local that a later
+// statement reads back.
+fun pick(x) {
+    var seen = 0;
+    var r = (match x { case 1 => true case _ => false }) and (seen + 1) or
+            (match x { case 1 => 10 case _ => 20 });
+    return r;
+}
+print pick(1);
+print pick(2);
+
+// A chain: the first join's result stays a named local for the next one.
+print (match 5 { case 5 => nil case _ => "five" }) or "chain-a" or "chain-b";
+print (match 6 { case 6 => "six" case _ => nil }) and "chain-c" and "unused";
+
+// A match as an `if` condition still pops its retired cell as a temporary.
+if (match 9 { case 9 => true case _ => false }) {
+    print "if-true";
+}
+if (match 8 { case 9 => true case _ => false }) {
+    print "if-false";
+}

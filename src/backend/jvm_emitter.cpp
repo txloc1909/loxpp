@@ -654,10 +654,23 @@ void emitCapturedStore(Emitter& e, int slot, int offset, bool peek) {
 // including a self-recursive closure's own seeded cell:
 // storeClosureIntoSelfCell marks that slot captured the normal way, so no
 // separate self-cell case is needed here (V5/V6 verify it).
+// The exact cell an `and`/`or` join with a folded `match` operand consumes,
+// or -1 when this offset carries no such record — see
+// FunctionStackAnalysis::shortCircuitJoins.
+int recordedJoinSlotAt(const FunctionStackAnalysis& analysis, int offset) {
+    for (const ShortCircuitJoin& join : analysis.shortCircuitJoins) {
+        if (join.offset == offset) {
+            return join.slot;
+        }
+    }
+    return -1;
+}
+
 int loadNamedLocalAtZeroDepth(Emitter& e, std::size_t i, int offset) {
     int loxSlot = resolveZeroDepthLocalSlot(
         e.analysis.before[i].localCount - 1, e.labelAtOffset.contains(offset),
-        e.lastInvisibleVarSlot, offset, "jvm_emitter");
+        e.lastInvisibleVarSlot, recordedJoinSlotAt(e.analysis, offset), offset,
+        "jvm_emitter");
     int slot = e.jvmSlotForLocal(loxSlot);
     if (e.isCaptured(loxSlot)) {
         emitCapturedGetLocal(e, slot, offset);

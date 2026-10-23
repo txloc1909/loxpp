@@ -185,6 +185,27 @@ inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
 // "UNKNOWN" for a byte that does not decode to a known Op (corrupt bytecode).
 const char* opcodeName(Op op);
 
+// A point where an `and`/`or` expression's two short-circuit paths meet, and
+// the cell that holds the expression's result there. `offset` is the byte
+// offset of the instruction the join targets; `slot` is the frame-relative
+// index of the result cell.
+//
+// The compiler leaves a `match` expression's result in a named local (its
+// synthetic `(match_result)` slot), but the other operand of an `and`/`or`
+// arrives as an ordinary temporary. Both paths must present the same thing at
+// the join: the JVM verifier requires one operand-stack depth on every
+// incoming edge, and the value genuinely is a local on the match path. So the
+// abstract-stack analysis treats this record as a reference to the result
+// cell: it finds the declaring push of that cell on each incoming path
+// (abstract_stack.cpp), the same way a `GET_LOCAL`/`SET_LOCAL` reference does,
+// and the JVM emitter's existing invisible-var store puts the temporary path's
+// value into that local slot. Native needs nothing — its locals and
+// temporaries share one stack cell — and QBE addresses every cell by height.
+struct ShortCircuitJoin {
+    int offset{-1};
+    int slot{-1};
+};
+
 class Chunk : std::vector<Byte> {
   public:
     using std::vector<Byte>::at;
@@ -200,6 +221,12 @@ class Chunk : std::vector<Byte> {
     // Drops every byte from `size` on, and their line entries. Constants
     // stay.
     void truncate(std::size_t size);
+    // Records one `and`/`or` join. See ShortCircuitJoin.
+    void recordShortCircuitJoin(int offset, int slot);
+    [[nodiscard]] const std::vector<ShortCircuitJoin>&
+    shortCircuitJoins() const {
+        return m_shortCircuitJoins;
+    }
     std::optional<uint16_t> addConstant(Value value);
     [[nodiscard]] Value getConstant(uint16_t idx) const;
     [[nodiscard]] const ValueArray& constants() const { return m_constants; }
@@ -208,4 +235,5 @@ class Chunk : std::vector<Byte> {
   private:
     ValueArray m_constants;
     std::vector<std::pair<int, int>> m_lines;
+    std::vector<ShortCircuitJoin> m_shortCircuitJoins;
 };
