@@ -13,4 +13,4 @@ print "unreachable";
 
 // STATUS: error
 // CHECK: 2
-// COVERS: fault integer_unsigned_division_by_zero
+// COVERS: fault integer_unsigned_division_by_zero udiv

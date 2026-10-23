@@ -14,4 +14,4 @@ print "unreachable";
 
 // STATUS: error
 // CHECK: 5
-// COVERS: fault integer_module_non_int
+// COVERS: fault integer_module_non_int parse_unsigned

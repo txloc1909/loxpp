@@ -360,7 +360,12 @@ lines. They say which row of which spec table the probe checks. Six scripts
 read them: `tools/check_int_operand_table.py`, `check_precedence_table.py`,
 `check_operator_protocol_table.py`, `check_int_literal_rejections.py`,
 `check_int_fault_rows.py`, and `check_int_edge_rows.py`. A row with no probe
-fails its script.
+fails its script. Two fault rows hold one fault for each function of the
+`integer` module, so their COVERS line names the function
+(`// COVERS: fault integer_module_non_int urem`). The script reads the
+function names from the member table of the module in `spec/05-stdlib.md`, and
+it fails for a function that has no probe of its non-Int fault, or, for `udiv`
+and `urem`, of its zero divisor.
 
 Each native node makes a group of these probes pass: the value layer and the
 literals (`164`, `165`, `176` to `183`, and the static-error probes `236` to

@@ -22,8 +22,27 @@ from any one of them fails:
     fault. A probe of a halting fault has `// STATUS: error`.
  4. No COVERS line names an id that is not in ROWS.
 
+Two rows hold one fault per function of the `integer` module, so one probe is
+not enough for them:
+
+    integer_module_non_int              every function of the module
+    integer_unsigned_division_by_zero   every function whose spec row says that
+                                        a zero divisor is a runtime error
+
+For these rows the probe line names the function:
+
+    // COVERS: fault integer_module_non_int urem
+    // COVERS: fault integer_unsigned_division_by_zero urem
+
+The function names come from the member table of `integer` in
+spec/05-stdlib.md (a function is a member written `integer.<name>(`). The
+decision names eight functions, MODULE_FUNCTIONS, and two of them divide,
+DIVIDING_FUNCTIONS. A function in the member table with no probe fails, so
+does a function of the decision that the table lost, and so does a probe that
+names a function it does not call.
+
 Usage:
-    tools/check_int_fault_rows.py [--semantics PATH] [--probes DIR]
+    tools/check_int_fault_rows.py [--semantics PATH] [--stdlib PATH] [--probes DIR]
 """
 
 import argparse
@@ -37,11 +56,23 @@ from spec_tables import PROBE_DIR, SpecError, probe_covers, report, section, spe
 SCRIPT = "check_int_fault_rows.py"
 
 
+# The functions of the `integer` module, as docs/decisions/integer-kind.md
+# lists them, and the two of them that divide. The member table of the spec is
+# the source of the names; these sets say what the decision requires of it.
+MODULE_FUNCTIONS = {"abs", "min", "max", "udiv", "urem", "ult", "ustr", "parse_unsigned"}
+DIVIDING_FUNCTIONS = {"udiv", "urem"}
+INTEGER_HEADING = "## `integer` — Int functions and constants"
+
+EVERY_FUNCTION = "every function"
+DIVIDING = "every dividing function"
+
+
 @dataclass
 class FaultRow:
     id: str
     kind: str | None  # the Error.kind of a catchable fault, None for a halting one
     example: str  # appears in the Example cell of the spec table
+    per_function: str | None = None  # EVERY_FUNCTION or DIVIDING: one probe for each function
 
 
 CATCHABLE = "catchable"
@@ -78,8 +109,8 @@ ROWS = [
     FaultRow("float_string_not_number", None, 'float("abc");'),
     FaultRow("float_other_kind", None, "float(nil);"),
     # the integer module
-    FaultRow("integer_module_non_int", None, "integer.abs(1);"),
-    FaultRow("integer_unsigned_division_by_zero", None, "integer.udiv(1i, 0i);"),
+    FaultRow("integer_module_non_int", None, "integer.abs(1);", EVERY_FUNCTION),
+    FaultRow("integer_unsigned_division_by_zero", None, "integer.udiv(1i, 0i);", DIVIDING),
     FaultRow(
         "integer_parse_unsigned_invalid",
         None,
@@ -92,9 +123,27 @@ def squash(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def code_lines(path: Path) -> list[str]:
+    return [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("//")]
+
+
+def module_functions(stdlib: str) -> tuple[set[str], set[str]]:
+    """Returns the functions of the member table of `integer`, and those whose
+    Meaning cell says that a zero divisor is a runtime error."""
+    functions: set[str] = set()
+    dividing: set[str] = set()
+    for member in table(section(stdlib, INTEGER_HEADING), "Member"):
+        names = set(re.findall(r"integer\.(\w+)\(", member["Member"]))
+        functions |= names
+        if "zero" in member["Meaning"].lower():
+            dividing |= names
+    return functions, dividing
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--semantics", help="path to a copy of spec/04-semantics.md")
+    parser.add_argument("--stdlib", help="path to a copy of spec/05-stdlib.md")
     parser.add_argument("--probes", help="a directory of spec probes", default=str(PROBE_DIR))
     args = parser.parse_args()
 
@@ -103,6 +152,7 @@ def main() -> None:
         semantics = spec_path("04-semantics.md", args.semantics).read_text(encoding="utf-8")
         catchable_rows = table(section(semantics, "## Runtime Errors"), "Cause")
         halting_rows = table(section(semantics, "### Halting Faults"), "Cause")
+        functions, dividing = module_functions(spec_path("05-stdlib.md", args.stdlib).read_text(encoding="utf-8"))
         covers = probe_covers(Path(args.probes))
         import check_fault_table as cft
 
@@ -114,6 +164,18 @@ def main() -> None:
     ids = [r.id for r in ROWS]
     if len(set(ids)) != len(ids):
         problems.append("ROWS holds an id twice")
+
+    for name in sorted(MODULE_FUNCTIONS - functions):
+        problems.append(f"the member table of `integer` has no function {name!r}, which the decision names")
+    for name in sorted(DIVIDING_FUNCTIONS - dividing):
+        problems.append(f"the member table of `integer` does not say that {name!r} faults on a zero divisor")
+    for name in sorted(dividing - DIVIDING_FUNCTIONS):
+        problems.append(
+            f"the member table of `integer` says that {name!r} faults on a zero divisor, "
+            f"and DIVIDING_FUNCTIONS does not name it"
+        )
+    scope = {EVERY_FUNCTION: functions | MODULE_FUNCTIONS, DIVIDING: dividing | DIVIDING_FUNCTIONS}
+    known: set[tuple[str, ...]] = set()
 
     for row in ROWS:
         halting = row.kind is None
@@ -143,20 +205,27 @@ def main() -> None:
             program = squash(fault.setup + " " + fault.body)
             if squash(row.example).rstrip(";") not in program:
                 problems.append(f"{row.id}: the fault table program does not hold the example {row.example!r}")
-        # 3. the probes
-        paths = covers.get(("fault", row.id), [])
-        if not paths:
-            problems.append(f"{row.id}: no spec probe has `// COVERS: fault {row.id}`")
-        for path in paths:
-            probe = parse_probe(path)
-            want_status = "error" if halting else "ok"
-            if probe is None or probe.status != want_status:
-                problems.append(
-                    f"{path.name} covers {row.id}: a probe of a "
-                    f"{'halting' if halting else 'catchable'} fault needs `// STATUS: {want_status}`"
-                )
+        # 3. the probes: one COVERS line, or one for each function of the module
+        if row.per_function:
+            words_of_row = [(("fault", row.id, name), name) for name in sorted(scope[row.per_function])]
+        else:
+            words_of_row = [(("fault", row.id), None)]
+        for words, name in words_of_row:
+            known.add(words)
+            paths = covers.get(words, [])
+            if not paths:
+                problems.append(f"{row.id}: no spec probe has `// COVERS: {' '.join(words)}`")
+            for path in paths:
+                probe = parse_probe(path)
+                want_status = "error" if halting else "ok"
+                if probe is None or probe.status != want_status:
+                    problems.append(
+                        f"{path.name} covers {row.id}: a probe of a "
+                        f"{'halting' if halting else 'catchable'} fault needs `// STATUS: {want_status}`"
+                    )
+                if name and not any(f"integer.{name}(" in line for line in code_lines(path)):
+                    problems.append(f"{path.name} covers {row.id} for {name!r} and does not call integer.{name}(")
 
-    known = {("fault", i) for i in ids}
     for words in sorted(w for w in covers if w[0] == "fault"):
         if words not in known:
             problems.append(f"`// COVERS: {' '.join(words)}` in {covers[words][0].name} names no row")
@@ -166,7 +235,8 @@ def main() -> None:
         problems,
         f"{len(ROWS)} rows ({sum(1 for r in ROWS if r.kind)} catchable, "
         f"{sum(1 for r in ROWS if not r.kind)} halting), each in the spec, in the fault table "
-        "check, and in a probe",
+        f"check, and in a probe; {len(scope[EVERY_FUNCTION])} functions of the `integer` module "
+        f"each with a non-Int probe, {len(scope[DIVIDING])} of them each with a zero-divisor probe",
     )
 
 
