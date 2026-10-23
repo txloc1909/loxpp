@@ -61,6 +61,20 @@ jobs:
           tools/check_suspend_points.py
           tools/check_blocking_calls.py
 
+      # The countable sets of the Int kind in spec/: the operand-kind table,
+      # the precedence table, the operator protocol table, the static errors
+      # of Int literals, the run-time fault rows, and the edge rows. Each
+      # script fails when a row of its table, or the spec probe of a row, is
+      # missing. Pure Python, so it needs no build.
+      - name: Check Int spec tables
+        run: |
+          tools/check_int_operand_table.py
+          tools/check_precedence_table.py
+          tools/check_operator_protocol_table.py
+          tools/check_int_literal_rejections.py
+          tools/check_int_fault_rows.py
+          tools/check_int_edge_rows.py
+
       # Lox++ has no import, so the credit channel library of
       # examples/credit_channel.lox is also in each probe that tests it. This
       # fails when a copy differs from the example. Pure Python, so it needs
