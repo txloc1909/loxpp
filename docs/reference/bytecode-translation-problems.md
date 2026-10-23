@@ -598,48 +598,41 @@ natives (P6); `getIndex` over enum payloads (P6); `init` returning the receiver
     program, and a nested-match-subject program all now match `build/loxpp`
     exactly; one unit test per shape proves it fails when its own
     `nativePops` row is reverted to `std::nullopt`.
-  - **SUPERSEDED for the native answer — a deficit of two or more.** A
-    `match` result sandwiched below TWO OR MORE live sibling operands of its
-    own consumer (`CALL`'s own sandwiched-argument shape, `ADD`'s own
-    mirror-image and both-sides-folded shapes — `1 + match ...`,
+  - **FIXED (issue #821), was a JVM-only deficit ceiling — a deficit of two
+    or more.** A `match` result sandwiched below TWO OR MORE live sibling
+    operands of its own consumer (`CALL`'s own sandwiched-argument shape,
+    `ADD`'s own mirror-image and both-sides-folded shapes — `1 + match ...`,
     `(match ...) + (match ...)`) used to have no correct native answer:
     `compileMatchBody`'s own `resultSlot`/`subjectSlot` allocation
     (compiler.cpp) used `m_localCount` alone, blind to a sibling operand
     already live on the real VM stack, so the two collided at the same slot.
     A fix to `compileMatchBody` now reserves one phantom local per live
-    sibling operand before allocating the match's own result/subject
-    slots, so the two no longer collide. Measured directly against the
-    current compiler: `1 + match 1 { case 1 => 2 case _ => 3 };` prints `3`,
-    `(match 1 { case 1 => 2 case _ => 3 }) + (match 1 { case 1 => 10 case _
-    => 20 });` prints `12`, and a three-argument `CALL` with the callee
-    folded and a live argument on either side prints the same sum a plain
-    temporary would — `build/loxpp` now answers every one of these
-    correctly, not just the deficit-of-one shape. The JVM backend's own
-    `normalizeFoldedOperands` still refuses a deficit of two or more
-    unconditionally; it was not changed to match this fix, so it remains
-    behind native on this shape. The CLR backend's own fold repair does not
-    carry that ceiling: it loads however many bottom locals a consumer's own
-    deficit names, in ascending slot order, so a deficit of two or more
-    reaches the same repair a deficit of one already used, with two
-    exceptions, both loud. First, when fewer locals are bound than the
-    deficit names, the repair is not a fold at all — a genuine
-    evaluation-stack underflow the compiler would never itself produce — so
-    it returns without touching the stack, leaving the instruction's own
-    `Builder::emit` read-count check to name the underflow against the real
-    CIL instruction being assembled. Second, when two or more of the
-    reloaded slots are also captured-closure slots, each one lowers through
-    the same `isinst object[]` test an ordinary `GET_LOCAL` on that slot
-    uses, and that test needs its own pair of ilasm labels per load — the
-    repair's own load loop passes a distinct sub-index for exactly this. A
-    second, theoretical residue is unchanged:
-    the case where the zero-depth cross-check's two slot estimates agree and
-    are BOTH wrong is not ruled out by that cross-check — only real,
-    per-edge merge verification closes it, which no node has attempted. No
-    known program reaches that second residue.
-    The JVM deficit ceiling is tracked as issue #821. That issue also names
-    the `and`/`or` result shapes that inherit it: issue #817 makes such a
-    result a named local, so it reaches the consumer through the same fold
-    path a plain `match` result already used.
+    sibling operand before allocating the match's own result/subject slots,
+    so the two no longer collide. That native fix folded every live sibling
+    operand BELOW a `match` into a named local too, which the JVM backend's
+    own `normalizeFoldedOperands` did not mirror: it repaired a deficit of
+    exactly one and threw for two or more, so `1 + match ...` reached `ADD`
+    with both operands folded and the emitter refused to load them back.
+    Issue #821 removed that ceiling: `normalizeFoldedOperands` now loads
+    however many bottom locals a consumer's own deficit names, in ascending
+    slot order (the shape the deleted CLR backend's fold repair already
+    used), spilling any genuine operands above the fold and reloading them
+    on top, with two guards. First, a deficit wider than the chunk's own
+    bound locals is not a fold at all — a genuine operand-stack underflow
+    the compiler would never itself produce — so the emitter throws a named
+    error rather than loading a slot that does not exist. Second, when two
+    or more of the reloaded slots are also captured-closure slots, each one
+    lowers through the same `instanceof object[]` test an ordinary
+    `GET_LOCAL` on that slot uses, and that test needs its own pair of
+    jasmin labels per load — the repair's own load loop passes a distinct
+    sub-index for exactly this. The `and`/`or` result shapes (issue #817,
+    which made such a result a named local) inherit the same ceiling and are
+    repaired by the same path. Probe `164_folded_match_deficit_two_or_more`
+    covers every shape; `test_jvm_emit.cpp` pins three of them. A separate,
+    theoretical residue is unchanged: the case where the zero-depth
+    cross-check's two slot estimates agree and are BOTH wrong is not ruled
+    out by that cross-check — only real, per-edge merge verification closes
+    it, which no node has attempted. No known program reaches that residue.
   - **FIXED (issue #817), was REACHABLE — deferred by referee ruling, PR
     #115 (originally R13, PR #115 round 2; disposition ruled at round 3).**
     `and`/`or` (`compiler.cpp`'s `and_`/`or_`) compile `JUMP_IF_FALSE` then

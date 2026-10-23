@@ -202,7 +202,10 @@ defined, and neither is a fault.
 - An Int prints as its decimal digits, with a `-` sign when it is negative:
   `str(1i)` is `"1"` and `str(-1i)` is `"-1"`. This is the same text as the
   equal Number.
-- The Number format does not change.
+- The Number format does not change here. It changes in
+  `number-print-format.md` (#834), which replaces `%g` with the shortest
+  decimal representation and makes the parity sentence above true for every
+  value, not only the small ones.
 
 ### Indexing
 

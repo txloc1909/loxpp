@@ -179,11 +179,11 @@ jobs:
               for f in ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox; do
                 case "$f" in
                   *141_match_comma_chain_rejected*|*142_bare_positional_pattern_rejected*) continue ;;
-                  *173_int_fractional_suffix_rejected*|*174_int_fractional_zero_suffix_rejected*) continue ;;
-                  *175_int_suffix_detached_rejected*) continue ;;
-                  *239_int_suffix_before_in_rejected*|*240_int_suffix_before_if_rejected*) continue ;;
-                  *241_int_fractional_suffix_before_in_rejected*|*242_int_fractional_suffix_before_if_rejected*) continue ;;
-                  *243_int_uppercase_hex_prefix_rejected*|*244_int_hex_suffix_rejected*|*245_int_binary_suffix_rejected*) continue ;;
+                  *174_int_fractional_suffix_rejected*|*175_int_fractional_zero_suffix_rejected*) continue ;;
+                  *176_int_suffix_detached_rejected*) continue ;;
+                  *240_int_suffix_before_in_rejected*|*241_int_suffix_before_if_rejected*) continue ;;
+                  *242_int_fractional_suffix_before_in_rejected*|*243_int_fractional_suffix_before_if_rejected*) continue ;;
+                  *244_int_uppercase_hex_prefix_rejected*|*245_int_hex_suffix_rejected*|*246_int_binary_suffix_rejected*) continue ;;
                 esac
                 case " $notyet " in
                   *" $(basename "$f") "*) continue ;;
