@@ -12,6 +12,12 @@ expected stdout, compared with trailing white space removed.
   status is non-zero, and the stdout lines start with the CHECK lines: the
   output before the fault binds, and the deferred calls of a halt may print
   more, because whether they run is implementation-defined.
+- `STATUS: error` with `// STATIC-ERROR`: the program is rejected before it
+  runs (spec/README.md, Conformance). The exit status is non-zero, and
+  nothing prints: the stdout is empty. An implementation that finds the error
+  only when it runs the program fails the probe if a line of the probe printed
+  first, so a static-error probe has a `print` before the bad form. A
+  static-error probe has no CHECK line.
 - A program that ends through `exit(code)` does not halt. Its probe carries
   `// EXIT: <code>`: the exit status must be exactly that code, and the
   stdout lines are exactly the CHECK lines.
@@ -76,6 +82,7 @@ STDERR_RE = re.compile(r"^\s*//\s*STDERR:\s?(.*)$")
 EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
 TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
 NOT_BINDING_RE = re.compile(r"^\s*//\s*NOT-BINDING:\s*(\S+)\s+(\S+)\s*$")
+STATIC_ERROR_RE = re.compile(r"^\s*//\s*STATIC-ERROR\s*$")
 
 
 @dataclass
@@ -88,6 +95,8 @@ class SpecProbe:
     # consumer -> the probe, by path from the probe directory, that holds the
     # consumer's own choice in place of this one
     not_binding: dict[str, str] | None = None
+    # the program is rejected before it runs, so nothing prints
+    static_error: bool = False
 
 
 def parse_probe(path: Path) -> SpecProbe | None:
@@ -97,7 +106,11 @@ def parse_probe(path: Path) -> SpecProbe | None:
     timeout = None
     checks: list[str] = []
     not_binding: dict[str, str] = {}
+    static_error = False
     for line in path.read_text(encoding="utf-8").splitlines():
+        if STATIC_ERROR_RE.match(line):
+            static_error = True
+            continue
         m = NOT_BINDING_RE.match(line)
         if m:
             if m.group(1) in not_binding:
@@ -130,7 +143,9 @@ def parse_probe(path: Path) -> SpecProbe | None:
         return None
     if exit_code is not None and (exit_code == 0) != (status == "ok"):
         raise ValueError(f"{path}: EXIT {exit_code} disagrees with STATUS {status}")
-    return SpecProbe(path, status, checks, exit_code, timeout, not_binding)
+    if static_error and (status != "error" or checks or exit_code is not None):
+        raise ValueError(f"{path}: a STATIC-ERROR probe has `// STATUS: error`, no CHECK line, and no EXIT line")
+    return SpecProbe(path, status, checks, exit_code, timeout, not_binding, static_error)
 
 
 def stdout_lines(stdout: str) -> list[str]:
@@ -144,6 +159,8 @@ def halts(probe: SpecProbe) -> bool:
 
 def stdout_ok(probe: SpecProbe, stdout: str) -> bool:
     lines = stdout_lines(stdout)
+    if probe.static_error:
+        return lines == []
     if halts(probe):
         return lines[:len(probe.checks)] == probe.checks
     return lines == probe.checks
@@ -278,7 +295,9 @@ def main() -> None:
                 print(f"      exit code {code}, expected {want}")
             if not stdout_ok(probe, stdout):
                 actual_stdout = stdout_lines(stdout)
-                if halts(probe):
+                if probe.static_error:
+                    print("      (a static error: the program is rejected, so nothing prints)")
+                elif halts(probe):
                     actual_stdout = actual_stdout[:len(probe.checks)]
                     print("      (a halt: the stdout must start with the CHECK lines)")
                 for line in difflib.unified_diff(
