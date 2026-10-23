@@ -267,9 +267,15 @@ and bootstrap runs with native; the bootstrap walk takes only the spec
 probes (`--only-spec-probes`), and separate CI steps name `32_string_nul`,
 `56_file_nul`, and `bootstrap-only/stdout_no_trailing_newline` for the JVM and
 QBE bootstrap wrappers (issue #654). A consumer that does not pass a probe yet
-can list it in an expected-failure file, which both tools read with
-`--xfail`: a listed probe must fail, and a listed probe that passes fails
-the gate until its line is deleted.
+can list it in its expected-failure file under `tools/spec-probe-xfail/`
+(`native`, `jvm`, `bootstrap`, `qbe`), which both tools read with `--xfail`: a
+listed probe must fail, and a listed probe that passes fails the gate until its
+line is deleted. The differential steps also read native's file with
+`--oracle-xfail`, so a backend that passes a probe before native does is not a
+divergence. Two more files serve the walkers that are not a consumer's own gate:
+`tooling.txt` for the tooling parser and resolver tests (`test/corpus.h`), and
+`tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
+that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
 
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its

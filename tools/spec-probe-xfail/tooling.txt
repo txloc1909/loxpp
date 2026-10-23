@@ -1,0 +1,13 @@
+# Spec probes that the language tooling does not handle yet.
+#
+# One line per spec probe of test/translation-probes/ that the tooling parser
+# of the language server does not handle yet: the file name, then a reason
+# that names the issue of the node that makes it pass. Blank lines and lines
+# that start with '#' are comments.
+#
+# The C++ tests of test/corpus.h read this file: the tooling parser test and
+# the tooling resolver test leave these probes out of their sweep of the
+# corpus.
+#
+# The node that makes the tooling handle a probe deletes its line. A test
+# that reads this file fails on a name that is not a probe file.

@@ -1,0 +1,12 @@
+# Spec probes that the tree-sitter grammar does not parse yet.
+#
+# One line per spec probe of test/translation-probes/ that the grammar of
+# editors/tree-sitter-loxpp does not parse yet: the file name, then a reason
+# that names the issue of the node that makes it pass. Blank lines and lines
+# that start with '#' are comments.
+#
+# The tree-sitter corpus step of .github/workflows/ci.yml reads this file and
+# leaves these probes out of the parse. That step fails on a listed name that
+# is not a probe file, so a rename shows at once.
+#
+# The node that makes the grammar parse a probe deletes its line.

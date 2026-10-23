@@ -145,8 +145,27 @@ jobs:
               tree-sitter test
               # Probes 141 and 142 hold an arm that the grammar rejects on
               # purpose (the comma chain, and a constructor pattern with no
-              # enum name), so they are not in the parse.
-              files=$(ls ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox | grep -v -e 141_match_comma_chain_rejected -e 142_bare_positional_pattern_rejected)
+              # enum name), so they are not in the parse. A spec probe that
+              # the grammar does not parse yet is listed in
+              # tools/spec-probe-xfail/tree-sitter.txt, and it is left out
+              # too. A listed name that is not a probe file fails the step.
+              notyet=$(grep -v "^#" ../../tools/spec-probe-xfail/tree-sitter.txt | awk "NF {print \$1}" | tr "\n" " ")
+              for name in $notyet; do
+                if [ ! -f ../../test/translation-probes/$name ]; then
+                  echo "FAIL: tree-sitter.txt lists $name, which is not a probe"
+                  exit 1
+                fi
+              done
+              files=""
+              for f in ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox; do
+                case "$f" in
+                  *141_match_comma_chain_rejected*|*142_bare_positional_pattern_rejected*) continue ;;
+                esac
+                case " $notyet " in
+                  *" $(basename "$f") "*) continue ;;
+                esac
+                files="$files $f"
+              done
               n=$(echo $files | wc -w)
               echo "Parsing $n corpus files ..."
               set +e
@@ -471,9 +490,10 @@ jobs:
 
       # The spec probes of test/translation-probes/ (the files with a STATUS
       # line), against the stdout the spec defines. Inside a mission, a
-      # consumer that does not pass a probe yet lists it in an
-      # expected-failure file (--xfail). Release only: the debug preset's
-      # instruction trace floods stdout (see AGENTS.md).
+      # consumer that does not pass a probe yet lists it in its expected-failure
+      # file under tools/spec-probe-xfail/ (--xfail); the differential steps
+      # read the native file as --oracle-xfail. Release only: the debug
+      # preset's instruction trace floods stdout (see AGENTS.md).
       - name: Check spec probes - native
         if: matrix.preset == 'release'
         run: |
@@ -481,7 +501,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/"
+            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/spec-probe-xfail/native.txt"
 
       - name: Check spec probes - bootstrap interpreter
         if: matrix.preset == 'release'
@@ -491,7 +511,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
+            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
 
       - name: Run examples through loxpp bootstrap interpreter
         if: matrix.preset == 'release'
@@ -556,7 +576,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt --oracle-xfail tools/spec-probe-xfail/native.txt --timeout 120"
 
       # Three probes that the walk above skips. Two have no STATUS line,
       # because a CHECK line cannot hold the NUL byte they print. The third is
@@ -1114,7 +1134,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --xfail tools/spec-probe-xfail/jvm.txt --oracle-xfail tools/spec-probe-xfail/native.txt"
 
       # The spec probes of test/translation-probes/ (the files with a
       # STATUS line) on the JVM backend, against the stdout the spec
@@ -1125,7 +1145,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/"
+            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/ --xfail tools/spec-probe-xfail/jvm.txt"
 
       # The compile phase of the differential gate: each parser or resolver
       # error of test/compile-errors/ must be rejected: a non-zero exit status
@@ -1382,7 +1402,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-qbe:latest \
-            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/"
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/spec-probe-xfail/qbe.txt"
 
       # The compile phase of the differential gate: each parser or resolver
       # error of test/compile-errors/ must be rejected: a non-zero exit status
