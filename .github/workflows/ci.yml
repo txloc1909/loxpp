@@ -726,6 +726,8 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R GcMinHeap --output-on-failure --no-tests=error"
 
+      # The suite expects `-0` for negative zero; Lox++ prints `0` by decision
+      # (docs/decisions/number-print-format.md). The sed adjusts that one line.
       - name: Run Lox interpreter test suite (craftinginterpreters)
         if: matrix.preset == 'release'
         run: |
@@ -737,6 +739,7 @@ jobs:
               git clone --depth=1 https://github.com/munificent/craftinginterpreters /tmp/craftinginterpreters &&
               cd /tmp/craftinginterpreters/tool && dart pub get &&
               cd /tmp/craftinginterpreters &&
+              sed -i 's|// expect: -0\$|// expect: 0|' test/number/literals.lox &&
               dart tool/bin/test.dart jlox --interpreter /workspace/bootstrap/lox_wrapper.sh
             "
 
