@@ -49,9 +49,9 @@ What the model keeps untouched: every existing program, every `CHECK` line,
 the Number print format, the index rules, `len`, `ord`, `math.floor`, the
 jlox suite that runs through `bootstrap/lox_interpreter.lox`, and the four
 backends' Number paths. The change is additive, with one lexical exception:
-a decimal literal written directly before `in` or `if` (constraint 4). A
-program that does not have that form has the same meaning after the change as
-before it.
+a decimal literal, whole or fractional, written directly before `in` or `if`
+(constraint 4). A program that does not have that form has the same meaning
+after the change as before it.
 
 What the model costs: an Int literal needs its suffix, so `x & (x - 1i)` and
 not `x & (x - 1)`, and a hash-mix loop over bytes writes `int(ord(c))`. The
@@ -310,9 +310,10 @@ the table is complete, before backend work starts:
 - the compile-time rejections: a decimal Int literal outside the int64 range
   except the unary-minus case, where the literal must be the whole operand of
   the `-`, with no call, property read, or index after it; a hex or binary
-  literal of more than 64 bits; a fractional literal with the suffix; and a
-  decimal literal with the letter `i` in the wrong position (`1in`, `1if`,
-  `1 i`);
+  literal of more than 64 bits; a fractional literal with the suffix, which
+  includes a fractional literal directly before `in` or `if` (`1.5i`,
+  `1.5in`, `1.5if`); and a decimal literal with the letter `i` in the wrong
+  position (`1in`, `1if`, `1 i`);
 - the runtime fault rows: a mixed-kind operand, a bit operator on a Number
   or an Instance, a shift count that is not an Int or is out of range, Int
   `/ 0i` and `% 0i`, `int()` on a fractional Number, a NaN, an infinity, a
@@ -342,15 +343,20 @@ checks them.
    today and must stay true. `1` and `1i` have different bits, so they are
    different constants.
 4. **The suffix is part of the token.** The scanner reads an `i` directly
-   after the digits of a decimal literal as the suffix, whatever follows it,
-   so `1i` is one token. `1 i` is a syntax error today and stays one. `1in`
-   and `1if` are valid today (`1 in xs`, and the guard of `case 1if t`), and
-   they become syntax errors, because the `i` is now the suffix. No program in
-   this repository writes a digit directly before `in` or `if`, so no program
-   here changes meaning. A program elsewhere puts a space before the keyword.
+   after the digits of a decimal literal, with a fractional part or without
+   one, as the suffix, whatever follows it, so `1i` is one token. `1 i` is a
+   syntax error today and stays one. `1in` and `1if` are valid today
+   (`1 in xs`, and the guard of `case 1if t`), and so are `1.5in` and
+   `1.5if`. All four become syntax errors, because the `i` is now the suffix:
+   the last two are the literal `1.5i`, which is an error by itself. No
+   program in this repository writes a digit directly before `in` or `if`, so
+   no program here changes meaning. A program elsewhere puts a space before
+   the keyword. A hexadecimal or binary literal has no suffix and ends at its
+   last digit of its base, so `0x1in [1i]` is `0x1 in [1i]`, a valid program.
    Each consumer that scans or parses programs owes this rule: the native
    scanner, the bootstrap interpreter, the tree-sitter grammar, and the
-   tooling parser. Probes `239` and `240` of `test/translation-probes/` pin it.
+   tooling parser. Probes `239` to `242` of `test/translation-probes/` pin the
+   four errors, and probe `165` pins the accepted forms.
 
 ## Program impact
 

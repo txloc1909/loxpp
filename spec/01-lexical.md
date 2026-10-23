@@ -168,9 +168,16 @@ followed by zero or more letters, digits (`0`–`9`), or underscores.
 ```
 NUMBER   ::= DIGIT+ ( "." DIGIT+ )? ;
 INT      ::= DIGIT+ "i" | "0x" HEXDIGIT+ | "0b" BINDIGIT+ ;
+BADINT   ::= DIGIT+ "." DIGIT+ "i" ;
 HEXDIGIT ::= [0-9a-fA-F] ;
 BINDIGIT ::= [01] ;
 ```
+
+`BADINT` is not a token of the language. It is the form of a fractional
+literal with the suffix, and the scanner rejects it (row `fractional-suffix`
+below). It is in the grammar so that the longest match gives the same answer
+as the rule of the suffix: at `1.5in`, `BADINT` matches `1.5i`, which is longer
+than the `NUMBER` `1.5`, so the scanner reads `BADINT` and rejects it.
 
 A `NUMBER` is a Number literal. Its digits are decimal. An optional fractional
 part is introduced by `.` followed by at least one digit. There are no octal
@@ -194,16 +201,27 @@ NUMBER followed by an identifier, which is a syntax error. There are no digit
 separators.
 
 The suffix is part of the token. The scanner reads an `i` directly after the
-digits of a decimal literal as the suffix, whatever character follows it, so
-`1i` is one token. An `i` after white space is not a suffix: `1 i` is the
-Number `1` and the name `i`, a syntax error, as it was before the suffix
-existed. Two forms change from valid to a syntax error. Before the suffix
-existed, `1in xs` was `1 in xs`, and `case 1if t` was the pattern `1` with the
-guard `if t`. Now the scanner reads the `i` as the suffix, so each is an Int
-literal followed by the name `n` or `f`. A program that writes a decimal
+digits of a decimal literal, with a fractional part or without one, as the
+suffix, whatever character follows it, so `1i` is one token. An `i` after
+white space is not a suffix: `1 i` is the Number `1` and the name `i`, a
+syntax error, as it was before the suffix existed. Four forms change from
+valid to a syntax error. Before the suffix existed, `1in xs` was `1 in xs`,
+and `case 1if t` was the pattern `1` with the guard `if t`. The same held for
+`1.5in xs` and `case 1.5if t`. Now the scanner reads the `i` as the suffix.
+`1in` and `1if` are each an Int literal followed by the name `n` or `f`.
+`1.5in` and `1.5if` are each the literal `1.5i`, a fractional literal with the
+suffix, which is a static error by itself. A program that writes a decimal
 literal directly before `in` or `if` needs a space between them. No literal
 that has no suffix and no `0x` or `0b` prefix is an Int: `1` and `1.0` are
 Numbers, and `1.5i` is an error.
+
+A hexadecimal or binary literal ends at the first character that is not a
+digit of its base, and the scanner then starts the next token there. The
+letter `i` is not a digit of either base, so `0x1in [1i]` is the Int `0x1`,
+the keyword `in`, and the list `[1i]`, a valid program that prints `true`.
+`case 0b1if t` reads the same way: the pattern `0b1` with the guard `if t`.
+The suffix `i` belongs to decimal literals only: a hexadecimal or binary
+literal has no suffix, so no rule makes the `i` after one a suffix.
 
 Examples: Numbers `0`, `42`, `3.14`, `1.0`; Ints `0i`, `42i`, `0xFF`, `0b1010`.
 
@@ -217,7 +235,7 @@ nearest literal of the same form that is valid.
 | `decimal-range` | A decimal Int literal whose value is above 9223372036854775807, except the unary-minus exception below | `9223372036854775808i` | `9223372036854775807i` |
 | `hex-width` | A hexadecimal literal whose value needs more than 64 bits | `0x10000000000000000` | `0xFFFFFFFFFFFFFFFF` |
 | `binary-width` | A binary literal whose value needs more than 64 bits | `0b1` followed by 64 zeros | `0b` followed by 64 ones |
-| `fractional-suffix` | A literal with a fractional part and the suffix `i` | `1.5i`, `1.0i` | `15i` |
+| `fractional-suffix` | A literal with a fractional part and the suffix `i`, which includes a fractional literal directly before `in` or `if` | `1.5i`, `1.0i`, `1.5in [1.5]`, `case 1.5if t` | `15i`, `1.5 in [1.5]` |
 | `suffix-boundary` | A decimal literal and the letter `i` in the wrong position: the `i` directly after the digits with a name character after it, or the `i` after white space | `1in [1, 2]`, `case 1if t`, `1 i` | `1i in [1i, 2i]` |
 
 **The unary-minus exception.** The literal `9223372036854775808i` is valid
