@@ -17,6 +17,12 @@ The first has `// STATIC-ERROR` and `// STATUS: error`. The second has
 rejects every Int literal passes the first and fails the second, so the pair
 tells a rejection for the right reason from a rejection by accident.
 
+Each rejected probe starts with a line that prints a String. A static error
+rejects the program, so nothing prints. An implementation that finds the error
+only when it runs the program prints that String, and the differential gates
+and tools/check_spec_probes.py see the difference. A rejected probe with no
+such line cannot tell a rejection at compile time from a halt at run time.
+
 The unary-minus exception has its own forms, each of which a probe must hold:
 the smallest Int as `-9223372036854775808i`, with and without a space, in a
 probe that is accepted, and three forms that are rejected, in probes that carry
@@ -27,6 +33,7 @@ Usage:
 """
 
 import argparse
+import re
 from pathlib import Path
 
 from check_spec_probes import parse_probe
@@ -42,6 +49,8 @@ REJECTED_FORMS = [
     "0i - 9223372036854775808i",
     "-9223372036854775809i",
 ]
+# The first line of code of a rejected probe: a `print` of a String.
+LEADING_PRINT = re.compile(r'^print "[^"\\]+";$')
 
 
 def code_lines(path: Path) -> list[str]:
@@ -103,16 +112,21 @@ def main() -> None:
             probe = parse_probe(path)
             if probe is None or probe.status != "ok" or is_static(path):
                 problems.append(f"{path.name} accepts row {row_id!r}: it needs `// STATUS: ok` and no `// STATIC-ERROR`")
+    rejected_paths = sorted(set(sum((covers.get(("literal", r), []) for r in EXPECTED_ROWS), [])))
+    for path in rejected_paths:
+        first = code_lines(path)[:1]
+        if not first or not LEADING_PRINT.match(first[0]):
+            problems.append(
+                f"{path.name} is a rejected probe: its first line of code must print a String "
+                f"(`print \"ran\";`), so that an implementation that runs the program "
+                f"before it finds the error prints something"
+            )
     for words in sorted(w for w in covers if w[0] in ("literal", "literal-accepts")):
         if len(words) != 2 or words[1] not in EXPECTED_ROWS:
             problems.append(f"`// COVERS: {' '.join(words)}` in {covers[words][0].name} names no row")
 
     accepted_text = [l for p in sorted(set(sum((covers.get(("literal-accepts", r), []) for r in EXPECTED_ROWS), []))) for l in code_lines(p)]
-    rejected_text = [
-        l
-        for p in sorted(set(sum((covers.get(("literal", r), []) for r in EXPECTED_ROWS), [])))
-        for l in code_lines(p)
-    ]
+    rejected_text = [l for p in rejected_paths for l in code_lines(p)]
     for form in ACCEPTED_FORMS:
         if not any(form in line for line in accepted_text):
             problems.append(f"no accepted probe holds the form {form!r}")
@@ -124,6 +138,7 @@ def main() -> None:
         SCRIPT,
         problems,
         f"{len(ids)} rows, each with a rejected probe and an accepted twin, "
+        f"{len(rejected_paths)} rejected probes that print before the error, "
         f"and the {len(ACCEPTED_FORMS) + len(REJECTED_FORMS)} forms of the unary-minus exception",
     )
 

@@ -376,6 +376,16 @@ must be accepted, in `164` or `165`, and the twin fails today. A consumer that
 rejects every Int literal passes a static-error probe and fails its twin. A
 static-error probe is a real check only after its consumer has Int literals.
 
+Each of these probes starts with `print "ran";`. A static error is found
+before any code runs, so a probe with `// STATIC-ERROR` prints nothing:
+`tools/check_spec_probes.py` fails it when the stdout is not empty, and
+`tools/diff_runtimes.py` reports a divergence when native rejects the program
+and the other consumer prints. A consumer that finds the error only when it
+runs the program, as the bootstrap interpreter can, prints `ran` and fails.
+Without the line, a halt at run time with no output passes both tools.
+`tools/check_int_literal_rejections.py` fails a rejected probe that does not
+start with such a line.
+
 One rule of the Workers and Tasks section has no spec probe: a `print`
 line from one worker never mixes with a line from another worker. Its
 output order depends on timing between threads, and a spec probe compares

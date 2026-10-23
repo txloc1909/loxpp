@@ -3,9 +3,11 @@
 // (spec/01-lexical.md, the unary-minus exception).
 //
 // A static error rejects the program: a non-zero exit status, and nothing
-// runs, so nothing prints (spec/README.md, Conformance). An implementation
-// that runs the program fails this probe.
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
 
+print "ran";
 print 0i - 9223372036854775808i;
 
 // STATIC-ERROR
