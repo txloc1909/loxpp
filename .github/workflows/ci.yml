@@ -68,6 +68,22 @@ jobs:
       - name: Check credit channel copies
         run: tools/check_credit_channel_copies.py
 
+  pi-extensions:
+    name: pi extension (subagent)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # The subagent extension builds kitty argv and tails the child's event
+      # files. Its unit tests use a fake `kitten`, so they need no terminal.
+      # The live kitty test stays out of CI: it needs a graphical kitty.
+      - name: Run extension unit tests
+        run: node --test .pi/extensions/subagent/*.test.ts
+
   pi-modes:
     name: pi mode guards
     runs-on: ubuntu-latest
@@ -94,7 +110,6 @@ jobs:
       # guards fire in the extension, not only in the policy module.
       - name: Run the scripted mode sessions
         run: node tools/test_pi_modes.mjs
-
 
   tree-sitter:
     name: tree-sitter grammar
