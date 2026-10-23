@@ -65,3 +65,6 @@
 230_integer_fault_urem_zero.lox  N7 #831: the suffix, the literals, and the bit operators
 234_int_fault_slice_negative.lox  N7 #831: the suffix, the literals, and the bit operators
 235_int_fault_enum_index_out_of_range.lox  N7 #831: the suffix, the literals, and the bit operators
+236_int_decimal_min_index_rejected.lox  N7 #831: the suffix, the literals, and the bit operators
+237_int_decimal_min_property_rejected.lox  N7 #831: the suffix, the literals, and the bit operators
+238_int_decimal_min_call_rejected.lox  N7 #831: the suffix, the literals, and the bit operators

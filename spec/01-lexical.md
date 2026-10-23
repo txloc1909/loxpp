@@ -215,13 +215,21 @@ nearest literal of the same form that is valid.
 
 **The unary-minus exception.** The literal `9223372036854775808i` is valid
 when it is the direct operand of a unary `-`. The unary `-` and the literal
-together then give the smallest Int, `-9223372036854775808i`. The literal is
-the direct operand when the token just before it is a `-` in prefix position:
-a `-` with a left operand is a binary `-`, and a literal inside parentheses has
-the parenthesis before it. White space between the tokens does not matter. So
-`-9223372036854775808i` and `- 9223372036854775808i` are valid, and
-`-(9223372036854775808i)`, `0i - 9223372036854775808i`, and
-`-9223372036854775809i` are static errors.
+together then give the smallest Int, `-9223372036854775808i`. The rule is
+about the grammar of [§02-syntax](02-syntax.md), not about the tokens that
+stand next to the literal. The literal is the direct operand when it is the
+whole `call` that the `unary` rule of a `-` takes: the `-` stands in prefix
+position, and no `(`, `.`, or `[` follows the literal. Each of those three
+binds to the literal first, as a call, a property read, or an index, so the
+operand of the `-` is that larger expression and not the literal. A `-` with a
+left operand is a binary `-`. A literal inside parentheses is the operand of
+the parentheses, not of the `-`. White space between the tokens does not
+matter, and a binary operator after the literal does not matter either. So
+`-9223372036854775808i`, `- 9223372036854775808i`, and
+`-9223372036854775808i + 1i` are valid. These are static errors:
+`-(9223372036854775808i)`, `0i - 9223372036854775808i`,
+`-9223372036854775809i`, `-9223372036854775808i[0]`,
+`-9223372036854775808i.x`, and `-9223372036854775808i(1)`.
 
 ---
 

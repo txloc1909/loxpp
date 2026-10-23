@@ -24,9 +24,13 @@ and tools/check_spec_probes.py see the difference. A rejected probe with no
 such line cannot tell a rejection at compile time from a halt at run time.
 
 The unary-minus exception has its own forms, each of which a probe must hold:
-the smallest Int as `-9223372036854775808i`, with and without a space, in a
-probe that is accepted, and three forms that are rejected, in probes that carry
-`// STATIC-ERROR`.
+the smallest Int as `-9223372036854775808i`, with and without a space, and
+with a binary operator after it, in a probe that is accepted, and six forms
+that are rejected, in probes that carry `// STATIC-ERROR`: a parenthesis, a
+binary minus, a value below the smallest Int, and an index, a property read,
+and a call after the literal. A postfix form is a static error because the
+literal is then not the whole operand of the minus; a consumer that reads the
+exception as a rule about the token before the literal accepts it.
 
 Usage:
     tools/check_int_literal_rejections.py [--lexical PATH] [--probes DIR]
@@ -43,11 +47,14 @@ SCRIPT = "check_int_literal_rejections.py"
 # The rows of docs/decisions/integer-kind.md, "Countable sets", with the hex
 # and the binary row apart.
 EXPECTED_ROWS = {"decimal-range", "hex-width", "binary-width", "fractional-suffix"}
-ACCEPTED_FORMS = ["-9223372036854775808i", "- 9223372036854775808i"]
+ACCEPTED_FORMS = ["-9223372036854775808i", "- 9223372036854775808i", "-9223372036854775808i + 1i"]
 REJECTED_FORMS = [
     "-(9223372036854775808i)",
     "0i - 9223372036854775808i",
     "-9223372036854775809i",
+    "-9223372036854775808i[0]",
+    "-9223372036854775808i.x",
+    "-9223372036854775808i(1)",
 ]
 # The first line of code of a rejected probe: a `print` of a String.
 LEADING_PRINT = re.compile(r'^print "[^"\\]+";$')

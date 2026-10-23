@@ -2,9 +2,11 @@
 // spec/01-lexical.md, Static errors in Int literals, is valid. The smallest
 // Int has no literal of its own: `-9223372036854775808i` is a unary minus and
 // the literal `9223372036854775808i`, which the unary-minus exception allows,
-// with or without white space. Leading zeros do not count towards the 64 bits.
-// Each static-error probe has this file as its twin: a consumer that rejects
-// every Int literal passes the static-error probe and fails this one.
+// with or without white space. A binary operator after the literal is valid
+// too, because the unary minus takes only the literal. Leading zeros do not
+// count towards the 64 bits. Each static-error probe has this file as its
+// twin: a consumer that rejects every Int literal passes the static-error probe
+// and fails this one.
 
 print 9223372036854775807i;
 print -9223372036854775808i;
@@ -18,6 +20,7 @@ print 0b1000000000000000000000000000000000000000000000000000000000000000;
 print 15i;
 print 1.5;
 print 1.0;
+print -9223372036854775808i + 1i;
 
 // STATUS: ok
 // CHECK: 9223372036854775807
@@ -32,6 +35,7 @@ print 1.0;
 // CHECK: 15
 // CHECK: 1.5
 // CHECK: 1
+// CHECK: -9223372036854775807
 // COVERS: literal-accepts decimal-range
 // COVERS: literal-accepts hex-width
 // COVERS: literal-accepts binary-width

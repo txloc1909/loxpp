@@ -1,0 +1,17 @@
+// The literal 9223372036854775808i is valid only as the direct operand of a
+// unary minus. An index binds to the literal before the minus applies, so
+// `-9223372036854775808i[0]` is `-(9223372036854775808i[0])`, and the literal
+// is not the operand of the minus. It is a static error, not a run-time fault
+// of the index (spec/01-lexical.md, the unary-minus exception).
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print -9223372036854775808i[0];
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal decimal-range
