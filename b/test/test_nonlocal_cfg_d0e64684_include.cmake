@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_nonlocal_cfg_d0e64684_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_nonlocal_cfg_d0e64684_tests.cmake")
+else()
+  add_test(test_nonlocal_cfg_NOT_BUILT test_nonlocal_cfg_NOT_BUILT)
+endif()

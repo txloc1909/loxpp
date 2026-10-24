@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_gc_regression_a2b0048c_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_gc_regression_a2b0048c_tests.cmake")
+else()
+  add_test(test_gc_regression_NOT_BUILT test_gc_regression_NOT_BUILT)
+endif()

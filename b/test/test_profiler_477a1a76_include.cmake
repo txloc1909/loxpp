@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_profiler_477a1a76_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_profiler_477a1a76_tests.cmake")
+else()
+  add_test(test_profiler_NOT_BUILT test_profiler_NOT_BUILT)
+endif()

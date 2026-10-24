@@ -103,6 +103,7 @@ loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_cor
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_value           test_value.cpp           CORE loxpp_test_core)
+loxpp_add_test(test_token_roundtrip test_token_roundtrip.cpp CORE loxpp_test_core PROBE)
 loxpp_add_test(test_local_variables test_local_variables.cpp CORE loxpp_test_core)
 loxpp_add_test(test_control_flow    test_control_flow.cpp    CORE loxpp_test_core)
 loxpp_add_test(test_vm_runtime      test_vm_runtime.cpp      CORE loxpp_test_core)
@@ -418,7 +419,8 @@ set(LOXPP_GTEST_TARGETS
     test_backend_native_pops
     test_stringify_depth_guard
     test_check_diagnostics test_enum_names test_tooling_parser test_tooling_resolver
-    test_backend_rt_capi test_backend_qbe_emitter)
+    test_backend_rt_capi test_backend_qbe_emitter
+    test_token_roundtrip)
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)
 endif()

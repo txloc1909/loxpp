@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_native_pops_1a7368d6_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_native_pops_1a7368d6_tests.cmake")
+else()
+  add_test(test_backend_native_pops_NOT_BUILT test_backend_native_pops_NOT_BUILT)
+endif()

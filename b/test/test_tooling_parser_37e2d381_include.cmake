@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_tooling_parser_37e2d381_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_tooling_parser_37e2d381_tests.cmake")
+else()
+  add_test(test_tooling_parser_NOT_BUILT test_tooling_parser_NOT_BUILT)
+endif()

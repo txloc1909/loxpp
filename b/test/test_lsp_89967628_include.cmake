@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_lsp_89967628_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_lsp_89967628_tests.cmake")
+else()
+  add_test(test_lsp_NOT_BUILT test_lsp_NOT_BUILT)
+endif()

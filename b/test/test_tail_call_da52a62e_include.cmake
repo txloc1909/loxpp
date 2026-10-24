@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_tail_call_da52a62e_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_tail_call_da52a62e_tests.cmake")
+else()
+  add_test(test_tail_call_NOT_BUILT test_tail_call_NOT_BUILT)
+endif()

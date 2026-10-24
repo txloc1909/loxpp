@@ -1,0 +1,1352 @@
+[
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/chunk.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/chunk.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/debug.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/debug.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/chunk_decoder.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/chunk_decoder.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/global_slots.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/global_slots.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/cfg.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/cfg.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/abstract_stack.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/abstract_stack.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/handler_depth.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/handler_depth.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/capture_analysis.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/capture_analysis.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/zero_depth_local.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/zero_depth_local.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/native_pops.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/native_pops.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/value.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/value.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/object.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/object.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/container_objects.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/container_objects.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/memory_manager.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/memory_manager.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/worker.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/worker.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/math.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/math.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/runtime.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/runtime.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/vm.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/vm.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/scanner.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/scanner.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/token.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/token.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/compiler.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/compiler.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/parser.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/parser.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/analyze.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/analyze.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/stdlib_context.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/stdlib_context.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/stdlib_registrar.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/stdlib_registrar.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/globals.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/globals.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/file_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/file_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/map_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/map_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/error_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/error_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/math_module.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/math_module.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/os_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/os_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/reflect_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/reflect_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/net_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/net_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/process_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/process_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/coroutine_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/coroutine_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/stdlib/task_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/stdlib/task_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_core.dir/src/backend/jvm_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_core.dir/src/backend/jvm_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_tooling.dir/src/tooling/tooling_parser.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/tooling_parser.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/tooling_parser.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_tooling.dir/src/tooling/tooling_parser.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_tooling.dir/src/tooling/symbol_table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/symbol_table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/symbol_table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_tooling.dir/src/tooling/symbol_table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_tooling.dir/src/tooling/stdlib_names.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/stdlib_names.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/stdlib_names.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_tooling.dir/src/tooling/stdlib_names.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_tooling.dir/src/tooling/resolver.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/resolver.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/resolver.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_tooling.dir/src/tooling/resolver.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp_tooling.dir/src/tooling/document_model.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/document_model.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/tooling/document_model.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_tooling.dir/src/tooling/document_model.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -DLOXPP_QBE_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/include -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp.dir/src/main.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/main.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/main.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp.dir/src/main.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -DLOXPP_QBE_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/include -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp.dir/src/backend/qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp.dir/src/backend/qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -DLOXPP_QBE_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/include -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp.dir/src/backend/qbe_promotion.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp.dir/src/backend/qbe_promotion.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -DLOXPP_QBE_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/include -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp.dir/src/backend/qbe_frontend.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_frontend.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_frontend.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp.dir/src/backend/qbe_frontend.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/include -O3 -DNDEBUG -Wno-c99-designator -o CMakeFiles/loxpp_isocline.dir/third_party/isocline/src/isocline.c.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/src/isocline.c",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party/isocline/src/isocline.c",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp_isocline.dir/third_party/isocline/src/isocline.c.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/main.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/main.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/main.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/main.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/json_rpc.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/json_rpc.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/json_rpc.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/json_rpc.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/document_store.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/document_store.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/document_store.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/document_store.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/server.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/server.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/server.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/server.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/code_action.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/code_action.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/code_action.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/code_action.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/signature_help.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/signature_help.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/signature_help.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/signature_help.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxpp-lsp.dir/src/lsp/stdlib_docs.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/stdlib_docs.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/stdlib_docs.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxpp-lsp.dir/src/lsp/stdlib_docs.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/loxrt.dir/src/backend/rt_capi.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/loxrt.dir/src/backend/rt_capi.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_probe.dir/tools/qbe_emit_probe.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/tools/qbe_emit_probe.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/tools/qbe_emit_probe.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_probe.dir/tools/qbe_emit_probe.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_probe.dir/src/backend/qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_probe.dir/src/backend/qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_probe.dir/src/backend/qbe_promotion.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_probe.dir/src/backend/qbe_promotion.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_program.dir/tools/qbe_emit_program.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/tools/qbe_emit_program.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/tools/qbe_emit_program.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_program.dir/tools/qbe_emit_program.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_program.dir/src/backend/qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_program.dir/src/backend/qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o CMakeFiles/qbe_emit_program.dir/src/backend/qbe_promotion.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/CMakeFiles/qbe_emit_program.dir/src/backend/qbe_promotion.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/vm.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/vm.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/runtime.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/runtime.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/math.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/math.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/compiler.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/compiler.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/parser.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/parser.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/analyze.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/analyze.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/chunk.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/chunk.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/debug.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/debug.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/chunk_decoder.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/chunk_decoder.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/global_slots.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/global_slots.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/cfg.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/cfg.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/abstract_stack.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/abstract_stack.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/handler_depth.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/handler_depth.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/capture_analysis.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/capture_analysis.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/zero_depth_local.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/zero_depth_local.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/native_pops.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/native_pops.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/jvm_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/jvm_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/rt_capi.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/rt_capi.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/backend/qbe_promotion.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/backend/qbe_promotion.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/value.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/value.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/object.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/object.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/container_objects.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/container_objects.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/memory_manager.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/memory_manager.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/worker.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/worker.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/token.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/token.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/scanner.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/scanner.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/stdlib_context.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/stdlib_context.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/stdlib_registrar.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/stdlib_registrar.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/globals.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/globals.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/file_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/file_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/map_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/map_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/error_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/error_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/math_module.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/math_module.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/os_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/os_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/reflect_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/reflect_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/net_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/net_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/process_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/process_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/coroutine_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/coroutine_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/task_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/__/src/stdlib/task_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core.dir/test_harness.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_harness.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_harness.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core.dir/test_harness.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/vm.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/vm.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/vm.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/runtime.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/runtime.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/runtime.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/math.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/math.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/math.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/compiler.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/compiler.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/compiler.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/parser.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/parser.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/parser.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/analyze.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/analyze.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/analyze.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/chunk.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/chunk.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/chunk.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/debug.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/debug.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/debug.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/chunk_decoder.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/chunk_decoder.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/chunk_decoder.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/global_slots.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/global_slots.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/global_slots.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/cfg.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/cfg.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/cfg.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/abstract_stack.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/abstract_stack.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/abstract_stack.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/handler_depth.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/handler_depth.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/handler_depth.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/capture_analysis.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/capture_analysis.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/capture_analysis.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/zero_depth_local.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/zero_depth_local.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/zero_depth_local.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/native_pops.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/native_pops.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/native_pops.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/jvm_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/jvm_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/jvm_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/rt_capi.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/rt_capi.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/rt_capi.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/qbe_promotion.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/backend/qbe_promotion.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/backend/qbe_promotion.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/value.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/value.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/value.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/object.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/object.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/object.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/container_objects.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/container_objects.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/container_objects.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/memory_manager.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/memory_manager.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/memory_manager.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/worker.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/worker.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/worker.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/token.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/token.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/scanner.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/scanner.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/stdlib_context.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_context.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/stdlib_context.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/stdlib_registrar.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/stdlib_registrar.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/stdlib_registrar.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/globals.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/globals.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/globals.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/file_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/file_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/file_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/map_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/map_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/map_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/error_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/error_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/error_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/math_module.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/math_module.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/math_module.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/os_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/os_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/os_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/reflect_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/reflect_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/reflect_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/net_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/net_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/net_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/process_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/process_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/process_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/coroutine_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/coroutine_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/coroutine_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/task_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/stdlib/task_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/__/src/stdlib/task_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/loxpp_test_core_profile.dir/test_harness.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_harness.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_harness.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/loxpp_test_core_profile.dir/test_harness.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_main.dir/test_main.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_main.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_main.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_main.dir/test_main.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_scanner.dir/test_scanner.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_scanner.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_scanner.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_scanner.dir/test_scanner.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_scanner.dir/__/src/scanner.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/scanner.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_scanner.dir/__/src/scanner.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_scanner.dir/__/src/token.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/token.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_scanner.dir/__/src/token.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_parser_vm.dir/test_parser_vm.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_parser_vm.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_parser_vm.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_parser_vm.dir/test_parser_vm.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_parser_bytecode.dir/test_parser_bytecode.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_parser_bytecode.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_parser_bytecode.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_parser_bytecode.dir/test_parser_bytecode.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_table.dir/test_table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_table.dir/test_table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_table_gc.dir/test_table.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_table.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_table.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_table_gc.dir/test_table.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_allocator.dir/test_allocator.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_allocator.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_allocator.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_allocator.dir/test_allocator.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_allocator_gc.dir/test_allocator.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_allocator.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_allocator.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_allocator_gc.dir/test_allocator.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_value.dir/test_value.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_value.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_value.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_value.dir/test_value.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_token_roundtrip.dir/test_token_roundtrip.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_token_roundtrip.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_token_roundtrip.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_token_roundtrip.dir/test_token_roundtrip.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_local_variables.dir/test_local_variables.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_local_variables.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_local_variables.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_local_variables.dir/test_local_variables.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_control_flow.dir/test_control_flow.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_control_flow.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_control_flow.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_control_flow.dir/test_control_flow.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_vm_runtime.dir/test_vm_runtime.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_vm_runtime.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_vm_runtime.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_vm_runtime.dir/test_vm_runtime.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_print_nul.dir/test_print_nul.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_print_nul.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_print_nul.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_print_nul.dir/test_print_nul.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_file_nul.dir/test_file_nul.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_file_nul.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_file_nul.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_file_nul.dir/test_file_nul.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_os_api.dir/test_os_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_os_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_os_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_os_api.dir/test_os_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_net_process.dir/test_net_process.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_net_process.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_net_process.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_net_process.dir/test_net_process.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_net_process_gc.dir/test_net_process.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_net_process.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_net_process.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_net_process_gc.dir/test_net_process.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_reflect_api.dir/test_reflect_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_reflect_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_reflect_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_reflect_api.dir/test_reflect_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_reflect_api_gc.dir/test_reflect_api.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_reflect_api.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_reflect_api.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_reflect_api_gc.dir/test_reflect_api.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_closures.dir/test_closures.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_closures.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_closures.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_closures.dir/test_closures.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_tail_call.dir/test_tail_call.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tail_call.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tail_call.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_tail_call.dir/test_tail_call.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_stress_gc.dir/test_stress_gc.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_stress_gc.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_stress_gc.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_stress_gc.dir/test_stress_gc.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_gc_regression.dir/test_gc_regression.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_gc_regression.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_gc_regression.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_gc_regression.dir/test_gc_regression.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_inheritance.dir/test_inheritance.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_inheritance.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_inheritance.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_inheritance.dir/test_inheritance.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_list.dir/test_list.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_list.dir/test_list.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_list_gc.dir/test_list.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_list_gc.dir/test_list.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_map.dir/test_map.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_map.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_map.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_map.dir/test_map.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_map_gc.dir/test_map.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_map.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_map.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_map_gc.dir/test_map.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_var_destructure.dir/test_var_destructure.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_var_destructure.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_var_destructure.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_var_destructure.dir/test_var_destructure.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_enum.dir/test_enum.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_enum.dir/test_enum.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_enum_gc.dir/test_enum.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_enum_gc.dir/test_enum.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_class_pattern.dir/test_class_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_class_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_class_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_class_pattern.dir/test_class_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_class_pattern_gc.dir/test_class_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_class_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_class_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_class_pattern_gc.dir/test_class_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_match_expr.dir/test_match_expr.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_match_expr.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_match_expr.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_match_expr.dir/test_match_expr.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_slice.dir/test_slice.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_slice.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_slice.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_slice.dir/test_slice.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_operator_overload.dir/test_operator_overload.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_operator_overload.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_operator_overload.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_operator_overload.dir/test_operator_overload.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_coroutine.dir/test_coroutine.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_coroutine.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_coroutine.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_coroutine.dir/test_coroutine.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_coroutine_gc.dir/test_coroutine.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_coroutine.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_coroutine.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_coroutine_gc.dir/test_coroutine.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_task.dir/test_task.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_task.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_task.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_task.dir/test_task.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_task_gc.dir/test_task.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_task.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_task.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_task_gc.dir/test_task.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_worker.dir/test_worker.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_worker.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_worker.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_worker.dir/test_worker.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_worker_gc.dir/test_worker.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_worker.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_worker.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_worker_gc.dir/test_worker.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_repl.dir/test_repl.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_repl.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_repl.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_repl.dir/test_repl.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_repl_gc.dir/test_repl.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_repl.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_repl.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_repl_gc.dir/test_repl.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_or_pattern.dir/test_or_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_or_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_or_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_or_pattern.dir/test_or_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_or_pattern_gc.dir/test_or_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_or_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_or_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_or_pattern_gc.dir/test_or_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_seq_destructure.dir/test_seq_destructure.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_seq_destructure.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_seq_destructure.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_seq_destructure.dir/test_seq_destructure.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_list_pattern.dir/test_list_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_list_pattern.dir/test_list_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_list_pattern_gc.dir/test_list_pattern.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list_pattern.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_list_pattern.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_list_pattern_gc.dir/test_list_pattern.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_at_binding.dir/test_at_binding.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_at_binding.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_at_binding.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_at_binding.dir/test_at_binding.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_at_binding_gc.dir/test_at_binding.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_at_binding.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_at_binding.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_at_binding_gc.dir/test_at_binding.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROFILE -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_profiler.dir/profiler_test.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/profiler_test.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/profiler_test.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_profiler.dir/profiler_test.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_chunk_decoder.dir/test_chunk_decoder.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_chunk_decoder.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_chunk_decoder.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_chunk_decoder.dir/test_chunk_decoder.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_cfg.dir/test_backend_cfg.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_cfg.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_cfg.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_cfg.dir/test_backend_cfg.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_abstract_stack.dir/test_backend_abstract_stack.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_abstract_stack.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_abstract_stack.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_abstract_stack.dir/test_backend_abstract_stack.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_capture.dir/test_backend_capture.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_capture.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_capture.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_capture.dir/test_backend_capture.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_native_pops.dir/test_backend_native_pops.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_native_pops.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_native_pops.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_native_pops.dir/test_backend_native_pops.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_nonlocal_cfg.dir/test_nonlocal_cfg.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_nonlocal_cfg.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_nonlocal_cfg.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_nonlocal_cfg.dir/test_nonlocal_cfg.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_handler_stack_leak.dir/test_handler_stack_leak.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_stack_leak.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_stack_leak.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_handler_stack_leak.dir/test_handler_stack_leak.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_handler_stack_leak_gc.dir/test_handler_stack_leak.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_stack_leak.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_stack_leak.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_handler_stack_leak_gc.dir/test_handler_stack_leak.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_handler_depth_invariant.dir/test_handler_depth_invariant.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_depth_invariant.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_handler_depth_invariant.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_handler_depth_invariant.dir/test_handler_depth_invariant.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_jvm_emit.dir/test_jvm_emit.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_jvm_emit.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_jvm_emit.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_jvm_emit.dir/test_jvm_emit.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_stringify_depth_guard.dir/test_stringify_depth_guard.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_stringify_depth_guard.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_stringify_depth_guard.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_stringify_depth_guard.dir/test_stringify_depth_guard.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_tooling_parser.dir/test_tooling_parser.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tooling_parser.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tooling_parser.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_tooling_parser.dir/test_tooling_parser.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -DLOXPP_PROJECT_SOURCE_DIR=\\\"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip\\\" -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_tooling_resolver.dir/test_tooling_resolver.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tooling_resolver.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_tooling_resolver.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_tooling_resolver.dir/test_tooling_resolver.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_check_diagnostics.dir/test_check_diagnostics.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_check_diagnostics.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_check_diagnostics.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_check_diagnostics.dir/test_check_diagnostics.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_enum_names.dir/test_enum_names.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum_names.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_enum_names.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_enum_names.dir/test_enum_names.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_rt_capi.dir/test_backend_rt_capi.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_rt_capi.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_rt_capi.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_rt_capi.dir/test_backend_rt_capi.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_backend_qbe_emitter.dir/test_backend_qbe_emitter.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_qbe_emitter.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_backend_qbe_emitter.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_backend_qbe_emitter.dir/test_backend_qbe_emitter.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/test_lsp.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_lsp.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/test/test_lsp.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/test_lsp.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/json_rpc.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/json_rpc.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/json_rpc.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/json_rpc.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/document_store.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/document_store.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/document_store.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/document_store.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/server.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/server.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/server.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/server.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/code_action.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/code_action.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/code_action.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/code_action.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/signature_help.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/signature_help.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/signature_help.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/signature_help.cpp.o"
+},
+{
+  "directory": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b",
+  "command": "/usr/bin/clang++ -DGTEST_LINKED_AS_SHARED_LIBRARY=1 -DLOXPP_JVM_BACKEND -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/third_party -I/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b -O3 -DNDEBUG -std=c++20 -Wno-c99-designator -o test/CMakeFiles/test_lsp.dir/__/src/lsp/stdlib_docs.cpp.o -c /home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/stdlib_docs.cpp",
+  "file": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/src/lsp/stdlib_docs.cpp",
+  "output": "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/CMakeFiles/test_lsp.dir/__/src/lsp/stdlib_docs.cpp.o"
+}
+]

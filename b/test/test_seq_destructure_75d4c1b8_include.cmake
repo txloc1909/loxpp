@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_seq_destructure_75d4c1b8_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_seq_destructure_75d4c1b8_tests.cmake")
+else()
+  add_test(test_seq_destructure_NOT_BUILT test_seq_destructure_NOT_BUILT)
+endif()

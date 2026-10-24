@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_handler_stack_leak_gc_bde2bc20_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_handler_stack_leak_gc_bde2bc20_tests.cmake")
+else()
+  add_test(test_handler_stack_leak_gc_NOT_BUILT test_handler_stack_leak_gc_NOT_BUILT)
+endif()

@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_enum_names_1aadc7e2_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_enum_names_1aadc7e2_tests.cmake")
+else()
+  add_test(test_enum_names_NOT_BUILT test_enum_names_NOT_BUILT)
+endif()

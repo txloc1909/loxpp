@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_qbe_emitter_fb4894bf_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_qbe_emitter_fb4894bf_tests.cmake")
+else()
+  add_test(test_backend_qbe_emitter_NOT_BUILT test_backend_qbe_emitter_NOT_BUILT)
+endif()

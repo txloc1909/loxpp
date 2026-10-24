@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_coroutine_gc_7e9ed54f_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_coroutine_gc_7e9ed54f_tests.cmake")
+else()
+  add_test(test_coroutine_gc_NOT_BUILT test_coroutine_gc_NOT_BUILT)
+endif()

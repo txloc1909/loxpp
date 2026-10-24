@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_operator_overload_08b0c228_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_operator_overload_08b0c228_tests.cmake")
+else()
+  add_test(test_operator_overload_NOT_BUILT test_operator_overload_NOT_BUILT)
+endif()

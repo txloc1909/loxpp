@@ -1,0 +1,5 @@
+if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_parser_bytecode_40186ce3_tests.cmake")
+  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_parser_bytecode_40186ce3_tests.cmake")
+else()
+  add_test(test_parser_bytecode_NOT_BUILT test_parser_bytecode_NOT_BUILT)
+endif()

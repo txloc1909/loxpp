@@ -1,0 +1,20 @@
+include("/usr/share/cmake/Modules/GoogleTestAddTests.cmake")
+gtest_discover_tests_impl(
+  TEST_TARGET [==[test_jvm_emit]==]
+  TEST_EXECUTABLE [==[/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_jvm_emit]==]
+  TEST_EXECUTOR [==[]==]
+  TEST_WORKING_DIR [==[/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test]==]
+  TEST_EXTRA_ARGS [==[]==]
+  TEST_PROPERTIES [==[]==]
+  TEST_PREFIX [==[test_jvm_emit.]==]
+  TEST_SUFFIX [==[]==]
+  TEST_FILTER [==[]==]
+  NO_PRETTY_TYPES [==[FALSE]==]
+  NO_PRETTY_VALUES [==[FALSE]==]
+  TEST_LIST [==[test_jvm_emit_TESTS]==]
+  CTEST_FILE [==[/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_jvm_emit_3d8bd85d_tests.cmake]==]
+  TEST_DISCOVERY_TIMEOUT [==[5]==]
+  TEST_DISCOVERY_EXTRA_ARGS [==[]==]
+  TEST_XML_OUTPUT_DIR [==[]==]
+  TEST_JSON_OUTPUT_DIR [==[/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test]==]
+)
