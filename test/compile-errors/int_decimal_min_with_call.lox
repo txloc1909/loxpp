@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Decimal Int literal is above the largest Int.
+// Compile error: a call binds to the literal before the `-` applies, so the
+// literal is not the operand of the unary minus (spec/01-lexical.md).
+print -9223372036854775808i(1);

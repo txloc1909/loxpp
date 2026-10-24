@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Decimal Int literal is above the largest Int.
+// Compile error: the unary-minus exception needs the literal as the whole
+// operand of the `-`, and parentheses take it first (spec/01-lexical.md).
+print -(9223372036854775808i);

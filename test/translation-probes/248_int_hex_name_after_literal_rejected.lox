@@ -1,0 +1,18 @@
+// The suffix boundary of a hexadecimal literal (spec/01-lexical.md, row
+// suffix-boundary). `a` is a hexadecimal digit, so the longest match reads
+// `0xFFa`, and `nd` is a name directly after a literal. A scanner that stops
+// the hexadecimal literal at the last digit it expects turns this line into
+// `0xFF and true`, which is a valid program, so this probe tells the two
+// apart.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 0xFFand true;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal suffix-boundary

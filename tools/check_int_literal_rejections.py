@@ -72,7 +72,7 @@ SCRIPT = "check_int_literal_rejections.py"
 # and the binary row apart, and the suffix boundary.
 EXPECTED_ROWS = {"decimal-range", "hex-width", "binary-width", "fractional-suffix", "suffix-boundary"}
 # The `valid` rows of the table of examples in spec/01-lexical.md.
-VALID_EXAMPLES = 19
+VALID_EXAMPLES = 23
 VALID = "valid"
 # The first line of code of a rejected probe: a `print` of a String.
 LEADING_PRINT = re.compile(r'^print "[^"\\]+";$')

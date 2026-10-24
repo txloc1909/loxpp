@@ -10,7 +10,11 @@ enum class Precedence : std::uint8_t {
     OR,         // ||
     AND,        // &&
     EQUALITY,   // == !=
-    COMPARISON, // < > <= >=
+    COMPARISON, // < > <= >= in
+    BIT_OR,     // |
+    BIT_XOR,    // ^
+    BIT_AND,    // &
+    SHIFT,      // << >> >>>
     TERM,       // + -
     FACTOR,     // * /
     UNARY,      // - +
@@ -72,6 +76,15 @@ struct Parser {
     // with m_canAssign. It records the precedence context itself, so a prefix
     // rule can tell an assignment-level call from an operand-position call.
     bool m_atAssignmentLevel{false};
+
+    // The unary-minus exception (spec/01-lexical.md). Compiler::unary() sets
+    // m_intMinusOperand when a '-' stands directly before an Int literal, and
+    // the INT prefix rule decides from it whether the literal is the operand
+    // of the '-' or of a call, property read, or index that binds first. When
+    // the rule accepts the exception it sets m_intMinusConsumed, so the '-'
+    // emits no NEGATE: the literal already holds the smallest Int.
+    bool m_intMinusOperand{false};
+    bool m_intMinusConsumed{false};
 
     // When set, errorAt collects diagnostics here and prints nothing. Null (the
     // default) keeps the original stderr behaviour byte-for-byte. compile()

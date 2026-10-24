@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Int literal cannot have a fractional part.
+// Compile error: a fractional literal with the suffix `i` is one rejected
+// lexeme (spec/01-lexical.md, row fractional-suffix), not `1.5` and a name.
+print 1.5i;

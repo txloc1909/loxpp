@@ -29,6 +29,7 @@ enum class ObjType : uint8_t {
     PROCESS,
     COROUTINE,
     TASK,
+    INT,
 };
 
 inline uint32_t hashString(std::string_view s) {
@@ -61,6 +62,17 @@ struct ObjString : public Obj {
 
     ObjString(std::string_view sv, VmAllocator<char> alloc)
         : Obj(ObjType::STRING), hash(hashString(sv)), chars(sv, alloc) {}
+};
+
+// An Int that does not fit the native inline range (src/value.h). Immutable:
+// no code writes `value` after construction, so the compiler pools one object
+// per distinct value and the collector never sees a mutated one.
+//
+// It lives here, not with the other container objects, because value.h needs
+// the type for is<Int>/as<Int> and the container headers include value.h.
+struct ObjInt : public Obj {
+    std::int64_t value;
+    explicit ObjInt(std::int64_t v) : Obj(ObjType::INT), value(v) {}
 };
 
 std::string stringifyObj(Obj* obj);

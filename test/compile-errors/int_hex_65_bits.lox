@@ -1,0 +1,4 @@
+// DIAGNOSTIC: Hexadecimal Int literal is wider than 64 bits.
+// Compile error: a hexadecimal literal is a 64-bit pattern
+// (spec/01-lexical.md, row hex-width).
+print 0x10000000000000000;

@@ -128,6 +128,7 @@ class Compiler {
     void yieldExpr();
     void literal();
     void number();
+    void intLiteral();
     void string();
     void variable();
     void call();
@@ -209,6 +210,9 @@ class Compiler {
     void emitLoopCleanup(int targetLocalCount, int targetHandlerCount);
 
     uint16_t makeConstant(Value value);
+    // Emits a CONSTANT for an Int: inline when it fits, else one immutable
+    // heap box (docs/decisions/integer-kind.md, Native layout).
+    void emitIntConstant(Int value);
     uint16_t identifierConstant(const Token& name);
     void emitConstantOp(Op op, uint16_t idx);
     void namedVariable(const Token& name, bool canAssign);

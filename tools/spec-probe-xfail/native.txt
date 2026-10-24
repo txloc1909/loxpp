@@ -15,17 +15,7 @@
 # A name with no spec probe behind it is an error.
 
 # ---- probes of the Int kind (tracking issue #824) ----
-165_int_literals.lox  N2 #826: native value layer and literals
-166_int_literal_limits.lox  N2 #826: native value layer and literals
-177_int_equality_kinds.lox  N2 #826: native value layer and literals
-178_int_map_keys.lox  N2 #826: native value layer and literals
-179_int_printing.lox  N2 #826: native value layer and literals
-180_int_match_patterns.lox  N2 #826: native value layer and literals
-181_int_messages.lox  N2 #826: native value layer and literals
-182_int_boxed_gc.lox  N2 #826: native value layer and literals
-183_int_fault_chr_int.lox  N2 #826: native value layer and literals
-184_int_fault_math_int.lox  N2 #826: native value layer and literals
-185_int_truthiness.lox  N3 #827: native operators
+166_int_literal_limits.lox  N3 #827: native operators
 186_int_arithmetic.lox  N3 #827: native operators
 187_int_division.lox  N3 #827: native operators
 188_int_comparison.lox  N3 #827: native operators
@@ -36,7 +26,6 @@
 193_int_mixed_kind_faults.lox  N3 #827: native operators
 194_int_operator_faults.lox  N3 #827: native operators
 195_int_bit_operator_no_protocol.lox  N3 #827: native operators
-196_int_operator_result_check.lox  N3 #827: native operators
 197_int_wrap_churn.lox  N3 #827: native operators
 198_int_flag_set.lox  N3 #827: native operators
 199_int_bitboard.lox  N3 #827: native operators
@@ -77,7 +66,3 @@
 234_integer_fault_parse_unsigned_empty.lox  N4 #828: native conversions, the integer module, and indexing
 235_int_fault_slice_negative.lox  N4 #828: native conversions, the integer module, and indexing
 236_int_fault_enum_index_out_of_range.lox  N4 #828: native conversions, the integer module, and indexing
-240_int_suffix_before_in_rejected.lox  N2 #826: native scanner reads the suffix before a name
-241_int_suffix_before_if_rejected.lox  N2 #826: native scanner reads the suffix before a name
-242_int_fractional_suffix_before_in_rejected.lox  N2 #826: native scanner reads the suffix before a name
-244_int_fractional_suffix_before_if_rejected.lox  N2 #826: native scanner reads the suffix before a name

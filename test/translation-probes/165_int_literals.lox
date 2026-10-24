@@ -31,6 +31,20 @@ print type(0xFF);
 print 1.5;
 print 15i;
 
+// The suffix ends at a token boundary, so a keyword may follow it directly.
+print 1iin [1i];
+print 1iand true;
+print 0x1or false;
+
+var t = true;
+fun pick_suffix(x) {
+    return match x {
+        case 1iif t => "guarded"
+        case _ => "other"
+    };
+}
+print pick_suffix(1i);
+
 // STATUS: ok
 // CHECK: 0
 // CHECK: 1
@@ -58,4 +72,8 @@ print 15i;
 // CHECK: Int
 // CHECK: 1.5
 // CHECK: 15
+// CHECK: true
+// CHECK: true
+// CHECK: 1
+// CHECK: guarded
 // COVERS: literal-accepts fractional-suffix
