@@ -1007,6 +1007,39 @@ class Emitter {
             m_body << doneLabel << "\n";
             break;
         }
+        // The Int bit operators (docs/decisions/integer-kind.md, "Operand
+        // kinds") have no operator protocol, so their whole body is the kind
+        // check, the count-range check and a 64-bit operation — never a plain
+        // double-double case, so Q5 gives them no inline fast path. They run
+        // no user code, so they need no resume point (isResumePoint).
+        case Op::BIT_AND:
+            callSlowPath("rt_op_bit_and", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::BIT_OR:
+            callSlowPath("rt_op_bit_or", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::BIT_XOR:
+            callSlowPath("rt_op_bit_xor", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::BIT_NOT:
+            callSlowPath("rt_op_bit_not", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::SHIFT_LEFT:
+            callSlowPath("rt_op_shift_left", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::SHIFT_RIGHT:
+            callSlowPath("rt_op_shift_right", before.height, {}, m_stopTemp,
+                         ins.offset, Catchability::Local);
+            break;
+        case Op::SHIFT_RIGHT_UNSIGNED:
+            callSlowPath("rt_op_shift_right_unsigned", before.height, {},
+                         m_stopTemp, ins.offset, Catchability::Local);
+            break;
         case Op::LESS:
             emitBinaryCompare("cltd", "rt_op_less", before.height, ins.offset);
             break;
