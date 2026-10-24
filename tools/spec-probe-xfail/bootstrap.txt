@@ -82,3 +82,4 @@
 
 # ---- the range of a Number literal (issue #852) ----
 251_number_literal_range_ends.lox  #852: bootstrap interpreter decimal conversion
+252_float_string_range.lox  N6 #830: bootstrap interpreter
