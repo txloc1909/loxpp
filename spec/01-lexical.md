@@ -179,6 +179,19 @@ or exponential notations.
 
 All Numbers are represented as IEEE 754 double-precision floating point.
 
+**Range of a Number.** A `NUMBER` token denotes the nearest IEEE 754
+double-precision value to the decimal that its digits spell. A tie goes to the
+value with an even last bit. A decimal above the largest finite double denotes
+positive infinity, and one below the smallest subnormal denotes zero. No
+`NUMBER` token is a static error, whatever its value, so the smallest subnormal
+is writable. Each row is an example of the rule, not a rule of its own.
+
+| Source | Value |
+|---|---|
+| `0.` followed by 323 zeros and a `5` | `5e-324`, the smallest subnormal |
+| `0.` followed by 400 zeros and a `1` | `0` |
+| 400 `9`s | `inf` |
+
 An `INT` is an Int literal, a signed 64-bit integer (see
 [§03-types](03-types.md#int)). `BADINT` is in the grammar so that the longest
 match reads `1.5i` as one rejected lexeme, and not as the `NUMBER` `1.5` and a

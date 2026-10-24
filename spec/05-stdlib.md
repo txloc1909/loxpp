@@ -167,7 +167,10 @@ Converts `value` to a Number.
 | String | The nearest Number to the decimal that the String names, when the String is an optional `+` or `-`, one or more decimal digits, and optionally a `.` followed by one or more decimal digits, with nothing else. |
 
 A String of another form (`"1e5"`, `".5"`, `"5."`, `" 1"`, `"inf"`, `""`) and a
-value of any other kind are runtime errors.
+value of any other kind are runtime errors. A decimal above the largest finite
+double gives an infinity, and one below the smallest subnormal gives zero, as
+a `NUMBER` literal of that decimal does
+([§01-lexical](01-lexical.md#number-and-int-literals)).
 
 ```lox
 print float(3i) == 3;                       // true
