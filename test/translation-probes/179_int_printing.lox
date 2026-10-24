@@ -1,9 +1,10 @@
 // An Int prints as its exact decimal digits, with a `-` sign when negative and
 // never in an exponent form (spec/03-types.md, Canonical String
-// Representation). A Number prints in the shortest form of its own rule, which
-// is the bare digits for an integral value, so `1000000` and `1000000i` print
-// the same text (docs/decisions/number-print-format.md, "The Int parity
-// probe"). `type` returns `"Int"` (spec/05-stdlib.md).
+// Representation). A Number prints in the shortest form of its own rule, so
+// `1000000` and `1000000i` print the same text. The two part above `2^53`,
+// where the Number's shortest form can differ from the Int's exact digits:
+// docs/decisions/number-print-format.md, "The Int parity probe". `type`
+// returns `"Int"` (spec/05-stdlib.md).
 
 print [1i, 2i, 3i];
 print [0xFFFFFFFFFFFFFFFF, 0x7FFFFFFFFFFFFFFF];
@@ -13,6 +14,8 @@ print str(0x8000000000000000);
 print str(1000000i);
 print 1000000;
 print 1000000i;
+print 18014398509481992;
+print 18014398509481992i;
 print 123456789012i;
 print 9007199254740993i;
 print 1000000000000000000i;
@@ -36,6 +39,8 @@ print type(str(1i));
 // CHECK: 1000000
 // CHECK: 1000000
 // CHECK: 1000000
+// CHECK: 18014398509481990
+// CHECK: 18014398509481992
 // CHECK: 123456789012
 // CHECK: 9007199254740993
 // CHECK: 1000000000000000000
