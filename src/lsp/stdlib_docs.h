@@ -3,11 +3,11 @@
 // Hover and completion text for the Lox++ standard library.
 //
 // One table, keyed by name, covering every global in
-// src/tooling/stdlib_names.h (22 globals + 25 `math` members) plus the
-// built-in Map and File methods. The descriptions are short and follow
-// spec/05-stdlib.md. src/tooling/stdlib_names.h stays the single source of
-// truth for the name set; stdlibDocsMissingNames() proves this table has an
-// entry for every name in it.
+// src/tooling/stdlib_names.h (31 globals + 25 `math` members + 10 `integer`
+// members) plus the built-in Map and File methods. The descriptions are short
+// and follow spec/05-stdlib.md. src/tooling/stdlib_names.h stays the single
+// source of truth for the name set; stdlibDocsMissingNames() proves this table
+// has an entry for every name in it.
 
 #include <optional>
 #include <string>
@@ -33,13 +33,16 @@ struct StdlibEntry {
 // A `math.<name>` member (function or constant).
 [[nodiscard]] const StdlibEntry* mathMemberDoc(std::string_view name);
 
+// An `integer.<name>` member (function or constant).
+[[nodiscard]] const StdlibEntry* integerMemberDoc(std::string_view name);
+
 // A `coroutine.<name>` member (`create`).
 [[nodiscard]] const StdlibEntry* coroutineMemberDoc(std::string_view name);
 
 // The members of a global object that a receiver name reaches (`math`,
-// `coroutine`, `task`), or nullptr for any other receiver. Completion, hover,
-// and signature help all ask this one lookup, so a global object has docs in
-// all three or in none.
+// `integer`, `coroutine`, `task`), or nullptr for any other receiver.
+// Completion, hover, and signature help all ask this one lookup, so a global
+// object has docs in all three or in none.
 [[nodiscard]] const std::vector<StdlibEntry>*
 receiverMemberDocs(std::string_view receiver);
 
@@ -55,6 +58,7 @@ receiverMemberDocs(std::string_view receiver);
 // Every entry, for completion lists.
 [[nodiscard]] const std::vector<StdlibEntry>& allGlobalDocs();
 [[nodiscard]] const std::vector<StdlibEntry>& allMathMemberDocs();
+[[nodiscard]] const std::vector<StdlibEntry>& allIntegerMemberDocs();
 [[nodiscard]] const std::vector<StdlibEntry>& allCoroutineMemberDocs();
 [[nodiscard]] const std::vector<StdlibEntry>& allMethodDocs();
 

@@ -52,6 +52,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/map_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/error_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/math_module.cpp
+    ${PROJECT_SOURCE_DIR}/src/stdlib/integer_module.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/os_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/reflect_api.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/net_api.cpp

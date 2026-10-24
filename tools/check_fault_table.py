@@ -134,10 +134,6 @@ class Row:
 # consumer until the node that builds that part of the consumer lands. The node
 # deletes its own entry. Each call returns a new dict, so no two rows share
 # one.
-def _int_skip(native_node: str, jvm_node: str, bootstrap_node: str) -> dict[str, str]:
-    return {NATIVE: native_node, JVM: jvm_node, BOOTSTRAP: bootstrap_node}
-
-
 def _int_operator_skip() -> dict[str, str]:
     # Native passes these rows since #827. The JVM and the bootstrap
     # interpreter name their own nodes until theirs land.
@@ -148,11 +144,12 @@ def _int_operator_skip() -> dict[str, str]:
 
 
 def _int_conversion_skip() -> dict[str, str]:
-    return _int_skip(
-        "#828: native conversions and the integer module",
-        "#829: JVM backend for Int",
-        "#830: bootstrap interpreter for Int",
-    )
+    # Native passes these rows since #828. The JVM and the bootstrap
+    # interpreter name their own nodes until theirs land.
+    return {
+        JVM: "#829: JVM backend for Int",
+        BOOTSTRAP: "#830: bootstrap interpreter for Int",
+    }
 
 
 # --- Catchable Runtime Errors table (spec/04-semantics.md, 18 rows) -------

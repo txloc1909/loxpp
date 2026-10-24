@@ -9,8 +9,9 @@ namespace loxpp::lsp {
 namespace {
 
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
-// math_module.cpp. Descriptions condensed from spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 28> kGlobals = {{
+// math_module.cpp, integer_module.cpp. Descriptions condensed from
+// spec/05-stdlib.md.
+constexpr std::array<StdlibEntry, 31> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -19,6 +20,11 @@ constexpr std::array<StdlibEntry, 28> kGlobals = {{
      "The byte value 0-255 of a one-byte String."},
     {"chr", "chr(value) -> String", 1,
      "The one-byte String for an integer byte value 0-255."},
+    {"int", "int(value) -> Int", 1,
+     "The Int for an Int, an integer-valued Number in range, or a decimal "
+     "String. Never rounds."},
+    {"float", "float(value) -> Number", 1,
+     "The Number for a Number, an Int, or a decimal String."},
     {"open", "open(path, mode) -> File", 2,
      "Opens a file in mode r, w, a, or r+. Returns a File."},
     {"args", "args() -> List[String]", 0,
@@ -69,6 +75,8 @@ constexpr std::array<StdlibEntry, 28> kGlobals = {{
     {"task", "task", kArityConstant,
      "Global object of tasks and messages: spawn, send, receive, reached "
      "with `.`."},
+    {"integer", "integer", kArityConstant,
+     "Global object of Int functions and constants, reached with `.`."},
 }};
 
 // `math.<name>`: src/math.cpp kMathFunctions and kMathConstants.
@@ -107,6 +115,34 @@ constexpr std::array<StdlibEntry, 25> kMath = {{
     {"e", "math.e", kArityConstant, "Base of the natural logarithm."},
     {"inf", "math.inf", kArityConstant, "Positive infinity."},
     {"nan", "math.nan", kArityConstant, "An IEEE 754 quiet NaN."},
+}};
+
+// `integer.<name>`: src/stdlib/integer_module.cpp kIntegerFunctions and
+// kIntegerConstants. Descriptions condensed from spec/05-stdlib.md, integer.
+constexpr std::array<StdlibEntry, 10> kInteger = {{
+    {"min_value", "integer.min_value", kArityConstant,
+     "The smallest Int, -9223372036854775808."},
+    {"max_value", "integer.max_value", kArityConstant,
+     "The largest Int, 9223372036854775807."},
+    {"abs", "integer.abs(x) -> Int", 1,
+     "Absolute value of `x`. abs(min_value) wraps to min_value."},
+    {"min", "integer.min(a, b) -> Int", 2,
+     "The smaller of `a` and `b`, by signed value."},
+    {"max", "integer.max(a, b) -> Int", 2,
+     "The larger of `a` and `b`, by signed value."},
+    {"udiv", "integer.udiv(a, b) -> Int", 2,
+     "Quotient with both operands read as unsigned 64-bit values. A zero "
+     "`b` faults."},
+    {"urem", "integer.urem(a, b) -> Int", 2,
+     "Remainder with both operands read as unsigned 64-bit values. A zero "
+     "`b` faults."},
+    {"ult", "integer.ult(a, b) -> Boolean", 2,
+     "True when `a` is below `b` with both read as unsigned 64-bit values."},
+    {"ustr", "integer.ustr(x) -> String", 1,
+     "The decimal digits of `x` read as an unsigned 64-bit value."},
+    {"parse_unsigned", "integer.parse_unsigned(s) -> Int", 1,
+     "The Int with the bit pattern of the unsigned decimal String `s`, at "
+     "most 2^64 - 1."},
 }};
 
 // Built-in methods on Map values (src/stdlib/map_api.cpp), File values
@@ -203,6 +239,10 @@ const StdlibEntry* mathMemberDoc(std::string_view name) {
     return find(kMath, name);
 }
 
+const StdlibEntry* integerMemberDoc(std::string_view name) {
+    return find(kInteger, name);
+}
+
 const StdlibEntry* coroutineMemberDoc(std::string_view name) {
     return find(kCoroutine, name);
 }
@@ -214,6 +254,9 @@ const StdlibEntry* methodDoc(std::string_view name) {
 const std::vector<StdlibEntry>* receiverMemberDocs(std::string_view receiver) {
     if (receiver == "math") {
         return &allMathMemberDocs();
+    }
+    if (receiver == "integer") {
+        return &allIntegerMemberDocs();
     }
     if (receiver == "coroutine") {
         return &allCoroutineMemberDocs();
@@ -241,6 +284,11 @@ const std::vector<StdlibEntry>& allGlobalDocs() {
 
 const std::vector<StdlibEntry>& allMathMemberDocs() {
     static const std::vector<StdlibEntry> v(kMath.begin(), kMath.end());
+    return v;
+}
+
+const std::vector<StdlibEntry>& allIntegerMemberDocs() {
+    static const std::vector<StdlibEntry> v(kInteger.begin(), kInteger.end());
     return v;
 }
 
@@ -277,6 +325,11 @@ std::vector<std::string> stdlibDocsMissingNames() {
     }
     for (std::string_view name : tooling::mathMembers()) {
         if (mathMemberDoc(name) == nullptr) {
+            missing.emplace_back(name);
+        }
+    }
+    for (std::string_view name : tooling::integerMembers()) {
+        if (integerMemberDoc(name) == nullptr) {
             missing.emplace_back(name);
         }
     }

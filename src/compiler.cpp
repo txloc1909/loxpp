@@ -332,11 +332,7 @@ static Int intFromBitPattern(std::uint64_t bits) {
 }
 
 void Compiler::emitIntConstant(Int value) {
-    const Value constant =
-        intFitsInline(value)
-            ? inlineIntValue(value)
-            : Value{static_cast<Obj*>(m_mm->create<ObjInt>(value))};
-    emitConstantOp(Op::CONSTANT, makeConstant(constant));
+    emitConstantOp(Op::CONSTANT, makeConstant(makeIntValue(*m_mm, value)));
 }
 
 // A decimal Int literal is valid up to 9223372036854775807, and

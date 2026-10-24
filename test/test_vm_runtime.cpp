@@ -15,7 +15,9 @@
 #include "container_objects.h"
 #include <gtest/gtest.h>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 
 // ===========================================================================
@@ -47,6 +49,14 @@ static void expect_global_nil(VMTestHarness& h, const std::string& name) {
 static void expect_global_str(VMTestHarness& h, const std::string& name,
                               const std::string& expected) {
     EXPECT_EQ(h.getGlobalStr(name), expected);
+}
+
+static void expect_global_int(VMTestHarness& h, const std::string& name,
+                              Int expected) {
+    auto v = h.getGlobal(name);
+    ASSERT_TRUE(v.has_value()) << "  global '" << name << "' not defined";
+    ASSERT_TRUE(is<Int>(*v)) << "  global '" << name << "' expected Int";
+    EXPECT_EQ(as<Int>(*v), expected);
 }
 
 static void expect_global_absent(VMTestHarness& h, const std::string& name) {
@@ -537,6 +547,457 @@ TEST_F(NativeTest, StackCleanAfterNativeCall) {
     VMTestHarness h;
     ASSERT_EQ(h.run("type(1); type(2); type(3);"), InterpretResult::OK);
     EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// ===========================================================================
+// Int conversions (spec/05-stdlib.md, int and float)
+// ===========================================================================
+
+class IntConversionTest : public ::testing::Test {};
+
+TEST_F(IntConversionTest, IntOfAnIntGivesItself) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = int(5i);"
+                    "var b = int(9223372036854775807i);"
+                    "var c = int(0x8000000000000000);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 5);
+    expect_global_int(h, "b", std::numeric_limits<Int>::max());
+    expect_global_int(h, "c", std::numeric_limits<Int>::min());
+}
+
+TEST_F(IntConversionTest, IntOfAnIntegralNumber) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = int(5.0);"
+                    "var b = int(0);"
+                    "var c = int(-0.0);"
+                    "var d = int(-7.0);"
+                    "var e = int(9223372036854774784.0);"
+                    "var f = int(-9223372036854775808.0);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 5);
+    expect_global_int(h, "b", 0);
+    expect_global_int(h, "c", 0);
+    expect_global_int(h, "d", -7);
+    expect_global_int(h, "e", 9223372036854774784LL);
+    expect_global_int(h, "f", std::numeric_limits<Int>::min());
+}
+
+TEST_F(IntConversionTest, IntOfADecimalString) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = int(\"42\");"
+                    "var b = int(\"-42\");"
+                    "var c = int(\"+7\");"
+                    "var d = int(\"007\");"
+                    "var e = int(\"-0\");"
+                    "var f = int(\"9223372036854775807\");"
+                    "var g = int(\"-9223372036854775808\");"
+                    "var i = int(\"-0009223372036854775808\");"
+                    "var t = type(int(\"1\"));"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 42);
+    expect_global_int(h, "b", -42);
+    expect_global_int(h, "c", 7);
+    expect_global_int(h, "d", 7);
+    expect_global_int(h, "e", 0);
+    expect_global_int(h, "f", std::numeric_limits<Int>::max());
+    expect_global_int(h, "g", std::numeric_limits<Int>::min());
+    expect_global_int(h, "i", std::numeric_limits<Int>::min());
+    expect_global_str(h, "t", "Int");
+}
+
+TEST_F(IntConversionTest, EveryInvalidIntArgumentFaults) {
+    static const char* const kPrograms[] = {
+        "int(1.5);",
+        "int(math.nan);",
+        "int(math.inf);",
+        "int(-math.inf);",
+        "int(9223372036854775808.0);",
+        "int(-9223372036854777856.0);",
+        "int(\"1.5\");",
+        "int(\"12abc\");",
+        "int(\"0x10\");",
+        "int(\"9223372036854775808\");",
+        "int(\"\");",
+        "int(\" 1\");",
+        "int(nil);",
+        "int(true);",
+        "int([1]);",
+    };
+    for (const char* src : kPrograms) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+TEST_F(IntConversionTest, IntFaultHaltsInsideTry) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("try { int(1.5); print \"caught\"; }"
+                    "catch (e) { print \"caught\"; }"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(IntConversionTest, FloatOfANumberGivesItself) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = float(2.5); var b = type(float(2.5));"),
+              InterpretResult::OK);
+    ASSERT_TRUE(is<Number>(*h.getGlobal("a")));
+    EXPECT_EQ(as<Number>(*h.getGlobal("a")), 2.5);
+    expect_global_str(h, "b", "Number");
+}
+
+TEST_F(IntConversionTest, FloatOfAnIntRoundsToTheNearestEven) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = float(3i) == 3;"
+                    "var b = float(9007199254740992i) == 9007199254740992.0;"
+                    "var c = float(9007199254740993i) == 9007199254740992.0;"
+                    "var d = float(9007199254740995i) == 9007199254740996.0;"
+                    "var e = float(9223372036854775807i) == "
+                    "9223372036854775808.0;"
+                    "var f = float(-9223372036854775808i) == "
+                    "-9223372036854775808.0;"
+                    "var t = type(float(3i));"),
+              InterpretResult::OK);
+    expect_global_bool(h, "a", true);
+    expect_global_bool(h, "b", true);
+    expect_global_bool(h, "c", true);
+    expect_global_bool(h, "d", true);
+    expect_global_bool(h, "e", true);
+    expect_global_bool(h, "f", true);
+    expect_global_str(h, "t", "Number");
+}
+
+TEST_F(IntConversionTest, FloatOfADecimalString) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = float(\"2.5\");"
+                    "var b = float(\"-0.25\");"
+                    "var c = float(\"+3\");"
+                    "var d = float(\"007.50\");"
+                    "var e = float(\"0\");"
+                    "var f = float(\"12\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<Number>(*h.getGlobal("a")), 2.5);
+    EXPECT_EQ(as<Number>(*h.getGlobal("b")), -0.25);
+    EXPECT_EQ(as<Number>(*h.getGlobal("c")), 3.0);
+    EXPECT_EQ(as<Number>(*h.getGlobal("d")), 7.5);
+    EXPECT_EQ(as<Number>(*h.getGlobal("e")), 0.0);
+    EXPECT_EQ(as<Number>(*h.getGlobal("f")), 12.0);
+}
+
+TEST_F(IntConversionTest, EveryInvalidFloatArgumentFaults) {
+    static const char* const kPrograms[] = {
+        "float(\"abc\");", "float(\"1e5\");", "float(\"5.\");",
+        "float(\".5\");",  "float(\" 1\");",  "float(\"inf\");",
+        "float(\"\");",    "float(nil);",     "float(true);",
+    };
+    for (const char* src : kPrograms) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+TEST_F(IntConversionTest, FloatFaultHaltsInsideTry) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("try { float(\"1e5\"); print \"caught\"; }"
+                    "catch (e) { print \"caught\"; }"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+// ===========================================================================
+// The integer module (spec/05-stdlib.md, integer)
+// ===========================================================================
+
+class IntegerModuleTest : public ::testing::Test {};
+
+TEST_F(IntegerModuleTest, ConstantsAreTheEndsOfTheIntRange) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.min_value;"
+                    "var b = integer.max_value;"
+                    "var t = type(integer.max_value);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", std::numeric_limits<Int>::min());
+    expect_global_int(h, "b", std::numeric_limits<Int>::max());
+    expect_global_str(h, "t", "Int");
+}
+
+TEST_F(IntegerModuleTest, AbsWrapsAtTheSmallestInt) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.abs(-5i);"
+                    "var b = integer.abs(5i);"
+                    "var c = integer.abs(0i);"
+                    "var d = integer.abs(integer.min_value);"
+                    "var e = integer.abs(0x8000000000000001);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 5);
+    expect_global_int(h, "b", 5);
+    expect_global_int(h, "c", 0);
+    expect_global_int(h, "d", std::numeric_limits<Int>::min());
+    expect_global_int(h, "e", std::numeric_limits<Int>::max());
+}
+
+TEST_F(IntegerModuleTest, MinAndMaxCompareAsSigned) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.min(-1i, 1i);"
+                    "var b = integer.max(-1i, 1i);"
+                    "var c = integer.min(-1i, 0xFFFFFFFFFFFFFFFF);"
+                    "var d = integer.max(-1i, 0xFFFFFFFFFFFFFFFF);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", -1);
+    expect_global_int(h, "b", 1);
+    expect_global_int(h, "c", -1);
+    expect_global_int(h, "d", -1);
+}
+
+TEST_F(IntegerModuleTest, UnsignedDivisionAndRemainder) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.udiv(0xFFFFFFFFFFFFFFFF, 2i);"
+                    "var b = integer.urem(0xFFFFFFFFFFFFFFFF, 10i);"
+                    "var c = integer.udiv(0x8000000000000000, 2i);"
+                    "var d = integer.urem(0x8000000000000000, 3i);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", std::numeric_limits<Int>::max());
+    expect_global_int(h, "b", 5);
+    expect_global_int(h, "c", 4611686018427387904LL);
+    expect_global_int(h, "d", 2);
+}
+
+TEST_F(IntegerModuleTest, UnsignedLessThan) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.ult(1i, 2i);"
+                    "var b = integer.ult(1i, 0xFFFFFFFFFFFFFFFF);"
+                    "var c = integer.ult(0xFFFFFFFFFFFFFFFF, 1i);"
+                    "var d = integer.ult(1i, 1i);"
+                    "var t = type(integer.ult(1i, 2i));"),
+              InterpretResult::OK);
+    expect_global_bool(h, "a", true);
+    expect_global_bool(h, "b", true);
+    expect_global_bool(h, "c", false);
+    expect_global_bool(h, "d", false);
+    expect_global_str(h, "t", "Boolean");
+}
+
+TEST_F(IntegerModuleTest, UstrAndParseUnsignedRoundTrip) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.ustr(-1i);"
+                    "var b = integer.ustr(0i);"
+                    "var c = integer.parse_unsigned(\"18446744073709551615\");"
+                    "var d = integer.parse_unsigned(\"007\");"
+                    "var e = integer.parse_unsigned(integer.ustr("
+                    "0xDEADBEEFDEADBEEF)) == 0xDEADBEEFDEADBEEF;"
+                    "var t = type(integer.ustr(1i));"),
+              InterpretResult::OK);
+    expect_global_str(h, "a", "18446744073709551615");
+    expect_global_str(h, "b", "0");
+    expect_global_int(h, "c", -1);
+    expect_global_int(h, "d", 7);
+    expect_global_bool(h, "e", true);
+    expect_global_str(h, "t", "String");
+}
+
+TEST_F(IntegerModuleTest, EveryNonIntArgumentFaults) {
+    static const char* const kPrograms[] = {
+        "integer.abs(1);",      "integer.min(1, 2i);",
+        "integer.max(1i, 2);",  "integer.udiv(1, 2i);",
+        "integer.urem(1i, 2);", "integer.ult(1, 2i);",
+        "integer.ustr(1);",     "integer.parse_unsigned(5i);",
+    };
+    for (const char* src : kPrograms) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+TEST_F(IntegerModuleTest, ZeroDivisorFaults) {
+    for (const char* src : {"integer.udiv(1i, 0i);", "integer.urem(1i, 0i);"}) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+TEST_F(IntegerModuleTest, ParseUnsignedRejectsBadStrings) {
+    static const char* const kPrograms[] = {
+        "integer.parse_unsigned(\"18446744073709551616\");",
+        "integer.parse_unsigned(\"-1\");",
+        "integer.parse_unsigned(\"+1\");",
+        "integer.parse_unsigned(\"\");",
+        "integer.parse_unsigned(\" 1\");",
+        "integer.parse_unsigned(\"1x\");",
+    };
+    for (const char* src : kPrograms) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+// ===========================================================================
+// Indexing with an Int (spec/04-semantics.md, Index Get and Slice Get)
+// ===========================================================================
+
+class IntIndexTest : public ::testing::Test {};
+
+TEST_F(IntIndexTest, AnIntIndexesAListAndAString) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = [10, 20, 30];"
+                    "var a = l[1i];"
+                    "var b = l[0x2];"
+                    "var c = l[1];"
+                    "var s = \"abc\";"
+                    "var d = s[1i];"
+                    "var e = s[0x2];"),
+              InterpretResult::OK);
+    // A List holds Numbers here, so the read gives a Number, not an Int.
+    expect_global_num(h, "a", 20);
+    expect_global_num(h, "b", 30);
+    expect_global_num(h, "c", 20);
+    expect_global_str(h, "d", "b");
+    expect_global_str(h, "e", "c");
+}
+
+TEST_F(IntIndexTest, AnIntIndexAssignsIntoAList) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = [10, 20, 30]; l[1i] = 99;"), InterpretResult::OK);
+    expect_global_str(h, "l", "[10, 99, 30]");
+}
+
+// Every big Int must be out of bounds. A cut to 32 bits would turn 2^32 into
+// the index 0, so the catch kind alone is not enough: the element must not
+// have been read either.
+TEST_F(IntIndexTest, ABigIntIndexIsOutOfBoundsAndNeverTruncated) {
+    static const char* const kIndices[] = {
+        "4294967296i",          "4294967297i", "0x7FFFFFFF00000000",
+        "9223372036854775807i", "-1i",         "-9223372036854775808i",
+    };
+    for (const char* index : kIndices) {
+        std::string src =
+            "var l = [10, 20, 30]; var kind = nil; var read = nil;"
+            "try { read = l[" +
+            std::string(index) + "]; } catch (e) { kind = e.kind; }";
+        VMTestHarness h;
+        ASSERT_EQ(h.run(src), InterpretResult::OK) << index;
+        expect_global_str(h, "kind", "IndexOutOfBoundsError");
+        expect_global_nil(h, "read");
+    }
+}
+
+TEST_F(IntIndexTest, ABigIntIndexIntoAStringIsOutOfBounds) {
+    for (const char* index : {"4294967296i", "0x7FFFFFFFFFFFFFFF", "-1i"}) {
+        std::string src = "var kind = nil;"
+                          "try { var c = \"abc\"[" +
+                          std::string(index) +
+                          "]; } catch (e) { kind = e.kind; }";
+        VMTestHarness h;
+        ASSERT_EQ(h.run(src), InterpretResult::OK) << index;
+        expect_global_str(h, "kind", "IndexOutOfBoundsError");
+    }
+}
+
+TEST_F(IntIndexTest, ABigIntIndexAssignIsOutOfBounds) {
+    for (const char* index : {"4294967296i", "-1i"}) {
+        std::string src = "var l = [10, 20, 30]; var kind = nil;"
+                          "try { l[" +
+                          std::string(index) +
+                          "] = 1; } catch (e) { kind = e.kind; }";
+        VMTestHarness h;
+        ASSERT_EQ(h.run(src), InterpretResult::OK) << index;
+        expect_global_str(h, "kind", "IndexOutOfBoundsError");
+        expect_global_str(h, "l", "[10, 20, 30]");
+    }
+}
+
+// The Number path had the same unguarded narrowing cast: an integral Number
+// outside the int range is out of bounds, not a truncated index.
+TEST_F(IntIndexTest, ABigNumberIndexIsOutOfBoundsAndNeverTruncated) {
+    for (const char* index : {"4294967296.0", "9223372036854775808.0",
+                              "1000000000000000000000000000000.0", "-1.0"}) {
+        std::string src =
+            "var l = [10, 20, 30]; var kind = nil; var read = nil;"
+            "try { read = l[" +
+            std::string(index) + "]; } catch (e) { kind = e.kind; }";
+        VMTestHarness h;
+        ASSERT_EQ(h.run(src), InterpretResult::OK) << index;
+        expect_global_str(h, "kind", "IndexOutOfBoundsError");
+        expect_global_nil(h, "read");
+    }
+}
+
+TEST_F(IntIndexTest, SlicesAcceptIntBounds) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = [10, 20, 30][0i:2i];"
+                    "var b = \"abc\"[1i:3i];"
+                    "var c = [10, 20, 30][0i:9223372036854775807i];"
+                    "var d = \"abc\"[0i:9223372036854775807i];"
+                    "var e = [10, 20, 30][2i:1i];"
+                    "var f = [10, 20, 30][4294967296i:4294967297i];"
+                    "var g = \"abc\"[0:2i];"
+                    "var i = \"abc\"[1i:2];"),
+              InterpretResult::OK);
+    expect_global_str(h, "a", "[10, 20]");
+    expect_global_str(h, "b", "bc");
+    expect_global_str(h, "c", "[10, 20, 30]");
+    expect_global_str(h, "d", "abc");
+    expect_global_str(h, "e", "[]");
+    expect_global_str(h, "f", "[]");
+    expect_global_str(h, "g", "ab");
+    expect_global_str(h, "i", "b");
+}
+
+TEST_F(IntIndexTest, SlicesClampABigNumberBound) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = [10, 20, 30][0:4294967296.0];"
+                    "var b = \"abc\"[0:1000000000000000000000000000000.0];"),
+              InterpretResult::OK);
+    expect_global_str(h, "a", "[10, 20, 30]");
+    expect_global_str(h, "b", "abc");
+}
+
+TEST_F(IntIndexTest, ANegativeIntSliceBoundIsAHaltingFault) {
+    for (const char* src : {"[1, 2][-1i:2i];", "[1, 2][0i:-1i];",
+                            "\"abc\"[-9223372036854775808i:2i];"}) {
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << src;
+        EXPECT_EQ(h.stackDepth(), 0) << src;
+    }
+}
+
+TEST_F(IntIndexTest, AnIntIndexesAnEnumValue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("enum E { A(x, y) }"
+                    "var v = E.A(7, 8);"
+                    "var a = v[0i];"
+                    "var b = v[1i];"
+                    "var c = v[0x1];"),
+              InterpretResult::OK);
+    // The fields hold Numbers here, so the read gives a Number, not an Int.
+    expect_global_num(h, "a", 7);
+    expect_global_num(h, "b", 8);
+    expect_global_num(h, "c", 8);
+}
+
+TEST_F(IntIndexTest, ABigIntEnumFieldIndexFaults) {
+    for (const char* index : {"4294967296i", "0x7FFFFFFF00000000", "-1i"}) {
+        std::string src =
+            "enum E { A(x) } var v = E.A(7); v[" + std::string(index) + "];";
+        VMTestHarness h;
+        EXPECT_EQ(h.run(src), InterpretResult::RUNTIME_ERROR) << index;
+        EXPECT_EQ(h.stackDepth(), 0) << index;
+    }
+}
+
+TEST_F(IntIndexTest, AMapIndexStaysAKey) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var m = {1: \"number\", 1i: \"int\"};"
+                    "var a = m[1];"
+                    "var b = m[1i];"
+                    "var c = m[0x1];"),
+              InterpretResult::OK);
+    expect_global_str(h, "a", "number");
+    expect_global_str(h, "b", "int");
+    expect_global_str(h, "c", "int");
 }
 
 // ===========================================================================

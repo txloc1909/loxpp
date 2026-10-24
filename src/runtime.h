@@ -267,13 +267,7 @@ class Runtime {
 
     // Pushes an Int, inline when it fits and as one heap box when it does not
     // (docs/decisions/integer-kind.md, Native layout).
-    void pushInt(Int value) {
-        if (intFitsInline(value)) {
-            push(inlineIntValue(value));
-        } else {
-            push(Value{static_cast<Obj*>(m_mm.create<ObjInt>(value))});
-        }
-    }
+    void pushInt(Int value) { push(makeIntValue(m_mm, value)); }
 
     // Compiled code (backend/rt_capi.cpp) writes its own stack slots
     // directly at base + 8h instead of going through push(), so it needs a

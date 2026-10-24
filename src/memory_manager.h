@@ -221,3 +221,14 @@ class MemoryManager : public VmAllocBase {
     // The drain's batch (see m_draining).
     std::vector<Envelope>& drainingBatch() { return m_draining; }
 };
+
+// Builds an Int value: inline when it fits and one heap box when it does not
+// (docs/decisions/integer-kind.md, Native layout). This is the one place that
+// decides, so the compiler, the VM's operand stack, and a native that returns
+// an Int all agree, and an Int inside the inline range never allocates.
+inline Value makeIntValue(MemoryManager& mm, Int value) {
+    if (intFitsInline(value)) {
+        return inlineIntValue(value);
+    }
+    return Value{static_cast<Obj*>(mm.create<ObjInt>(value))};
+}
