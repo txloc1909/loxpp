@@ -128,6 +128,7 @@ set(LOXPP_CORE_SOURCES
     src/stdlib/map_api.cpp
     src/stdlib/error_api.cpp
     src/stdlib/math_module.cpp
+    src/stdlib/integer_module.cpp
     src/stdlib/os_api.cpp
     src/stdlib/reflect_api.cpp
     src/stdlib/net_api.cpp

@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include "class_objects.h"
 #include "corpus.h"
 #include "tooling/document_model.h"
 #include "tooling/resolver.h"
@@ -631,6 +632,11 @@ TEST(ToolingResolver, StdlibGlobalIsKnown) {
     EXPECT_TRUE(warningMessages(model).empty());
     EXPECT_TRUE(isStdlibGlobal("callMethod"));
     EXPECT_TRUE(isMathMember("floor"));
+    EXPECT_TRUE(isStdlibGlobal("int"));
+    EXPECT_TRUE(isStdlibGlobal("float"));
+    EXPECT_TRUE(isStdlibGlobal("integer"));
+    EXPECT_TRUE(isIntegerMember("parse_unsigned"));
+    EXPECT_FALSE(isIntegerMember("floor"));
     EXPECT_FALSE(isStdlibGlobal("print"));
 }
 
@@ -647,6 +653,27 @@ TEST(ToolingResolver, StdlibNamesMatchTheRuntimeGlobals) {
     }
     std::set<std::string> tooling;
     for (std::string_view name : stdlibGlobals()) {
+        tooling.emplace(name);
+    }
+    EXPECT_EQ(tooling, runtime);
+}
+
+// The member list of the `integer` module must equal the runtime's own field
+// set. A missing name costs a correct program an "unknown name" warning, and
+// an extra name hides a real typo.
+TEST(ToolingResolver, IntegerMembersMatchTheRuntimeFields) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(""), InterpretResult::OK);
+    auto value = vm.getGlobal("integer");
+    ASSERT_TRUE(value.has_value());
+    ASSERT_TRUE(isInstance(*value));
+    std::set<std::string> runtime;
+    asObjInstance(as<Obj*>(*value))
+        ->fields.forEach([&runtime](ObjString* key, Value /*member*/) {
+            runtime.emplace(key->chars.data(), key->chars.size());
+        });
+    std::set<std::string> tooling;
+    for (std::string_view name : integerMembers()) {
         tooling.emplace(name);
     }
     EXPECT_EQ(tooling, runtime);

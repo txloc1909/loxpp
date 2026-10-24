@@ -374,6 +374,11 @@ TEST(LspStdlibDocs, EveryStdlibNameHasADoc) {
         ASSERT_NE(e, nullptr) << name;
         EXPECT_FALSE(loxpp::lsp::renderHover(*e).empty());
     }
+    for (std::string_view name : loxpp::tooling::integerMembers()) {
+        const auto* e = loxpp::lsp::integerMemberDoc(name);
+        ASSERT_NE(e, nullptr) << name;
+        EXPECT_FALSE(loxpp::lsp::renderHover(*e).empty());
+    }
 }
 
 // Every global object of the runtime (an Instance such as `math`,

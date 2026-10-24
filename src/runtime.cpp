@@ -12,6 +12,7 @@
 #include "stdlib/map_api.h"
 #include "stdlib/error_api.h"
 #include "stdlib/math_module.h"
+#include "stdlib/integer_module.h"
 #include "stdlib/os_api.h"
 #include "stdlib/reflect_api.h"
 #include "stdlib/net_api.h"
@@ -2067,6 +2068,7 @@ void Runtime::defineNatives() {
     m_mapClass = registerMapAPI(reg);
     m_errorClass = registerErrorAPI(reg);
     registerMath(reg);
+    registerInteger(reg);
     registerOSAPI(reg, m_mapClass);
     registerReflectAPI(reg);
     NetClasses net = registerNetAPI(reg);
@@ -2993,28 +2995,85 @@ bool Runtime::mapDelFromNative(ObjMap* map, const Value& key) {
     return true;
 }
 
+namespace {
+
+// How a value reads as a sequence index, a slice bound, or an enum field
+// index. All five sites go through readIndexValue(), so an Int and an
+// integral Number get the same checks (spec/04-semantics.md, Index Get steps
+// 4a-4d and Slice Get steps 3-5).
+enum class IndexKind {
+    Ok,         // a non-negative value that fits an Int
+    NotNumeric, // neither a Number nor an Int
+    NotInteger, // a Number that is not integer-valued, a NaN included
+    Negative,   // a Number or an Int below zero
+    TooLarge,   // non-negative and above INT64_MAX
+};
+
+// Reads an index-like value into `out`. The range check runs before every
+// narrowing cast: a cast of a NaN, an infinity, or a Number outside the Int
+// range is undefined behaviour, and a cut to 32 bits would turn 2^32 into the
+// index 0. An Int that no index can reach is TooLarge or Negative, never a
+// wrapped or truncated index.
+IndexKind readIndexValue(const Value& value, Int* out) {
+    if (is<Int>(value)) {
+        const Int i = as<Int>(value);
+        if (i < 0) {
+            return IndexKind::Negative;
+        }
+        *out = i;
+        return IndexKind::Ok;
+    }
+    if (!is<Number>(value)) {
+        return IndexKind::NotNumeric;
+    }
+    const Number n = as<Number>(value);
+    if (n != std::floor(n)) {
+        return IndexKind::NotInteger;
+    }
+    if (n < 0.0) {
+        return IndexKind::Negative;
+    }
+    // 2^63 is exact, so this is the first Number above the Int range.
+    if (n >= 9223372036854775808.0) {
+        return IndexKind::TooLarge;
+    }
+    *out = static_cast<Int>(n);
+    return IndexKind::Ok;
+}
+
+} // namespace
+
 std::optional<Runtime::OpResult>
 Runtime::checkSequenceIndex(Value indexVal, size_t size, const char* noun,
                             int stopAtFrameCount, int* outIdx) {
     char msg[64];
-    if (!is<Number>(indexVal)) {
+    Int idx = 0;
+    switch (readIndexValue(indexVal, &idx)) {
+    case IndexKind::NotNumeric:
         snprintf(msg, sizeof(msg), "%s index must be a number.", noun);
         return fromThrow(
             raiseThrowableError("IndexTypeError", msg, stopAtFrameCount));
-    }
-    double n = as<Number>(indexVal);
-    if (n != std::floor(n)) {
+    case IndexKind::NotInteger:
         snprintf(msg, sizeof(msg), "%s index must be an integer.", noun);
         return fromThrow(
             raiseThrowableError("IndexNotIntegerError", msg, stopAtFrameCount));
+    case IndexKind::Negative:
+    case IndexKind::TooLarge:
+        snprintf(msg, sizeof(msg), "%s index out of bounds.", noun);
+        return fromThrow(raiseThrowableError("IndexOutOfBoundsError", msg,
+                                             stopAtFrameCount));
+    case IndexKind::Ok:
+        break;
     }
-    int idx = static_cast<int>(n);
-    if (idx < 0 || idx >= static_cast<int>(size)) {
+    // No index can reach past INT_MAX either, and `outIdx` is one; compare in
+    // the wide types so neither bound can wrap.
+    if (static_cast<std::uint64_t>(idx) >= size ||
+        idx > std::numeric_limits<int>::max()) {
         snprintf(msg, sizeof(msg), "%s index out of bounds.", noun);
         return fromThrow(raiseThrowableError("IndexOutOfBoundsError", msg,
                                              stopAtFrameCount));
     }
-    *outIdx = idx;
+    *outIdx = static_cast<int>(idx);
     return std::nullopt;
 }
 
@@ -3057,32 +3116,26 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isEnumValue(collectionVal)) {
-        if (!is<Number>(indexVal)) {
+        auto* e = asObjEnum(as<Obj*>(collectionVal));
+        Int idx = 0;
+        switch (readIndexValue(indexVal, &idx)) {
+        case IndexKind::NotNumeric:
             runtimeError("Enum field index must be a number.");
             return OpResult::Fatal;
-        }
-        double n = as<Number>(indexVal);
-        auto* e = asObjEnum(as<Obj*>(collectionVal));
-        // NaN, +-infinity, and a magnitude outside int's range have no
-        // well-defined static_cast<int> result (UB) and can never be a valid
-        // field index either way, so report them out of range directly from
-        // the Value's own text instead of casting first.
-        if (!std::isfinite(n) ||
-            n < static_cast<double>(std::numeric_limits<int>::min()) ||
-            n > static_cast<double>(std::numeric_limits<int>::max())) {
+        case IndexKind::NotInteger:
+            runtimeError("Enum field index must be an integer.");
+            return OpResult::Fatal;
+        case IndexKind::Negative:
+        case IndexKind::TooLarge:
             runtimeError("Enum field index %s out of range.",
                          stringify(indexVal).c_str());
             return OpResult::Fatal;
+        case IndexKind::Ok:
+            break;
         }
-        // A fractional index is a type error, as for a List and a String;
-        // truncation would silently select a field.
-        if (n != std::floor(n)) {
-            runtimeError("Enum field index must be an integer.");
-            return OpResult::Fatal;
-        }
-        int idx = static_cast<int>(n);
-        if (idx < 0 || idx >= static_cast<int>(e->fields.size())) {
-            runtimeError("Enum field index %d out of range.", idx);
+        if (static_cast<std::uint64_t>(idx) >= e->fields.size()) {
+            runtimeError("Enum field index %s out of range.",
+                         stringify(indexVal).c_str());
             return OpResult::Fatal;
         }
         push(e->fields[static_cast<size_t>(idx)]);
@@ -3484,48 +3537,52 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         runtimeError("Slice requires a List or String.");
         return OpResult::Fatal;
     }
-    if (!is<Number>(startVal)) {
-        runtimeError("Slice index must be a number.");
-        return OpResult::Fatal;
-    }
-    double startD = as<Number>(startVal);
-    if (startD != std::floor(startD)) {
-        runtimeError("Slice index must be an integer.");
-        return OpResult::Fatal;
-    }
-    if (startD < 0.0) {
-        runtimeError("Slice index must be non-negative.");
-        return OpResult::Fatal;
-    }
-    if (!is<Number>(endVal)) {
-        runtimeError("Slice index must be a number.");
-        return OpResult::Fatal;
-    }
-    double endD = as<Number>(endVal);
-    if (endD != std::floor(endD)) {
-        runtimeError("Slice index must be an integer.");
-        return OpResult::Fatal;
-    }
-    if (endD < 0.0) {
-        runtimeError("Slice index must be non-negative.");
+    // Slice Get steps 3-5: each bound is an integral Number or an Int, it is
+    // non-negative, and it is clamped to the sequence length. The clamp is
+    // exact for every Int, so a bound above every reachable index yields the
+    // whole tail and never a truncated one.
+    const size_t n = isList(seqVal)
+                         ? asObjList(as<Obj*>(seqVal))->elements.size()
+                         : asObjString(as<Obj*>(seqVal))->chars.size();
+    auto readBound = [&](const Value& value, size_t* out) -> bool {
+        Int bound = 0;
+        switch (readIndexValue(value, &bound)) {
+        case IndexKind::Ok:
+            *out = static_cast<std::uint64_t>(bound) < n
+                       ? static_cast<size_t>(bound)
+                       : n;
+            return true;
+        case IndexKind::TooLarge:
+            *out = n;
+            return true;
+        case IndexKind::NotNumeric:
+            runtimeError("Slice index must be a number.");
+            return false;
+        case IndexKind::NotInteger:
+            runtimeError("Slice index must be an integer.");
+            return false;
+        case IndexKind::Negative:
+            runtimeError("Slice index must be non-negative.");
+            return false;
+        }
+        return false;
+    };
+    size_t s = 0;
+    size_t e = 0;
+    if (!readBound(startVal, &s) || !readBound(endVal, &e)) {
         return OpResult::Fatal;
     }
 
     if (isList(seqVal)) {
-        auto* src = asObjList(as<Obj*>(seqVal));
-        int n = static_cast<int>(src->elements.size());
-        int s = static_cast<int>(std::min(startD, static_cast<double>(n)));
-        int e = static_cast<int>(std::min(endD, static_cast<double>(n)));
-        int count = (s < e) ? e - s : 0;
+        const size_t count = (s < e) ? e - s : 0;
 
         ObjList* result = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
-        // seqVal is still at peek(2) -> src is GC-rooted on the stack.
+        // seqVal is still at peek(2), so it is GC-rooted on the stack.
         m_mm.pushTempRoot(result);
-        result->elements.resize(static_cast<std::size_t>(count)); // may GC
-        src = asObjList(as<Obj*>(peek(2))); // re-read after potential GC
-        for (int i = 0; i < count; i++) {
-            result->elements[static_cast<std::size_t>(i)] =
-                src->elements[static_cast<std::size_t>(s + i)];
+        result->elements.resize(count);           // may GC
+        auto* src = asObjList(as<Obj*>(peek(2))); // re-read after potential GC
+        for (size_t i = 0; i < count; i++) {
+            result->elements[i] = src->elements[s + i];
         }
         m_mm.popTempRoot();
         pop();
@@ -3535,13 +3592,8 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
     } else {
         // String -- copy chars to a local buffer while src is still on stack.
         auto* src = asObjString(as<Obj*>(seqVal));
-        int n = static_cast<int>(src->chars.size());
-        int s = static_cast<int>(std::min(startD, static_cast<double>(n)));
-        int e = static_cast<int>(std::min(endD, static_cast<double>(n)));
-        std::string substr = (s < e)
-                                 ? std::string(src->chars.data() + s,
-                                               static_cast<std::size_t>(e - s))
-                                 : std::string{};
+        std::string substr =
+            (s < e) ? std::string(src->chars.data() + s, e - s) : std::string{};
         pop();
         pop();
         pop();

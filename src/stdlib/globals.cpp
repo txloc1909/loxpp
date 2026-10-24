@@ -5,10 +5,16 @@
 #include "../object.h"
 #include "../value.h"
 
+#include <bit>
+#include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <ctime>
 #include <iostream>
+#include <limits>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 static Value clockNative(int /*argCount*/, Value* /*args*/) {
     return from<Number>(static_cast<double>(std::clock()) / CLOCKS_PER_SEC);
@@ -60,9 +66,175 @@ static Value inputNative(int /*argCount*/, Value* /*args*/) {
     return Value{static_cast<Obj*>(s)};
 }
 
+// The two ends of the Int range as doubles. 2^63 is exact, so it is the first
+// Number above the range; -2^63 is the smallest Int itself.
+static constexpr double kTwoToThe63 = 9223372036854775808.0;
+
+// The String form of int(): an optional '+' or '-' and one or more decimal
+// digits, nothing else (spec/05-stdlib.md, int). The magnitude may reach 2^63
+// only when the sign is negative, so the smallest Int parses and the same
+// digits with a positive sign do not.
+static bool parseIntString(std::string_view text, Int* out) {
+    std::size_t i = 0;
+    bool negative = false;
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+        negative = text[i] == '-';
+        ++i;
+    }
+    const std::size_t firstDigit = i;
+    const std::uint64_t limit =
+        negative ? (std::uint64_t{1} << 63)
+                 : static_cast<std::uint64_t>(std::numeric_limits<Int>::max());
+    std::uint64_t magnitude = 0;
+    for (; i < text.size(); ++i) {
+        if (text[i] < '0' || text[i] > '9') {
+            return false;
+        }
+        const auto digit = static_cast<std::uint64_t>(text[i] - '0');
+        if (magnitude > (limit - digit) / 10) {
+            return false;
+        }
+        magnitude = magnitude * 10 + digit;
+    }
+    if (i == firstDigit) {
+        return false;
+    }
+    *out = negative ? std::bit_cast<Int>(std::uint64_t{0} - magnitude)
+                    : static_cast<Int>(magnitude);
+    return true;
+}
+
+// The String form of float(): an optional sign, one or more decimal digits,
+// and optionally a '.' followed by one or more decimal digits, nothing else
+// (spec/05-stdlib.md, float). The grammar is checked before the parse, so
+// float("1e5") faults even though strtod() would accept it. std::from_chars
+// reads the digits itself, so the process locale's decimal point never
+// decides where the fraction starts.
+static bool parseFloatString(std::string_view text, Number* out) {
+    std::size_t i = 0;
+    const bool negative = i < text.size() && text[i] == '-';
+    if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
+        ++i;
+    }
+    const std::size_t firstDigit = i;
+    bool integerPartHasNonZero = false;
+    for (; i < text.size() && text[i] >= '0' && text[i] <= '9'; ++i) {
+        integerPartHasNonZero = integerPartHasNonZero || text[i] != '0';
+    }
+    if (i == firstDigit) {
+        return false;
+    }
+    if (i < text.size() && text[i] == '.') {
+        ++i;
+        const std::size_t firstFractionDigit = i;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') {
+            ++i;
+        }
+        if (i == firstFractionDigit) {
+            return false;
+        }
+    }
+    if (i != text.size()) {
+        return false;
+    }
+    const char* begin = text.data();
+    if (*begin == '+') {
+        ++begin; // std::from_chars takes '-' but not '+'
+    }
+    const char* end = text.data() + text.size();
+    Number parsed = 0.0;
+    const auto result =
+        std::from_chars(begin, end, parsed, std::chars_format::fixed);
+    if (result.ec == std::errc::result_out_of_range) {
+        // A decimal with a non-zero digit before the point is too large for a
+        // double and rounds to an infinity; one with digits only after it is
+        // too small and rounds to zero.
+        const Number large = std::numeric_limits<Number>::infinity();
+        if (integerPartHasNonZero) {
+            *out = negative ? -large : large;
+        } else {
+            *out = negative ? -0.0 : 0.0;
+        }
+        return true;
+    }
+    if (result.ec != std::errc{} || result.ptr != end) {
+        return false;
+    }
+    *out = parsed;
+    return true;
+}
+
+// int(x): an Int gives itself, an integral Number in the Int range gives the
+// equal Int, and a decimal String parses. It never rounds, so a fractional
+// Number is a fault (spec/05-stdlib.md, int).
+static Value intNative(int /*argCount*/, Value* args) {
+    const Value v = args[0];
+    if (is<Int>(v)) {
+        return makeIntValue(*getActiveMM(), as<Int>(v));
+    }
+    if (is<Number>(v)) {
+        const Number n = as<Number>(v);
+        // Check the range before the cast: a cast of a NaN, an infinity, or a
+        // Number outside the Int range is undefined behaviour. -0.0 passes
+        // and becomes 0.
+        if (!std::isfinite(n) || n != std::floor(n) || n < -kTwoToThe63 ||
+            n >= kTwoToThe63) {
+            nativeRuntimeError(
+                "int() argument must be an integer-valued number in the range "
+                "of an Int.");
+            return from<Nil>(Nil{});
+        }
+        return makeIntValue(*getActiveMM(), static_cast<Int>(n));
+    }
+    if (isString(v)) {
+        Int parsed = 0;
+        const LoxString& chars = asObjString(as<Obj*>(v))->chars;
+        if (!parseIntString(std::string_view{chars.data(), chars.size()},
+                            &parsed)) {
+            nativeRuntimeError(
+                "int() String must be an optional sign and decimal digits in "
+                "the range of an Int.");
+            return from<Nil>(Nil{});
+        }
+        return makeIntValue(*getActiveMM(), parsed);
+    }
+    nativeRuntimeError("int() argument must be an Int, a Number, or a String.");
+    return from<Nil>(Nil{});
+}
+
+// float(x): a Number gives itself, an Int gives the nearest double, and a
+// decimal String parses. The Int conversion is static_cast, whose
+// round-to-nearest-even matches spec/05-stdlib.md, float.
+static Value floatNative(int /*argCount*/, Value* args) {
+    const Value v = args[0];
+    if (is<Number>(v)) {
+        return from<Number>(as<Number>(v));
+    }
+    if (is<Int>(v)) {
+        return from<Number>(static_cast<Number>(as<Int>(v)));
+    }
+    if (isString(v)) {
+        Number parsed = 0.0;
+        const LoxString& chars = asObjString(as<Obj*>(v))->chars;
+        if (!parseFloatString(std::string_view{chars.data(), chars.size()},
+                              &parsed)) {
+            nativeRuntimeError(
+                "float() String must be an optional sign, decimal digits, and "
+                "an optional fractional part.");
+            return from<Nil>(Nil{});
+        }
+        return from<Number>(parsed);
+    }
+    nativeRuntimeError(
+        "float() argument must be an Int, a Number, or a String.");
+    return from<Nil>(Nil{});
+}
+
 void registerGlobals(StdlibRegistrar& reg) {
     reg.defineGlobal("clock", clockNative, 0);
     reg.defineGlobal("input", inputNative, 0);
     reg.defineGlobal("ord", ordNative, 1);
     reg.defineGlobal("chr", chrNative, 1);
+    reg.defineGlobal("int", intNative, 1);
+    reg.defineGlobal("float", floatNative, 1);
 }
