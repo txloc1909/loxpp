@@ -47,7 +47,7 @@ struct Name {
     std::size_t length = 0;
 };
 
-enum class LiteralKind : std::uint8_t { Number, String, True, False, Nil };
+enum class LiteralKind : std::uint8_t { Number, Int, String, True, False, Nil };
 
 // ---------------------------------------------------------------------------
 // Expressions

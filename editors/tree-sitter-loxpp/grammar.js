@@ -15,10 +15,14 @@ const PREC = {
   and: 3,
   equality: 4,
   comparison: 5,
-  term: 6,
-  factor: 7,
-  unary: 8,
-  call: 9,
+  bitOr: 6,
+  bitXor: 7,
+  bitAnd: 8,
+  shift: 9,
+  term: 10,
+  factor: 11,
+  unary: 12,
+  call: 13,
 };
 
 module.exports = grammar({
@@ -250,6 +254,12 @@ module.exports = grammar({
         [">", PREC.comparison],
         [">=", PREC.comparison],
         ["in", PREC.comparison],
+        ["|", PREC.bitOr],
+        ["^", PREC.bitXor],
+        ["&", PREC.bitAnd],
+        ["<<", PREC.shift],
+        [">>", PREC.shift],
+        [">>>", PREC.shift],
         ["+", PREC.term],
         ["-", PREC.term],
         ["*", PREC.factor],
@@ -264,11 +274,12 @@ module.exports = grammar({
     },
 
     unary_expression: $ => prec.right(PREC.unary, seq(
-      field("operator", choice("!", "-")),
+      field("operator", choice("!", "-", "~")),
       field("operand", $._operand),
     )),
 
     _primary: $ => choice(
+      $.rejected_bad_int,
       $.call_expression,
       $.field_expression,
       $.subscript_expression,
@@ -280,6 +291,7 @@ module.exports = grammar({
       $.this_expression,
       $.super_expression,
       $.identifier,
+      $.int,
       $.number,
       $.string,
       $.true,
@@ -376,6 +388,8 @@ module.exports = grammar({
     ),
 
     literal_pattern: $ => choice(
+      $.rejected_bad_int,
+      $.int,
       $.number,
       $.string,
       $.true,
@@ -476,6 +490,26 @@ module.exports = grammar({
     identifier: _ => /[a-zA-Z_][a-zA-Z0-9_]*/,
 
     number: _ => token(/\d+(\.\d+)?/),
+
+    // A decimal Int needs the suffix; a hex or binary literal takes none and
+    // ends at its last digit of that base (spec/01-lexical.md).
+    int: _ => choice(
+      token(/\d+i/),
+      token(/0x[0-9a-fA-F]+/),
+      token(/0b[01]+/),
+    ),
+
+    // `BADINT`: a fractional literal with the suffix is one rejected lexeme,
+    // so `1.5in` reads `1.5i` then `n` and is not the valid `1.5 in`. The only
+    // production that accepts the token requires two `$` bytes. `$` cannot
+    // begin any token, so no valid source file can satisfy it, and every real
+    // program that contains the token is an error.
+    bad_int: _ => token(/\d+\.\d+i/),
+    rejected_bad_int: $ => seq(
+      $.bad_int,
+      token.immediate(/\$/),
+      token.immediate(/\$/),
+    ),
 
     string: $ => seq(
       '"',

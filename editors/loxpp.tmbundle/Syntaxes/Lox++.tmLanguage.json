@@ -78,8 +78,16 @@
       ]
     },
     "numbers": {
-      "match": "(?<![a-zA-Z_0-9])[0-9]+(?:\\.[0-9]+)?",
-      "name": "constant.numeric.lox"
+      "patterns": [
+        {
+          "match": "(?<![a-zA-Z_0-9])[0-9]+\\.[0-9]+i",
+          "name": "invalid.illegal.int-suffix.lox"
+        },
+        {
+          "match": "(?<![a-zA-Z_0-9])(?:0x[0-9a-fA-F]+|0b[01]+|[0-9]+(?:\\.[0-9]+)?i?)",
+          "name": "constant.numeric.lox"
+        }
+      ]
     },
     "keywords": {
       "patterns": [
@@ -183,7 +191,7 @@
       ]
     },
     "operators": {
-      "match": "=>|==|!=|<=|>=|[=+\\-*/%<>!]",
+      "match": ">>>|>>|<<|=>|==|!=|<=|>=|[=+\\-*/%<>!&|^~]",
       "name": "keyword.operator.lox"
     },
     "operators-patterns": {

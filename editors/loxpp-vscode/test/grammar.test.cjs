@@ -220,21 +220,41 @@ test('numbers tokenize decimal followed by dot as numeric then dot', async () =>
   );
 });
 
-test('no single numeric token covers hex or exponent forms', async () => {
+test('int literals match spec/01-lexical.md INT form', async () => {
   const g = await getGrammar();
-  const hex = tokenize('0x1F', g).tokens.filter((t) => flat(t.scopes).length > 0);
-  const hexNumerics = hex.filter((t) => flat(t.scopes)[0] === 'constant.numeric.lox');
-  assert.ok(hexNumerics.length > 0, 'hex digits must still produce numeric tokens');
-  for (const t of hexNumerics) {
-    assert.notStrictEqual(t.text, '0x1F', 'hex literal must not be one numeric token');
-  }
+  const { tokens } = tokenize('0 1i 255i 007i 0x1F 0xFF 0b1010', g);
+  assert.deepStrictEqual(
+    tokens.map((t) => [t.text, flat(t.scopes)[0]]).filter(([text]) => text.trim() !== ''),
+    [
+      ['0', 'constant.numeric.lox'],
+      ['1i', 'constant.numeric.lox'],
+      ['255i', 'constant.numeric.lox'],
+      ['007i', 'constant.numeric.lox'],
+      ['0x1F', 'constant.numeric.lox'],
+      ['0xFF', 'constant.numeric.lox'],
+      ['0b1010', 'constant.numeric.lox']
+    ]
+  );
+});
+
+test('a fractional literal with the suffix is flagged', async () => {
+  const g = await getGrammar();
+  const { tokens } = tokenize('1.5i', g);
+  assert.deepStrictEqual(
+    tokens.map((t) => [t.text, flat(t.scopes)[0]]).filter(([text]) => text.trim() !== ''),
+    [['1.5i', 'invalid.illegal.int-suffix.lox']]
+  );
+});
+
+test('no single numeric token covers an exponent form', async () => {
+  const g = await getGrammar();
   const exp = tokenize('1e5', g).tokens.filter((t) => flat(t.scopes).length > 0);
   const expNumerics = exp.filter((t) => flat(t.scopes)[0] === 'constant.numeric.lox');
   assert.ok(expNumerics.length > 0, 'exponent digits must still produce numeric tokens');
   for (const t of expNumerics) {
     assert.notStrictEqual(t.text, '1e5', 'exponent literal must not be one numeric token');
   }
-  for (const t of [...hex, ...exp]) {
+  for (const t of exp) {
     assert.notStrictEqual(flat(t.scopes)[0], 'invalid.illegal', 'split numerics are permitted, not flagged');
   }
 });
@@ -310,11 +330,12 @@ test('comment after code does not eat rest of file', async () => {
 
 test('operators scope to keyword.operator', async () => {
   const g = await getGrammar();
-  const { tokens } = tokenize('= == != < <= > >= + - * / % !', g);
+  const { tokens } = tokenize('= == != < <= > >= + - * / % ! & | ^ ~ << >> >>>', g);
   const ops = tokens.filter((t) => flat(t.scopes).includes('keyword.operator.lox'));
   assert.deepStrictEqual(
     ops.map((t) => t.text),
-    ['=', '==', '!=', '<', '<=', '>', '>=', '+', '-', '*', '/', '%', '!']
+    ['=', '==', '!=', '<', '<=', '>', '>=', '+', '-', '*', '/', '%', '!',
+      '&', '|', '^', '~', '<<', '>>', '>>>']
   );
 });
 

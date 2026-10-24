@@ -646,6 +646,26 @@ TEST(LspCodeAction, StrWrapSkipsOperandsAlreadyInStr) {
     }
 }
 
+TEST(LspCodeAction, StrWrapSkipsTwoNumericLiterals) {
+    // `1i + 1` is a mixed-kind fault. Wrapping either operand in str() leaves
+    // a String beside the other numeric kind, so neither fix helps.
+    const std::string source = "print 1i + 1;\n";
+    loxpp::tooling::DocumentModel model(source);
+    EXPECT_TRUE(loxpp::lsp::strWrapFixes(model, source.find('+')).empty());
+}
+
+TEST(LspCodeAction, StrWrapAnIntLiteralAgainstAStringLiteral) {
+    // Only the Int operand needs the wrap: the String operand is already one.
+    const std::string source = "print 1i + \"x\";\n";
+    loxpp::tooling::DocumentModel model(source);
+    const std::vector<loxpp::lsp::QuickFix> fixes =
+        loxpp::lsp::strWrapFixes(model, source.find('+'));
+    ASSERT_EQ(fixes.size(), 1U);
+    EXPECT_EQ(fixes[0].title, "Wrap left operand in str()");
+    EXPECT_EQ(applySourceEdits(source, fixes[0].edits),
+              "print str(1i) + \"x\";\n");
+}
+
 TEST(LspCodeAction, StrWrapNeedsAPlus) {
     loxpp::tooling::DocumentModel model("print 1;\n");
     EXPECT_TRUE(loxpp::lsp::strWrapFixes(model, 0).empty());
