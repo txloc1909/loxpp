@@ -262,6 +262,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Number b = as<Number>(m_rt.pop());
                 Number a = as<Number>(m_rt.pop());
                 m_rt.push(from<bool>(a > b));
+            } else if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.push(from<bool>(a > b));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opGreater(stopAtFrameCount); })) {
@@ -275,6 +279,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Number b = as<Number>(m_rt.pop());
                 Number a = as<Number>(m_rt.pop());
                 m_rt.push(from<bool>(a < b));
+            } else if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.push(from<bool>(a < b));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opLess(stopAtFrameCount); })) {
@@ -286,6 +294,8 @@ InterpretResult VM::run(int stopAtFrameCount) {
         case Op::NEGATE: {
             if (is<Number>(m_rt.peek(0))) {
                 m_rt.push(from<Number>(-as<Number>(m_rt.pop())));
+            } else if (isInlineInt(m_rt.peek(0))) {
+                m_rt.pushInt(intWrapNegate(as<Int>(m_rt.pop())));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opNegate(stopAtFrameCount); })) {
@@ -299,6 +309,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Number b = as<Number>(m_rt.pop());
                 Number a = as<Number>(m_rt.pop());
                 m_rt.push(from<Number>(a + b));
+            } else if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intWrapAdd(a, b));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opAdd(stopAtFrameCount); })) {
@@ -312,6 +326,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Number b = as<Number>(m_rt.pop());
                 Number a = as<Number>(m_rt.pop());
                 m_rt.push(from<Number>(a - b));
+            } else if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intWrapSubtract(a, b));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opSubtract(stopAtFrameCount); })) {
@@ -325,6 +343,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 Number b = as<Number>(m_rt.pop());
                 Number a = as<Number>(m_rt.pop());
                 m_rt.push(from<Number>(a * b));
+            } else if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intWrapMultiply(a, b));
             } else {
                 if (auto ret = dispatchOp(
                         [&] { return m_rt.opMultiply(stopAtFrameCount); })) {
@@ -352,6 +374,89 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // it, and the sign correction is not a plain double-double case).
             if (auto ret = dispatchOp(
                     [&] { return m_rt.opModulo(stopAtFrameCount); })) {
+                return *ret;
+            }
+            break;
+        }
+        case Op::BIT_AND: {
+            if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intBitAnd(a, b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opBitAnd(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
+            break;
+        }
+        case Op::BIT_OR: {
+            if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intBitOr(a, b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opBitOr(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
+            break;
+        }
+        case Op::BIT_XOR: {
+            if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int b = as<Int>(m_rt.pop());
+                Int a = as<Int>(m_rt.pop());
+                m_rt.pushInt(intBitXor(a, b));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opBitXor(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
+            break;
+        }
+        case Op::BIT_NOT: {
+            if (isInlineInt(m_rt.peek(0))) {
+                m_rt.pushInt(intBitNot(as<Int>(m_rt.pop())));
+            } else {
+                if (auto ret = dispatchOp(
+                        [&] { return m_rt.opBitNot(stopAtFrameCount); })) {
+                    return *ret;
+                }
+            }
+            break;
+        }
+        case Op::SHIFT_LEFT:
+        case Op::SHIFT_RIGHT:
+        case Op::SHIFT_RIGHT_UNSIGNED: {
+            const Op op = toOpcode(instruction);
+            if (isInlineInt(m_rt.peek(0)) && isInlineInt(m_rt.peek(1))) {
+                Int count = as<Int>(m_rt.peek(0));
+                if (count >= 0 && count <= 63) {
+                    Int value = as<Int>(m_rt.peek(1));
+                    m_rt.pop();
+                    m_rt.pop();
+                    value = op == Op::SHIFT_LEFT
+                                ? intShiftLeft(value, count)
+                                : (op == Op::SHIFT_RIGHT
+                                       ? intShiftRight(value, count)
+                                       : intShiftRightUnsigned(value, count));
+                    m_rt.pushInt(value);
+                    break;
+                }
+            }
+            // A count outside the range, or a boxed operand, takes the slow
+            // path, where the fault is raised with the frame's own line.
+            if (auto ret = dispatchOp([&] {
+                    return op == Op::SHIFT_LEFT
+                               ? m_rt.opShiftLeft(stopAtFrameCount)
+                               : (op == Op::SHIFT_RIGHT
+                                      ? m_rt.opShiftRight(stopAtFrameCount)
+                                      : m_rt.opShiftRightUnsigned(
+                                            stopAtFrameCount));
+                })) {
                 return *ret;
             }
             break;

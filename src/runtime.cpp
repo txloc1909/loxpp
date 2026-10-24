@@ -3603,6 +3603,12 @@ void Runtime::opInstanceof(ObjString* className) {
 // operator overloading existed.
 
 Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
+    if (is<Int>(peek(0)) && is<Int>(peek(1))) {
+        Int b = as<Int>(pop());
+        Int a = as<Int>(pop());
+        pushInt(intWrapAdd(a, b));
+        return OpResult::OK;
+    }
     if (isString(peek(0)) && isString(peek(1))) {
         auto* b_str = asObjString(pop());
         auto* a_str = asObjString(pop());
@@ -3626,6 +3632,12 @@ Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::opSubtract(int stopAtFrameCount) {
+    if (is<Int>(peek(0)) && is<Int>(peek(1))) {
+        Int b = as<Int>(pop());
+        Int a = as<Int>(pop());
+        pushInt(intWrapSubtract(a, b));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethod(Protocol::Sub, stopAtFrameCount)) {
         return *r;
     }
@@ -3637,6 +3649,12 @@ Runtime::OpResult Runtime::opSubtract(int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::opMultiply(int stopAtFrameCount) {
+    if (is<Int>(peek(0)) && is<Int>(peek(1))) {
+        Int b = as<Int>(pop());
+        Int a = as<Int>(pop());
+        pushInt(intWrapMultiply(a, b));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethod(Protocol::Mul, stopAtFrameCount)) {
         return *r;
     }
@@ -3648,6 +3666,21 @@ Runtime::OpResult Runtime::opMultiply(int stopAtFrameCount) {
 }
 
 Runtime::OpResult Runtime::opDivide(int stopAtFrameCount) {
+    if (is<Int>(peek(0)) && is<Int>(peek(1))) {
+        Int divisor = as<Int>(peek(0));
+        if (divisor == 0) {
+            return fromThrow(raiseThrowableError(
+                "DivisionByZeroError", "Division by zero.", stopAtFrameCount));
+        }
+        pop();
+        Int dividend = as<Int>(pop());
+        // INT64_MIN / -1 is undefined in C++ and defined here, as a wrap, so
+        // the edge row is answered before the C++ operator runs.
+        pushInt(dividend == std::numeric_limits<Int>::min() && divisor == -1
+                    ? dividend
+                    : intFloorDivide(dividend, divisor));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethod(Protocol::Div, stopAtFrameCount)) {
         return *r;
     }
@@ -3673,6 +3706,19 @@ Runtime::OpResult Runtime::opModulo(int stopAtFrameCount) {
         push(from<Number>(result));
         return OpResult::OK;
     }
+    if (is<Int>(peek(0)) && is<Int>(peek(1))) {
+        Int divisor = as<Int>(peek(0));
+        if (divisor == 0) {
+            return fromThrow(raiseThrowableError(
+                "DivisionByZeroError", "Division by zero.", stopAtFrameCount));
+        }
+        pop();
+        Int dividend = as<Int>(pop());
+        pushInt(dividend == std::numeric_limits<Int>::min() && divisor == -1
+                    ? Int{0}
+                    : intFloorModulo(dividend, divisor));
+        return OpResult::OK;
+    }
     if (auto r = tryBinaryMethod(Protocol::Mod, stopAtFrameCount)) {
         return *r;
     }
@@ -3683,8 +3729,99 @@ Runtime::OpResult Runtime::opModulo(int stopAtFrameCount) {
         "ArithmeticTypeError", "Operands must be numbers.", stopAtFrameCount));
 }
 
+// A bit operator has no operator protocol and no reflected form, so its slow
+// path checks the operand kinds and then runs the built-in case or faults
+// (spec/04-semantics.md, Bit Operators).
+Runtime::OpResult Runtime::opBitAnd(int stopAtFrameCount) {
+    if (!(is<Int>(peek(0)) && is<Int>(peek(1)))) {
+        return fromThrow(raiseThrowableError(
+            "BitwiseTypeError", "Operands must be Ints.", stopAtFrameCount));
+    }
+    Int b = as<Int>(pop());
+    Int a = as<Int>(pop());
+    pushInt(intBitAnd(a, b));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opBitOr(int stopAtFrameCount) {
+    if (!(is<Int>(peek(0)) && is<Int>(peek(1)))) {
+        return fromThrow(raiseThrowableError(
+            "BitwiseTypeError", "Operands must be Ints.", stopAtFrameCount));
+    }
+    Int b = as<Int>(pop());
+    Int a = as<Int>(pop());
+    pushInt(intBitOr(a, b));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opBitXor(int stopAtFrameCount) {
+    if (!(is<Int>(peek(0)) && is<Int>(peek(1)))) {
+        return fromThrow(raiseThrowableError(
+            "BitwiseTypeError", "Operands must be Ints.", stopAtFrameCount));
+    }
+    Int b = as<Int>(pop());
+    Int a = as<Int>(pop());
+    pushInt(intBitXor(a, b));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opBitNot(int stopAtFrameCount) {
+    if (!is<Int>(peek(0))) {
+        return fromThrow(raiseThrowableError(
+            "BitwiseTypeError", "Operand must be an Int.", stopAtFrameCount));
+    }
+    pushInt(intBitNot(as<Int>(pop())));
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opShift(ShiftKind kind, int stopAtFrameCount) {
+    // The kind of both operands is checked before the range of the count, so
+    // `1i << 64.5` is a kind fault, not a count fault (spec/04-semantics.md,
+    // Bit Operators).
+    if (!(is<Int>(peek(0)) && is<Int>(peek(1)))) {
+        return fromThrow(raiseThrowableError(
+            "BitwiseTypeError", "Operands must be Ints.", stopAtFrameCount));
+    }
+    Int count = as<Int>(peek(0));
+    if (count < 0 || count > 63) {
+        return fromThrow(raiseThrowableError(
+            "ShiftCountError", "Shift count must be an Int from 0i to 63i.",
+            stopAtFrameCount));
+    }
+    pop();
+    Int value = as<Int>(pop());
+    switch (kind) {
+    case ShiftKind::Left:
+        pushInt(intShiftLeft(value, count));
+        break;
+    case ShiftKind::Right:
+        pushInt(intShiftRight(value, count));
+        break;
+    case ShiftKind::RightUnsigned:
+        pushInt(intShiftRightUnsigned(value, count));
+        break;
+    }
+    return OpResult::OK;
+}
+
+Runtime::OpResult Runtime::opShiftLeft(int stopAtFrameCount) {
+    return opShift(ShiftKind::Left, stopAtFrameCount);
+}
+
+Runtime::OpResult Runtime::opShiftRight(int stopAtFrameCount) {
+    return opShift(ShiftKind::Right, stopAtFrameCount);
+}
+
+Runtime::OpResult Runtime::opShiftRightUnsigned(int stopAtFrameCount) {
+    return opShift(ShiftKind::RightUnsigned, stopAtFrameCount);
+}
+
 Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
     Value operand = peek(0);
+    if (is<Int>(operand)) {
+        pushInt(intWrapNegate(as<Int>(pop())));
+        return OpResult::OK;
+    }
     if (isInstance(operand)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(operand));
         Value method;
@@ -3702,6 +3839,12 @@ Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
 Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
     Value b = peek(0);
     Value a = peek(1);
+    if (is<Int>(a) && is<Int>(b)) {
+        Int rhs = as<Int>(pop());
+        Int lhs = as<Int>(pop());
+        push(from<bool>(lhs < rhs));
+        return OpResult::OK;
+    }
     if (isString(a) && isString(b)) {
         // Bytewise lexicographic order; char_traits compares each char as an
         // unsigned byte, matching the JVM backend's ISO-8859-1 char compare.
@@ -3726,6 +3869,12 @@ Runtime::OpResult Runtime::opLess(int stopAtFrameCount) {
 Runtime::OpResult Runtime::opGreater(int stopAtFrameCount) {
     Value b = peek(0);
     Value a = peek(1);
+    if (is<Int>(a) && is<Int>(b)) {
+        Int rhs = as<Int>(pop());
+        Int lhs = as<Int>(pop());
+        push(from<bool>(lhs > rhs));
+        return OpResult::OK;
+    }
     if (isString(a) && isString(b)) {
         bool result = asObjString(as<Obj*>(a))
                           ->chars.compare(asObjString(as<Obj*>(b))->chars) > 0;

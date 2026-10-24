@@ -62,6 +62,7 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::GET_TAG:
     case Op::INSTANCEOF:
     case Op::IS_SEQ:
+    case Op::BIT_NOT:
     // PUSH_HANDLER/POP_HANDLER touch the VM's separate handler stack, not
     // the operand stack this pass tracks (chunk.h). RUN_DEFERS leaves the
     // operand stack unchanged (chunk.h). YIELD pops the yielded value and
@@ -82,6 +83,12 @@ int frameHeightEffect(const DecodedInstruction& ins) {
     case Op::MULTIPLY:
     case Op::DIVIDE:
     case Op::MODULO:
+    case Op::BIT_AND:
+    case Op::BIT_OR:
+    case Op::BIT_XOR:
+    case Op::SHIFT_LEFT:
+    case Op::SHIFT_RIGHT:
+    case Op::SHIFT_RIGHT_UNSIGNED:
     case Op::IN:
     case Op::PRINT:
     case Op::POP:

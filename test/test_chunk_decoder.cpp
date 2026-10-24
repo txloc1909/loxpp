@@ -89,6 +89,13 @@ void renderInstruction(const Chunk& chunk, const DecodedInstruction& ins,
     case Op::MULTIPLY:
     case Op::DIVIDE:
     case Op::MODULO:
+    case Op::BIT_AND:
+    case Op::BIT_OR:
+    case Op::BIT_XOR:
+    case Op::BIT_NOT:
+    case Op::SHIFT_LEFT:
+    case Op::SHIFT_RIGHT:
+    case Op::SHIFT_RIGHT_UNSIGNED:
     case Op::NOT:
     case Op::LEN:
     case Op::STR:

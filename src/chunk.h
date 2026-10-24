@@ -2,6 +2,7 @@
 
 #include "value.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -24,6 +25,13 @@ enum class Op : Byte {
     MULTIPLY,
     DIVIDE,
     MODULO,
+    BIT_AND,   // Int only; no operator protocol
+    BIT_OR,    // Int only; no operator protocol
+    BIT_XOR,   // Int only; no operator protocol
+    BIT_NOT,   // unary ~, Int only; no operator protocol
+    SHIFT_LEFT,           // Int only; a count outside 0i..63i faults
+    SHIFT_RIGHT,          // Int only; copies the sign bit
+    SHIFT_RIGHT_UNSIGNED, // aka >>>; fills with zero bits
     NOT,
     LEN, // pops one value, pushes its length (Number); dispatches __len__
     STR, // pops one value, pushes its canonical string; dispatches __str__
@@ -131,6 +139,13 @@ enum class Op : Byte {
     X(MULTIPLY)                                                                \
     X(DIVIDE)                                                                  \
     X(MODULO)                                                                  \
+    X(BIT_AND)                                                                 \
+    X(BIT_OR)                                                                  \
+    X(BIT_XOR)                                                                 \
+    X(BIT_NOT)                                                                 \
+    X(SHIFT_LEFT)                                                              \
+    X(SHIFT_RIGHT)                                                             \
+    X(SHIFT_RIGHT_UNSIGNED)                                                    \
     X(NOT)                                                                     \
     X(LEN)                                                                     \
     X(STR)                                                                     \
@@ -180,6 +195,16 @@ enum class Op : Byte {
     X(YIELD)
 
 inline Op toOpcode(Byte byte) { return static_cast<Op>(byte); }
+
+// The number of Op enumerators. A table keyed by opcode sizes itself from
+// this, so it cannot fall behind a new enumerator. The static_assert below
+// keeps the macro and the enum from drifting apart: YIELD is the last
+// enumerator, so the count must land exactly one past it.
+#define LOXPP_COUNT_OP(NAME) +1
+inline constexpr std::size_t kOpcodeCount = 0 LOXPP_FOR_EACH_OP(LOXPP_COUNT_OP);
+#undef LOXPP_COUNT_OP
+static_assert(kOpcodeCount == static_cast<std::size_t>(Op::YIELD) + 1,
+              "LOXPP_FOR_EACH_OP and the Op enum disagree");
 
 // Name of an Op enumerator, e.g. opcodeName(Op::ADD) == "ADD". Falls back to
 // "UNKNOWN" for a byte that does not decode to a known Op (corrupt bytecode).

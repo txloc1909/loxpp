@@ -49,7 +49,7 @@ struct GcStats {
 struct ProfilerData {
     // Per-opcode dispatch counts. Indexed by static_cast<uint8_t>(Op).
     // Array size 64 is larger than the current opcode count (42) for headroom.
-    std::array<OpcodeStats, 64> opcodeTable{};
+    std::array<OpcodeStats, kOpcodeCount> opcodeTable{};
 
     // Per-function stats. Key is ObjFunction* (stable for program lifetime).
     std::unordered_map<ObjFunction*, FunctionStats> funcTable;

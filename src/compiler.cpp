@@ -210,7 +210,7 @@ void Compiler::unary() {
         emitByte(Op::NOT);
         break;
     case TokenType::TILDE:
-        // The bit operators land with the operator node (N3, #827).
+        emitByte(Op::BIT_NOT);
         break;
     default:
         return; // Unreachable.
@@ -266,6 +266,24 @@ void Compiler::binary() {
         break;
     case TokenType::PERCENT:
         emitByte(Op::MODULO);
+        break;
+    case TokenType::AMPERSAND:
+        emitByte(Op::BIT_AND);
+        break;
+    case TokenType::PIPE:
+        emitByte(Op::BIT_OR);
+        break;
+    case TokenType::CARET:
+        emitByte(Op::BIT_XOR);
+        break;
+    case TokenType::LESS_LESS:
+        emitByte(Op::SHIFT_LEFT);
+        break;
+    case TokenType::GREATER_GREATER:
+        emitByte(Op::SHIFT_RIGHT);
+        break;
+    case TokenType::GREATER_GREATER_GREATER:
+        emitByte(Op::SHIFT_RIGHT_UNSIGNED);
         break;
     case TokenType::IN:
         emitByte(Op::IN);
@@ -2970,6 +2988,7 @@ void Compiler::trackOperandStack(Op op) {
         m_stackHeight++;
         break;
     case Op::NEGATE:
+    case Op::BIT_NOT:
     case Op::NOT:
     case Op::LEN:
     case Op::STR:
@@ -2996,6 +3015,12 @@ void Compiler::trackOperandStack(Op op) {
     case Op::MULTIPLY:
     case Op::DIVIDE:
     case Op::MODULO:
+    case Op::BIT_AND:
+    case Op::BIT_OR:
+    case Op::BIT_XOR:
+    case Op::SHIFT_LEFT:
+    case Op::SHIFT_RIGHT:
+    case Op::SHIFT_RIGHT_UNSIGNED:
     case Op::GET_INDEX:
     case Op::IN:
     case Op::SET_PROPERTY:

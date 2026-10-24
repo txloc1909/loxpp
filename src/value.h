@@ -110,6 +110,11 @@ inline Value inlineIntValue(Int v) {
 
 template <typename T>
 bool is(const Value& v);
+// True for the inline form only. The fast paths in the VM use it to tell an
+// Int that needs no allocation from one that is a heap box (slow path).
+inline bool isInlineInt(const Value& v) {
+    return (v.bits & detail::INT_TAG_MASK) == detail::INT_TAG;
+}
 template <>
 inline bool is<Number>(const Value& v) {
     return (v.bits & detail::QNAN) != detail::QNAN;
@@ -134,6 +139,73 @@ inline bool is<Int>(const Value& v) {
     return (v.bits & detail::OBJ_TAG) == detail::OBJ_TAG &&
            reinterpret_cast<Obj*>(v.bits & ~detail::OBJ_TAG)->type ==
                ObjType::INT;
+}
+
+// ---- Int arithmetic -------------------------------------------------------
+// Every wrapping operation runs in uint64_t and returns through bit_cast, so
+// two's-complement wrap is defined behaviour and the debug preset's
+// -fsanitize=undefined has nothing to report (docs/decisions/
+// integer-kind.md, constraint 1).
+//
+// Division and modulo take the floor rule of spec/04-semantics.md,
+// Arithmetic. Their preconditions are b != 0 and, for the two defined edge
+// rows, a == INT64_MIN with b == -1: the callers check both before calling,
+// because only they know how to raise the fault or return the edge result.
+inline Int intWrapAdd(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) +
+                              static_cast<uint64_t>(b));
+}
+inline Int intWrapSubtract(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) -
+                              static_cast<uint64_t>(b));
+}
+inline Int intWrapMultiply(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) *
+                              static_cast<uint64_t>(b));
+}
+inline Int intWrapNegate(Int a) {
+    return std::bit_cast<Int>(uint64_t{0} - static_cast<uint64_t>(a));
+}
+inline Int intFloorDivide(Int a, Int b) {
+    Int quotient = a / b;
+    Int remainder = a % b;
+    if (remainder != 0 && ((remainder < 0) != (b < 0))) {
+        --quotient;
+    }
+    return quotient;
+}
+inline Int intFloorModulo(Int a, Int b) {
+    Int remainder = a % b;
+    if (remainder != 0 && ((remainder < 0) != (b < 0))) {
+        remainder += b;
+    }
+    return remainder;
+}
+inline Int intShiftLeft(Int a, Int count) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a)
+                              << static_cast<unsigned>(count));
+}
+inline Int intShiftRight(Int a, Int count) {
+    return a >> static_cast<unsigned>(count);
+}
+inline Int intShiftRightUnsigned(Int a, Int count) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) >>
+                              static_cast<unsigned>(count));
+}
+inline Int intBitAnd(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) &
+                              static_cast<uint64_t>(b));
+}
+inline Int intBitOr(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) |
+                              static_cast<uint64_t>(b));
+}
+inline Int intBitXor(Int a, Int b) {
+    return std::bit_cast<Int>(static_cast<uint64_t>(a) ^
+                              static_cast<uint64_t>(b));
+}
+inline Int intBitNot(Int a) {
+    return std::bit_cast<Int>(~static_cast<uint64_t>(a));
 }
 
 // A global slot's empty state (src/runtime.h's m_globalSlots). Not one of the
