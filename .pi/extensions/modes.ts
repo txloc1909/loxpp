@@ -77,7 +77,14 @@ tools/check_managed_toolchains.sh
 cmake --preset release
 cmake --build build
 ctest --test-dir build --output-on-failure -j$(nproc)
-tools/diff_runtimes.py`;
+# The differential phase is the one value this gate cannot guess: it needs a
+# native binary, a runner, and a corpus. CI's "JVM differential suite -
+# probes" step is the reference. A node on another managed backend adds its
+# own runner line here rather than replacing this one (#855).
+python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh \\
+  test/translation-probes/ test/translation-probes/jvm-only/ \\
+  --xfail tools/spec-probe-xfail/jvm.txt \\
+  --oracle-xfail tools/spec-probe-xfail/native.txt`;
 
 // The exact template forms multi-agent-playbook.md requires. Plain `gh issue
 // view` hides comment hazards; `--comments` drops the body. The tool hardcodes
