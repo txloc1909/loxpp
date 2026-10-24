@@ -1,0 +1,229 @@
+================================================================================
+Int literals
+================================================================================
+
+var a = 0i;
+var b = 1i;
+var c = 0xFF;
+var d = 0b1010;
+var e = 1.5;
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (int))
+  (variable_declaration
+    (identifier)
+    (int))
+  (variable_declaration
+    (identifier)
+    (int))
+  (variable_declaration
+    (identifier)
+    (int))
+  (variable_declaration
+    (identifier)
+    (number)))
+
+================================================================================
+Int literal patterns
+================================================================================
+
+var v = match x {
+  case 1i => 1
+  case 0xFF => 2
+  case 0b1 => 3
+  case _ => 0
+};
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (literal_pattern
+          (int))
+        (number))
+      (match_arm
+        (literal_pattern
+          (int))
+        (number))
+      (match_arm
+        (literal_pattern
+          (int))
+        (number))
+      (match_arm
+        (identifier_pattern)
+        (number)))))
+
+================================================================================
+Bit operators and unary tilde
+================================================================================
+
+var a = ~x & y | z ^ w;
+var b = x << 1i >> 2i >>> 3i;
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (binary_expression
+          (identifier)
+          (int))
+        (int))
+      (int))))
+
+================================================================================
+Rejected fractional suffix
+================================================================================
+
+var a = 1.5i;
+var b = 1.0i;
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (ERROR
+      (bad_int)))
+  (variable_declaration
+    (identifier)
+    (ERROR
+      (bad_int))))
+
+================================================================================
+Rejected suffix boundary before in
+================================================================================
+
+print 1in [1, 2];
+print 1.5in [1.5];
+
+---
+
+(source_file
+  (print_statement
+    (subscript_expression
+      (int)
+      (ERROR
+        (identifier))
+      (ERROR
+        (number))
+      (number)))
+  (print_statement
+    (ERROR
+      (bad_int))
+    (subscript_expression
+      (identifier)
+      (number))))
+
+================================================================================
+Rejected suffix boundary before if
+================================================================================
+
+var a = match x {
+  case 1if t => 1
+  case _ => 0
+};
+var b = match x {
+  case 1.5if t => 1
+  case _ => 0
+};
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (literal_pattern
+          (int))
+        (ERROR
+          (identifier)
+          (identifier))
+        (number))
+      (match_arm
+        (identifier_pattern)
+        (number))))
+  (variable_declaration
+    (identifier)
+    (match_expression
+      (identifier)
+      (match_arm
+        (ERROR
+          (bad_int)
+          (identifier))
+        (identifier_pattern)
+        (number))
+      (match_arm
+        (identifier_pattern)
+        (number)))))
+
+================================================================================
+Rejected hex and binary prefixes
+================================================================================
+
+print 0XFF;
+print 0xFFi;
+print 0b1i;
+print 0xFFand true;
+print 0x;
+
+---
+
+(source_file
+  (print_statement
+    (ERROR
+      (number))
+    (identifier))
+  (print_statement
+    (int)
+    (ERROR
+      (identifier)))
+  (print_statement
+    (int)
+    (ERROR
+      (identifier)))
+  (print_statement
+    (int)
+    (ERROR
+      (identifier)
+      (true)))
+  (print_statement
+    (number)
+    (ERROR
+      (identifier))))
+
+================================================================================
+Rejected detached suffix
+================================================================================
+
+print 1 i;
+
+---
+
+(source_file
+  (print_statement
+    (number)
+    (ERROR
+      (identifier))))

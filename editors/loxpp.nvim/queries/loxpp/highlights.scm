@@ -6,7 +6,9 @@
 (comment) @comment
 
 ; Literals
+(int) @number
 (number) @number
+(bad_int) @error
 (string) @string
 (escape_sequence) @string.escape
 [
@@ -62,6 +64,13 @@
   "/"
   "%"
   "!"
+  "&"
+  "|"
+  "^"
+  "~"
+  "<<"
+  ">>"
+  ">>>"
   "=>"
   "@"
   "..."

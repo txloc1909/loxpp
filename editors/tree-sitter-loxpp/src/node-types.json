@@ -72,6 +72,10 @@
         "named": true
       },
       {
+        "type": "int",
+        "named": true
+      },
+      {
         "type": "list",
         "named": true
       },
@@ -93,6 +97,10 @@
       },
       {
         "type": "parenthesized_expression",
+        "named": true
+      },
+      {
+        "type": "rejected_bad_int",
         "named": true
       },
       {
@@ -259,6 +267,10 @@
             "named": false
           },
           {
+            "type": "&",
+            "named": false
+          },
+          {
             "type": "*",
             "named": false
           },
@@ -279,6 +291,10 @@
             "named": false
           },
           {
+            "type": "<<",
+            "named": false
+          },
+          {
             "type": "<=",
             "named": false
           },
@@ -295,6 +311,18 @@
             "named": false
           },
           {
+            "type": ">>",
+            "named": false
+          },
+          {
+            "type": ">>>",
+            "named": false
+          },
+          {
+            "type": "^",
+            "named": false
+          },
+          {
             "type": "and",
             "named": false
           },
@@ -304,6 +332,10 @@
           },
           {
             "type": "or",
+            "named": false
+          },
+          {
+            "type": "|",
             "named": false
           }
         ]
@@ -824,6 +856,11 @@
     }
   },
   {
+    "type": "int",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "list",
     "named": true,
     "fields": {},
@@ -866,11 +903,19 @@
           "named": true
         },
         {
+          "type": "int",
+          "named": true
+        },
+        {
           "type": "nil",
           "named": true
         },
         {
           "type": "number",
+          "named": true
+        },
+        {
+          "type": "rejected_bad_int",
           "named": true
         },
         {
@@ -1152,6 +1197,21 @@
     }
   },
   {
+    "type": "rejected_bad_int",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "bad_int",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "rest_element",
     "named": true,
     "fields": {
@@ -1399,6 +1459,10 @@
           {
             "type": "-",
             "named": false
+          },
+          {
+            "type": "~",
+            "named": false
           }
         ]
       }
@@ -1503,6 +1567,10 @@
     "named": false
   },
   {
+    "type": "&",
+    "named": false
+  },
+  {
     "type": "(",
     "named": false
   },
@@ -1551,6 +1619,10 @@
     "named": false
   },
   {
+    "type": "<<",
+    "named": false
+  },
+  {
     "type": "<=",
     "named": false
   },
@@ -1575,6 +1647,14 @@
     "named": false
   },
   {
+    "type": ">>",
+    "named": false
+  },
+  {
+    "type": ">>>",
+    "named": false
+  },
+  {
     "type": "@",
     "named": false
   },
@@ -1587,8 +1667,16 @@
     "named": false
   },
   {
+    "type": "^",
+    "named": false
+  },
+  {
     "type": "and",
     "named": false
+  },
+  {
+    "type": "bad_int",
+    "named": true
   },
   {
     "type": "break",
@@ -1724,7 +1812,15 @@
     "named": false
   },
   {
+    "type": "|",
+    "named": false
+  },
+  {
     "type": "}",
+    "named": false
+  },
+  {
+    "type": "~",
     "named": false
   }
 ]
