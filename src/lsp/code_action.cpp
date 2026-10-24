@@ -1,6 +1,7 @@
 #include "lsp/code_action.h"
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 #include "token.h"
@@ -17,6 +18,8 @@ using tooling::DocumentModel;
 using tooling::Expr;
 using tooling::ExprKind;
 using tooling::IdentifierExpr;
+using tooling::LiteralExpr;
+using tooling::LiteralKind;
 using tooling::MatchExpr;
 using tooling::Stmt;
 using tooling::StmtKind;
@@ -506,6 +509,13 @@ std::string lineIndent(const std::string& text, std::size_t offset) {
     return text.substr(start, i - start);
 }
 
+std::optional<LiteralKind> literalKindOf(const Expr* e) {
+    if (e == nullptr || e->kind != ExprKind::Literal) {
+        return std::nullopt;
+    }
+    return static_cast<const LiteralExpr*>(e)->literal_kind;
+}
+
 bool isStrCall(const Expr* e) {
     if (e == nullptr) {
         return false;
@@ -699,21 +709,43 @@ std::vector<QuickFix> strWrapFixes(const DocumentModel& model,
     if (plus == nullptr || plus->left == nullptr || plus->right == nullptr) {
         return {};
     }
+    const Expr* const left = plus->left.get();
+    const Expr* const right = plus->right.get();
+    const bool leftIsString =
+        literalKindOf(left) == LiteralKind::String || isStrCall(left);
+    const bool rightIsString =
+        literalKindOf(right) == LiteralKind::String || isStrCall(right);
+
+    // Two literal operands name their kinds at the site. Wrapping one in str()
+    // can only help when the other is already a String; two numeric literals
+    // of any kinds stay a type fault either way.
+    if (literalKindOf(left).has_value() && literalKindOf(right).has_value()) {
+        if (leftIsString == rightIsString) {
+            return {};
+        }
+        const Expr* const wrap = leftIsString ? right : left;
+        const bool wrapLeft = !leftIsString;
+        QuickFix fix;
+        fix.title = wrapLeft ? "Wrap left operand in str()"
+                             : "Wrap right operand in str()";
+        fix.edits.push_back(SourceEdit{wrap->offset, 0, "str("});
+        fix.edits.push_back(SourceEdit{wrap->offset + wrap->length, 0, ")"});
+        return {std::move(fix)};
+    }
+
     std::vector<QuickFix> out;
-    if (!isStrCall(plus->left.get())) {
+    if (!isStrCall(left)) {
         QuickFix fix;
         fix.title = "Wrap left operand in str()";
-        fix.edits.push_back(SourceEdit{plus->left->offset, 0, "str("});
-        fix.edits.push_back(
-            SourceEdit{plus->left->offset + plus->left->length, 0, ")"});
+        fix.edits.push_back(SourceEdit{left->offset, 0, "str("});
+        fix.edits.push_back(SourceEdit{left->offset + left->length, 0, ")"});
         out.push_back(std::move(fix));
     }
-    if (!isStrCall(plus->right.get())) {
+    if (!isStrCall(right)) {
         QuickFix fix;
         fix.title = "Wrap right operand in str()";
-        fix.edits.push_back(SourceEdit{plus->right->offset, 0, "str("});
-        fix.edits.push_back(
-            SourceEdit{plus->right->offset + plus->right->length, 0, ")"});
+        fix.edits.push_back(SourceEdit{right->offset, 0, "str("});
+        fix.edits.push_back(SourceEdit{right->offset + right->length, 0, ")"});
         out.push_back(std::move(fix));
     }
     return out;

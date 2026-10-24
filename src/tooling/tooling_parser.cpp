@@ -12,6 +12,7 @@ namespace {
 bool isLiteralToken(TokenType t) {
     switch (t) {
     case TokenType::NUMBER:
+    case TokenType::INT:
     case TokenType::STRING:
     case TokenType::TRUE:
     case TokenType::FALSE:
@@ -26,6 +27,8 @@ LiteralKind literalKindOf(TokenType t) {
     switch (t) {
     case TokenType::NUMBER:
         return LiteralKind::Number;
+    case TokenType::INT:
+        return LiteralKind::Int;
     case TokenType::STRING:
         return LiteralKind::String;
     case TokenType::TRUE:
@@ -104,11 +107,12 @@ class Parser {
     //     `match` subject or arm body, nested block, nested `if`/`while`/`for`
     //     -- each such step recurses through a guarded rule (assignment(),
     //     unary(), declaration(), statement()) that adds 1 via NestingGuard;
-    //   * loop-built left-leaning chains -- the six operator-ladder rules
-    //     (logicOr, logicAnd, equality, comparison, term, factor) and the
-    //     call() postfix loop (`.name`, `(args)`, `[index]`, `[a:b]`) each
-    //     wrap the running left operand in one more node per turn, growing
-    //     the left spine by one; every turn adds 1 via ChainGuard.
+    //   * loop-built left-leaning chains -- the ten operator-ladder rules
+    //     (logicOr, logicAnd, equality, comparison, bitOr, bitXor, bitAnd,
+    //     shift, term, factor) and the call() postfix loop (`.name`,
+    //     `(args)`, `[index]`, `[a:b]`) each wrap the running left operand in
+    //     one more node per turn, growing the left spine by one; every turn
+    //     adds 1 via ChainGuard.
     // The two share `m_depth`, so nesting depth and chain length add up along
     // a path. When the sum exceeds the cap the parser stops extending that
     // path, calls error(), recovers, and still returns a Program: a
@@ -809,11 +813,74 @@ class Parser {
     }
 
     ExprPtr comparison() {
-        ExprPtr expr = term();
+        ExprPtr expr = bitOr();
         ChainGuard chain(*this);
         while ((check(TokenType::GREATER) || check(TokenType::GREATER_EQUAL) ||
                 check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
                 check(TokenType::IN)) &&
+               !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
+            Token op = advance();
+            ExprPtr right = bitOr();
+            expr = makeBinary(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    ExprPtr bitOr() {
+        ExprPtr expr = bitXor();
+        ChainGuard chain(*this);
+        while (check(TokenType::PIPE) && !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
+            Token op = advance();
+            ExprPtr right = bitXor();
+            expr = makeBinary(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    ExprPtr bitXor() {
+        ExprPtr expr = bitAnd();
+        ChainGuard chain(*this);
+        while (check(TokenType::CARET) && !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
+            Token op = advance();
+            ExprPtr right = bitAnd();
+            expr = makeBinary(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    ExprPtr bitAnd() {
+        ExprPtr expr = shift();
+        ChainGuard chain(*this);
+        while (check(TokenType::AMPERSAND) && !m_panic) {
+            if (chain.step()) {
+                error();
+                break;
+            }
+            Token op = advance();
+            ExprPtr right = shift();
+            expr = makeBinary(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    ExprPtr shift() {
+        ExprPtr expr = term();
+        ChainGuard chain(*this);
+        while ((check(TokenType::LESS_LESS) ||
+                check(TokenType::GREATER_GREATER) ||
+                check(TokenType::GREATER_GREATER_GREATER)) &&
                !m_panic) {
             if (chain.step()) {
                 error();
@@ -875,16 +942,18 @@ class Parser {
         node.length = end > start ? end - start : 0;
     }
 
-    // A `!`/`-` prefix chain recurses through unary() itself, without passing
-    // through assignment(), so this rule carries its own guard in addition to
-    // the one in assignment().
+    // A `!`/`-`/`~` prefix chain recurses through unary() itself, without
+    // passing through assignment(), so this rule carries its own guard in
+    // addition to the one in assignment().
     ExprPtr unary() {
         NestingGuard guard(*this);
         if (tooDeep()) {
             error();
             return nullptr;
         }
-        if ((check(TokenType::BANG) || check(TokenType::MINUS)) && !m_panic) {
+        if ((check(TokenType::BANG) || check(TokenType::MINUS) ||
+             check(TokenType::TILDE)) &&
+            !m_panic) {
             Token op = advance();
             auto node = std::make_unique<UnaryExpr>();
             node->op = op.type;
