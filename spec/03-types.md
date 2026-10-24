@@ -27,8 +27,8 @@ same value. An integer-valued Number is still a Number: it is never an
 
 Special IEEE 754 values (positive/negative infinity, NaN) may arise from an
 arithmetic operation. A `NUMBER` literal also gives an infinity when its
-decimal is nearer to infinity than to the largest finite double, and zero when
-its decimal is nearer to zero than to the smallest subnormal
+decimal is at or above the midpoint between the largest finite double and
+2^1024, and zero when its decimal is at or below half the smallest subnormal
 ([§01-lexical](01-lexical.md#number-and-int-literals)). Their behavior follows
 IEEE 754.
 

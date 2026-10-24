@@ -10,9 +10,11 @@
 // The nearest IEEE 754 double to a decimal text of one or more digits with an
 // optional '.' and more digits, and an optional leading sign
 // (spec/01-lexical.md, the range of a Number literal; spec/05-stdlib.md,
-// float). A decimal above the largest finite double gives an infinity and one
-// below the smallest subnormal gives zero. The caller checks the grammar: this
-// function reads the text as far as its form allows and never faults.
+// float). The nearest value is taken over the whole range of the format: a
+// text at or above the midpoint between the largest finite double and 2^1024
+// gives an infinity, and one at or below half the smallest subnormal gives
+// zero. The caller checks the grammar: this function reads the text as far as
+// its form allows and never faults.
 //
 // std::from_chars reads the digits itself, so the process locale's decimal
 // point never decides where the fraction starts, and a long literal costs one
@@ -31,9 +33,9 @@ inline Number nearestDoubleFromDecimal(std::string_view text) {
     if (result.ec != std::errc::result_out_of_range) {
         return negative ? -parsed : parsed;
     }
-    // A non-zero digit before the point means a value above the largest finite
-    // double, because the parse would otherwise have succeeded. Digits only
-    // after the point mean a value below the smallest subnormal.
+    // A non-zero digit before the point means a value at or above the overflow
+    // midpoint, because the parse succeeds for every value below it. Digits
+    // only after the point mean a value at or below the underflow midpoint.
     for (const char c : text) {
         if (c == '.') {
             break;
