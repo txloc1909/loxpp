@@ -384,6 +384,16 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_repl_session.py
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    # Issue #858: an expected-failure entry that names no program of the run is
+    # an error (exit 2), as tools/check_spec_probes.py already makes it. A dead
+    # entry is otherwise silent, so a gate that runs only tools/diff_runtimes.py
+    # stays green over the gap the entry claims to record. The checker runs
+    # native against itself, so it needs no managed toolchain and no jar.
+    add_test(NAME DiffRuntimesXfailNames
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_xfail.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

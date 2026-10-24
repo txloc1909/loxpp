@@ -54,8 +54,12 @@ reordering, never a content change.
 
 --xfail <file> names the spec probes (tools/check_spec_probes.py) that the
 other runner does not pass yet: the consumer's expected-failure list, in the
-form tools/check_spec_probes.py reads. A listed program reports one of two
-outcomes:
+form tools/check_spec_probes.py reads. A name that is not a spec probe of this
+run is an error (exit 2), as it is in tools/check_spec_probes.py. A name that
+no program backs says nothing at all, where a listed probe the consumer passes
+prints XPASS and exits 1, so after a rename the list would look satisfied and
+a gate that runs only this script would report green over the gap. A listed
+program reports one of two outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
   XPASS        both runs pass the probe (tools/check_spec_probes.py). Exit
@@ -63,7 +67,8 @@ outcomes:
                deleted.
 
 --oracle-xfail <file> is native's own expected-failure list, in the
-same form. A listed spec probe that the other runner passes and native
+same form, with the same rule: a name that is not a spec probe of this run is
+an error (exit 2). A listed spec probe that the other runner passes and native
 does not reports one more outcome:
   AHEAD        the other runner passes the probe before native does. Not a
                divergence: native's own gate shows its gap. A listed probe
@@ -106,8 +111,9 @@ Usage:
         --exclude <file> --only-excluded <dir>
 
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
-A path that is neither a file nor a directory, or a program list that ends
-up empty, is an error (exit 2), not a silent zero-file pass.
+A path that is neither a file nor a directory, a program list that ends up
+empty, or an --xfail or --oracle-xfail entry that is not a spec probe of the
+list, is an error (exit 2), not a silent zero-file pass.
 
 --only-excluded <dir> ignores <path> and runs only the programs named in
 --exclude, resolved under <dir>. This wires the permutation guard: an
@@ -316,6 +322,30 @@ def collect_programs(paths: list[str]) -> list[Path]:
     return files
 
 
+def require_known_spec_probes(
+    list_path: Path, entries: dict[str, str], programs: list[Path]
+) -> None:
+    """Exits when an expected-failure list names something this run cannot grade.
+
+    Both flags grade a program by spec-probe criteria, so only a spec probe of
+    this run can be listed. A name that no spec probe backs is worse than a
+    stale one: the lookup misses, no outcome is ever counted for it, and the
+    entry reads as satisfied where a listed probe the consumer passes would
+    print XPASS and exit 1. Each name therefore has to resolve against the
+    probes of the list this run was given, not against every program in it.
+    """
+    probes = [p for p in programs if parse_probe(p) is not None]
+    known = {p.name for p in probes}
+    for name in entries:
+        if name not in known:
+            print(
+                f"error: {list_path} lists {name}, which is not a spec probe of "
+                f"this run ({len(probes)} spec probes compared)",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 def resolve_excluded_programs(excluded: dict[str, str], base_dir: Path) -> list[Path]:
     """Resolves every name in the exclusion file under base_dir.
 
@@ -433,6 +463,11 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(2)
+
+    if args.xfail:
+        require_known_spec_probes(args.xfail, xfail, programs)
+    if args.oracle_xfail:
+        require_known_spec_probes(args.oracle_xfail, oracle_xfail, programs)
 
     matched = permuted = diverged = staled = xfailed = xpassed = exempted = ahead = 0
 
