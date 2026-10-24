@@ -37,15 +37,20 @@ syntax keyword loxBoolean       true false
 syntax keyword loxConstant      nil
 
 " --- Numbers ----------------------------------------------------------------
-" DIGIT+ ( "." DIGIT+ )?  -- decimal only, no exponent (spec/01-lexical.md).
-syntax match   loxNumber        /\<\d\+\%(\.\d\+\)\?\>/
+" DIGIT+ ( "." DIGIT+ )? is a Number. DIGIT+ "i", 0x..., and 0b... are Ints
+" (spec/01-lexical.md). No exponent form.
+syntax match   loxNumber        /\<0x[0-9a-fA-F]\+\>/
+syntax match   loxNumber        /\<0b[01]\+\>/
+syntax match   loxNumber        /\<\d\+\%(\.\d\+\)\?i\?\>/
+" A fractional literal with the suffix is one rejected lexeme.
+syntax match   loxNumberError   /\<\d\+\.\d\+i\>/
 
 " --- Operators ------------------------------------------------------------
 " loxString and loxComment are defined after loxOperator on purpose: at an
 " equal start position the last-defined item wins, so `//` stays a comment and
 " `"` opens a string instead of matching the `/` or bare operator rules.
-syntax match   loxOperator      /[-+*/%!<>=]/
-syntax match   loxOperator      /==\|!=\|>=\|<=\|=>/
+syntax match   loxOperator      /[-+*/%!<>=&|^~]/
+syntax match   loxOperator      />>>\|>>\|<<\|==\|!=\|>=\|<=\|=>/
 syntax match   loxOperator      /\.\.\./
 syntax match   loxOperator      /@/
 
@@ -79,6 +84,7 @@ highlight default link loxTypeName         Type
 highlight default link loxBoolean          Boolean
 highlight default link loxConstant         Constant
 highlight default link loxNumber           Number
+highlight default link loxNumberError      Error
 highlight default link loxOperator         Operator
 highlight default link loxString           String
 highlight default link loxStringEscape     SpecialChar

@@ -239,15 +239,26 @@
 		</dict>
 		<key>numbers</key>
 		<dict>
-			<key>match</key>
-			<string>(?&lt;![a-zA-Z_0-9])[0-9]+(?:\.[0-9]+)?</string>
-			<key>name</key>
-			<string>constant.numeric.lox</string>
+			<key>patterns</key>
+			<array>
+				<dict>
+					<key>match</key>
+					<string>(?&lt;![a-zA-Z_0-9])[0-9]+\.[0-9]+i</string>
+					<key>name</key>
+					<string>invalid.illegal.int-suffix.lox</string>
+				</dict>
+				<dict>
+					<key>match</key>
+					<string>(?&lt;![a-zA-Z_0-9])(?:0x[0-9a-fA-F]+|0b[01]+|[0-9]+(?:\.[0-9]+)?i?)</string>
+					<key>name</key>
+					<string>constant.numeric.lox</string>
+				</dict>
+			</array>
 		</dict>
 		<key>operators</key>
 		<dict>
 			<key>match</key>
-			<string>=&gt;|==|!=|&lt;=|&gt;=|[=+\-*/%&lt;&gt;!]</string>
+			<string>&gt;&gt;&gt;|&gt;&gt;|&lt;&lt;|=&gt;|==|!=|&lt;=|&gt;=|[=+\-*/%&lt;&gt;!&amp;|^~]</string>
 			<key>name</key>
 			<string>keyword.operator.lox</string>
 		</dict>
