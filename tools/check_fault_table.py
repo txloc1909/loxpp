@@ -135,19 +135,17 @@ class Row:
 # deletes its own entry. Each call returns a new dict, so no two rows share
 # one.
 def _int_operator_skip() -> dict[str, str]:
-    # Native passes these rows since #827. The JVM and the bootstrap
-    # interpreter name their own nodes until theirs land.
+    # Native passes these rows since #827, and the JVM backend passes them
+    # since #829. The bootstrap interpreter names its own node until it lands.
     return {
-        JVM: "#829: JVM backend for Int",
         BOOTSTRAP: "#830: bootstrap interpreter for Int",
     }
 
 
 def _int_conversion_skip() -> dict[str, str]:
-    # Native passes these rows since #828. The JVM and the bootstrap
-    # interpreter name their own nodes until theirs land.
+    # Native passes these rows since #828, and the JVM backend passes them
+    # since #829. The bootstrap interpreter names its own node until it lands.
     return {
-        JVM: "#829: JVM backend for Int",
         BOOTSTRAP: "#830: bootstrap interpreter for Int",
     }
 

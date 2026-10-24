@@ -56,6 +56,9 @@ public final class StringifyTest {
 
         checkEquals("true", LoxOps.stringify(true), "stringify(true)");
         checkEquals("false", LoxOps.stringify(false), "stringify(false)");
+        checkEquals("1", LoxOps.stringify(1L), "stringify(Int 1)");
+        checkEquals("9223372036854775807", LoxOps.stringify(Long.MAX_VALUE), "stringify(max Int)");
+        checkEquals("-9223372036854775808", LoxOps.stringify(Long.MIN_VALUE), "stringify(min Int)");
         checkEquals("nil", LoxOps.stringify(null), "stringify(nil)");
         checkEquals("hello", LoxOps.stringify("hello"), "stringify(string)");
 

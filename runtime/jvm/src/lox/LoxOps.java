@@ -246,6 +246,11 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a + (Double)b;
         }
+        // A long sum wraps in two's complement, as spec/04-semantics.md's
+        // operand table requires, and Java's long arithmetic does the same.
+        if (a instanceof Long && b instanceof Long) {
+            return (Long)a + (Long)b;
+        }
         if (a instanceof String && b instanceof String) {
             return (String)a + (String)b;
         }
@@ -266,6 +271,9 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a - (Double)b;
         }
+        if (a instanceof Long && b instanceof Long) {
+            return (Long)a - (Long)b;
+        }
         LoxClosure dunder = findDunder(a, "__sub__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
@@ -282,6 +290,9 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a * (Double)b;
         }
+        if (a instanceof Long && b instanceof Long) {
+            return (Long)a * (Long)b;
+        }
         LoxClosure dunder = findDunder(a, "__mul__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
@@ -297,6 +308,15 @@ public final class LoxOps {
     public static Object divide(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a / (Double)b;
+        }
+        if (a instanceof Long && b instanceof Long) {
+            long divisor = (Long)b;
+            if (divisor == 0L) {
+                throw makeError("DivisionByZeroError", "Division by zero.");
+            }
+            // Math.floorDiv wraps Long.MIN_VALUE / -1 to Long.MIN_VALUE, as
+            // the spec's min-div-neg1 row requires, and never throws there.
+            return Math.floorDiv((Long)a, divisor);
         }
         LoxClosure dunder = findDunder(a, "__div__");
         if (dunder != null) {
@@ -324,6 +344,15 @@ public final class LoxOps {
             }
             return result;
         }
+        if (a instanceof Long && b instanceof Long) {
+            long divisor = (Long)b;
+            if (divisor == 0L) {
+                throw makeError("DivisionByZeroError", "Division by zero.");
+            }
+            // Math.floorMod(Long.MIN_VALUE, -1) is 0, as the spec's
+            // min-mod-neg1 row requires, and never throws there.
+            return Math.floorMod((Long)a, divisor);
+        }
         LoxClosure dunder = findDunder(a, "__mod__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[] {b});
@@ -340,12 +369,78 @@ public final class LoxOps {
         if (a instanceof Double) {
             return -((Double)a);
         }
+        // Negating Long.MIN_VALUE wraps to itself in Java's long arithmetic,
+        // as the spec's neg-min row requires.
+        if (a instanceof Long) {
+            return -((Long)a);
+        }
         LoxClosure dunder = findDunder(a, "__neg__");
         if (dunder != null) {
             return dunder.callAsSelf(a, new Object[0]);
         }
         checkNumber(a);
         throw new AssertionError("checkNumber must throw");
+    }
+
+    // ------------------------------------------------------------------
+    // Bit operators (spec/04-semantics.md, Bit Operators)
+    // ------------------------------------------------------------------
+
+    /** Both operands must be Ints; a bit operator has no operator protocol. */
+    private static void checkInts(Object a, Object b) {
+        if (!(a instanceof Long) || !(b instanceof Long)) {
+            throw makeError("BitwiseTypeError", "Operands must be Ints.");
+        }
+    }
+
+    public static Object bitAnd(Object a, Object b) {
+        checkInts(a, b);
+        return (Long)a & (Long)b;
+    }
+
+    public static Object bitOr(Object a, Object b) {
+        checkInts(a, b);
+        return (Long)a | (Long)b;
+    }
+
+    public static Object bitXor(Object a, Object b) {
+        checkInts(a, b);
+        return (Long)a ^ (Long)b;
+    }
+
+    public static Object bitNot(Object a) {
+        if (!(a instanceof Long)) {
+            throw makeError("BitwiseTypeError", "Operand must be an Int.");
+        }
+        return ~(Long)a;
+    }
+
+    /** The three shifts share the operand-kind and count-range checks. */
+    private static long shiftCount(Object a, Object b) {
+        // The kind of BOTH operands is checked before the range of the count,
+        // so `1i << 64.5` is a kind fault, not a count fault.
+        checkInts(a, b);
+        long count = (Long)b;
+        if (count < 0L || count > 63L) {
+            throw makeError("ShiftCountError",
+                            "Shift count must be an Int from 0i to 63i.");
+        }
+        return count;
+    }
+
+    public static Object shiftLeft(Object a, Object b) {
+        long count = shiftCount(a, b);
+        return (Long)a << (int)(count & 63L);
+    }
+
+    public static Object shiftRight(Object a, Object b) {
+        long count = shiftCount(a, b);
+        return (Long)a >> (int)(count & 63L);
+    }
+
+    public static Object shiftRightUnsigned(Object a, Object b) {
+        long count = shiftCount(a, b);
+        return (Long)a >>> (int)(count & 63L);
     }
 
     // ------------------------------------------------------------------
@@ -362,6 +457,12 @@ public final class LoxOps {
     public static boolean equal(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
             return ((Double)a).doubleValue() == ((Double)b).doubleValue();
+        }
+        // Two Longs compare by value. Their boxes are not the same object
+        // outside the Long cache (-128..127), so an identity test here would
+        // make equal Ints unequal.
+        if (a instanceof Long && b instanceof Long) {
+            return ((Long)a).longValue() == ((Long)b).longValue();
         }
         // __eq__ on the left operand, before the type-based fallthrough, so an
         // Instance that defines it overrides identity equality.
@@ -387,7 +488,13 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return ((Double)a).doubleValue() == ((Double)b).doubleValue();
         }
+        if (a instanceof Long && b instanceof Long) {
+            return ((Long)a).longValue() == ((Long)b).longValue();
+        }
         if (a instanceof Double || b instanceof Double) {
+            return false;
+        }
+        if (a instanceof Long || b instanceof Long) {
             return false;
         }
         if (a instanceof Boolean && b instanceof Boolean) {
@@ -411,6 +518,9 @@ public final class LoxOps {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a > (Double)b;
         }
+        if (a instanceof Long && b instanceof Long) {
+            return (Long)a > (Long)b;
+        }
         if (a instanceof String && b instanceof String) {
             // ISO-8859-1 strings are one char per byte, so compareTo's
             // UTF-16 code-unit order is the byte order spec/04-semantics.md
@@ -432,6 +542,9 @@ public final class LoxOps {
     public static boolean less(Object a, Object b) {
         if (a instanceof Double && b instanceof Double) {
             return (Double)a < (Double)b;
+        }
+        if (a instanceof Long && b instanceof Long) {
+            return (Long)a < (Long)b;
         }
         if (a instanceof String && b instanceof String) {
             return ((String)a).compareTo((String)b) < 0;
@@ -478,7 +591,8 @@ public final class LoxOps {
      * is built, per vm.cpp.
      */
     public static void checkMapKey(Object key) {
-        if (key == null || key instanceof Boolean || key instanceof String) {
+        if (key == null || key instanceof Boolean || key instanceof String ||
+            key instanceof Long) {
             return;
         }
         if (key instanceof Double) {
@@ -530,6 +644,12 @@ public final class LoxOps {
         if (key instanceof Boolean) {
             return (Boolean)key ? 1231 : 1237;
         }
+        // Fold the Int's bits exactly as value.cpp's hashValue does. Without
+        // this branch a Long key would take the Instance path below.
+        if (key instanceof Long) {
+            long bits = (Long)key;
+            return (int)(bits ^ (bits >>> 32));
+        }
         if (key instanceof Double) {
             return foldDouble((Double)key);
         }
@@ -570,7 +690,8 @@ public final class LoxOps {
      * choice.
      */
     static void checkMapKeyForNativeMethod(Object key) {
-        if (key == null || key instanceof Boolean || key instanceof String) {
+        if (key == null || key instanceof Boolean || key instanceof String ||
+            key instanceof Long) {
             return;
         }
         if (key instanceof Double && !Double.isNaN((Double)key)) {
@@ -615,7 +736,14 @@ public final class LoxOps {
             "Right operand of 'in' must be a list, string, or map.");
     }
 
-    private static int sliceIndex(Object v) {
+    private static long sliceIndex(Object v) {
+        if (v instanceof Long) {
+            long n = (Long)v;
+            if (n < 0) {
+                throw new LoxError("Slice index must be non-negative.");
+            }
+            return n;
+        }
         if (!(v instanceof Double)) {
             throw new LoxError("Slice index must be a number.");
         }
@@ -626,7 +754,7 @@ public final class LoxOps {
         if (d < 0.0) {
             throw new LoxError("Slice index must be non-negative.");
         }
-        return (int)d;
+        return (long)d;
     }
 
     /**
@@ -641,13 +769,13 @@ public final class LoxOps {
             }
             throw new LoxError("Slice requires a List or String.");
         }
-        int start = sliceIndex(startVal);
-        int end = sliceIndex(endVal);
+        long start = sliceIndex(startVal);
+        long end = sliceIndex(endVal);
         if (seq instanceof LoxList) {
             List<Object> src = ((LoxList)seq).elements;
             int n = src.size();
-            int s = Math.min(start, n);
-            int e = Math.min(end, n);
+            int s = (int)Math.min(start, n);
+            int e = (int)Math.min(end, n);
             LoxList result = new LoxList();
             if (s < e) {
                 result.elements.addAll(src.subList(s, e));
@@ -656,12 +784,22 @@ public final class LoxOps {
         }
         String str = (String)seq;
         int n = str.length();
-        int s = Math.min(start, n);
-        int e = Math.min(end, n);
+        int s = (int)Math.min(start, n);
+        int e = (int)Math.min(end, n);
         return (s < e) ? str.substring(s, e) : "";
     }
 
     private static int boundedIndex(Object indexVal, int size, String kind) {
+        // An Int is already integral and may be far outside the int range, so
+        // the bounds test runs on the 64-bit value, never on a narrowed one.
+        if (indexVal instanceof Long) {
+            long n = (Long)indexVal;
+            if (n < 0 || n >= size) {
+                throw makeError("IndexOutOfBoundsError",
+                                kind + " index out of bounds.");
+            }
+            return (int)n;
+        }
         if (!(indexVal instanceof Double)) {
             throw makeError("IndexTypeError",
                                 kind + " index must be a number.");
@@ -751,11 +889,19 @@ public final class LoxOps {
             // Enum field indexing is fatal on native (vm.cpp's GET_INDEX
             // uses RAISE_ERROR here, not tryCatchableError) — unlike List/
             // String/Map indexing just above, which is catchable.
+            Object[] payload = ((LoxEnum)collection).payload;
+            if (index instanceof Long) {
+                long n = (Long)index;
+                if (n < 0 || n >= payload.length) {
+                    throw new LoxError("Enum field index " + n +
+                                        " out of range.");
+                }
+                return payload[(int)n];
+            }
             if (!(index instanceof Double)) {
                 throw new LoxError("Enum field index must be a number.");
             }
             double n = (Double)index;
-            Object[] payload = ((LoxEnum)collection).payload;
             // NaN, +-infinity, and a magnitude outside int's range have no
             // well-defined narrowing conversion to int (JLS 5.1.3 sends
             // NaN to 0 and an out-of-range value to Integer.MIN_VALUE/
@@ -1429,6 +1575,11 @@ public final class LoxOps {
         }
         if (v instanceof Boolean) {
             return ((Boolean)v) ? "true" : "false";
+        }
+        // An Int prints its exact decimal digits, never through the Number
+        // format (spec/03-types.md, Canonical String Representation).
+        if (v instanceof Long) {
+            return Long.toString((Long)v);
         }
         if (v instanceof Double) {
             return formatNumber((Double)v);

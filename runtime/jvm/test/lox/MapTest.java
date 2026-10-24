@@ -35,6 +35,16 @@ public final class MapTest {
         map.remove("never-there"); // no-op, matches ObjMap::mapDel on a missing key
         checkEquals(1, map.size(), "removing an absent key is a no-op");
 
+        // An Int key hashes by value and never equals the equal Number key
+        // (spec/03-types.md, Int).
+        map.put(1L, "int-one");
+        checkEquals("int-one", map.get(1L), "an Int key round-trips");
+        checkEquals("neg-zero", map.get(0.0), "an Int key does not replace the Number key");
+        map.put(9223372036854775807L, "max");
+        checkEquals("max", map.get(9223372036854775807L),
+                "an Int key outside the box cache finds its entry");
+        checkEquals(3, map.size(), "the Int and Number keys are distinct entries");
+
         // LinkedHashMap gives insertion order, not the native table's bucket
         // order (PR #97: the gap is
         // legal because spec/03-types.md leaves map order unspecified).

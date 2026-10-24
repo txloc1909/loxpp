@@ -7,6 +7,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -124,6 +125,7 @@ public final class LoxRuntime {
         LoxGlobals globals = new LoxGlobals();
         registerGlobals(globals);
         registerMath(globals);
+        registerInteger(globals);
         registerReflection(globals);
         registerCoroutine(globals);
         registerTask(globals);
@@ -259,7 +261,150 @@ public final class LoxRuntime {
                 }
                 return String.valueOf((char)(int)n);
             }));
+        // spec/05-stdlib.md's int() and float(). A fault of either is a
+        // halting fault on native (tools/check_fault_table.py, FATAL_ROWS),
+        // so each throws a raw LoxError, which no try/catch can catch.
+        globals.define("int",
+                       new LoxNative("int", 1, args -> intValue(args[0])));
+        globals.define(
+            "float", new LoxNative("float", 1, args -> floatValue(args[0])));
         registerOsAccess(globals);
+    }
+
+    // The two ends of the Int range as doubles. 2^63 is exact, so it is the
+    // first Number above the range and -2^63 is the smallest Int itself.
+    private static final double TWO_TO_THE_63 = 9223372036854775808.0;
+    private static final BigInteger INT_MIN_MAGNITUDE =
+        BigInteger.ONE.shiftLeft(63);
+    private static final BigInteger INT_MAX_MAGNITUDE =
+        BigInteger.valueOf(Long.MAX_VALUE);
+    private static final BigInteger MAX_UNSIGNED =
+        BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
+
+    private static boolean isDecimalDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    /**
+     * The String form of int(): an optional '+' or '-' and one or more decimal
+     * digits, nothing else (spec/05-stdlib.md, int). The magnitude may reach
+     * 2^63 only when the sign is negative, so the smallest Int parses and the
+     * same digits with a positive sign do not.
+     */
+    private static Long parseIntString(String text) {
+        int i = 0;
+        boolean negative = false;
+        if (i < text.length() &&
+            (text.charAt(i) == '+' || text.charAt(i) == '-')) {
+            negative = text.charAt(i) == '-';
+            ++i;
+        }
+        if (i == text.length()) {
+            return null;
+        }
+        for (int j = i; j < text.length(); j++) {
+            if (!isDecimalDigit(text.charAt(j))) {
+                return null;
+            }
+        }
+        BigInteger magnitude = new BigInteger(text.substring(i));
+        if (negative) {
+            if (magnitude.compareTo(INT_MIN_MAGNITUDE) > 0) {
+                return null;
+            }
+            return magnitude.negate().longValue();
+        }
+        if (magnitude.compareTo(INT_MAX_MAGNITUDE) > 0) {
+            return null;
+        }
+        return magnitude.longValue();
+    }
+
+    /**
+     * The String form of float(): an optional sign, one or more decimal
+     * digits, and optionally a '.' followed by one or more decimal digits,
+     * nothing else (spec/05-stdlib.md, float). Unlike Double.parseDouble, this
+     * grammar rejects an exponent, a leading '.', and a trailing '.'.
+     */
+    private static Double parseFloatString(String text) {
+        int i = 0;
+        if (i < text.length() &&
+            (text.charAt(i) == '+' || text.charAt(i) == '-')) {
+            ++i;
+        }
+        int firstDigit = i;
+        while (i < text.length() && isDecimalDigit(text.charAt(i))) {
+            ++i;
+        }
+        if (i == firstDigit) {
+            return null;
+        }
+        if (i < text.length() && text.charAt(i) == '.') {
+            ++i;
+            int firstFractionDigit = i;
+            while (i < text.length() && isDecimalDigit(text.charAt(i))) {
+                ++i;
+            }
+            if (i == firstFractionDigit) {
+                return null;
+            }
+        }
+        if (i != text.length()) {
+            return null;
+        }
+        return Double.parseDouble(text);
+    }
+
+    // int(x): an Int gives itself, an integral Number in the Int range gives
+    // the equal Int, and a decimal String parses. It never rounds, so a
+    // fractional Number is a fault (spec/05-stdlib.md, int).
+    private static Object intValue(Object v) {
+        if (v instanceof Long) {
+            return v;
+        }
+        if (v instanceof Double) {
+            double n = (Double)v;
+            // Check the range before the cast: a cast of a NaN, an infinity,
+            // or a Number outside the Int range would clamp silently.
+            if (!Double.isFinite(n) || n != Math.floor(n) ||
+                n < -TWO_TO_THE_63 || n >= TWO_TO_THE_63) {
+                throw new LoxError(
+                    "int() argument must be an integer-valued number in the range of an Int.");
+            }
+            return (long)n;
+        }
+        if (v instanceof String) {
+            Long parsed = parseIntString((String)v);
+            if (parsed == null) {
+                throw new LoxError(
+                    "int() String must be an optional sign and decimal digits in the range of an Int.");
+            }
+            return parsed;
+        }
+        throw new LoxError(
+            "int() argument must be an Int, a Number, or a String.");
+    }
+
+    // float(x): a Number gives itself, an Int gives the nearest double, and a
+    // decimal String parses. The Int conversion rounds to nearest even, as
+    // IEEE 754 and spec/05-stdlib.md, float, require.
+    private static Object floatValue(Object v) {
+        if (v instanceof Double) {
+            return v;
+        }
+        if (v instanceof Long) {
+            return (double)(Long)v;
+        }
+        if (v instanceof String) {
+            Double parsed = parseFloatString((String)v);
+            if (parsed == null) {
+                throw new LoxError(
+                    "float() String must be an optional sign, decimal digits, and an optional fractional part.");
+            }
+            return parsed;
+        }
+        throw new LoxError(
+            "float() argument must be an Int, a Number, or a String.");
     }
 
     // Mirrors src/stdlib/os_api.cpp: args, env, exit, time, sleep, and the
@@ -456,6 +601,95 @@ public final class LoxRuntime {
         globals.define("math", math);
     }
 
+    // Mirrors src/stdlib/integer_module.cpp: the `integer` global object, whose
+    // functions take Ints only and whose unsigned views read the same 64 bits
+    // as an unsigned value. Every fault here is fatal, as on native.
+    private static void registerInteger(LoxGlobals globals) {
+        LoxInstance module = new LoxInstance(new LoxClass("Integer", null));
+        module.fields.put("min_value", Long.MIN_VALUE);
+        module.fields.put("max_value", Long.MAX_VALUE);
+        module.fields.put("abs", new LoxNative("abs", 1, args -> {
+            long x = requireInt(args[0]);
+            return x < 0L ? -x : x; // abs(min_value) wraps to itself
+        }));
+        module.fields.put("min", new LoxNative("min", 2, args -> {
+            long a = requireInt(args[0]);
+            long b = requireInt(args[1]);
+            return Math.min(a, b);
+        }));
+        module.fields.put("max", new LoxNative("max", 2, args -> {
+            long a = requireInt(args[0]);
+            long b = requireInt(args[1]);
+            return Math.max(a, b);
+        }));
+        module.fields.put("udiv", new LoxNative("udiv", 2, args -> {
+            long a = requireInt(args[0]);
+            long b = requireInt(args[1]);
+            if (b == 0L) {
+                throw new LoxError(
+                    "integer.udiv() divisor must not be zero.");
+            }
+            return Long.divideUnsigned(a, b);
+        }));
+        module.fields.put("urem", new LoxNative("urem", 2, args -> {
+            long a = requireInt(args[0]);
+            long b = requireInt(args[1]);
+            if (b == 0L) {
+                throw new LoxError(
+                    "integer.urem() divisor must not be zero.");
+            }
+            return Long.remainderUnsigned(a, b);
+        }));
+        module.fields.put("ult", new LoxNative("ult", 2, args -> {
+            long a = requireInt(args[0]);
+            long b = requireInt(args[1]);
+            return Long.compareUnsigned(a, b) < 0;
+        }));
+        module.fields.put("ustr", new LoxNative("ustr", 1, args -> {
+            return Long.toUnsignedString(requireInt(args[0]));
+        }));
+        module.fields.put("parse_unsigned",
+                          new LoxNative("parse_unsigned", 1,
+                                        args -> parseUnsigned(args[0])));
+        globals.define("integer", module);
+    }
+
+    private static long requireInt(Object v) {
+        if (!(v instanceof Long)) {
+            throw new LoxError("integer function argument must be an Int.");
+        }
+        return (Long)v;
+    }
+
+    /**
+     * The String form of parse_unsigned(): one or more decimal digits, no sign
+     * and nothing else, with a value of at most 2^64 - 1 (spec/05-stdlib.md,
+     * integer).
+     */
+    private static Object parseUnsigned(Object v) {
+        if (!(v instanceof String)) {
+            throw new LoxError(
+                "integer.parse_unsigned() argument must be a String.");
+        }
+        String text = (String)v;
+        if (text.isEmpty()) {
+            throw new LoxError(
+                "integer.parse_unsigned() String must be decimal digits.");
+        }
+        for (int i = 0; i < text.length(); i++) {
+            if (!isDecimalDigit(text.charAt(i))) {
+                throw new LoxError(
+                    "integer.parse_unsigned() String must be decimal digits.");
+            }
+        }
+        BigInteger magnitude = new BigInteger(text);
+        if (magnitude.compareTo(MAX_UNSIGNED) > 0) {
+            throw new LoxError(
+                "integer.parse_unsigned() String is above 2^64 - 1.");
+        }
+        return magnitude.longValue();
+    }
+
     // Mirrors src/stdlib/reflect_api.cpp: type/fields/methods/getField/
     // setField/hasField/callMethod, the introspection surface over
     // LoxInstance's field table and LoxClass's method table. `callMethod` on
@@ -600,6 +834,9 @@ public final class LoxRuntime {
         }
         if (v instanceof Boolean) {
             return "Boolean";
+        }
+        if (v instanceof Long) {
+            return "Int";
         }
         if (v instanceof Double) {
             return "Number";
