@@ -39,11 +39,16 @@ syntax keyword loxConstant      nil
 " --- Numbers ----------------------------------------------------------------
 " DIGIT+ ( "." DIGIT+ )? is a Number. DIGIT+ "i", 0x..., and 0b... are Ints
 " (spec/01-lexical.md). No exponent form.
-syntax match   loxNumber        /\<0x[0-9a-fA-F]\+\>/
-syntax match   loxNumber        /\<0b[01]\+\>/
-syntax match   loxNumber        /\<\d\+\%(\.\d\+\)\?i\?\>/
+"
+" No pattern ends with `\>`: a keyword or a name may follow a literal with
+" no space (`1iin`, `0x1or`). Vim gives the same start byte to the pattern
+" that is defined last, so the decimal pattern comes first, the specific hex
+" and binary forms next, and the rejected fractional form last.
+syntax match   loxNumber        /\<\d\+\%(\.\d\+\)\?i\?/
+syntax match   loxNumber        /\<0x[0-9a-fA-F]\+/
+syntax match   loxNumber        /\<0b[01]\+/
 " A fractional literal with the suffix is one rejected lexeme.
-syntax match   loxNumberError   /\<\d\+\.\d\+i\>/
+syntax match   loxNumberError   /\<\d\+\.\d\+i/
 
 " --- Operators ------------------------------------------------------------
 " loxString and loxComment are defined after loxOperator on purpose: at an

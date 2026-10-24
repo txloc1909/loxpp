@@ -340,6 +340,10 @@ jobs:
                 || { echo "FAIL: checkhealth did not see loxpp-lsp"; exit 1; }
               grep -q "parser .loxpp. is compiled" /tmp/health.txt \
                 || { echo "FAIL: checkhealth did not see the compiled parser"; exit 1; }
+              # The fallback regex syntax has no parser to catch a token
+              # boundary, so read the scope of each Int form from a real
+              # Neovim session.
+              python3 tools/check_nvim_syntax.py
               tools/check_nvim_plugin.sh
               tools/check_nvim_plugin.sh --fallback
               # Prove the LSP-attach check can fail: a server that exits at once.
