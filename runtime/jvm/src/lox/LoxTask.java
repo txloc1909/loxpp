@@ -55,7 +55,8 @@ public final class LoxTask {
      */
     static boolean isMessage(Object v) {
         if (v == null || v instanceof Boolean || v instanceof Double ||
-            v instanceof String || v instanceof LoxTask) {
+            v instanceof Long || v instanceof String ||
+            v instanceof LoxTask) {
             return true;
         }
         return v instanceof LoxEnum && ((LoxEnum)v).message;

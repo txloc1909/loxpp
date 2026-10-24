@@ -44,6 +44,39 @@ public final class RuntimeStdlibTest {
                 .call(new Object[] {Double.NaN, 5.0}), "math.min ignores a NaN operand");
         check((Double) ((LoxInstance) math).fields.get("pi") > 3.14, "math.pi is present");
 
+        // int()/float() and the integer module (spec/05-stdlib.md).
+        checkEquals("Int", call(globals, "type", 1L), "type(Int)");
+        checkEquals(5L, call(globals, "int", 5.0), "int(5.0)");
+        checkEquals(5L, call(globals, "int", 5L), "int(Int) is itself");
+        checkEquals(42L, call(globals, "int", "42"), "int(String)");
+        checkThrows(() -> call(globals, "int", 1.5), LoxError.class, "int() rejects a fraction");
+        checkThrows(() -> call(globals, "int", "0x10"), LoxError.class, "int() rejects a hex String");
+        checkThrows(() -> call(globals, "int", "9223372036854775808"), LoxError.class,
+                "int(String) rejects a value above the range");
+        checkEquals(3.0, call(globals, "float", 3L), "float(Int)");
+        checkEquals(2.5, call(globals, "float", "2.5"), "float(String)");
+        checkThrows(() -> call(globals, "float", "1e5"), LoxError.class, "float() rejects an exponent");
+        checkThrows(() -> call(globals, "float", "5."), LoxError.class, "float() rejects a trailing point");
+
+        Object integer = globals.get("integer");
+        check(integer instanceof LoxInstance, "integer is an instance");
+        checkEquals(Long.MAX_VALUE, ((LoxInstance) integer).fields.get("max_value"), "integer.max_value");
+        checkEquals(Long.MIN_VALUE, ((LoxInstance) integer).fields.get("min_value"), "integer.min_value");
+        checkEquals(Long.MIN_VALUE, callField((LoxInstance) integer, "abs", Long.MIN_VALUE),
+                "integer.abs(min) wraps");
+        checkEquals(-1L, callField((LoxInstance) integer, "udiv", -1L, 1L), "integer.udiv reads unsigned");
+        checkEquals(1L, callField((LoxInstance) integer, "urem", -1L, 2L), "integer.urem reads unsigned");
+        check(Boolean.TRUE.equals(callField((LoxInstance) integer, "ult", 1L, -1L)),
+                "integer.ult reads unsigned");
+        checkEquals("18446744073709551615", callField((LoxInstance) integer, "ustr", -1L),
+                "integer.ustr(-1)");
+        checkEquals(-1L, callField((LoxInstance) integer, "parse_unsigned", "18446744073709551615"),
+                "integer.parse_unsigned(max)");
+        checkThrows(() -> callField((LoxInstance) integer, "abs", 1.0), LoxError.class,
+                "integer.abs rejects a Number");
+        checkThrows(() -> callField((LoxInstance) integer, "udiv", 1L, 0L), LoxError.class,
+                "integer.udiv rejects a zero divisor");
+
         checkOpenRoundtrip(globals);
         checkOsAccess(globals);
 
