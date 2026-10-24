@@ -308,8 +308,11 @@ TokenType Scanner::identifierType() {
 Token Scanner::consumeNumber() {
     // A `0x` or `0b` literal is an Int with no suffix. The prefix is lower
     // case only, so `0XFF` is the NUMBER `0` and the name `XFF`
-    // (spec/01-lexical.md, Examples of the literal rules).
-    if (m_start[0] == '0' && (peek() == 'x' || peek() == 'b')) {
+    // (spec/01-lexical.md, Examples of the literal rules). The base needs one
+    // digit of its own, or the longest match is the NUMBER `0` and the prefix
+    // starts a name: `0x` alone is `0` then `x`.
+    if (m_start[0] == '0' && (peek() == 'x' || peek() == 'b') &&
+        (peek() == 'x' ? isHexDigit(peekNext()) : isBinaryDigit(peekNext()))) {
         const bool hex = peek() == 'x';
         advance(); // the base letter
         while (hex ? isHexDigit(peek()) : isBinaryDigit(peek())) {

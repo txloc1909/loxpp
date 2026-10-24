@@ -256,6 +256,10 @@ lexeme, and any other token as its lexeme. `Result` is `valid`, or the row of
 | `0x1in [1i]` | `INT 0x1` `in` `[` `INT 1i` `]` | valid |
 | `0b1in [1i]` | `INT 0b1` `in` `[` `INT 1i` `]` | valid |
 | `case 0x1if t` | `case` `INT 0x1` `if` `IDENTIFIER t` | valid |
+| `1iin [1i]` | `INT 1i` `in` `[` `INT 1i` `]` | valid |
+| `case 1iif t` | `case` `INT 1i` `if` `IDENTIFIER t` | valid |
+| `1iand true` | `INT 1i` `and` `true` | valid |
+| `0x1or false` | `INT 0x1` `or` `false` | valid |
 | `9223372036854775808i` | `INT 9223372036854775808i` | `decimal-range` |
 | `99999999999999999999i` | `INT 99999999999999999999i` | `decimal-range` |
 | `-(9223372036854775808i)` | `-` `(` `INT 9223372036854775808i` `)` | `decimal-range` |
@@ -276,6 +280,8 @@ lexeme, and any other token as its lexeme. `Result` is `valid`, or the row of
 | `0XFF` | `NUMBER 0` `IDENTIFIER XFF` | `suffix-boundary` |
 | `0xFFi` | `INT 0xFF` `IDENTIFIER i` | `suffix-boundary` |
 | `0b1i` | `INT 0b1` `IDENTIFIER i` | `suffix-boundary` |
+| `0xFFand true` | `INT 0xFFa` `IDENTIFIER nd` `true` | `suffix-boundary` |
+| `0x` | `NUMBER 0` `IDENTIFIER x` | `suffix-boundary` |
 
 ---
 

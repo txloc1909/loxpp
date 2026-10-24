@@ -1,0 +1,16 @@
+// The `0x` prefix needs one digit of its base (spec/01-lexical.md, Number and
+// Int Literals). Without one the longest match is the NUMBER `0` and the name
+// `x`, so this line is a name directly after a literal (row suffix-boundary).
+// A scanner that takes the prefix greedily reads an Int with no digits.
+//
+// A static error rejects the program: a non-zero exit status, and nothing
+// runs, so nothing prints (spec/README.md, Conformance). The first line
+// prints `ran`, so an implementation that finds the error only when it runs
+// the program prints `ran` and fails this probe.
+
+print "ran";
+print 0x;
+
+// STATIC-ERROR
+// STATUS: error
+// COVERS: literal suffix-boundary
