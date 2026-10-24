@@ -1,5 +1,0 @@
-if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_worker_gc_baf07d53_tests.cmake")
-  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_worker_gc_baf07d53_tests.cmake")
-else()
-  add_test(test_worker_gc_NOT_BUILT test_worker_gc_NOT_BUILT)
-endif()

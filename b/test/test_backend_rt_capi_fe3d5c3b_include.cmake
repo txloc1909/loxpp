@@ -1,5 +1,0 @@
-if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_rt_capi_fe3d5c3b_tests.cmake")
-  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_backend_rt_capi_fe3d5c3b_tests.cmake")
-else()
-  add_test(test_backend_rt_capi_NOT_BUILT test_backend_rt_capi_NOT_BUILT)
-endif()

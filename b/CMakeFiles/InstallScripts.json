@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/cmake_install.cmake",
-		"/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

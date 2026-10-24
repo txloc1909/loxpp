@@ -1,5 +1,0 @@
-if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_handler_depth_invariant_7681aeb1_tests.cmake")
-  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_handler_depth_invariant_7681aeb1_tests.cmake")
-else()
-  add_test(test_handler_depth_invariant_NOT_BUILT test_handler_depth_invariant_NOT_BUILT)
-endif()

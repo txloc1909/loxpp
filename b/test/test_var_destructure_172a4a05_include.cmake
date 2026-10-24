@@ -1,5 +1,0 @@
-if(EXISTS "/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_var_destructure_172a4a05_tests.cmake")
-  include("/home/loctx/personal/loxpp/.claude/worktrees/loxpp-test-token-roundtrip/b/test/test_var_destructure_172a4a05_tests.cmake")
-else()
-  add_test(test_var_destructure_NOT_BUILT test_var_destructure_NOT_BUILT)
-endif()
