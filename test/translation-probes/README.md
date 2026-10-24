@@ -203,7 +203,7 @@ each has an off-the-shelf solution.
 | `176_int_suffix_detached_rejected` | the suffix is part of the token: a space before it is a syntax error | none (spec probe of the Int kind, static error) |
 | `177_int_equality_kinds` | `==` and `!=` on Ints compare by value, never across kinds; the constant pool keeps `1` and `1i` apart; `in` and `remove` follow `==` | none (spec probe of the Int kind, N2 #826) |
 | `178_int_map_keys` | an Int is a valid map key that hashes by value: `1` and `1i` are two keys, and two Ints of one value are one key | none (spec probe of the Int kind, N2 #826) |
-| `179_int_printing` | an Int prints as its exact decimal digits, alone and nested in a List, a Map and an Enum; `type` names the kind | none (spec probe of the Int kind, N2 #826) |
+| `179_int_printing` | an Int prints as its exact decimal digits, alone and nested in a List, a Map and an Enum; a Number prints its shortest form, which is the Int's text below `2^53` and can differ above it; `type` names the kind | none (spec probe of the Int kind, N2 #826) |
 | `180_int_match_patterns` | a literal pattern of `match` follows `==`: `1i` matches the Int and not the Number, for inline and heap-held Ints | none (spec probe of the Int kind, N2 #826) |
 | `181_int_messages` | an Int is always a message, inline or heap-held, alone or as a field of an Enum, and it arrives equal to what was sent | none (spec probe of the Int kind, N2 #826) |
 | `182_int_boxed_gc` | Ints that an implementation may hold in the heap survive collections and stay equal to their literals | none (spec probe of the Int kind, N2 #826) |
