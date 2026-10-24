@@ -1,12 +1,12 @@
 #include "globals.h"
 #include "stdlib_context.h"
 #include "../container_objects.h"
+#include "../decimal_number.h"
 #include "../exec_objects.h"
 #include "../object.h"
 #include "../value.h"
 
 #include <bit>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <ctime>
@@ -14,7 +14,6 @@
 #include <limits>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 static Value clockNative(int /*argCount*/, Value* /*args*/) {
     return from<Number>(static_cast<double>(std::clock()) / CLOCKS_PER_SEC);
@@ -107,19 +106,14 @@ static bool parseIntString(std::string_view text, Int* out) {
 // The String form of float(): an optional sign, one or more decimal digits,
 // and optionally a '.' followed by one or more decimal digits, nothing else
 // (spec/05-stdlib.md, float). The grammar is checked before the parse, so
-// float("1e5") faults even though strtod() would accept it. std::from_chars
-// reads the digits itself, so the process locale's decimal point never
-// decides where the fraction starts.
+// float("1e5") faults even though strtod() would accept it.
 static bool parseFloatString(std::string_view text, Number* out) {
     std::size_t i = 0;
-    const bool negative = i < text.size() && text[i] == '-';
     if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
         ++i;
     }
     const std::size_t firstDigit = i;
-    bool integerPartHasNonZero = false;
     for (; i < text.size() && text[i] >= '0' && text[i] <= '9'; ++i) {
-        integerPartHasNonZero = integerPartHasNonZero || text[i] != '0';
     }
     if (i == firstDigit) {
         return false;
@@ -137,30 +131,7 @@ static bool parseFloatString(std::string_view text, Number* out) {
     if (i != text.size()) {
         return false;
     }
-    const char* begin = text.data();
-    if (*begin == '+') {
-        ++begin; // std::from_chars takes '-' but not '+'
-    }
-    const char* end = text.data() + text.size();
-    Number parsed = 0.0;
-    const auto result =
-        std::from_chars(begin, end, parsed, std::chars_format::fixed);
-    if (result.ec == std::errc::result_out_of_range) {
-        // A decimal with a non-zero digit before the point is too large for a
-        // double and rounds to an infinity; one with digits only after it is
-        // too small and rounds to zero.
-        const Number large = std::numeric_limits<Number>::infinity();
-        if (integerPartHasNonZero) {
-            *out = negative ? -large : large;
-        } else {
-            *out = negative ? -0.0 : 0.0;
-        }
-        return true;
-    }
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return false;
-    }
-    *out = parsed;
+    *out = nearestDoubleFromDecimal(text);
     return true;
 }
 
