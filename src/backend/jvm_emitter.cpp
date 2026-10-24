@@ -406,6 +406,12 @@ void emitConstant(Emitter& e, const DecodedInstruction& in) {
         e.b.emit("invokestatic java/lang/Double/longBitsToDouble(J)D", 0);
         e.b.emit("invokestatic java/lang/Double/valueOf(D)Ljava/lang/Double;",
                  -1);
+    } else if (is<Int>(v)) {
+        // `ldc2_w` of a long pushes 2 words; Long.valueOf(J) consumes them
+        // and pushes one reference, so the net effect is +1, the same as a
+        // Number constant. as<Int> reads both the inline and the boxed form.
+        e.b.emit("ldc2_w " + std::to_string(as<Int>(v)), +2);
+        e.b.emit("invokestatic java/lang/Long/valueOf(J)Ljava/lang/Long;", -1);
     } else if (isString(v)) {
         e.b.emit("ldc \"" +
                      escapeJasminString(std::string(asObjString(v)->chars)) +
@@ -2512,6 +2518,43 @@ void emitBody(Emitter& e, bool isScript,
         case Op::MODULO:
             emitModulo(e);
             break;
+        // The bit operators have no operator protocol, so each is a plain
+        // call to its LoxOps helper (spec/04-semantics.md, Bit Operators).
+        case Op::BIT_AND:
+            e.b.emit("invokestatic lox/LoxOps/bitAnd(Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
+        case Op::BIT_OR:
+            e.b.emit("invokestatic lox/LoxOps/bitOr(Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
+        case Op::BIT_XOR:
+            e.b.emit("invokestatic lox/LoxOps/bitXor(Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
+        case Op::BIT_NOT:
+            e.b.emit("invokestatic lox/LoxOps/bitNot(Ljava/lang/Object;)"
+                     "Ljava/lang/Object;",
+                     0);
+            break;
+        case Op::SHIFT_LEFT:
+            e.b.emit("invokestatic lox/LoxOps/shiftLeft(Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
+        case Op::SHIFT_RIGHT:
+            e.b.emit("invokestatic lox/LoxOps/shiftRight(Ljava/lang/Object;"
+                     "Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
+        case Op::SHIFT_RIGHT_UNSIGNED:
+            e.b.emit("invokestatic lox/LoxOps/shiftRightUnsigned(Ljava/lang/"
+                     "Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                     -1);
+            break;
         case Op::EQUAL:
             emitEqual(e);
             break;
@@ -2846,6 +2889,11 @@ bool sameConstant(const Value& a, const Value& b) {
     if (is<Number>(a) && is<Number>(b)) {
         return std::bit_cast<std::uint64_t>(as<Number>(a)) ==
                std::bit_cast<std::uint64_t>(as<Number>(b));
+    }
+    // A boxed Int would otherwise compare by address, and the two compiles
+    // make separate boxes, so this must compare by value.
+    if (is<Int>(a) && is<Int>(b)) {
+        return as<Int>(a) == as<Int>(b);
     }
     return a == b;
 }
