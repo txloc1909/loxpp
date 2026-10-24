@@ -26,8 +26,9 @@ same value. An integer-valued Number is still a Number: it is never an
 [Int](#int), and the two kinds do not mix.
 
 Special IEEE 754 values (positive/negative infinity, NaN) may arise from an
-arithmetic operation, and an infinity also from a `NUMBER` literal whose
-decimal is above the largest finite double
+arithmetic operation. A `NUMBER` literal also gives an infinity when its
+decimal is nearer to infinity than to the largest finite double, and zero when
+its decimal is nearer to zero than to the smallest subnormal
 ([§01-lexical](01-lexical.md#number-and-int-literals)). Their behavior follows
 IEEE 754.
 

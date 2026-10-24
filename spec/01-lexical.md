@@ -180,17 +180,26 @@ or exponential notations.
 All Numbers are represented as IEEE 754 double-precision floating point.
 
 **Range of a Number.** A `NUMBER` token denotes the nearest IEEE 754
-double-precision value to the decimal that its digits spell. A tie goes to the
-value with an even last bit. A decimal above the largest finite double denotes
-positive infinity, and one below the smallest subnormal denotes zero. No
-`NUMBER` token is a static error, whatever its value, so the smallest subnormal
-is writable. Each row is an example of the rule, not a rule of its own.
+double-precision value to the decimal that its digits spell, and a tie goes to
+the value with an even last bit. The nearest value is taken over the whole
+range of the format, so a decimal that is nearer to positive infinity than to
+the largest finite double denotes positive infinity, and a decimal that is
+nearer to zero than to the smallest subnormal denotes zero. No `NUMBER` token
+is a static error, whatever its value.
 
-| Source | Value |
-|---|---|
-| `0.` followed by 323 zeros and a `5` | `5e-324`, the smallest subnormal |
-| `0.` followed by 400 zeros and a `1` | `0` |
-| 400 `9`s | `inf` |
+Each row of the table is an example of that rule, not a rule of its own.
+`tools/check_number_literal_range.py` proves that a spec probe holds each row
+and that the probe's check line agrees with the row.
+
+| Case | Source | Value |
+|---|---|---|
+| `largest-finite` | the 309 digits of the largest finite double | `1.7976931348623157e+308` |
+| `above-largest-finite` | `17976931348623158` followed by 292 zeros, which is nearer to the largest finite double than to infinity | `1.7976931348623157e+308` |
+| `overflow` | `179769313486231581` followed by 291 zeros, which is nearer to infinity than to the largest finite double | `inf` |
+| `far-above-range` | 400 `9`s | `inf` |
+| `smallest-subnormal` | `0.` followed by 323 zeros and a `5` | `5e-324` |
+| `below-smallest-subnormal` | `0.` followed by 323 zeros and a `49`, which is nearer to the smallest subnormal than to zero | `5e-324` |
+| `far-below-range` | `0.` followed by 400 zeros and a `1` | `0` |
 
 An `INT` is an Int literal, a signed 64-bit integer (see
 [§03-types](03-types.md#int)). `BADINT` is in the grammar so that the longest
