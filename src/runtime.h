@@ -265,6 +265,16 @@ class Runtime {
     Value pop() { return *--stackTop; }
     Value peek(int distance) { return stackTop[-1 - distance]; }
 
+    // Pushes an Int, inline when it fits and as one heap box when it does not
+    // (docs/decisions/integer-kind.md, Native layout).
+    void pushInt(Int value) {
+        if (intFitsInline(value)) {
+            push(inlineIntValue(value));
+        } else {
+            push(Value{static_cast<Obj*>(m_mm.create<ObjInt>(value))});
+        }
+    }
+
     // Compiled code (backend/rt_capi.cpp) writes its own stack slots
     // directly at base + 8h instead of going through push(), so it needs a
     // way to tell this Runtime where its own top now is before any call
@@ -731,6 +741,19 @@ class Runtime {
     OpResult opMultiply(int stopAtFrameCount);
     OpResult opDivide(int stopAtFrameCount);
     OpResult opModulo(int stopAtFrameCount);
+    // Bit operators: Ints only, and no operator protocol (spec/04-semantics.md,
+    // Bit Operators). The VM's fast path handles two inline Ints; every other
+    // operand pair lands here, including a boxed Int.
+    OpResult opBitAnd(int stopAtFrameCount);
+    OpResult opBitOr(int stopAtFrameCount);
+    OpResult opBitXor(int stopAtFrameCount);
+    OpResult opBitNot(int stopAtFrameCount);
+    OpResult opShiftLeft(int stopAtFrameCount);
+    OpResult opShiftRight(int stopAtFrameCount);
+    OpResult opShiftRightUnsigned(int stopAtFrameCount);
+    // The shared body of the three shift opcodes above.
+    enum class ShiftKind : std::uint8_t { Left, Right, RightUnsigned };
+    OpResult opShift(ShiftKind kind, int stopAtFrameCount);
     OpResult opNegate(int stopAtFrameCount);
     OpResult opLess(int stopAtFrameCount);
     OpResult opGreater(int stopAtFrameCount);

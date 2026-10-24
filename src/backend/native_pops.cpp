@@ -31,6 +31,20 @@ std::string opName(Op op) {
         return "DIVIDE";
     case Op::MODULO:
         return "MODULO";
+    case Op::BIT_AND:
+        return "BIT_AND";
+    case Op::BIT_OR:
+        return "BIT_OR";
+    case Op::BIT_XOR:
+        return "BIT_XOR";
+    case Op::BIT_NOT:
+        return "BIT_NOT";
+    case Op::SHIFT_LEFT:
+        return "SHIFT_LEFT";
+    case Op::SHIFT_RIGHT:
+        return "SHIFT_RIGHT";
+    case Op::SHIFT_RIGHT_UNSIGNED:
+        return "SHIFT_RIGHT_UNSIGNED";
     case Op::NOT:
         return "NOT";
     case Op::LEN:
@@ -151,6 +165,7 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
         return 0;
     // One operand read.
     case Op::NEGATE:
+    case Op::BIT_NOT:
     case Op::NOT:
     case Op::LEN:
     case Op::STR:
@@ -176,6 +191,12 @@ std::optional<int> nativePops(Op op, const DecodedInstruction& in) {
     case Op::MULTIPLY:
     case Op::DIVIDE:
     case Op::MODULO:
+    case Op::BIT_AND:
+    case Op::BIT_OR:
+    case Op::BIT_XOR:
+    case Op::SHIFT_LEFT:
+    case Op::SHIFT_RIGHT:
+    case Op::SHIFT_RIGHT_UNSIGNED:
     case Op::GET_INDEX:
     case Op::IN:
     case Op::SET_PROPERTY:  // reads the instance AND the value; pops both,

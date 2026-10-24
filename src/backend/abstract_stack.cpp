@@ -213,6 +213,7 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
 
     // Pop 1, push 1: value replaced in place.
     case Op::NEGATE:
+    case Op::BIT_NOT:
     case Op::NOT:
     case Op::LEN:
     case Op::STR:
@@ -250,6 +251,12 @@ StackEffect stackEffect(const DecodedInstruction& ins) {
     case Op::MULTIPLY:
     case Op::DIVIDE:
     case Op::MODULO:
+    case Op::BIT_AND:
+    case Op::BIT_OR:
+    case Op::BIT_XOR:
+    case Op::SHIFT_LEFT:
+    case Op::SHIFT_RIGHT:
+    case Op::SHIFT_RIGHT_UNSIGNED:
     case Op::GET_INDEX:
     case Op::IN:
     case Op::SET_PROPERTY: // pop val,instance; push val (P2 shuffle)

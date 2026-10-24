@@ -144,6 +144,20 @@ int disassembleInstruction(const Chunk& chunk, const MemoryManager& mm,
         return simpleInstruction("DIVIDE", offset, out, color);
     case Op::MODULO:
         return simpleInstruction("MODULO", offset, out, color);
+    case Op::BIT_AND:
+        return simpleInstruction("BIT_AND", offset, out, color);
+    case Op::BIT_OR:
+        return simpleInstruction("BIT_OR", offset, out, color);
+    case Op::BIT_XOR:
+        return simpleInstruction("BIT_XOR", offset, out, color);
+    case Op::BIT_NOT:
+        return simpleInstruction("BIT_NOT", offset, out, color);
+    case Op::SHIFT_LEFT:
+        return simpleInstruction("SHIFT_LEFT", offset, out, color);
+    case Op::SHIFT_RIGHT:
+        return simpleInstruction("SHIFT_RIGHT", offset, out, color);
+    case Op::SHIFT_RIGHT_UNSIGNED:
+        return simpleInstruction("SHIFT_RIGHT_UNSIGNED", offset, out, color);
     case Op::NOT:
         return simpleInstruction("NOT", offset, out, color);
     case Op::LEN:

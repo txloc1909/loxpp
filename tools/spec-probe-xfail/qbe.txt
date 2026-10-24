@@ -13,14 +13,9 @@
 # A name with no spec probe behind it is an error.
 
 # ---- probes of the Int kind (tracking issue #824) ----
-166_int_literal_limits.lox  N8 #832: QBE backend
-186_int_arithmetic.lox  N8 #832: QBE backend
-187_int_division.lox  N8 #832: QBE backend
-188_int_comparison.lox  N8 #832: QBE backend
 189_int_bit_logic.lox  N8 #832: QBE backend
 190_int_shifts.lox  N8 #832: QBE backend
 191_int_precedence.lox  N8 #832: QBE backend
-192_int_edge_cases.lox  N8 #832: QBE backend
 193_int_mixed_kind_faults.lox  N8 #832: QBE backend
 194_int_operator_faults.lox  N8 #832: QBE backend
 195_int_bit_operator_no_protocol.lox  N8 #832: QBE backend
