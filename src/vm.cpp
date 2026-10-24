@@ -438,25 +438,30 @@ InterpretResult VM::run(int stopAtFrameCount) {
                     Int value = as<Int>(m_rt.peek(1));
                     m_rt.pop();
                     m_rt.pop();
-                    value = op == Op::SHIFT_LEFT
-                                ? intShiftLeft(value, count)
-                                : (op == Op::SHIFT_RIGHT
-                                       ? intShiftRight(value, count)
-                                       : intShiftRightUnsigned(value, count));
+                    if (op == Op::SHIFT_LEFT) {
+                        value = intShiftLeft(value, count);
+                    } else if (op == Op::SHIFT_RIGHT) {
+                        value = intShiftRight(value, count);
+                    } else {
+                        value = intShiftRightUnsigned(value, count);
+                    }
                     m_rt.pushInt(value);
                     break;
                 }
             }
             // A count outside the range, or a boxed operand, takes the slow
             // path, where the fault is raised with the frame's own line.
-            if (auto ret = dispatchOp([&] {
-                    return op == Op::SHIFT_LEFT
-                               ? m_rt.opShiftLeft(stopAtFrameCount)
-                               : (op == Op::SHIFT_RIGHT
-                                      ? m_rt.opShiftRight(stopAtFrameCount)
-                                      : m_rt.opShiftRightUnsigned(
-                                            stopAtFrameCount));
-                })) {
+            auto shiftSlowPath = [&] {
+                switch (op) {
+                case Op::SHIFT_LEFT:
+                    return m_rt.opShiftLeft(stopAtFrameCount);
+                case Op::SHIFT_RIGHT:
+                    return m_rt.opShiftRight(stopAtFrameCount);
+                default:
+                    return m_rt.opShiftRightUnsigned(stopAtFrameCount);
+                }
+            };
+            if (auto ret = dispatchOp(shiftSlowPath)) {
                 return *ret;
             }
             break;

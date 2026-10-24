@@ -15,21 +15,6 @@
 # A name with no spec probe behind it is an error.
 
 # ---- probes of the Int kind (tracking issue #824) ----
-166_int_literal_limits.lox  N3 #827: native operators
-186_int_arithmetic.lox  N3 #827: native operators
-187_int_division.lox  N3 #827: native operators
-188_int_comparison.lox  N3 #827: native operators
-189_int_bit_logic.lox  N3 #827: native operators
-190_int_shifts.lox  N3 #827: native operators
-191_int_precedence.lox  N3 #827: native operators
-192_int_edge_cases.lox  N3 #827: native operators
-193_int_mixed_kind_faults.lox  N3 #827: native operators
-194_int_operator_faults.lox  N3 #827: native operators
-195_int_bit_operator_no_protocol.lox  N3 #827: native operators
-197_int_wrap_churn.lox  N3 #827: native operators
-198_int_flag_set.lox  N3 #827: native operators
-199_int_bitboard.lox  N3 #827: native operators
-200_int_hash_mix_splitmix.lox  N3 #827: native operators
 201_int_conversions.lox  N4 #828: native conversions, the integer module, and indexing
 202_int_index.lox  N4 #828: native conversions, the integer module, and indexing
 203_integer_module.lox  N4 #828: native conversions, the integer module, and indexing

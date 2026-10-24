@@ -139,11 +139,12 @@ def _int_skip(native_node: str, jvm_node: str, bootstrap_node: str) -> dict[str,
 
 
 def _int_operator_skip() -> dict[str, str]:
-    return _int_skip(
-        "#827: native operators on Int",
-        "#829: JVM backend for Int",
-        "#830: bootstrap interpreter for Int",
-    )
+    # Native passes these rows since #827. The JVM and the bootstrap
+    # interpreter name their own nodes until theirs land.
+    return {
+        JVM: "#829: JVM backend for Int",
+        BOOTSTRAP: "#830: bootstrap interpreter for Int",
+    }
 
 
 def _int_conversion_skip() -> dict[str, str]:
