@@ -642,6 +642,53 @@ TEST(ToolingParserSpans, GetExprAndSuperNameSpans) {
     EXPECT_EQ(thisGet->object->kind, ExprKind::This);
 }
 
+TEST(ToolingParserPrecedence, BitOperatorsFollowTheSpecTable) {
+    // `a & b == 0i` groups as `(a & b) == 0i` (spec/02-syntax.md rows 4 to 9).
+    const Program prog = parse("a & b == 0i;\n");
+    ASSERT_EQ(prog.body.size(), 1U);
+    const auto* stmt = dynamic_cast<const ExprStmt*>(prog.body[0].get());
+    ASSERT_NE(stmt, nullptr);
+    const auto* eq = dynamic_cast<const BinaryExpr*>(stmt->expr.get());
+    ASSERT_NE(eq, nullptr);
+    EXPECT_EQ(eq->op, TokenType::EQUAL_EQUAL);
+    const auto* bitAnd = dynamic_cast<const BinaryExpr*>(eq->left.get());
+    ASSERT_NE(bitAnd, nullptr);
+    EXPECT_EQ(bitAnd->op, TokenType::AMPERSAND);
+
+    // The rows from lowest to highest: `|`, `^`, `&`, `<<`, `+`, `*`.
+    const Program chain = parse("a | b ^ c & d << e + f * g;\n");
+    ASSERT_EQ(chain.body.size(), 1U);
+    const auto* chainStmt = dynamic_cast<const ExprStmt*>(chain.body[0].get());
+    ASSERT_NE(chainStmt, nullptr);
+    const auto* bitOr = dynamic_cast<const BinaryExpr*>(chainStmt->expr.get());
+    ASSERT_NE(bitOr, nullptr);
+    EXPECT_EQ(bitOr->op, TokenType::PIPE);
+    const auto* bitXor = dynamic_cast<const BinaryExpr*>(bitOr->right.get());
+    ASSERT_NE(bitXor, nullptr);
+    EXPECT_EQ(bitXor->op, TokenType::CARET);
+    const auto* bitAnd2 = dynamic_cast<const BinaryExpr*>(bitXor->right.get());
+    ASSERT_NE(bitAnd2, nullptr);
+    EXPECT_EQ(bitAnd2->op, TokenType::AMPERSAND);
+    const auto* shift = dynamic_cast<const BinaryExpr*>(bitAnd2->right.get());
+    ASSERT_NE(shift, nullptr);
+    EXPECT_EQ(shift->op, TokenType::LESS_LESS);
+    const auto* sum = dynamic_cast<const BinaryExpr*>(shift->right.get());
+    ASSERT_NE(sum, nullptr);
+    EXPECT_EQ(sum->op, TokenType::PLUS);
+    const auto* product = dynamic_cast<const BinaryExpr*>(sum->right.get());
+    ASSERT_NE(product, nullptr);
+    EXPECT_EQ(product->op, TokenType::STAR);
+
+    // `~` is a prefix operator, not a binary one.
+    const Program tilde = parse("~a;\n");
+    ASSERT_EQ(tilde.body.size(), 1U);
+    const auto* tildeStmt = dynamic_cast<const ExprStmt*>(tilde.body[0].get());
+    ASSERT_NE(tildeStmt, nullptr);
+    const auto* unary = dynamic_cast<const UnaryExpr*>(tildeStmt->expr.get());
+    ASSERT_NE(unary, nullptr);
+    EXPECT_EQ(unary->op, TokenType::TILDE);
+}
+
 TEST(ToolingParserSpans, TwoDotRunDoesNotParseAsGet) {
     // `o..x` lexes as o DOT DOT x; the parser must not recover it into a
     // GetExpr the way `o.x` would. Only the bare identifier survives.

@@ -227,3 +227,36 @@ print 1 i;
     (number)
     (ERROR
       (identifier))))
+
+================================================================================
+Bit operator precedence
+================================================================================
+
+var p = a | b ^ c & d << e + f * g;
+var q = x & m == 0i;
+
+---
+
+(source_file
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (identifier)
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (identifier)
+              (binary_expression
+                (identifier)
+                (identifier))))))))
+  (variable_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (int))))
