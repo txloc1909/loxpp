@@ -253,6 +253,10 @@ TEST_F(ProfilerTest, CoroutineSuspendResumeKeepsProfileConsistent) {
 // ---------------------------------------------------------------------------
 TEST_F(ProfilerTest, SuspendedCoroutineFunctionMergedIntoReport) {
     VM vm;
+    // The printed report must list YIELD too: it sits past index 63, so a
+    // report loop with a literal bound silently drops it even though the
+    // table holds its count (see report()'s use of opcodeTable.size()).
+    testing::internal::CaptureStderr();
     InterpretResult result = vm.interpret(R"(
         fun gen() {
             yield 1;
@@ -260,7 +264,12 @@ TEST_F(ProfilerTest, SuspendedCoroutineFunctionMergedIntoReport) {
         var co = coroutine.create(gen);
         co.resume();
     )");
+    std::string report = testing::internal::GetCapturedStderr();
     ASSERT_EQ(result, InterpretResult::OK);
+
+    EXPECT_NE(report.find("  YIELD "), std::string::npos)
+        << "the report must print YIELD when the table counts it:\n"
+        << report;
 
     const ProfilerData& data = vm.profilerData();
     const FunctionStats* gen = findFunction(data, "gen");

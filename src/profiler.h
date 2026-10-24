@@ -48,7 +48,8 @@ struct GcStats {
 
 struct ProfilerData {
     // Per-opcode dispatch counts. Indexed by static_cast<uint8_t>(Op).
-    // Array size 64 is larger than the current opcode count (42) for headroom.
+    // kOpcodeCount comes from LOXPP_FOR_EACH_OP, so the table grows with the
+    // enum. Every reader iterates opcodeTable.size(), not a literal.
     std::array<OpcodeStats, kOpcodeCount> opcodeTable{};
 
     // Per-function stats. Key is ObjFunction* (stable for program lifetime).
@@ -334,11 +335,11 @@ inline void ProfilerData::report(std::FILE* out) const {
     // Build sorted list of (count, index) pairs.
     struct OpcodeEntry {
         uint64_t count;
-        int index;
+        std::size_t index;
     };
     std::vector<OpcodeEntry> entries;
     uint64_t totalOps = 0;
-    for (int i = 0; i < 64; ++i) {
+    for (std::size_t i = 0; i < opcodeTable.size(); ++i) {
         if (opcodeTable[i].count > 0) {
             entries.push_back({opcodeTable[i].count, i});
             totalOps += opcodeTable[i].count;
