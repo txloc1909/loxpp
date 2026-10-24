@@ -1,9 +1,9 @@
 // An Int prints as its exact decimal digits, with a `-` sign when negative and
 // never in an exponent form (spec/03-types.md, Canonical String
 // Representation). A Number prints in the shortest form of its own rule, so
-// `1000000` and `1000000i` print the same text. The two part above `2^53`,
-// where the Number's shortest form can differ from the Int's exact digits:
-// docs/decisions/number-print-format.md, "The Int parity probe". `type`
+// `1000000` and `1000000i` print the same text. The two can part above
+// `2^53`, where the Number's shortest form can differ from the Int's exact
+// digits: docs/decisions/number-print-format.md, "The Int parity probe". `type`
 // returns `"Int"` (spec/05-stdlib.md).
 
 print [1i, 2i, 3i];
