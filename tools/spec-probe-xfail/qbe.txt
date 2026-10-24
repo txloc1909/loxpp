@@ -13,17 +13,7 @@
 # A name with no spec probe behind it is an error.
 
 # ---- probes of the Int kind (tracking issue #824) ----
-165_int_literals.lox  N8 #832: QBE backend
 166_int_literal_limits.lox  N8 #832: QBE backend
-177_int_equality_kinds.lox  N8 #832: QBE backend
-178_int_map_keys.lox  N8 #832: QBE backend
-179_int_printing.lox  N8 #832: QBE backend
-180_int_match_patterns.lox  N8 #832: QBE backend
-181_int_messages.lox  N8 #832: QBE backend
-182_int_boxed_gc.lox  N8 #832: QBE backend
-183_int_fault_chr_int.lox  N8 #832: QBE backend
-184_int_fault_math_int.lox  N8 #832: QBE backend
-185_int_truthiness.lox  N8 #832: QBE backend
 186_int_arithmetic.lox  N8 #832: QBE backend
 187_int_division.lox  N8 #832: QBE backend
 188_int_comparison.lox  N8 #832: QBE backend
@@ -34,7 +24,6 @@
 193_int_mixed_kind_faults.lox  N8 #832: QBE backend
 194_int_operator_faults.lox  N8 #832: QBE backend
 195_int_bit_operator_no_protocol.lox  N8 #832: QBE backend
-196_int_operator_result_check.lox  N8 #832: QBE backend
 197_int_wrap_churn.lox  N8 #832: QBE backend
 198_int_flag_set.lox  N8 #832: QBE backend
 199_int_bitboard.lox  N8 #832: QBE backend
