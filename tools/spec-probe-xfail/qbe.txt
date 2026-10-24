@@ -11,16 +11,3 @@
 # A listed probe must fail. A listed probe that passes fails the gate until
 # its line is deleted, so the node that makes a probe pass deletes the line.
 # A name with no spec probe behind it is an error.
-
-# ---- probes of the Int kind (tracking issue #824) ----
-189_int_bit_logic.lox  N8 #832: QBE backend
-190_int_shifts.lox  N8 #832: QBE backend
-191_int_precedence.lox  N8 #832: QBE backend
-193_int_mixed_kind_faults.lox  N8 #832: QBE backend
-194_int_operator_faults.lox  N8 #832: QBE backend
-195_int_bit_operator_no_protocol.lox  N8 #832: QBE backend
-197_int_wrap_churn.lox  N8 #832: QBE backend
-198_int_flag_set.lox  N8 #832: QBE backend
-199_int_bitboard.lox  N8 #832: QBE backend
-200_int_hash_mix_splitmix.lox  N8 #832: QBE backend
-204_int_hash_mix_fnv.lox  N8 #832: QBE backend

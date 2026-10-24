@@ -143,6 +143,29 @@ TEST(QbeEmitter, ConstantEmbedsRawDoubleBitsAtItsOwnHeight) {
     EXPECT_NE(ssa.find("storel 4607182418800017408"), std::string::npos);
 }
 
+// A CONSTANT whose value is an Int must not take the double branch above: an
+// inline Int already carries INT_TAG, so reading its bits as a double would
+// store a double that is not that Int. Both Int forms read the constant back
+// through rt_constant_at instead (N8, #832).
+TEST(QbeEmitter, IntConstantTakesTheRtConstantAtPathNotTheDoubleBranch) {
+    // 1i is inside the inline range, so the constant pool holds the inline
+    // tagged word itself.
+    std::string ssa = emitScriptFrom("print 1i;");
+    EXPECT_NE(ssa.find("call $rt_constant_at"), std::string::npos)
+        << "an inline Int constant must be read back, not re-encoded";
+    EXPECT_EQ(ssa.find("storel 4607182418800017408"), std::string::npos)
+        << "an Int must never be stored as the double 1.0";
+}
+
+TEST(QbeEmitter, BoxedIntConstantTakesTheRtConstantAtPathNotTheDoubleBranch) {
+    // 10^18 is outside the inline range, so makeIntValue boxes it in an
+    // ObjInt the startup step already built.
+    std::string ssa = emitScriptFrom("print 1000000000000000000i;");
+    EXPECT_NE(ssa.find("call $rt_constant_at"), std::string::npos)
+        << "a boxed Int constant must be read back, not re-encoded";
+    EXPECT_EQ(ssa.find("storel 4607182418800017408"), std::string::npos);
+}
+
 TEST(QbeEmitter, TerminatorBlocksEndInATerminator) {
     // QBE allows a block to fall through to the next one (it inserts the
     // edge), so not every `@label` needs its own terminator — the S8
@@ -228,6 +251,61 @@ TEST(QbeEmitter, ModuloHasNoInlineFastPath) {
     std::string ssa = emitScriptFrom("print 5 % 2;");
     EXPECT_NE(ssa.find("call $rt_op_modulo"), std::string::npos);
     EXPECT_EQ(ssa.find(" =d rem "), std::string::npos);
+}
+
+// ---------------------------------------------------------------------
+// N8 (#832): the Int bit operators. One case per opcode: each must lower to
+// its own rt_capi wrapper rather than reach the `default: unsupported(...)`
+// arm, and none may grow an inline fast path (Q5 — only plain
+// double-double cases are inlined). The subject is Int-only, so any ` =d `
+// instruction in the emitted function would be an inline double path this
+// opcode must not have.
+// ---------------------------------------------------------------------
+
+TEST(QbeEmitter, BitAndLowersToRtOpBitAndWithNoInlineFastPath) {
+    std::string ssa = emitScriptFrom("print 1i & 2i;");
+    EXPECT_NE(ssa.find("call $rt_op_bit_and"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, BitOrLowersToRtOpBitOrWithNoInlineFastPath) {
+    std::string ssa = emitScriptFrom("print 1i | 2i;");
+    EXPECT_NE(ssa.find("call $rt_op_bit_or"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, BitXorLowersToRtOpBitXorWithNoInlineFastPath) {
+    std::string ssa = emitScriptFrom("print 1i ^ 2i;");
+    EXPECT_NE(ssa.find("call $rt_op_bit_xor"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, BitNotLowersToRtOpBitNotWithNoInlineFastPath) {
+    std::string ssa = emitScriptFrom("print ~1i;");
+    EXPECT_NE(ssa.find("call $rt_op_bit_not"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, ShiftLeftLowersToRtOpShiftLeftWithNoInlineFastPath) {
+    std::string ssa = emitScriptFrom("print 1i << 2i;");
+    EXPECT_NE(ssa.find("call $rt_op_shift_left"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, ShiftRightLowersToRtOpShiftRightWithNoInlineFastPath) {
+    // 0xFFFFFFFFFFFFFFF8 is -8i as a 64-bit pattern. A hex INT literal takes
+    // no suffix, and writing `-8i` here would add NEGATE's own inline ` =d
+    // neg ` to the same function and blur the assertion below.
+    std::string ssa = emitScriptFrom("print 0xFFFFFFFFFFFFFFF8 >> 1i;");
+    EXPECT_NE(ssa.find("call $rt_op_shift_right(l"), std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
+}
+
+TEST(QbeEmitter, ShiftRightUnsignedLowersToRtOpShiftRightUnsigned) {
+    std::string ssa = emitScriptFrom("print 0xFFFFFFFFFFFFFFFF >>> 63i;");
+    EXPECT_NE(ssa.find("call $rt_op_shift_right_unsigned(l"),
+              std::string::npos);
+    EXPECT_EQ(ssa.find(" =d "), std::string::npos);
 }
 
 TEST(QbeEmitter, ReturnSetsTopAndReturnsZero) {

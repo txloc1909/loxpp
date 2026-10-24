@@ -390,6 +390,35 @@ int rt_op_negate(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opNegate(stopAtFrameCount); });
 }
 
+int rt_op_bit_and(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opBitAnd(stopAtFrameCount); });
+}
+
+int rt_op_bit_or(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opBitOr(stopAtFrameCount); });
+}
+
+int rt_op_bit_xor(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opBitXor(stopAtFrameCount); });
+}
+
+int rt_op_bit_not(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opBitNot(stopAtFrameCount); });
+}
+
+int rt_op_shift_left(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opShiftLeft(stopAtFrameCount); });
+}
+
+int rt_op_shift_right(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt, [&] { return rt->opShiftRight(stopAtFrameCount); });
+}
+
+int rt_op_shift_right_unsigned(Runtime* rt, int stopAtFrameCount) noexcept {
+    return rtGuard(rt,
+                   [&] { return rt->opShiftRightUnsigned(stopAtFrameCount); });
+}
+
 int rt_op_less(Runtime* rt, int stopAtFrameCount) noexcept {
     return rtGuard(rt, [&] { return rt->opLess(stopAtFrameCount); });
 }

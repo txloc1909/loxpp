@@ -234,6 +234,17 @@ int rt_op_multiply(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_divide(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_modulo(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_negate(Runtime* rt, int stopAtFrameCount) noexcept;
+// The Int bit operators (docs/decisions/integer-kind.md). A bit operator has
+// no operator protocol and no reflected form, so each wrapper runs only the
+// kind check, the shift-count range check (counts only) and a 64-bit
+// operation — the emitter has no inline fast path for any of them (Q5).
+int rt_op_bit_and(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_bit_or(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_bit_xor(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_bit_not(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_shift_left(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_shift_right(Runtime* rt, int stopAtFrameCount) noexcept;
+int rt_op_shift_right_unsigned(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_less(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_greater(Runtime* rt, int stopAtFrameCount) noexcept;
 int rt_op_equal(Runtime* rt, int stopAtFrameCount) noexcept;
