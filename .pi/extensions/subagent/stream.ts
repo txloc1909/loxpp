@@ -38,12 +38,18 @@ export interface StreamState {
   model?: string;
   stopReason?: string;
   errorMessage?: string;
+  /**
+   * True between `agent_end` and the next `agent_start`. An interactive child
+   * in this state waits at its prompt for the person at its keyboard.
+   */
+  idle: boolean;
 }
 
 export function emptyState(): StreamState {
   return {
     messages: [],
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+    idle: false,
   };
 }
 
@@ -90,6 +96,14 @@ function applyLine(state: StreamState, line: string): boolean {
 /** `message_end` carries a finished message; `tool_result_end` a tool result. */
 function applyEvent(state: StreamState, event: unknown): boolean {
   const record = asRecord(event);
+  // The run boundaries tell the parent whether the child is working or waits at
+  // its prompt, which is what an interactive window is for.
+  if (record.type === "agent_start" || record.type === "agent_end") {
+    const idle = record.type === "agent_end";
+    if (state.idle === idle) return false;
+    state.idle = idle;
+    return true;
+  }
   if (record.type !== "message_end" && record.type !== "tool_result_end") return false;
   const message = asRecord(record.message);
   if (typeof message.role !== "string") return false;
@@ -119,7 +133,7 @@ function applyEvent(state: StreamState, event: unknown): boolean {
 }
 
 /** The child's answer: the last text of its last assistant message. */
-export function finalOutput(state: StreamState): string {
+export function finalOutput(state: Pick<StreamState, "messages">): string {
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const message = state.messages[i];
     if (message.role !== "assistant") continue;
@@ -131,7 +145,7 @@ export function finalOutput(state: StreamState): string {
 }
 
 /** Last tool call the child made, for the parent's progress line. */
-export function lastToolCall(state: StreamState): { name: string; args: Record<string, unknown> } | null {
+export function lastToolCall(state: Pick<StreamState, "messages">): { name: string; args: Record<string, unknown> } | null {
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const message = state.messages[i];
     if (message.role !== "assistant") continue;

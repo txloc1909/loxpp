@@ -62,3 +62,36 @@ test("childArgs omits a system prompt flag when there is no prompt", () => {
   assert.equal(args.includes("--append-system-prompt"), false);
   assert.equal(args.at(-1), "Task: x");
 });
+
+test("an interactive child keeps its terminal and loads the event mirror", () => {
+  const args = childArgs(agent({ model: "p/fast" }), "find auth", "/tmp/p.md", { model: "p/m", thinking: "high" }, {
+    interactive: true,
+    mirrorPath: "/ext/mirror.ts",
+  });
+  assert.deepEqual(args, [
+    "--name",
+    "subagent: scout",
+    "--extension",
+    "/ext/mirror.ts",
+    "--model",
+    "p/fast",
+    "--append-system-prompt",
+    "/tmp/p.md",
+    "Task: find auth",
+  ]);
+  // Print mode would end the child as soon as the task is done, and the parent
+  // would read its events from stdout, where an interactive child draws the TUI.
+  for (const flag of ["-p", "--mode", "--no-session"]) assert.equal(args.includes(flag), false, flag);
+});
+
+test("an interactive child without a mirror path still runs, with no event file", () => {
+  const args = childArgs(agent(), "x", undefined, {}, { interactive: true });
+  assert.equal(args.includes("--extension"), false);
+  assert.deepEqual(args.slice(0, 2), ["--name", "subagent: scout"]);
+  assert.equal(args.at(-1), "Task: x");
+});
+
+test("a print-mode child is unchanged", () => {
+  const args = childArgs(agent(), "x", undefined, {}, { interactive: false, mirrorPath: "/ext/mirror.ts" });
+  assert.deepEqual(args, ["--mode", "json", "-p", "--no-session", "Task: x"]);
+});

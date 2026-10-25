@@ -28,6 +28,18 @@ const listenOn = process.env.KITTY_LISTEN_ON ?? "";
 const listWindows = (): Promise<{ code: number; stdout: string; stderr: string }> =>
   runProcess(listWindowsArgv(listenOn));
 
+/**
+ * The window that runs this test: the test opens its splits beside that window,
+ * so it must not touch a tab that belongs to anyone else.
+ */
+function parentWindowId(listing: string): string {
+  const own = process.env.KITTY_WINDOW_ID;
+  if (own && windowIds(listing).includes(own)) return own;
+  const first = windowIds(listing)[0];
+  assert.ok(first, "the kitty instance has at least one window");
+  return first;
+}
+
 /** Tab id that holds a window, for placement assertions. */
 function tabOf(listing: string, windowId: string): number | null {
   const osWindows = JSON.parse(listing) as Array<{ id: number; tabs: Array<{ id: number; windows: Array<{ id: number }> }> }>;
@@ -42,8 +54,7 @@ function tabOf(listing: string, windowId: string): number | null {
 test("a real kitty window runs the child and closes afterwards", { skip: !live && "set LOXPP_SUBAGENT_LIVE=1" }, async () => {
   const listing = await listWindows();
   assert.equal(listing.code, 0, listing.stderr);
-  const parentWindow = windowIds(listing.stdout)[0];
-  assert.ok(parentWindow, "the kitty instance has at least one window");
+  const parentWindow = parentWindowId(listing.stdout);
 
   const cwd = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-live-"));
   try {
@@ -80,7 +91,7 @@ test("a real kitty window runs the child and closes afterwards", { skip: !live &
 
 test("the subagent window is a split in the parent's tab, not a new OS window", { skip: !live && "set LOXPP_SUBAGENT_LIVE=1" }, async () => {
   const listing = await listWindows();
-  const parentWindow = windowIds(listing.stdout)[0];
+  const parentWindow = parentWindowId(listing.stdout);
   const osWindowsBefore = JSON.parse(listing.stdout).length;
 
   const cwd = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-live-"));
@@ -105,6 +116,75 @@ test("the subagent window is a split in the parent's tab, not a new OS window", 
     assert.equal(tabOf(after.stdout, run.windowId), tabOf(after.stdout, parentWindow), "the child is in the parent's tab");
 
     await runProcess(closeWindowArgv(run.windowId, listenOn));
+  } finally {
+    await fs.promises.rm(cwd, { recursive: true, force: true });
+  }
+});
+
+/** The id of the window whose title holds the marker, or null while it is absent. */
+function windowByTitle(listing: string, marker: string): string | null {
+  const osWindows = JSON.parse(listing) as Array<{
+    tabs: Array<{ windows: Array<{ id: number; title?: string }> }>;
+  }>;
+  for (const osWindow of osWindows) {
+    for (const tab of osWindow.tabs) {
+      for (const win of tab.windows) {
+        if (typeof win.title === "string" && win.title.includes(marker)) return String(win.id);
+      }
+    }
+  }
+  return null;
+}
+
+async function waitForWindow(marker: string, timeoutMs = 5000): Promise<string> {
+  const until = Date.now() + timeoutMs;
+  while (Date.now() < until) {
+    const listing = await listWindows();
+    if (listing.code === 0) {
+      const id = windowByTitle(listing.stdout, marker);
+      if (id) return id;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`no kitty window titled with ${marker} appeared within ${timeoutMs} ms`);
+}
+
+test("a person types into an interactive child's window", { skip: !live && "set LOXPP_SUBAGENT_LIVE=1" }, async () => {
+  const listing = await listWindows();
+  assert.equal(listing.code, 0, listing.stderr);
+  const parentWindow = parentWindowId(listing.stdout);
+
+  const marker = `loxpp-input-${process.pid}-${Date.now()}`;
+  const typed = `typed from the keyboard ${Date.now()}`;
+  const cwd = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-live-"));
+  try {
+    const running = runInKittyWindow({
+      session: { windowId: parentWindow, listenOn },
+      cwd,
+      title: `pi subagent: ${marker}`,
+      header: [],
+      // The child reads the keyboard exactly as pi's TUI does, and proves that
+      // its window is a live terminal rather than a log sink.
+      command: ["/bin/sh", "-c", 'IFS= read -r line; printf "%s" "$line" > typed.txt'],
+      env: {},
+      hold: false,
+      keepFocus: true,
+      interactive: true,
+      signal: undefined,
+      onProgress: () => {},
+    });
+
+    const windowId = await waitForWindow(marker);
+    const to = [`--to=${listenOn}`];
+    const sent = await runProcess(["kitten", "@", ...to, "send-text", `--match=id:${windowId}`, typed]);
+    assert.equal(sent.code, 0, sent.stderr);
+    const entered = await runProcess(["kitten", "@", ...to, "send-key", `--match=id:${windowId}`, "enter"]);
+    assert.equal(entered.code, 0, entered.stderr);
+
+    const run = await running;
+    assert.equal(run.exitCode, 0, run.stderr);
+    const received = await fs.promises.readFile(path.join(cwd, "typed.txt"), "utf8");
+    assert.equal(received, typed, "the characters a person typed reached the child");
   } finally {
     await fs.promises.rm(cwd, { recursive: true, force: true });
   }
