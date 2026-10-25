@@ -28,11 +28,20 @@ cmake --preset debug
 cmake --build build
 ctest --test-dir build --output-on-failure -j$(nproc)`;
 
+// The debug preset's sanitizer flags live in CMAKE_CXX_FLAGS, which the
+// release preset does not set. A cache written by an earlier debug gate in the
+// same build/ therefore survives `cmake --preset release`, and every object
+// keeps -fsanitize=address,undefined while the release linker flags lose the
+// sanitizer runtime: a QBE program's own plain `cc` link then fails on undefined
+// __asan_* symbols. Clear the value so a release gate is a release build no
+// matter which gate configured the directory first.
+const RELEASE_CONFIGURE = `cmake --preset release -DCMAKE_CXX_FLAGS=`;
+
 const BACKEND_SCRIPT = `set -e
 cd /workspace
 tools/build_lox_rt.sh
 tools/check_managed_toolchains.sh
-cmake --preset release
+${RELEASE_CONFIGURE}
 cmake --build build
 ctest --test-dir build --output-on-failure -j$(nproc)
 # The differential phase is the one value this gate cannot guess: it needs a
@@ -162,7 +171,7 @@ fi`,
 
 const QBE_SCRIPT = `set -e
 cd /workspace
-cmake --preset release
+${RELEASE_CONFIGURE}
 cmake --build build
 ${QBE_GATE_STEPS.map((step) => step.script).join("\n")}`;
 

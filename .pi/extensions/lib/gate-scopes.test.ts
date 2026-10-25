@@ -94,7 +94,7 @@ test("the qbe plan names the QBE image, the release preset, and every step", () 
   assert.equal(plan.image, "loxpp-dev-qbe");
   assert.equal(GATE_IMAGES.qbe, plan.image, "the preflight image is the image the gate runs");
 
-  const head = "set -e\ncd /workspace\ncmake --preset release\ncmake --build build\n";
+  const head = "set -e\ncd /workspace\ncmake --preset release -DCMAKE_CXX_FLAGS=\ncmake --build build\n";
   assert.ok(plan.script.startsWith(head), "the qbe gate builds release before it checks");
 
   // One build ahead of the steps covers every target CI builds per step, so a
@@ -104,6 +104,21 @@ test("the qbe plan names the QBE image, the release preset, and every step", () 
     const found = plan.script.indexOf(step.script, at);
     assert.notEqual(found, -1, `the qbe gate omits step "${step.name}"`);
     at = found + step.script.length;
+  }
+});
+
+test("a release scope clears a cached debug sanitizer flag", () => {
+  // AGENTS.md's task loop builds the debug preset first, so a release gate in
+  // the same worktree sees a build/ the debug preset configured. The debug
+  // preset's -fsanitize=address,undefined lives in CMAKE_CXX_FLAGS, which the
+  // release preset does not set, so it survives the reconfigure; the QBE
+  // program's own plain `cc` link then fails on undefined __asan_* symbols.
+  for (const scope of ["backend", "qbe"] as const) {
+    const configure = gatePlan(scope)
+      .script.split("\n")
+      .find((line) => line.startsWith("cmake --preset release"));
+    assert.ok(configure, `${scope} configures the release preset`);
+    assert.match(configure, /-DCMAKE_CXX_FLAGS=$/, `${scope} clears the cached sanitizer flags`);
   }
 });
 
