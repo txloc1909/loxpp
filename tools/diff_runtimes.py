@@ -79,11 +79,14 @@ A probe may sit on both lists at once, which is what a native regression under
 a consumer that is also behind looks like. The oracle entry then decides when
 it is the one that explains the run (the other runner passes, native does not)
 and reports AHEAD; otherwise the consumer entry decides, with XPASS when both
-runs pass and XFAIL when they do not. A listed probe that times out reports
-XFAIL when the consumer lists it, with both reasons on the line, because a run
-that produced no output for one side cannot be graded as AHEAD. No reason a
-list gives is dropped, and the overlap is not an error: refusing it would
-block a state that is real.
+runs pass and XFAIL when they do not. Every list that graded the probe puts its
+reason on the line, and a line that answers an entry names the file that can
+drop it, so no graded reason is dropped and the overlap is not an error:
+refusing it would block a state that is real.
+
+A probe that times out is not graded at all. Its line names the side that did
+not finish, with that side's reason when a list gives one, and claims nothing
+about the other side.
 
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
@@ -519,26 +522,42 @@ def main() -> None:
                 exempted += 1
                 continue
         input_file = lox_file.with_suffix(".input")
+        # Each side runs in its own try, so a timeout can name the side that did
+        # not finish. A line that named the wrong side, or repeated a list's
+        # reason for a side it never graded, would be a claim the run cannot
+        # support.
+        timeout_side = None
+        timeout_reason = None
         try:
             native_out, native_err, native_status = run_program(
                 [args.native, str(lox_file)], input_file, args.timeout, raise_native_stack=True
             )
-            other_out, other_err, other_status = run_program(
-                [args.other_runner, str(lox_file)], input_file, args.timeout
-            )
-        except RunTimeout as exc:
+        except RunTimeout:
+            timeout_side = "native"
+            timeout_reason = oracle_xfail.get(lox_file.name)
+            native_out, native_err, native_status = "", "", None
+        if timeout_side is None:
+            try:
+                other_out, other_err, other_status = run_program(
+                    [args.other_runner, str(lox_file)], input_file, args.timeout
+                )
+            except RunTimeout:
+                timeout_side = "the other runner"
+                timeout_reason = xfail.get(lox_file.name)
+                other_out, other_err, other_status = "", "", None
+
+        if timeout_side is not None:
+            # Nothing was graded: one side produced no output, so neither list
+            # can be answered. Name the side, with its own list's reason when a
+            # list gives one for it.
+            detail = f"{timeout_side} did not finish in {args.timeout:.0f}s"
+            if timeout_reason:
+                detail += f"; {timeout_reason}"
             if lox_file.name in xfail:
-                # A timeout leaves one side without output, so AHEAD is not
-                # decidable here. The consumer entry still grades the run, and
-                # an oracle entry on the same probe adds its reason instead of
-                # being dropped.
-                reasons = [xfail[lox_file.name]]
-                if lox_file.name in oracle_xfail:
-                    reasons.append(f"native: {oracle_xfail[lox_file.name]}")
-                print(f"XFAIL       {lox_file}  (timeout: {exc}; {'; '.join(reasons)})")
+                print(f"XFAIL       {lox_file}  (timeout: {detail})")
                 xfailed += 1
                 continue
-            print(f"DIVERGE     {lox_file}  (timeout: {exc})")
+            print(f"DIVERGE     {lox_file}  (timeout: {detail})")
             diverged += 1
             continue
 
@@ -555,15 +574,24 @@ def main() -> None:
             # regression under a consumer that is behind too), so neither list
             # may simply swallow the other.
             if listed_oracle and consumer_passes and not native_passes:
-                print(f"AHEAD       {lox_file}  (native: {oracle_xfail[lox_file.name]})")
+                detail = f"native: {oracle_xfail[lox_file.name]}"
+                if listed_consumer:
+                    detail += f"; the consumer passes it, so {args.xfail} can drop its line"
+                print(f"AHEAD       {lox_file}  ({detail})")
                 ahead += 1
                 continue
             if listed_consumer:
                 if consumer_passes and native_passes:
-                    print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
+                    detail = f"both runs pass it now: delete its line from {args.xfail}"
+                    if listed_oracle:
+                        detail += f" and from {args.oracle_xfail}"
+                    print(f"XPASS       {lox_file}  ({detail})")
                     xpassed += 1
                 else:
-                    print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
+                    reasons = [xfail[lox_file.name]]
+                    if listed_oracle:
+                        reasons.append(f"native: {oracle_xfail[lox_file.name]}")
+                    print(f"XFAIL       {lox_file}  ({'; '.join(reasons)})")
                     xfailed += 1
                 continue
             # Listed only as an oracle entry, and not AHEAD: the ordinary

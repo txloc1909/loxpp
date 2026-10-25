@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Seven cases, each on an explicit program list, so no corpus is walked:
+Nine cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -22,18 +22,20 @@ Seven cases, each on an explicit program list, so no corpus is walked:
   6. a malformed probe in the run is a clean exit 2 with a message, not a
      Python traceback, which would read as a divergence of the whole run;
   7. a probe on BOTH lists reports AHEAD when native's gap is the reason a
-     reader needs, and still reports XFAIL when it is not;
-  8. a probe on both lists that times out reports XFAIL with both reasons on
-     the line, because a side that produced no output cannot be graded AHEAD.
+     reader needs, and states that the consumer line is now stale;
+  8. a probe on both lists that both sides fail reports XFAIL with BOTH
+     reasons, so neither list's reason is dropped;
+  9. a probe on both lists that times out names the side that did not finish,
+     with that side's reason only, and claims nothing about the other side.
 
 Cases 1 to 6 run native against itself, so they need no managed toolchain and
-no runtime jar. Cases 7 and 8 use a stub script as the other runner, because
-they need one side to pass, or to hang, where native does not.
+no runtime jar. Cases 7 to 9 use a stub script as a runner, because they need
+one side to pass, to fail, or to hang where the other side does not.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all eight cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all nine cases hold, 1 with a report per failed case otherwise,
 and 2 when the probe this script needs is missing.
 """
 
@@ -305,10 +307,33 @@ def main() -> int:
             f"stdout {out.strip()!r}",
         )
 
-        # Case 8: both lists, and a side that never finishes. A run without
-        # output cannot be graded AHEAD, so the consumer entry still decides,
-        # and the oracle entry adds its reason to the same line instead of
-        # being dropped.
+        # Case 8: both lists, and both sides fail the probe. Neither list's
+        # reason may be dropped: the line names the consumer's and native's.
+        failing_stub = work / "failing_runner.sh"
+        failing_stub.write_text('#!/bin/sh\n# Fails the probe on purpose.\nexit 1\n')
+        failing_stub.chmod(0o755)
+        code, out, err = run(
+            args.native,
+            [both_probe],
+            [("--xfail", consumer_list), ("--oracle-xfail", oracle_list)],
+            runner=str(failing_stub),
+        )
+        expects(
+            failures,
+            "both lists, both sides fail",
+            "XFAIL" in out,
+            f"did not report XFAIL: exit {code}, stdout {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "both lists, both sides fail",
+            "consumer is behind" in out and "native: native regressed" in out,
+            f"dropped a graded reason: expected both on the line, got {out.strip()!r}",
+        )
+
+        # Case 9: both lists, and a side that never finishes. The run grades
+        # nothing, so it must name the side that did not finish, carry only that
+        # side's reason, and claim nothing about the other side.
         slow_stub = work / "slow_runner.sh"
         slow_stub.write_text('#!/bin/sh\n# Never finishes within the timeout below.\nsleep 30\n')
         slow_stub.chmod(0o755)
@@ -321,16 +346,37 @@ def main() -> int:
         )
         expects(
             failures,
-            "a timeout on both lists",
-            "XFAIL" in out and "timeout" in out,
-            f"did not report XFAIL for the timeout: exit {code}, "
+            "the other runner times out",
+            "XFAIL" in out and "the other runner did not finish" in out,
+            f"did not name the side that timed out: exit {code}, stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "the other runner times out",
+            "consumer is behind" in out and "native regressed" not in out,
+            f"claimed a reason for the side that finished: {out.strip()!r}",
+        )
+
+        code, out, err = run(
+            str(slow_stub),
+            [both_probe],
+            [("--xfail", consumer_list), ("--oracle-xfail", oracle_list)],
+            runner=args.native,
+            timeout=1,
+        )
+        expects(
+            failures,
+            "native times out",
+            "XFAIL" in out and "native did not finish" in out,
+            f"did not name native as the side that timed out: exit {code}, "
             f"stdout {out.strip()!r}, stderr {err.strip()!r}",
         )
         expects(
             failures,
-            "a timeout on both lists",
-            "consumer is behind" in out and "native: native regressed" in out,
-            f"dropped a reason: expected both on the line, got {out.strip()!r}",
+            "native times out",
+            "native regressed" in out and "consumer is behind" not in out,
+            f"claimed a reason for the side that finished: {out.strip()!r}",
         )
 
     if failures:
@@ -342,7 +388,7 @@ def main() -> int:
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
         "probe is a clean refusal, a real probe reaches the comparison, and a "
-        "probe on both lists reports every reason that explains the run"
+        "probe on both lists reports every reason the run graded"
     )
     return 0
 
