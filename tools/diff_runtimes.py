@@ -78,7 +78,9 @@ does not reports one more outcome:
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
 EXEMPT and is not run: the probe depends on implementation-defined behavior
-that the consumer chooses differently.
+that the consumer chooses differently. An --xfail or --oracle-xfail entry that
+names such a probe is an error (exit 2), as it is in tools/check_spec_probes.py:
+this run never grades it, so the entry would read as satisfied.
 
 --only-spec-probes keeps only the spec probes (the .lox files with a
 `// STATUS:` line) of the program list, so a walk of a directory runs the
@@ -322,25 +324,48 @@ def collect_programs(paths: list[str]) -> list[Path]:
     return files
 
 
-def require_known_spec_probes(
-    list_path: Path, entries: dict[str, str], programs: list[Path]
+def parse_probe_or_exit(path: Path):
+    """parse_probe, with a malformed probe reported as exit 2, not a traceback.
+
+    A run that carries an expected-failure list parses every program it walks, so
+    one bad probe file would otherwise abort a corpus of hundreds with a Python
+    traceback and exit 1, which reads as a divergence of the whole run.
+    """
+    try:
+        return parse_probe(path)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def require_gradeable_names(
+    list_path: Path,
+    entries: dict[str, str],
+    probes: list,
+    consumer: str | None,
 ) -> None:
     """Exits when an expected-failure list names something this run cannot grade.
 
-    Both flags grade a program by spec-probe criteria, so only a spec probe of
-    this run can be listed. A name that no spec probe backs is worse than a
-    stale one: the lookup misses, no outcome is ever counted for it, and the
-    entry reads as satisfied where a listed probe the consumer passes would
-    print XPASS and exit 1. Each name therefore has to resolve against the
-    probes of the list this run was given, not against every program in it.
+    Both flags grade a program by spec-probe criteria, so only a spec probe this
+    run actually grades can be listed. A name that no spec probe backs is worse
+    than a stale one: the lookup misses, no outcome is ever counted for it, and
+    the entry reads as satisfied where a listed probe the consumer passes would
+    print XPASS and exit 1. A probe the consumer exempts is the same shape for a
+    different reason: the run skips it before either flag is consulted.
     """
-    probes = [p for p in programs if parse_probe(p) is not None]
-    known = {p.name for p in probes}
+    known = {p.path.name: p for p in probes}
     for name in entries:
-        if name not in known:
+        probe = known.get(name)
+        if probe is None:
             print(
                 f"error: {list_path} lists {name}, which is not a spec probe of "
                 f"this run ({len(probes)} spec probes compared)",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if consumer is not None and consumer in probe.not_binding:
+            print(
+                f"error: {list_path} lists {name}, which does not bind {consumer}",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -454,7 +479,7 @@ def main() -> None:
         programs = collect_programs(args.paths)
 
     if args.only_spec_probes:
-        programs = [p for p in programs if parse_probe(p) is not None]
+        programs = [p for p in programs if parse_probe_or_exit(p) is not None]
 
     if not programs:
         print(
@@ -464,16 +489,21 @@ def main() -> None:
         )
         sys.exit(2)
 
-    if args.xfail:
-        require_known_spec_probes(args.xfail, xfail, programs)
-    if args.oracle_xfail:
-        require_known_spec_probes(args.oracle_xfail, oracle_xfail, programs)
+    if args.xfail or args.oracle_xfail:
+        # One parse of the run's programs serves both lists: it decides which
+        # names this run can grade, and a malformed probe fails here rather than
+        # inside the loop.
+        probes = [p for p in map(parse_probe_or_exit, programs) if p is not None]
+        if args.xfail:
+            require_gradeable_names(args.xfail, xfail, probes, args.consumer)
+        if args.oracle_xfail:
+            require_gradeable_names(args.oracle_xfail, oracle_xfail, probes, args.consumer)
 
     matched = permuted = diverged = staled = xfailed = xpassed = exempted = ahead = 0
 
     for lox_file in programs:
         if args.consumer is not None:
-            probe = parse_probe(lox_file)
+            probe = parse_probe_or_exit(lox_file)
             if probe is not None and args.consumer in probe.not_binding:
                 print(f"EXEMPT      {lox_file}  (does not bind {args.consumer})")
                 exempted += 1
@@ -496,7 +526,7 @@ def main() -> None:
             continue
 
         if lox_file.name in xfail:
-            probe = parse_probe(lox_file)
+            probe = parse_probe_or_exit(lox_file)
             if (
                 probe is not None
                 and passes(probe, native_out, native_status)
@@ -510,7 +540,7 @@ def main() -> None:
             continue
 
         if lox_file.name in oracle_xfail:
-            probe = parse_probe(lox_file)
+            probe = parse_probe_or_exit(lox_file)
             if (
                 probe is not None
                 and passes(probe, other_out, other_status)
