@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Six cases, each on an explicit program list, so no corpus is walked:
+Seven cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -20,7 +20,11 @@ Six cases, each on an explicit program list, so no corpus is walked:
   5. a listed probe that --consumer exempts is refused: the run skips it before
      either flag is consulted;
   6. a malformed probe in the run is a clean exit 2 with a message, not a
-     Python traceback, which would read as a divergence of the whole run.
+     Python traceback, which would read as a divergence of the whole run;
+  7. a list path that does not exist is no gap: exit 0, a NOTE that names the
+     path, and the run grades every program. No expected-failure list exists in
+     the tree today (test/translation-probes/README.md), so a call site that
+     still passes one must not turn the gate red on its own.
 
 Both runners are the native binary, so the comparison is native against
 itself: it needs no managed toolchain and no runtime jar.
@@ -28,7 +32,7 @@ itself: it needs no managed toolchain and no runtime jar.
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all six cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all seven cases hold, 1 with a report per failed case otherwise,
 and 2 when the probe this script needs is missing.
 """
 
@@ -233,6 +237,33 @@ def main() -> int:
             "the spec binds no stderr text" in err,
             f"stderr does not name the malformed directive: {err.strip()!r}",
         )
+
+        # Case 7: a list path that does not exist. No consumer lists a gap
+        # today, so no expected-failure file is in the tree, and a call site
+        # that still passes one must not turn the gate red on its own. An
+        # absent path is reported as a NOTE and grades every program, in both
+        # flags.
+        for flag in ("--xfail", "--oracle-xfail"):
+            absent = work / f"absent{flag.lstrip('-')}.txt"
+            code, out, err = run(args.native, [real_probe], flag, absent)
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                code == 0,
+                f"exit {code}, expected 0 (an absent list is no gap)",
+            )
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                f"NOTE: {absent} does not exist" in out,
+                f"no NOTE names the absent path; stdout was {out.strip()!r}",
+            )
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                "MATCH" in out,
+                f"the run did not grade the program; stdout was {out.strip()!r}",
+            )
 
     if failures:
         for failure in failures:

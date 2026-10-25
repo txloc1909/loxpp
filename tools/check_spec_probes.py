@@ -45,7 +45,10 @@ A probe passes when its stdout and its exit status agree.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
-'#' are comments. Outcomes:
+'#' are comments. No such file exists today, because every consumer passes every
+probe; a node that finds a gap creates one under tools/spec-probe-xfail/ and
+passes it with --xfail. A path that does not exist is no gap: it is reported as
+a NOTE and grades every probe. Outcomes:
 
   PASS   not on the list, and the probe passes.
   FAIL   not on the list, and the probe fails. Exit code 1.
@@ -178,6 +181,17 @@ def passes(probe: SpecProbe, stdout: str, exit_code: int) -> bool:
 
 
 def parse_xfail_file(path: Path) -> dict[str, str]:
+    """The entries of one expected-failure list.
+
+    An absent list means the consumer passes every probe: no file exists while
+    no gap is open (test/translation-probes/README.md). Print that, and return
+    no entries, so deleting a list and dropping the flag that named it can land
+    in either order. A list that exists is read strictly: an entry that names no
+    probe of the run is still a failure.
+    """
+    if not path.exists():
+        print(f"NOTE: {path} does not exist, so no probe is expected to fail")
+        return {}
     reasons: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()

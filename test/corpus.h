@@ -51,12 +51,18 @@ listLoxFiles(const std::filesystem::path& dir) {
 // The names of the spec probes that one consumer does not pass yet: the first
 // field of each line of tools/spec-probe-xfail/<consumer>.txt, the file that
 // tools/check_spec_probes.py reads with --xfail. Blank lines and lines that
-// start with '#' are comments. A missing file is an error, and so is a name
-// that is not a probe file, so a rename cannot turn a sweep that skips these
-// names into one that skips fewer.
+// start with '#' are comments.
+//
+// Every consumer passes every probe today, so no such file exists: an absent
+// file is an empty set, not an error, and the gate then grades every probe. A
+// name that is not a probe file stays an error, so a mistyped entry cannot turn
+// a sweep that skips these names into one that skips fewer.
 inline std::set<std::string> specProbeXfail(const std::string& consumer) {
     const std::filesystem::path path =
         projectRoot() / "tools" / "spec-probe-xfail" / (consumer + ".txt");
+    if (!std::filesystem::is_regular_file(path)) {
+        return {};
+    }
     std::istringstream lines(readFile(path));
     std::set<std::string> names;
     std::string line;
@@ -85,7 +91,8 @@ inline const std::vector<std::string>& corpusDirectories() {
 }
 
 // The files the tooling tests parse. It leaves out the spec probes that the
-// tooling does not handle yet (tools/spec-probe-xfail/tooling.txt).
+// tooling does not handle yet, which a gap would record in
+// tools/spec-probe-xfail/tooling.txt.
 inline std::vector<std::filesystem::path> corpusFiles() {
     const std::set<std::string> notYet = specProbeXfail("tooling");
     std::vector<std::filesystem::path> files;
@@ -122,9 +129,9 @@ inline bool hasStaticErrorMarker(const std::filesystem::path& probe) {
 // The translation probes that the native compiler must compile. A test that
 // compiles every probe and inspects its bytecode sweeps these. It leaves out
 // the static-error probes; ChunkDecoderTest.StaticErrorProbesDoNotCompile
-// checks them. It also leaves out the spec probes that native does not pass
-// yet (tools/spec-probe-xfail/native.txt): such a probe can use a form that
-// the native compiler does not accept yet.
+// checks them. It also leaves out a spec probe that native does not pass yet,
+// which a gap would record in tools/spec-probe-xfail/native.txt: such a probe
+// can use a form that the native compiler does not accept yet.
 inline std::vector<std::filesystem::path> compiledTranslationProbes() {
     const std::set<std::string> notYet = specProbeXfail("native");
     std::vector<std::filesystem::path> probes;
