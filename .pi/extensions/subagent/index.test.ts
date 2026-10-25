@@ -307,6 +307,7 @@ test("a watched call returns at once, and its result arrives as a message", { sk
 
     // The run is still going: its window exists, and nobody has reported it.
     await waitFor(() => fs.existsSync(path.join(box.kittenDir, "launch.argv")), "the watched run opened a window");
+    assert.equal(kittenLaunches(box.kittenDir).length, 1, "the watched run did ask kitty for exactly one window");
     assert.equal(harness.sent.length, 0, "no result while the child is still running");
 
     // End the run, then the message that wakes the parent must arrive.
