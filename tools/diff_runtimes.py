@@ -75,6 +75,13 @@ does not reports one more outcome:
                that native passes, or that the other runner fails, is
                compared as usual.
 
+A probe may sit on both lists at once, which is what a native regression under
+a consumer that is also behind looks like. The oracle entry then decides when
+it is the one that explains the run (the other runner passes, native does not)
+and reports AHEAD; otherwise the consumer entry decides and reports XFAIL.
+Neither reason is dropped, and the overlap is not an error: refusing it would
+block a state that is real.
+
 --consumer <name> names the consumer the other runner is. A spec probe whose
 `// NOT-BINDING:` line names it (see tools/check_spec_probes.py) reports
 EXEMPT and is not run: the probe depends on implementation-defined behavior
@@ -525,30 +532,32 @@ def main() -> None:
             diverged += 1
             continue
 
-        if lox_file.name in xfail:
+        listed_consumer = lox_file.name in xfail
+        listed_oracle = lox_file.name in oracle_xfail
+        if listed_consumer or listed_oracle:
             probe = parse_probe_or_exit(lox_file)
-            if (
-                probe is not None
-                and passes(probe, native_out, native_status)
-                and passes(probe, other_out, other_status)
-            ):
-                print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
-                xpassed += 1
-            else:
-                print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
-                xfailed += 1
-            continue
-
-        if lox_file.name in oracle_xfail:
-            probe = parse_probe_or_exit(lox_file)
-            if (
-                probe is not None
-                and passes(probe, other_out, other_status)
-                and not passes(probe, native_out, native_status)
-            ):
+            consumer_passes = probe is not None and passes(probe, other_out, other_status)
+            native_passes = probe is not None and passes(probe, native_out, native_status)
+            # The oracle entry decides when it is the one that explains this
+            # run: native no longer passes a probe the consumer does, so native's
+            # own gap is the reason a reader needs. The two reasons cannot both
+            # apply, and one probe on both lists is a real state (a native
+            # regression under a consumer that is behind too), so neither list
+            # may simply swallow the other.
+            if listed_oracle and consumer_passes and not native_passes:
                 print(f"AHEAD       {lox_file}  (native: {oracle_xfail[lox_file.name]})")
                 ahead += 1
                 continue
+            if listed_consumer:
+                if consumer_passes and native_passes:
+                    print(f"XPASS       {lox_file}  (both runs pass it now: delete its line from {args.xfail})")
+                    xpassed += 1
+                else:
+                    print(f"XFAIL       {lox_file}  ({xfail[lox_file.name]})")
+                    xfailed += 1
+                continue
+            # Listed only as an oracle entry, and not AHEAD: the ordinary
+            # comparison below decides, as it did before this branch.
 
         native_rejects = native_status == NATIVE_REJECT_STATUS and native_out == ""
         if args.compile_errors and not native_rejects:
