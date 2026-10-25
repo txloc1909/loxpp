@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Nine cases, each on an explicit program list, so no corpus is walked:
+Ten cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -26,16 +26,19 @@ Nine cases, each on an explicit program list, so no corpus is walked:
   8. a probe on both lists that both sides fail reports XFAIL with BOTH
      reasons, so neither list's reason is dropped;
   9. a probe on both lists that times out names the side that did not finish,
-     with that side's reason only, and claims nothing about the other side.
+     with that side's reason only, and claims nothing about the other side;
+  10. a probe on both lists whose consumer fails while native passes reports
+     the consumer reason and says native's entry is answered, never that
+     native regressed.
 
 Cases 1 to 6 run native against itself, so they need no managed toolchain and
-no runtime jar. Cases 7 to 9 use a stub script as a runner, because they need
-one side to pass, to fail, or to hang where the other side does not.
+no runtime jar. Cases 7 to 10 use a stub script as a runner, because they
+need one side to pass, to fail, or to hang where the other side does not.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all nine cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all ten cases hold, 1 with a report per failed case otherwise,
 and 2 when the probe this script needs is missing.
 """
 
@@ -377,6 +380,42 @@ def main() -> int:
             "native times out",
             "native regressed" in out and "consumer is behind" not in out,
             f"claimed a reason for the side that finished: {out.strip()!r}",
+        )
+
+        # Case 10: both lists, the consumer fails the probe and native passes
+        # it. Native's entry is answered here, not confirmed, so the line must
+        # not claim native regressed. The probe is written here so native passes
+        # it on any build of the tree.
+        native_passes_probe = work / "native_passes.lox"
+        native_passes_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
+        consumer_list_2 = work / "consumer2.txt"
+        consumer_list_2.write_text(f"{native_passes_probe.name}  consumer is behind\n")
+        oracle_list_2 = work / "oracle2.txt"
+        oracle_list_2.write_text(f"{native_passes_probe.name}  native regressed\n")
+        code, out, err = run(
+            args.native,
+            [native_passes_probe],
+            [("--xfail", consumer_list_2), ("--oracle-xfail", oracle_list_2)],
+            runner=str(failing_stub),
+        )
+        expects(
+            failures,
+            "consumer fails, native passes, both lists",
+            "XFAIL" in out and "consumer is behind" in out,
+            f"did not report XFAIL with the consumer reason: exit {code}, "
+            f"stdout {out.strip()!r}, stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "consumer fails, native passes, both lists",
+            "native regressed" not in out,
+            f"claimed native regressed while native passes the probe: {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "consumer fails, native passes, both lists",
+            "native passes it now" in out,
+            f"did not say native's entry is answered: {out.strip()!r}",
         )
 
     if failures:

@@ -590,7 +590,15 @@ def main() -> None:
                 else:
                     reasons = [xfail[lox_file.name]]
                     if listed_oracle:
-                        reasons.append(f"native: {oracle_xfail[lox_file.name]}")
+                        # The oracle reason holds only while native fails. When
+                        # native passes the probe, its entry is answered, not
+                        # confirmed, and the line must say so.
+                        if native_passes:
+                            reasons.append(
+                                f"native passes it now, so {args.oracle_xfail} can drop its line"
+                            )
+                        else:
+                            reasons.append(f"native: {oracle_xfail[lox_file.name]}")
                     print(f"XFAIL       {lox_file}  ({'; '.join(reasons)})")
                     xfailed += 1
                 continue

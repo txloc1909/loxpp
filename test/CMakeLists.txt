@@ -390,7 +390,7 @@ if(LOXPP_PYTHON3)
     # probe that sits on both lists is graded by the reason that explains the run.
     # A dead or ungraded entry is otherwise silent, so a gate that runs only
     # tools/diff_runtimes.py stays green over the gap the entry claims to record.
-    # Cases 1 to 6 need only the native binary; 7 and 8 add a stub runner, so the
+    # Cases 1 to 6 need only the native binary; 7 to 10 add a stub runner, so the
     # test needs no managed toolchain and no jar either way.
     add_test(NAME DiffRuntimesXfailNames
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_xfail.py
