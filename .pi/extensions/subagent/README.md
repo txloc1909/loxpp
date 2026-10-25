@@ -1,18 +1,28 @@
 # Subagent extension (kitty)
 
-Delegate a task to a separate `pi` process with its own context. The child runs
-in a new window in the same kitty tab as pi. By default that window holds a
-normal interactive pi session: chat with the child there, watch its work, and
-direct it while it runs. The call returns when the child exits, and the window
-closes with it.
+Delegate a task to a separate `pi` process with its own context.
 
-The extension is active only when pi runs inside a kitty window. Outside kitty
-it registers no tool.
+There are two kinds of run, and only one of them has a window.
+
+| Run kind | When | Window | The tool call | The result arrives as |
+|---|---|---|---|---|
+| **watched** | one task, `interactive` not set to `false` | yes, a new kitty window in pi's tab | returns as soon as the window opens | a `subagent-result` message that wakes the session |
+| **unattended** | `interactive: false`, or `tasks`/`chain` | none | waits for the run | the tool result |
+
+A watched run is a normal interactive pi session in its window: chat with it,
+watch its work, and redirect it while it runs. The parent never waits for that
+person, so it keeps working, or ends its turn, and the end of the run arrives
+later as a message.
+
+An unattended run is a child process with pipes. It has no terminal and no
+window, it needs no kitty, and it works in any terminal. Parallel and chain
+runs are unattended by nature: a chain hands one step's result to the next, and
+a batch has no one window to steer.
 
 ## Requirements
 
-pi must reach kitty's remote control **through a socket**. In
-`~/.config/kitty/kitty.conf`:
+A watched run needs pi inside a kitty window, and kitty's remote control
+**through a socket**. In `~/.config/kitty/kitty.conf`:
 
 ```
 allow_remote_control socket-only
@@ -32,8 +42,8 @@ Do not use `allow_remote_control yes` without a `listen_on` line. That setting
 opens the terminal channel instead: `kitten @` writes the request to the
 controlling terminal and reads kitty's reply from it, and pi reads its keys
 from that same terminal. The reply then arrives as input, so a large listing
-such as `ls` lands in the prompt. The extension refuses to run in that mode and
-says which two lines to add.
+such as `ls` lands in the prompt. The extension refuses to run a watched job in
+that mode and says which two lines to add.
 
 Every call names the socket with `--to`. The code never relies on a fallback.
 
@@ -80,25 +90,24 @@ Chain: scout finds the read tool, then worker adds the line range it names.
 | Mode | Parameters | Notes |
 |---|---|---|
 | single | `agent`, `task` | one child |
-| parallel | `tasks: [{ agent, task }]` | at most 8 tasks, 4 at a time |
-| chain | `chain: [{ agent, task }]` | sequential; a later task may use `{previous}` |
+| parallel | `tasks: [{ agent, task }]` | at most 8 tasks, 4 at a time; unattended |
+| chain | `chain: [{ agent, task }]` | sequential; a later task may use `{previous}`; unattended |
 
 Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `interactive`,
 `hold`, `keepFocus`.
 
 - `cwd` sets the child's working directory. The default is the pi session's
   directory.
-- `interactive` (default `true`) gives the child the window's terminal, so a
-  person can chat with it. The call returns when that person quits the child
-  (`Ctrl+D` or `/quit`) or closes its window. Set it to `false` for an
-  unattended run: the child then ends as soon as its task is done, prints no
-  TUI, and the window closes by itself. Parallel and chain runs are usually
-  unattended, so pass `interactive: false` there.
-- `hold: true` keeps the window open at a shell after the child exits. Use it
-  to read the child's log. The default is to close the window.
+- `interactive` (default `true` for one task) runs the child as a watched job:
+  a person can chat with it, and the call returns as soon as its window opens.
+  Set it to `false` for an unattended run: no window, and the call waits.
+  `interactive: true` together with `tasks` or `chain` is refused, because a
+  batch has no one window to steer.
+- `hold: true` keeps a watched window open at a shell after the child exits.
+  Use it to read the child's log. The default is to close the window.
 - `keepFocus: true` leaves the keyboard in pi's window.
 
-## How a run works
+## How a watched run works
 
 1. `kitten @ --to=<socket> launch --match=window_id=<pi window> --type=window
    --cwd=<cwd>` opens the child window as a split in pi's tab. The match on
@@ -106,26 +115,51 @@ Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `interactive`,
    focus. The socket address keeps kitty's reply out of pi's terminal.
 2. kitty runs a small shell script. The script enters the working directory and
    starts the child.
-3. An interactive child keeps the terminal: its keys and its TUI stay in the
-   window, and only its stderr goes to a log file. It saves a session named
+3. The child keeps the terminal: its keys and its TUI stay in the window, and
+   only its stderr goes to a log file. It saves a session named
    `subagent: <agent>`. The parent cannot read that terminal, so the child
    loads `mirror.ts`, which appends three record types to the event file:
    `message_end` for each finished message, and `agent_start`/`agent_end`
-   around each run. They use the shape `pi --mode json` gives the same records.
-4. pi tails the event file. Progress and token counts stream into the pi
-   session, and the child window's title shows the turn count, the current
-   tool, or `waiting for you` when the child is back at its prompt.
+   around each run.
+4. The tool call returns. The parent keeps working, and a footer line names the
+   job, its window and its current tool. pi tails the event file, and the
+   window's title shows the turn count, the current tool, or `waiting for you`
+   when the child is back at its prompt.
 5. The child exits, and the exit code goes to a third file. kitty closes the
-   window at once. pi also sends `close-window` as a safety net, so an aborted
-   or crashed run leaves no window behind. `hold: true` turns both closes off.
-6. The tool result is the child's last assistant text plus its usage. For an
-   interactive child that is the answer after the last instruction a person
-   gave it. Closing the window by hand is a normal end for an interactive run;
-   `/quit` returns exit code 0.
+   window at once, and pi sends `close-window` as a safety net. `hold: true`
+   turns both closes off.
+6. The parent gets a `subagent-result` message with the child's last assistant
+   text and its usage. That message starts a new turn in the parent session, so
+   the parent reads the answer and continues. It waits behind a running turn
+   rather than cutting into it. The tool call itself only says that the job
+   started, and the model is told not to guess the answer before the message
+   arrives.
 
-With `interactive: false` steps 2 and 3 differ: the child runs `--mode json -p`
-with stdout, stderr and the exit code in files, and the window shows a short
-header. Closing that window by hand ends the run as aborted.
+### Closing the window early
+
+A person can end a watched run at any moment:
+
+- Quit the child (`Ctrl+D`, `/quit`) or close the window while it waits at its
+  prompt: the run completed, and the answer is its last message.
+- Close the window while a turn is still running: kitty kills the child. The
+  parent notices within about three seconds (a two-second liveness poll plus a
+  grace period), keeps what the child had already finished, and reports the run
+  as **stopped**, not completed. The message says that only finished messages
+  are included, so the parent does not read an older answer as the answer to
+  its task.
+- The last turn itself failed or was interrupted: the run is a failure, even if
+  the person closes the window afterwards.
+
+No notification is sent to a session that has ended: a job belongs to the
+session that started it, and every shutdown path stops its jobs.
+
+## How an unattended run works
+
+The child runs `--mode json -p --no-session` as a plain subprocess: stdout
+carries the event stream, stderr is kept for the tool result, and the exit code
+ends the run. Progress streams into the tool call. There is no window, no kitty
+call, and no temporary event file. An abort ends the child: `SIGTERM` first,
+then `SIGKILL` after two seconds.
 
 ## Tests
 
@@ -144,3 +178,14 @@ LOXPP_SUBAGENT_LIVE=1 node --test .pi/extensions/subagent/live.test.ts
 `LOXPP_SUBAGENT_PI=/path/to/program` makes the extension launch that program
 instead of pi. The end-to-end tests use it to run the window plumbing without a
 model call.
+
+`index.test.ts` loads the real `index.ts` against a fake `ExtensionAPI`, a fake
+kitty and a stand-in child. That needs the pi packages, which `index.ts`
+imports: the test skips where they are not installed. `PI_PACKAGES_DIR` points
+at a pi installation's `node_modules` when none of the usual places has it.
+
+The two rules that file carries:
+
+- a watched call returns while its child is still running, and the run's end
+  arrives as a message that wakes the session;
+- an unattended call never calls kitty.

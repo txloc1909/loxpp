@@ -19,10 +19,26 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { closeWindowArgv, listWindowsArgv, windowIds } from "./kitty.ts";
+import { isFailed, runResult, runStatus } from "./result.ts";
 import { finalOutput } from "./stream.ts";
 import { runInKittyWindow, runProcess } from "./window.ts";
 
 const live = process.env.LOXPP_SUBAGENT_LIVE === "1";
+
+/** The mapping index.ts applies to a window run. */
+function resultOfRun(run: Awaited<ReturnType<typeof runInKittyWindow>>) {
+  return runResult({
+    agent: "scout",
+    agentSource: "user",
+    task: "t",
+    exitCode: run.exitCode,
+    state: run.state,
+    stderr: run.stderr,
+    windowId: run.windowId,
+    interactive: true,
+    closedByUser: run.closedByUser,
+  });
+}
 const listenOn = process.env.KITTY_LISTEN_ON ?? "";
 
 const listWindows = (): Promise<{ code: number; stdout: string; stderr: string }> =>
@@ -63,11 +79,13 @@ test("a real kitty window runs the child and closes afterwards", { skip: !live &
       cwd,
       title: "pi subagent: live test",
       header: ["pi subagent: live test"],
-      // The child reports the window it runs in, so the assertion needs no race.
+      // The child reports the window it runs in, so the assertion needs no
+      // race. A watched child writes its events through the mirror, not on
+      // stdout: the terminal belongs to the child's TUI.
       command: [
         "/bin/sh",
         "-c",
-        `printf '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input":1,"output":1}}}\\n' "$KITTY_WINDOW_ID"; sleep 0.6; exit 5`,
+        `printf '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"usage":{"input":1,"output":1}}}\\n' "$KITTY_WINDOW_ID" >> "$LOXPP_SUBAGENT_EVENTS"; sleep 0.6; exit 5`,
       ],
       env: {},
       hold: false,
@@ -185,6 +203,59 @@ test("a person types into an interactive child's window", { skip: !live && "set 
     assert.equal(run.exitCode, 0, run.stderr);
     const received = await fs.promises.readFile(path.join(cwd, "typed.txt"), "utf8");
     assert.equal(received, typed, "the characters a person typed reached the child");
+  } finally {
+    await fs.promises.rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("closing the window while a turn runs keeps what the child finished and calls the run stopped", { skip: !live && "set LOXPP_SUBAGENT_LIVE=1" }, async () => {
+  const listing = await listWindows();
+  assert.equal(listing.code, 0, listing.stderr);
+  const parentWindow = parentWindowId(listing.stdout);
+
+  const cwd = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-live-"));
+  try {
+    let opened: (windowId: string) => void = () => {};
+    const windowOpened = new Promise<string>((resolve) => {
+      opened = resolve;
+    });
+    const running = runInKittyWindow({
+      session: { windowId: parentWindow, listenOn },
+      cwd,
+      title: "pi subagent: close test",
+      header: ["pi subagent: close test"],
+      // The child finishes one message, then keeps working. The person closes
+      // the window during that second turn.
+      command: [
+        "/bin/sh",
+        "-c",
+        [
+          `printf '%s\\n' '{"type":"agent_start"}' >> "$LOXPP_SUBAGENT_EVENTS"`,
+          `printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"half done"}],"usage":{"input":1,"output":1}}}' >> "$LOXPP_SUBAGENT_EVENTS"`,
+          "sleep 20",
+        ].join("; "),
+      ],
+      env: {},
+      hold: false,
+      keepFocus: true,
+      signal: undefined,
+      onWindow: (windowId) => opened(windowId),
+      onProgress: () => {},
+      pollMs: 50,
+      livenessMs: 200,
+      deadWindowGraceMs: 200,
+    });
+
+    const windowId = await windowOpened;
+    await runProcess(closeWindowArgv(windowId, listenOn));
+    const run = await running;
+
+    assert.equal(run.closedByUser, true);
+    assert.equal(finalOutput(run.state), "half done", "the finished message survived the close");
+    assert.equal(run.state.idle, false, "no agent_end: the child was still working");
+    const result = resultOfRun(run);
+    assert.equal(isFailed(result), false, "a person ending a watched run is a normal end");
+    assert.equal(runStatus(result), "stopped", "but it is not a completed run");
   } finally {
     await fs.promises.rm(cwd, { recursive: true, force: true });
   }

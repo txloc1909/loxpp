@@ -130,10 +130,9 @@ test("windowIds reads window ids, not OS window or tab ids", () => {
   assert.deepEqual(windowIds("[]"), []);
 });
 
-test("buildRunScript reports events, stderr and the exit code", async () => {
+test("the run script keeps stdin and stdout with the child and records stderr and the exit code", async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-test-"));
   try {
-    const eventsPath = path.join(dir, "events.jsonl");
     const stderrPath = path.join(dir, "stderr.log");
     const exitPath = path.join(dir, "exit.code");
     const scriptPath = path.join(dir, "run.sh");
@@ -142,54 +141,21 @@ test("buildRunScript reports events, stderr and the exit code", async () => {
       buildRunScript({
         header: ["pi subagent: test", "this window closes when the subagent exits"],
         cwd: dir,
-        command: ["/bin/sh", "-c", "printf '{\"type\":\"x\"}\\n'; printf 'boom' >&2; exit 7"],
-        eventsPath,
+        command: ["/bin/sh", "-c", 'read line; printf \'got:%s\' "$line"; printf \'boom\' >&2; exit 7'],
         stderrPath,
         exitPath,
       }),
     );
 
-    const run = spawnSync("/bin/sh", [scriptPath], { encoding: "utf8" });
-    assert.equal(run.status, 0, "the wrapper itself exits 0");
-    assert.equal(fs.readFileSync(eventsPath, "utf8"), '{"type":"x"}\n');
-    assert.equal(fs.readFileSync(stderrPath, "utf8"), "boom");
-    assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "7");
-    assert.match(run.stdout, /pi subagent: test/);
-    assert.match(run.stdout, /this window closes when the subagent exits/);
-  } finally {
-    await fs.promises.rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("a terminal run script leaves stdin and stdout with the child", async () => {
-  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-test-"));
-  try {
-    const eventsPath = path.join(dir, "events.jsonl");
-    const stderrPath = path.join(dir, "stderr.log");
-    const exitPath = path.join(dir, "exit.code");
-    const scriptPath = path.join(dir, "run.sh");
-    await fs.promises.writeFile(
-      scriptPath,
-      buildRunScript({
-        header: ["pi subagent: interactive"],
-        cwd: dir,
-        command: ["/bin/sh", "-c", 'read line; printf \'got:%s\' "$line"; printf \'boom\' >&2; exit 4'],
-        eventsPath,
-        stderrPath,
-        exitPath,
-        terminal: true,
-      }),
-    );
-
-    // The keyboard reaches the child, and its output reaches the window: that
-    // is the whole point of an interactive subagent.
+    // The keyboard reaches the child and its output reaches the window: that
+    // is what makes the window a live session instead of a log sink.
     const run = spawnSync("/bin/sh", [scriptPath], { encoding: "utf8", input: "hello\n" });
     assert.equal(run.status, 0, "the wrapper itself exits 0");
     assert.match(run.stdout, /got:hello/);
-    assert.match(run.stdout, /pi subagent: interactive/);
+    assert.match(run.stdout, /pi subagent: test/);
+    assert.match(run.stdout, /this window closes when the subagent exits/);
     assert.equal(fs.readFileSync(stderrPath, "utf8"), "boom");
-    assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "4");
-    assert.equal(fs.existsSync(eventsPath), false, "the event file belongs to the child's mirror, not to stdout");
+    assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "7");
     const script = fs.readFileSync(scriptPath, "utf8");
     assert.equal(script.includes("</dev/null"), false, "no stdin redirect");
   } finally {
@@ -208,7 +174,6 @@ test("buildRunScript reports a cwd it cannot enter", async () => {
         header: ["h"],
         cwd: path.join(dir, "missing"),
         command: ["/bin/sh", "-c", "exit 0"],
-        eventsPath: path.join(dir, "events.jsonl"),
         stderrPath: path.join(dir, "stderr.log"),
         exitPath,
       }),
@@ -218,7 +183,6 @@ test("buildRunScript reports a cwd it cannot enter", async () => {
     assert.equal(run.status, 1);
     assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "1");
     assert.match(run.stdout, /cannot enter/);
-    assert.equal(fs.existsSync(path.join(dir, "events.jsonl")), false);
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }

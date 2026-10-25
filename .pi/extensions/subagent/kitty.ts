@@ -134,31 +134,22 @@ export interface RunScriptSpec {
   header: string[];
   cwd: string;
   command: string[];
-  eventsPath: string;
   stderrPath: string;
   exitPath: string;
-  /**
-   * The child owns the terminal, so stdin and stdout stay attached and only
-   * stderr goes to the log. An interactive child needs this: its stdout is the
-   * TUI and its keyboard is the window.
-   */
-  terminal?: boolean;
 }
 
 /**
- * The script kitty runs in the new window. A print-mode child owns no terminal,
- * so its JSONL event stream and stderr go to files and the parent tails them.
- * The exit code always goes to a third file: it is the parent's only proof that
- * the run ended and how.
+ * The script kitty runs in the new window. The child owns the terminal: stdin
+ * and stdout stay attached, because its stdout is the TUI and its keyboard is
+ * the window. Only stderr goes to a log. The exit code goes to a second file:
+ * it is the parent's only proof that the run ended and how.
  *
  * Every path is absolute, so the script does not depend on the window's cwd.
  */
 export function buildRunScript(spec: RunScriptSpec): string {
   const quote = shellQuote;
   const cdFailure = `loxpp subagent: cannot enter ${spec.cwd}`;
-  const redirect = spec.terminal
-    ? `2> ${quote(spec.stderrPath)}`
-    : `</dev/null > ${quote(spec.eventsPath)} 2> ${quote(spec.stderrPath)}`;
+  const redirect = `2> ${quote(spec.stderrPath)}`;
   return [
     "#!/bin/sh",
     "# Written by the Lox++ pi subagent extension; removed when the run ends.",

@@ -1,9 +1,9 @@
 /**
- * Running one subagent in one kitty window.
+ * Running one watched subagent in one kitty window.
  *
  * The child owns its terminal, so it cannot also own a pipe to the parent.
  * stdout, stderr and the exit code go to files in a temporary directory and
- * this module tails them: the JSONL stream feeds progress, the exit file says
+ * this module tails them: the event stream feeds progress, the exit file says
  * the run is over, and `kitten @ ls` catches a window the user closed by hand.
  *
  * Node builtins only, so the tests load this module directly.
@@ -133,13 +133,9 @@ export interface WindowRunOptions {
   env: Record<string, string>;
   hold: boolean;
   keepFocus: boolean;
-  /**
-   * The child owns the terminal: a person chats with it in the window, and its
-   * stdout carries the TUI rather than the event stream. The child then writes
-   * its events itself, through the mirror this module points at `EVENTS_ENV`.
-   */
-  interactive?: boolean;
   signal: AbortSignal | undefined;
+  /** Called once kitty reports the window id, before the run ends. */
+  onWindow?: (windowId: string) => void;
   onProgress: (state: StreamState) => void;
   kitten?: string;
   pollMs?: number;
@@ -157,7 +153,6 @@ export interface WindowRunResult {
 
 export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRunResult> {
   const kitten = opts.kitten ?? "kitten";
-  const interactive = opts.interactive ?? false;
   const target = requireListenOn(opts.session);
   const pollMs = opts.pollMs ?? POLL_MS;
   const livenessMs = opts.livenessMs ?? LIVENESS_MS;
@@ -175,18 +170,16 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
       header: opts.header,
       cwd: opts.cwd,
       command: opts.command,
-      eventsPath,
       stderrPath,
       exitPath,
-      terminal: interactive,
     }),
     { mode: 0o700 },
   );
 
-  // An interactive child writes its own events, so it needs the path. kitty
-  // starts the child from its own environment, and `childEnv` forwards only
-  // PATH and `PI_*`, so this one travels as a launch flag.
-  const env = interactive ? { ...opts.env, [EVENTS_ENV]: eventsPath } : opts.env;
+  // The child writes its own events, so it needs the path. kitty starts the
+  // child from its own environment, and `childEnv` forwards only PATH and
+  // `PI_*`, so this one travels as a launch flag.
+  const env = { ...opts.env, [EVENTS_ENV]: eventsPath };
 
   const launched = await runProcess(
     launchArgv(
@@ -215,6 +208,7 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
   }
 
   const closeWindow = (): Promise<ProcResult> => runProcess(closeWindowArgv(windowId, target, kitten));
+  opts.onWindow?.(windowId);
   const onAbort = (): void => {
     void closeWindow();
   };
@@ -263,7 +257,7 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
         const listing = await runProcess(listWindowsArgv(target, kitten));
         if (listing.code === 0) {
           if (windowIds(listing.stdout).includes(windowId)) {
-            const title = progressTitle(opts.title, stream.state, interactive);
+            const title = progressTitle(opts.title, stream.state);
             if (title !== lastTitle) {
               lastTitle = title;
               void runProcess(setTitleArgv(windowId, title, target, kitten));
@@ -278,8 +272,8 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
       // stream holds instead of waiting for a file that cannot appear.
       if (goneSince !== null && Date.now() - goneSince >= deadWindowGraceMs) {
         // The child may have written its last message just before the window
-        // went away: the person closing an interactive child ends the run, and
-        // that last answer is the result.
+        // went away: the person closing a watched child ends the run, and that
+        // last answer is the result.
         const tail = await readNew(eventsPath, offset);
         if (tail.length > 0) {
           offset += tail.length;
@@ -309,12 +303,12 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
 const UPDATE_MS = 250; // progress updates for the caller's UI
 const STDERR_CAP = 4000;
 
-export function progressTitle(base: string, state: StreamState, interactive = false): string {
+export function progressTitle(base: string, state: StreamState): string {
   const turns = state.usage.turns;
   const turnsPart = turns ? ` · ${turns} turn${turns > 1 ? "s" : ""}` : "";
-  // Only an interactive child waits for a person. A print-mode child that ends
-  // a turn may start another one at once, so its title keeps the last tool.
-  if (interactive && state.idle) return `${base}${turnsPart} · waiting for you`;
+  // A watched child that is back at its prompt waits for the person at its
+  // keyboard, and the title is the only place the parent session can say so.
+  if (state.idle) return `${base}${turnsPart} · waiting for you`;
   const tool = lastToolCall(state);
   return `${base}${turnsPart}${tool ? ` · ${tool.name}` : ""}`;
 }

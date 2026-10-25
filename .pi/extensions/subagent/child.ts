@@ -21,15 +21,15 @@ export interface Invocation {
 
 export interface ChildMode {
   /**
-   * An interactive child owns the terminal in its window, so a person can chat
-   * with it and direct the work. It ends when that person quits it. Without
-   * this flag the child runs `--mode json -p` and ends by itself.
+   * A watched child owns the terminal in its window, so a person can chat with
+   * it and direct the work. It ends when that person quits it. Without this
+   * flag the child runs `--mode json -p` and ends by itself.
    */
   interactive: boolean;
   /**
-   * The extension that mirrors the child's session events to `EVENTS_ENV`. An
-   * interactive child needs it: its stdout carries the TUI, so the parent has
-   * no event stream to read there.
+   * The extension that mirrors the child's session events to `EVENTS_ENV`. A
+   * watched child needs it: its stdout carries the TUI, so the parent has no
+   * event stream to read there.
    */
   mirrorPath?: string;
 }
@@ -85,9 +85,9 @@ export function childArgs(
   dispatch: Dispatch,
   mode: ChildMode = { interactive: false },
 ): string[] {
-  // An interactive child is a normal pi session: a person reads it, types into
-  // it, and resumes it later, so it saves its session and carries a name. The
-  // print-mode child reports through stdout and keeps no session.
+  // A watched child is a normal pi session: a person reads it, types into it,
+  // and resumes it later, so it saves its session and carries a name. An
+  // unattended child reports through stdout and keeps no session.
   const args = mode.interactive ? ["--name", `subagent: ${agent.name}`] : ["--mode", "json", "-p", "--no-session"];
   if (mode.interactive && mode.mirrorPath) args.push("--extension", mode.mirrorPath);
   const model = agent.model ?? dispatch.model;

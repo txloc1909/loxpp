@@ -99,13 +99,17 @@ const baseOptions = (kitten: string, cwd: string) => ({
 test("a finished run reports its events, stderr and exit code", async () => {
   await withFakeKitten(async (cwd, kitten) => {
     const progress: number[] = [];
+    const windows: string[] = [];
     const run = await runInKittyWindow({
       ...baseOptions(kitten, cwd),
       command: [
         "/bin/sh",
         "-c",
-        `printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":7,"output":3,"totalTokens":10}}}'; printf 'warn' >&2; exit 3`,
+        `printf '%s\\n' '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":7,"output":3,"totalTokens":10}}}' >> "$LOXPP_SUBAGENT_EVENTS"; printf 'warn' >&2; exit 3`,
       ],
+      onWindow: (windowId) => {
+        windows.push(windowId);
+      },
       onProgress: (state) => {
         progress.push(state.usage.turns);
       },
@@ -118,6 +122,7 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.equal(run.stderr, "warn");
     assert.deepEqual(run.state.messages[0].content, [{ type: "text", text: "done" }]);
     assert.ok(progress.length > 0, "progress reached the caller");
+    assert.deepEqual(windows, ["42"], "the window id reaches the caller before the run ends");
 
     const dir = process.env.FAKE_KITTY_DIR!;
     const argv = JSON.parse(await fs.promises.readFile(path.join(dir, "launch.argv"), "utf8"));
@@ -257,10 +262,10 @@ test("a window closed by hand ends the run instead of hanging", async () => {
   });
 });
 
-test("an interactive child keeps the terminal and writes its own events", async () => {
+test("a watched child keeps the terminal and writes its own events", async () => {
   await withFakeKitten(async (cwd, kitten) => {
-    // What mirror.ts writes in the child: the parent gets no stdout from an
-    // interactive child, so the launch flag carries the path.
+    // What mirror.ts writes in the child: the parent gets no stdout from a
+    // watched child, so the launch flag carries the path.
     const records = [
       { type: "agent_start" },
       { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "from the mirror" }], usage: { input: 4 } } },
@@ -271,7 +276,6 @@ test("an interactive child keeps the terminal and writes its own events", async 
     const dir = process.env.FAKE_KITTY_DIR!;
     const running = runInKittyWindow({
       ...baseOptions(kitten, cwd),
-      interactive: true,
       // The child waits for the test, so the script can be read while it lives.
       // The wait is bounded: a failed assertion above must not leave it behind.
       command: [
@@ -315,29 +319,3 @@ async function waitForFile<T>(file: string, parse: (text: string) => T, timeoutM
     }
   }
 }
-
-test("a print-mode child still captures its event stream", async () => {
-  await withFakeKitten(async (cwd, kitten) => {
-    const record = JSON.stringify({
-      type: "message_end",
-      message: { role: "assistant", content: [{ type: "text", text: "printed" }] },
-    });
-    await fs.promises.writeFile(path.join(cwd, "printed.jsonl"), `${record}\n`);
-
-    const run = await runInKittyWindow({
-      ...baseOptions(kitten, cwd),
-      command: ["/bin/sh", "-c", "cat printed.jsonl; exit 0"],
-      onProgress: () => {},
-    });
-
-    assert.equal(finalOutput(run.state), "printed");
-    const argv = JSON.parse(
-      await fs.promises.readFile(path.join(process.env.FAKE_KITTY_DIR!, "launch.argv"), "utf8"),
-    ) as string[];
-    assert.equal(
-      argv.some((arg) => arg.startsWith("--env=LOXPP_SUBAGENT_EVENTS=")),
-      false,
-      "a print-mode child needs no mirror",
-    );
-  });
-});
