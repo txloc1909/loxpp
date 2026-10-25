@@ -59,12 +59,18 @@ run is an error (exit 2), as it is in tools/check_spec_probes.py. A name that
 no program backs says nothing at all, where a listed probe the consumer passes
 prints XPASS and exits 1, so after a rename the list would look satisfied and
 a gate that runs only this script would report green over the gap. A listed
-program reports one of two outcomes:
+program reports one of three outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
   XPASS        both runs pass the probe (tools/check_spec_probes.py). Exit
                code 1: the backend passes it now, so its line must be
                deleted.
+  DIVERGE      the other runner passes the probe and native does not, with no
+               --oracle-xfail entry for that probe. Exit code 1: the consumer
+               passes a probe its own list calls a gap, so the line is stale,
+               and native's failure is the side a reader must fix. The
+               consumer's reason would name a gap that does not exist, so the
+               line states native's failure instead.
 
 --oracle-xfail <file> is native's own expected-failure list, in the
 same form, with the same rule: a name that is not a spec probe of this run is
@@ -129,7 +135,10 @@ Usage:
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
 A path that is neither a file nor a directory, a program list that ends up
 empty, or an --xfail or --oracle-xfail entry that is not a spec probe of the
-list, is an error (exit 2), not a silent zero-file pass.
+list, is an error (exit 2), not a silent zero-file pass. So is a runner path
+that does not name an executable file: a mistyped <native-loxpp> or
+<other-runner> is a precondition, not a failed comparison, and it fails before
+the first program runs.
 
 --only-excluded <dir> ignores <path> and runs only the programs named in
 --exclude, resolved under <dir>. This wires the permutation guard: an
@@ -588,6 +597,19 @@ def main() -> None:
                         detail += f" and from {args.oracle_xfail}"
                     print(f"XPASS       {lox_file}  ({detail})")
                     xpassed += 1
+                elif consumer_passes:
+                    # Reached only with no oracle entry for this probe: the
+                    # AHEAD branch above already took the state where one
+                    # explains native's gap. So native fails a probe the
+                    # consumer passes, and nothing accounts for it: the
+                    # consumer's line is stale and native is the side to fix.
+                    print(
+                        f"DIVERGE     {lox_file}  (native does not pass it; "
+                        f"{args.xfail} lists it as a gap of the consumer, which "
+                        f"passes it, so that line is stale, and no "
+                        f"--oracle-xfail entry explains native's gap)"
+                    )
+                    diverged += 1
                 else:
                     reasons = [xfail[lox_file.name]]
                     if listed_oracle:

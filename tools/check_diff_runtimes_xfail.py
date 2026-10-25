@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Twelve cases, each on an explicit program list, so no corpus is walked:
+Thirteen cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -36,9 +36,12 @@ Twelve cases, each on an explicit program list, so no corpus is walked:
      path, and both flags grade every program. No expected-failure list exists
      in the tree today (test/translation-probes/README.md), so a call site that
      still names one must not turn a gate red on its own.
+  13. a probe on the consumer list alone that the consumer passes and native
+     fails is a divergence with exit 1, which says the consumer's line is
+     stale and names no consumer reason: the consumer has no gap here.
 
 Cases 1 to 6 and case 12 run native against itself, so they need no managed
-toolchain and no runtime jar. Cases 7 to 11 use a stub script as a runner,
+toolchain and no runtime jar. Cases 7 to 11 and 13 use a stub script as a runner,
 because they need one side to pass, to fail, or to hang where the other side
 does not.
 
@@ -52,7 +55,7 @@ red or a false green.
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all twelve cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all thirteen cases hold, 1 with a report per failed case otherwise,
 2 when a precondition fails (the probe this script needs is missing, or the
 binary does not run a trivial program and print its line), and 125 when the
 build traces execution so that cases 10 and 11 cannot be judged.
@@ -357,17 +360,43 @@ def main() -> int:
             f"case that can fail: {out.strip()!r}",
         )
 
-        # The same probe with the consumer list alone still reports XFAIL, so
-        # case 7 measures the overlap rule and not the ordinary path.
+        # Case 13: the same state with the consumer list ALONE, so case 7
+        # measures the overlap rule and this case measures the single-list one.
+        # The consumer passes a probe its own list calls a gap, and native fails
+        # it with no entry to explain that: the consumer's line is stale, and
+        # native's failure is the reason a reader needs. Printing the consumer's
+        # reason would state a gap the consumer does not have, and exit 0 would
+        # hide both facts.
+        consumer_only = work / "consumer_only.txt"
+        consumer_only.write_text(f"{both_probe.name}  consumer is behind\n")
         code, out, err = run(
-            args.native, [both_probe], [("--xfail", consumer_list)], runner=str(stub)
+            args.native, [both_probe], [("--xfail", consumer_only)], runner=str(stub)
         )
         expects(
             failures,
-            "a probe on the consumer list alone",
-            "XFAIL" in out and "consumer is behind" in out,
-            f"did not report XFAIL with the consumer reason: exit {code}, "
+            "the consumer list alone, consumer ahead of native",
+            "DIVERGE" in out,
+            f"did not report a divergence: exit {code}, stdout {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            code == 1,
+            f"exit {code}, expected 1 (a stale entry is not green): "
             f"stdout {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            "consumer is behind" not in out,
+            f"printed the consumer's reason for a probe the consumer passes: "
+            f"{out.strip()!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            "stale" in out and consumer_only.name in out,
+            f"did not name the stale line: {out.strip()!r}",
         )
 
         # Case 8: both lists, and both sides fail the probe. Neither list's
@@ -547,15 +576,16 @@ def main() -> int:
         print(
             f"SKIP: {args.native} prints a disassembly or an execution trace, so "
             f"no probe can pass on it and cases 10 and 11 cannot be judged. The "
-            f"other ten cases pass. Use the release preset for the full check."
+            f"other eleven cases pass. Use the release preset for the full check."
         )
         return 125
 
     print(
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
-        "probe is a clean refusal, a real probe reaches the comparison, and a "
-        "probe on both lists reports every reason the run graded"
+        "probe is a clean refusal, a real probe reaches the comparison, a probe "
+        "on both lists reports every reason the run graded, and a consumer entry "
+        "the consumer passes is a divergence, not an XFAIL"
     )
     return 0
 
