@@ -329,11 +329,13 @@ to a count. A count changes only at these events, never on the
 interpreter's hot path: a send across workers; a spawn, which raises one
 count on the new task handle for the spawning worker and one on the start
 message; a drain; the new worker's receipt of its start message; a
-collection; a worker exit; and the free of a dead heap. The creating
-worker's collector treats an object with a count above zero as a root. The
-receiver's collector marks
-foreign objects in a side table of its own, never in the object header,
-because the header's mark bit belongs to the owner's collector; a foreign
+collection; a worker exit; and the free of a heap, which releases the
+foreign counts that the heap still holds. The free runs in `dropOwner` when
+the owner is gone and no count is left, or in the last `releaseHold` of a
+dead heap. The creating worker's collector treats an object with a count
+above zero as a root. The receiver's collector marks foreign objects in a
+side table of its own, never in the object header, because the header's
+mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
 the count drops. A message has no pointer to mutable state and no cycle
 can cross a worker boundary, so the count has no cycle problem.
@@ -558,7 +560,7 @@ hold table of the native `MemoryManager` (`hold`, `releaseHold`, and the
 held roots of a collection). Every path that changes a count goes through
 it: the send, the spawn (the hold on the new task handle and on the start
 message), the drain, the new worker's receipt of its start message, the
-collection, the worker exit, and the free of a dead heap. The QBE backend
+collection, the worker exit, and the free of a heap. The QBE backend
 links this runtime. The JVM and the bootstrap have one collector for all
 workers and keep no count.
 
