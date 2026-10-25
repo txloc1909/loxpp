@@ -187,7 +187,6 @@ test("a person types into an interactive child's window", { skip: !live && "set 
       env: {},
       hold: false,
       keepFocus: true,
-      interactive: true,
       signal: undefined,
       onProgress: () => {},
     });
