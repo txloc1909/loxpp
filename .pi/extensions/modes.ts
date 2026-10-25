@@ -48,6 +48,7 @@ import {
   type Mode,
   type PolicyState,
 } from "./lib/mode-policy.ts";
+import { GATE_SCOPES, gatePlan, type GateScope } from "./lib/gate-scopes.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
 // the approval decision to the agent for /goal. A per-command --handoff /
@@ -63,28 +64,8 @@ const STAGNATION_LIMIT = 3; // identical gate failures on an unchanged tree befo
 // The gate always runs inside the dev container: AGENTS.md's dev model puts the
 // agent on the host and program execution in the container, where the toolchain
 // lives. The checkout (cwd) is mounted at /workspace and the task-loop commands
-// run there.
-const NATIVE_CONTAINER_GATE = `set -e
-cd /workspace
-cmake --preset debug
-cmake --build build
-ctest --test-dir build --output-on-failure -j$(nproc)`;
-
-const BACKEND_CONTAINER_GATE = `set -e
-cd /workspace
-tools/build_lox_rt.sh
-tools/check_managed_toolchains.sh
-cmake --preset release
-cmake --build build
-ctest --test-dir build --output-on-failure -j$(nproc)
-# The differential phase is the one value this gate cannot guess: it needs a
-# native binary, a runner, and a corpus. CI's "JVM differential suite -
-# probes" step is the reference. A node on another managed backend adds its
-# own runner line here rather than replacing this one (#855).
-python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh \\
-  test/translation-probes/ test/translation-probes/jvm-only/ \\
-  --xfail tools/spec-probe-xfail/jvm.txt \\
-  --oracle-xfail tools/spec-probe-xfail/native.txt`;
+// run there. Each scope's image and script live in lib/gate-scopes.ts, where a
+// test compares the qbe scope against CI's own QBE toolchain job.
 
 // The exact template forms multi-agent-playbook.md requires. Plain `gh issue
 // view` hides comment hazards; `--comments` drops the body. The tool hardcodes
@@ -131,7 +112,7 @@ interface AutonomyState {
   mode: Mode | null;
   policy: PolicyState;
   lastGatePassed: boolean | undefined;
-  lastScope: "native" | "backend";
+  lastScope: GateScope;
   lastCwd: string | undefined;
   declaredDone: boolean;
   sameFailureCount: number;
@@ -249,10 +230,10 @@ async function treeSignature(roots: readonly string[]): Promise<string | undefin
 // The agent runs on the host; program execution runs inside the dev container
 // (AGENTS.md), so the gate always enters the container via podman.
 async function gatePreflight(
-  scope: "native" | "backend",
+  scope: GateScope,
   signal: AbortSignal | undefined,
 ): Promise<{ ok: boolean; output: string }> {
-  const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
+  const image = gatePlan(scope).image;
   // These checks do not depend on the checkout; run them from process.cwd() so a
   // missing checkout is not misreported as a missing podman.
   const podman = await runArgv(["podman", "--version"], process.cwd(), signal);
@@ -273,7 +254,7 @@ async function gatePreflight(
 }
 
 async function runGate(
-  scope: "native" | "backend",
+  scope: GateScope,
   cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ passed: boolean; output: string }> {
@@ -281,8 +262,7 @@ async function runGate(
   if (!preflight.ok) {
     return { passed: false, output: preflight.output };
   }
-  const image = scope === "backend" ? "loxpp-dev-env-managed" : "loxpp-dev-env";
-  const script = scope === "backend" ? BACKEND_CONTAINER_GATE : NATIVE_CONTAINER_GATE;
+  const { image, script } = gatePlan(scope);
   // podman -v needs an absolute host path; a relative one becomes a named volume.
   const absCwd = path.resolve(cwd);
   const argv = [
@@ -413,7 +393,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
   }
 
   async function recordGate(
-    scope: "native" | "backend",
+    scope: GateScope,
     cwd: string,
     passed: boolean,
     output: string,
@@ -485,9 +465,9 @@ export default function loxppModes(pi: ExtensionAPI): void {
     promptSnippet: "run the Lox++ build/test gate and report pass/fail",
     parameters: Type.Object({
       scope: Type.Optional(
-        StringEnum(["native", "backend"] as const, {
+        StringEnum(GATE_SCOPES, {
           description:
-            "native = debug build + ctest. backend = managed toolchains + release build + ctest + diff_runtimes. Default native.",
+            "native = debug build + ctest. backend = managed toolchains + release build + ctest + diff_runtimes. qbe = QBE toolchain + release build + CI's QBE toolchain job. Default native.",
           default: "native",
         }),
       ),
@@ -496,7 +476,7 @@ export default function loxppModes(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const scope: "native" | "backend" = params.scope ?? "native";
+      const scope: GateScope = params.scope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
       const r = await runGate(scope, cwd, signal);
       await recordGate(scope, cwd, r.passed, r.output, "gate");
@@ -524,14 +504,14 @@ export default function loxppModes(pi: ExtensionAPI): void {
       pr: Type.Optional(Type.String({ description: "PR number or URL. When given, CI green and [Reviewer] APPROVED are also required." })),
       repo: Type.Optional(Type.String({ description: `Repo, default ${REPO}.` })),
       scope: Type.Optional(
-        StringEnum(["native", "backend"] as const, {
+        StringEnum(GATE_SCOPES, {
           description: "Gate scope to re-run. Default the scope of the last loxpp_gate call.",
         }),
       ),
       cwd: Type.Optional(Type.String({ description: "Checkout to gate. Default the last loxpp_gate cwd." })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const scope: "native" | "backend" = params.scope ?? autonomy.lastScope ?? "native";
+      const scope: GateScope = params.scope ?? autonomy.lastScope ?? "native";
       const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : (autonomy.lastCwd ?? ctx.cwd);
       const repo = params.repo ?? REPO;
       const pr = params.pr?.trim();
