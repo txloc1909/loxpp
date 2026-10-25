@@ -40,19 +40,20 @@ fun hexDigitValue(c) {
 }
 
 // Encode a Unicode code point as UTF-8 bytes, since a Lox++ String is a byte
-// sequence.
+// sequence. The continuation bytes are 6-bit fields of the Int code point.
 fun utf8FromCodePoint(cp) {
-    if (cp < 128) return chr(cp);
-    if (cp < 2048) {
-        return chr(192 + math.floor(cp / 64)) + chr(128 + cp % 64);
+    var c = int(cp);
+    if (c < 128i) return chr(cp);
+    if (c < 2048i) {
+        return chr(float(0xC0 | (c >> 6i))) + chr(float(0x80 | (c & 0x3F)));
     }
-    if (cp < 65536) {
-        return chr(224 + math.floor(cp / 4096))
-            + chr(128 + math.floor(cp / 64) % 64) + chr(128 + cp % 64);
+    if (c < 65536i) {
+        return chr(float(0xE0 | (c >> 12i)))
+            + chr(float(0x80 | ((c >> 6i) & 0x3F))) + chr(float(0x80 | (c & 0x3F)));
     }
-    return chr(240 + math.floor(cp / 262144))
-        + chr(128 + math.floor(cp / 4096) % 64)
-        + chr(128 + math.floor(cp / 64) % 64) + chr(128 + cp % 64);
+    return chr(float(0xF0 | (c >> 18i)))
+        + chr(float(0x80 | ((c >> 12i) & 0x3F)))
+        + chr(float(0x80 | ((c >> 6i) & 0x3F))) + chr(float(0x80 | (c & 0x3F)));
 }
 
 // ---------- JSON object with a deterministic key order ----------

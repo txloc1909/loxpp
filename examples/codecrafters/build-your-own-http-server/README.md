@@ -8,9 +8,8 @@ regression cases are marked `local:`. A second battery diffs against
 Python's `http.client`/`gzip`/`zlib` as an independent oracle.
 
 The HTTP/1.1 parser, the router, and the `gzip` encoder (DEFLATE + CRC32) all
-run **inside the VM**. Lox++ has no bitwise operators, so the DEFLATE bit
-stream and the CRC32 checksum are built with arithmetic (`/`, `%`,
-`math.floor`) over the 32-bit range.
+run **inside the VM**. The DEFLATE bit stream and the CRC32 checksum are Int
+bit patterns, built with `<<`, `>>`, `>>>`, `&` and `^` over the 32-bit range.
 
 ## Layout
 

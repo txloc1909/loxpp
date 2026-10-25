@@ -1,8 +1,9 @@
 // zlib.lox — zlib (RFC 1950) over DEFLATE (RFC 1951), in pure Lox++.
 //
-// Lox++ has no bitwise operators, so every bit operation here is arithmetic
-// (`math.floor`, `%`, `*`) over the 32-bit range, exactly as the gzip encoder
-// in examples/codecrafters/build-your-own-http-server/http.lox does.
+// The bit stream is built with Int bit patterns: `<<`, `>>`, `&`, `|` and
+// `^` over the 32-bit range, so every packed field and checksum is exact.
+// The same shape is used by the gzip encoder in
+// examples/codecrafters/build-your-own-http-server/http.lox.
 //
 // Decode (inflate) handles all three DEFLATE block types — stored, fixed
 // Huffman, and dynamic Huffman — plus LZ77 back-references, so it consumes
@@ -16,8 +17,6 @@
 //
 // Demonstrates: byte-level string handling with ord/chr, binary formats,
 //               recursive-free bit I/O, and a canonical Huffman codec.
-
-var POW2 = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
 
 // RFC 1951 §3.2.5: length codes 257..285, and distance codes 0..29. Index i
 // is code 257+i for lengths, code i for distances.
@@ -34,7 +33,7 @@ var DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8,
 // alphabet of a dynamic block.
 var CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
 
-// ---------- byte helpers (no bitwise operators) ----------
+// ---------- byte helpers ----------
 
 fun fromBytes(a) {
     var s = "";
@@ -51,30 +50,30 @@ fun bytesToHex(s) {
     var out = "";
     var i = 0;
     while (i < len(s)) {
-        var b = ord(s[i]);
-        out = out + HEX[math.floor(b / 16)] + HEX[b % 16];
+        var b = int(ord(s[i]));
+        out = out + HEX[int(b >> 4i)] + HEX[int(b & 0xF)];
         i = i + 1;
     }
     return out;
 }
 
 fun be32(n) {
-    return chr(math.floor(n / 16777216) % 256)
-        + chr(math.floor(n / 65536) % 256)
-        + chr(math.floor(n / 256) % 256) + chr(n % 256);
+    var x = int(n);
+    return chr(float((x >> 24i) & 0xFF)) + chr(float((x >> 16i) & 0xFF))
+        + chr(float((x >> 8i) & 0xFF)) + chr(float(x & 0xFF));
 }
 
 // Adler-32 (RFC 1950 §9): two sums modulo 65521, combined as (b << 16) | a.
 fun adler32(s) {
-    var a = 1;
-    var b = 0;
+    var a = 1i;
+    var b = 0i;
     var i = 0;
     while (i < len(s)) {
-        a = (a + ord(s[i])) % 65521;
-        b = (b + a) % 65521;
+        a = (a + int(ord(s[i]))) % 65521i;
+        b = (b + a) % 65521i;
         i = i + 1;
     }
-    return b * 65536 + a;
+    return (b << 16i) | a;
 }
 
 // ---------- bit I/O ----------
@@ -83,18 +82,18 @@ fun adler32(s) {
 // MSB-first (RFC 1951 §3.1.1).
 class BitWriter {
     init() {
-        this.acc = 0;
+        this.acc = 0i;
         this.n = 0;
         this.out = "";
     }
     put(b) {
-        if (b == 1) this.acc = this.acc + POW2[this.n];
+        this.acc = this.acc | (int(b) << int(this.n));
         this.n = this.n + 1;
         if (this.n == 8) this.flushByte();
     }
     flushByte() {
-        this.out = this.out + chr(this.acc);
-        this.acc = 0;
+        this.out = this.out + chr(float(this.acc));
+        this.acc = 0i;
         this.n = 0;
     }
     finish() {
@@ -104,18 +103,21 @@ class BitWriter {
 }
 
 fun putBits(w, value, count) {
-    var i = 0;
-    while (i < count) {
-        w.put(math.floor(value / POW2[i]) % 2);
-        i = i + 1;
+    var v = int(value);
+    var i = 0i;
+    var n = int(count);
+    while (i < n) {
+        w.put(int((v >> i) & 1i));
+        i = i + 1i;
     }
 }
 
 fun emitCode(w, code, bits) {
-    var i = bits - 1;
-    while (i >= 0) {
-        w.put(math.floor(code / POW2[i]) % 2);
-        i = i - 1;
+    var v = int(code);
+    var i = int(bits) - 1i;
+    while (i >= 0i) {
+        w.put(int((v >> i) & 1i));
+        i = i - 1i;
     }
 }
 
@@ -123,28 +125,32 @@ class BitReader {
     init(s) {
         this.s = s;
         this.pos = 0;
-        this.acc = 0;
+        this.acc = 0i;
         this.n = 0;
     }
-    readBit() {
+    readBitInt() {
         if (this.n == 0) {
-            this.acc = ord(this.s[this.pos]);
+            this.acc = int(ord(this.s[this.pos]));
             this.pos = this.pos + 1;
             this.n = 8;
         }
-        var bit = this.acc % 2;
-        this.acc = math.floor(this.acc / 2);
+        var bit = this.acc & 1i;
+        this.acc = this.acc >> 1i;
         this.n = this.n - 1;
         return bit;
     }
+    readBit() {
+        return float(this.readBitInt());
+    }
     readBits(count) {
-        var v = 0;
-        var i = 0;
-        while (i < count) {
-            v = v + this.readBit() * POW2[i];
-            i = i + 1;
+        var v = 0i;
+        var i = 0i;
+        var n = int(count);
+        while (i < n) {
+            v = v | (this.readBitInt() << i);
+            i = i + 1i;
         }
-        return v;
+        return float(v);
     }
     // Discard the rest of the current byte, then return the next whole byte.
     // Used by stored blocks, which are byte-aligned.
@@ -381,25 +387,25 @@ fun zlibDecompress(s) {
     if (len(s) < 6) {
         throw "not a zlib stream";
     }
-    var cmf = ord(s[0]);
-    var flg = ord(s[1]);
-    if (cmf % 16 != 8) {
+    var cmf = int(ord(s[0]));
+    var flg = int(ord(s[1]));
+    if ((cmf & 0xF) != 8i) {
         throw "unsupported zlib compression method";
     }
     // RFC 1950 §2.2: CINFO above 7 asks for a window larger than 32 KiB.
-    if (math.floor(cmf / 16) > 7) {
+    if ((cmf >> 4i) > 7i) {
         throw "unsupported zlib window size";
     }
-    if ((cmf * 256 + flg) % 31 != 0) {
+    if (((cmf << 8i) | flg) % 31i != 0i) {
         throw "corrupt zlib header";
     }
-    if (math.floor(flg / 32) % 2 == 1) {
+    if (((flg >> 5i) & 1i) == 1i) {
         throw "preset dictionaries are unsupported";
     }
     var out = inflate(s[2:len(s) - 4]);
     var n = len(s);
-    var expected = ord(s[n - 4]) * 16777216 + ord(s[n - 3]) * 65536
-        + ord(s[n - 2]) * 256 + ord(s[n - 1]);
+    var expected = (int(ord(s[n - 4])) << 24i) | (int(ord(s[n - 3])) << 16i)
+        | (int(ord(s[n - 2])) << 8i) | int(ord(s[n - 1]));
     if (adler32(out) != expected) {
         throw "zlib Adler-32 mismatch";
     }
@@ -534,11 +540,11 @@ fun deflateFixed(s) {
 
 // One stored block. Valid only for inputs that fit a single 16-bit length.
 fun deflateStored(s) {
-    var n = len(s);
+    var n = int(len(s));
     var out = chr(1);
-    out = out + chr(n % 256) + chr(math.floor(n / 256) % 256);
-    var inv = 65535 - n;
-    out = out + chr(inv % 256) + chr(math.floor(inv / 256) % 256);
+    out = out + chr(float(n & 0xFF)) + chr(float((n >> 8i) & 0xFF));
+    var inv = 65535i - n;
+    out = out + chr(float(inv & 0xFF)) + chr(float((inv >> 8i) & 0xFF));
     return out + s;
 }
 

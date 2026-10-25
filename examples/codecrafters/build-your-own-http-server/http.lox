@@ -9,9 +9,9 @@
 // `Connection: close`, and `gzip` content coding.
 //
 // Everything here is Lox++: the HTTP parser, the router, and the gzip encoder.
-// Lox++ has no bitwise operators, so the DEFLATE bit stream and CRC32 are
-// built with arithmetic (`/`, `%`, math.floor) over the 32-bit range. See the
-// README for the one stage this cannot reach and why.
+// The DEFLATE bit stream and CRC32 are Int bit patterns, built with `<<`,
+// `>>`, `>>>`, `&` and `^` over the 32-bit range. See the README for the one
+// stage this cannot reach and why.
 
 // ===========================================================================
 // Small string helpers (the stdlib has no split/trim/lower built in).
@@ -126,26 +126,22 @@ fun joinPath(dir, name) {
 // inputs — valid, and exactly what the compression stage allows.
 // ===========================================================================
 
-var POW2 = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048];
-
 class BitWriter {
     init() {
-        this.acc = 0;
+        this.acc = 0i;
         this.n = 0;
         this.out = "";
     }
     put(b) {
-        if (b == 1) {
-            this.acc = this.acc + POW2[this.n];
-        }
+        this.acc = this.acc | (int(b) << int(this.n));
         this.n = this.n + 1;
         if (this.n == 8) {
             this.flushByte();
         }
     }
     flushByte() {
-        this.out = this.out + chr(this.acc);
-        this.acc = 0;
+        this.out = this.out + chr(float(this.acc));
+        this.acc = 0i;
         this.n = 0;
     }
     finish() {
@@ -157,11 +153,11 @@ class BitWriter {
 }
 
 fun emitCode(w, code, bits) {
-    var i = bits - 1;
-    while (i >= 0) {
-        var bit = math.floor(code / POW2[i]) % 2;
-        w.put(bit);
-        i = i - 1;
+    var v = int(code);
+    var i = int(bits) - 1i;
+    while (i >= 0i) {
+        w.put(int((v >> i) & 1i));
+        i = i - 1i;
     }
 }
 
@@ -190,47 +186,31 @@ fun deflateFixed(s) {
     return w.finish();
 }
 
-// 32-bit XOR with no bitwise operators. Values stay below 2^32, exact in a
-// double, and `bit` peaks at 2^31 before the loop ends.
-fun bxor(a, b) {
-    var r = 0;
-    var bit = 1;
-    var i = 0;
-    while (i < 32) {
-        var ab = math.floor(a / bit) % 2;
-        var bb = math.floor(b / bit) % 2;
-        if (ab != bb) {
-            r = r + bit;
-        }
-        bit = bit * 2;
-        i = i + 1;
-    }
-    return r;
-}
-
 // Reflected CRC32 (polynomial 0xEDB88320), the gzip trailer checksum.
+// `>>>` keeps the register unsigned as it shifts.
 fun crc32(s) {
-    var crc = 4294967295;
+    var crc = 0xFFFFFFFF;
     var i = 0;
     while (i < len(s)) {
-        crc = bxor(crc, ord(s[i]));
+        crc = crc ^ int(ord(s[i]));
         var k = 0;
         while (k < 8) {
-            if (crc % 2 == 1) {
-                crc = bxor(3988292384, math.floor(crc / 2));
+            if ((crc & 1i) == 1i) {
+                crc = 0xEDB88320 ^ (crc >>> 1i);
             } else {
-                crc = math.floor(crc / 2);
+                crc = crc >>> 1i;
             }
             k = k + 1;
         }
         i = i + 1;
     }
-    return bxor(crc, 4294967295);
+    return crc ^ 0xFFFFFFFF;
 }
 
 fun le32(n) {
-    return chr(n % 256) + chr(math.floor(n / 256) % 256)
-        + chr(math.floor(n / 65536) % 256) + chr(math.floor(n / 16777216) % 256);
+    var x = int(n);
+    return chr(float(x & 0xFF)) + chr(float((x >> 8i) & 0xFF))
+        + chr(float((x >> 16i) & 0xFF)) + chr(float((x >> 24i) & 0xFF));
 }
 
 fun gzip(s) {
