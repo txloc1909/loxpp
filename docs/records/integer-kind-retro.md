@@ -53,14 +53,17 @@ Twelve review rounds ran before N9, in one referee-free mission except for N1:
 
 Seven of the eight merged pull requests needed one round or fewer for the code
 itself. The one node that consumed three quarters of the review effort was the
-spec node, and both of its design faults were in the check scripts, not in the
-language text.
+spec node, and its two design faults were in different places: the first was in
+the language text, in "Number and Int Literals" of `spec/01-lexical.md`, which
+stated each lexical rule more than once; the second was in the check scripts,
+which took their evidence from a wider scope than their claim named.
 
 N1 also needed two approvals that are not review rounds: main moved twice
-during it (#834's Number print format and its probe renumbering, then #840),
-and the reviewer re-approved each merge head. That is a cost of a long node on
-a moving `main`, and it is the reason the probe numbers shifted from the ones
-its issue names: probes 243 to 246 became 244 to 247.
+during it (#836's probe 164, which N1 merged in `eb312d5`, then #840's Number
+print format and its probe renumbering in `bb4470c`), and the reviewer
+re-approved each merge head. That is a cost of a long node on a moving `main`,
+and it is the reason the probe numbers shifted from the ones its issue names:
+probes 243 to 246 became 244 to 247.
 
 ## The two referee rulings on N1
 
@@ -99,10 +102,12 @@ two deletions 72 sites, 6 `cannot read` sites and 1 `raise`. The same
 mechanism, "the evidence is wider than the claim", is worth looking for in
 every check script a later mission adds.
 
-The playbook's warning that a trigger can fire on the wrong file and still be
-right was exact here: the file name drifted from `spec/01-lexical.md` to
-`check_int_fault_rows.py` to `check_int_literal_rejections.py` while the
-mechanism stayed one.
+The second trigger is the playbook's warning in action. The harness named
+`tools/check_int_fault_rows.py`, which held two of the three findings the
+ruling covered, R7 and R11, at lines 81 and 226. The third, R13, was in
+`tools/check_int_literal_rejections.py`, at line 107. The referee read the file
+name as a pointer to the set, not as the diagnosis, and the set was the wider
+one.
 
 ## The permission denials
 
@@ -131,14 +136,17 @@ that could not fail on the object they named.
 
 ## The bug classes
 
-The decision names six classes before any node started. Each one fired at
-least once during the mission.
+The decision names six classes before any node started. Constraints 5 and 6
+fired, each as a referee ruling, and each one changed the design. The other
+four did not fire: no node's review and no gate found a defect of one of those
+classes, so their cost was the guards, the probes and the named skips, not a
+fix.
 
 | Constraint | What it predicted | What happened |
 |---|---|---|
 | 1. Undefined behavior under the test gate | Wrapping in `uint64_t`, the smallest Int over `-1i`, a range check before every double-to-int cast | The debug gate (`-fsanitize=address,undefined`) stayed green on every node; the probes for the smallest Int over `-1i` and for `int()` at both ends of the range are the ones that would have fired |
 | 2. A new object kind touches every switch over `ObjType` | GC mark and free, `isMessage`, `stringify`, equality, hashing, the type name, the QBE C API | N2's review checked the site counts by `grep`, and N2 added a boxed `Int` at each of them as probes |
-| 3. The constant pool keys by bit pattern, not by `==` | `1` and `1i` are two constants | Probe 191 holds both in one program; the JVM's `Long.equals(Double)` is `false` for the same reason |
+| 3. The constant pool keys by bit pattern, not by `==` | `1` and `1i` are two constants | Probe 177 holds both in one function, and its header states them as two constants; the JVM's `Long.equals(Double)` is `false` for the same reason |
 | 4. Four forms change meaning under the longest match | `1in`, `1if`, `1.5in`, `1.5if` | Probes 240 to 242 and 244 pin them, and the tree-sitter step keeps them named; no program in the repository wrote one |
 | 5. One normative statement per lexical question | The class of the first referee ruling | The redesign and the examples table; every scanner implements the rules, and the check reads the table |
 | 6. A check reads one object, never prose | The class of the second referee ruling | The prose checks deleted, the 72 sites audited with one mutation each |
@@ -150,10 +158,13 @@ a diff of language code. Both came from a referee, not from a reviewer.
 
 - **#834 (the Number print format) closed mid-mission, by #849.** It was not a
   node of this mission: N1 found the gap in the spec before the mission ran.
-  It landed on 2026-10-24, changed the Number print form to the shortest
-  decimal that round-trips, and added the Int and Number print parity probes
-  that the decision's "Printing" section cites. Its merge renumbered four Int
-  probes (243 to 246 became 244 to 247) under N1's feet.
+  The format change itself landed in #840 on 2026-10-23: a Number prints the
+  shortest decimal that round-trips, not the `%g` text. N1 merged #840 into its
+  own branch in `bb4470c`, and that merge renumbered four Int probes (243 to
+  246 became 244 to 247) under N1's feet. #849 closed #834 on 2026-10-24 by
+  pinning the Int and Number print parity that #840's rule made possible, in
+  probe 179 and its README row; `git show --name-status 91e5f49` lists those
+  two files and no other.
 - **#883 and #884 are the mission's last cleanup.** At close, no
   `tools/spec-probe-xfail/*.txt` file held a probe line, so the six files and
   the C++ loader that reads them (`specProbeXfail` in `test/corpus.h`) had no
@@ -179,10 +190,14 @@ a diff of language code. Both came from a referee, not from a reviewer.
    198 as the bitboard, which was stale after the renumbering. The N9 plan
    corrected both from the source before any work started, and N9 ran the
    compile phase against the command, not the range.
-2. **The stagnation trigger named the wrong file twice in N1.** The referee
-   ruled correctly both times, so no ruling was lost, but the trigger's file
-   label cost a round of confusion each time. The playbook already says to
-   read the label as a pointer. This mission is the evidence.
+2. **The stagnation trigger's file label was exact once and narrower once in
+   N1.** The first trigger named `spec/01-lexical.md`, which held the defect, so
+   the label was right. The second named `tools/check_int_fault_rows.py`, which
+   held two of the three findings that the ruling covered; the third was in
+   `tools/check_int_literal_rejections.py`. The referee ruled correctly both
+   times, so no ruling was lost. The playbook already says to read the label as
+   a pointer. This mission is the evidence for both cases: a label that is
+   right, and a label that is a pointer to a wider set.
 3. **The DAG order and the merge order disagreed for one pair.** The DAG ran
    N7 after N2 and before N3, but N3's pull request merged 14 minutes before
    N7's on 2026-10-24. Nothing broke, because the two touch disjoint files, but

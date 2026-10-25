@@ -480,8 +480,9 @@ because map iteration order is unspecified (`spec/03-types.md`).
 
 At close, no expected-failure file holds a probe line. PR #884 removes the
 six files and the C++ loader that reads them; it runs in parallel with this
-node and owns those edits. The three Int probes that the tree-sitter step
-names in `ci.yml` (174, 175 and 176) stay named there.
+node and owns those edits. The twelve Int probes that the tree-sitter step
+names in `ci.yml` (174 to 176, 240 to 242, 244, and 245 to 249) stay named
+there.
 
 ### Follow-ups filed at close
 
@@ -499,12 +500,15 @@ functions, so none of these four items is a capability gap of the kind
 
 ### Work that landed during the mission
 
-These pull requests changed shared tooling while the mission ran. None of
-them changes this decision.
+These pull requests landed on `main` while the mission ran, or changed shared
+tooling. None of them changes this decision.
 
 | Pull request | Issue it closes | What changed |
 |---|---|---|
-| #849 | #834 | The canonical string form of a Number, and the Int and Number print parity probes |
+| #836 | #821 | The JVM backend repairs a folded-match deficit of two or more. Its probe takes the number 164, so N1 moves the Int probes up by one in `eb312d5` |
+| #837 | — | The Number canonical string form decision is accepted beside the Int kind decision |
+| #840 | — | A Number prints as its shortest decimal, not the `%g` text. N1 merges it in `bb4470c`, and that merge moves the Int probes 243 to 246 up by one |
+| #849 | #834 | The Int and Number print parity in probe 179 |
 | #857 | #855 | The `backend` scope of `loxpp_gate` runs the differential suite |
 | #861 | — | The mission role definitions move into the repository |
 | #866 | #862 | `tools/diff_runtimes.py` refuses a listed probe that the consumer exempts |
