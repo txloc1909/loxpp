@@ -39,9 +39,11 @@ Fourteen cases, each on an explicit program list, so no corpus is walked:
   13. a probe on the consumer list alone that the consumer passes and native
      fails is a divergence with exit 1, which says the consumer's line is
      stale and names no consumer reason: the consumer has no gap here.
-  14. a runner path that does not exist is exit 2 and names the path, in this
+  14. a runner that the run cannot start is exit 2 and names the path, in this
      checker and in both runner slots of tools/diff_runtimes.py, and it is no
-     traceback: a setup mistake must not read as a failed case.
+     traceback: a setup mistake must not read as a failed case. Two shapes: a
+     path that does not exist, and a file that exists and is executable whose
+     shebang names a missing interpreter.
 
 Cases 1 to 6 and 12 run native against itself, so they need no managed
 toolchain and no runtime jar. Cases 7 to 11 and 13 use a stub script as a
@@ -80,7 +82,7 @@ DIFF_RUNTIMES = REPO_ROOT / "tools" / "diff_runtimes.py"
 # not depend on how the file was started.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from diff_runtimes import require_runner
+from diff_runtimes import refuse_unrunnable, require_runner
 
 # A spec probe of test/translation-probes/ that runs in milliseconds. Case 4
 # asserts only that the check let the run through, so whether this probe passes
@@ -167,8 +169,7 @@ def build_traces(native: str, work: Path) -> bool | None:
         # The path passed the precondition and still cannot be spawned: a
         # wrapper whose interpreter is missing, for example. That is a
         # precondition too, so it must not read as "traces" or as a failed case.
-        print(f"error: {native} cannot run: {exc}", file=sys.stderr)
-        sys.exit(2)
+        refuse_unrunnable(native, exc)
     if completed.returncode != 0:
         return None
     if completed.stdout == 'trace check\n':
@@ -413,11 +414,22 @@ def main() -> int:
             f"printed the consumer's reason for a probe the consumer passes: "
             f"{out.strip()!r}",
         )
+        diverge_line = next(
+            (line for line in out.splitlines() if line.startswith("DIVERGE")), ""
+        )
         expects(
             failures,
             "the consumer list alone, consumer ahead of native",
-            "stale" in out and consumer_only.name in out,
-            f"did not name the stale line: {out.strip()!r}",
+            f"{consumer_only.name} lists it" in diverge_line,
+            f"did not name the file whose line is stale on the DIVERGE line: "
+            f"{diverge_line!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            "is stale" in diverge_line,
+            f"the DIVERGE line does not say the consumer line is stale: "
+            f"{diverge_line!r}",
         )
 
         # Case 8: both lists, and both sides fail the probe. Neither list's
@@ -646,6 +658,68 @@ def main() -> int:
                 f"stderr holds a Python traceback: {err.strip()!r}",
             )
 
+        # A file that passes every path check and still cannot be spawned,
+        # because the interpreter in its shebang is missing. The kernel fails
+        # exec after require_runner has said the path is fine, so the spawn
+        # needs the precondition too, in this checker and in both runner slots
+        # of tools/diff_runtimes.py.
+        unrunnable = work / "unrunnable_runner.sh"
+        unrunnable.write_text("#!/nonexistent/interpreter\necho never\n")
+        unrunnable.chmod(0o755)
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--native", str(unrunnable)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            completed.returncode == 2,
+            f"exit {completed.returncode}, expected 2 (a precondition): "
+            f"stderr {completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            f"error: {unrunnable} cannot run" in completed.stderr,
+            f"stderr does not name the runner that cannot start: "
+            f"{completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            "Traceback" not in completed.stderr,
+            f"stderr holds a Python traceback: {completed.stderr.strip()!r}",
+        )
+
+        for role, invoke in (
+            ("--native", lambda: run(str(unrunnable), [real_probe], [])),
+            (
+                "the other runner",
+                lambda: run(args.native, [real_probe], [], runner=str(unrunnable)),
+            ),
+        ):
+            code, out, err = invoke()
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                code == 2,
+                f"exit {code}, expected 2 (a precondition): stderr {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                f"error: {unrunnable} cannot run" in err,
+                f"stderr does not name the runner that cannot start: {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                "Traceback" not in err,
+                f"stderr holds a Python traceback: {err.strip()!r}",
+            )
+
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
@@ -664,8 +738,8 @@ def main() -> int:
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
         "probe is a clean refusal, a real probe reaches the comparison, a probe "
         "on both lists reports every reason the run graded, a consumer entry the "
-        "consumer passes is a divergence rather than an XFAIL, and a runner path "
-        "that does not exist is a clean precondition (exit 2)"
+        "consumer passes is a divergence rather than an XFAIL, and a runner the "
+        "run cannot start is a clean precondition (exit 2)"
     )
     return 0
 

@@ -135,10 +135,11 @@ Usage:
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
 A path that is neither a file nor a directory, a program list that ends up
 empty, or an --xfail or --oracle-xfail entry that is not a spec probe of the
-list, is an error (exit 2), not a silent zero-file pass. So is a runner path
-that does not name an executable file: a mistyped <native-loxpp> or
-<other-runner> is a precondition, not a failed comparison, and it fails before
-the first program runs.
+list, is an error (exit 2), not a silent zero-file pass. So is a runner that
+cannot start: a mistyped <native-loxpp> or <other-runner>, a path that is not an
+executable file, or a wrapper whose shebang names a missing interpreter. A
+precondition, not a failed comparison: it exits 2 and names the path, and it
+never prints a comparison first.
 
 --only-excluded <dir> ignores <path> and runs only the programs named in
 --exclude, resolved under <dir>. This wires the permutation guard: an
@@ -325,7 +326,22 @@ def run_program(
         )
     except subprocess.TimeoutExpired as exc:
         raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
+    except OSError as exc:
+        refuse_unrunnable(cmd[0], exc)
     return result.stdout, result.stderr, result.returncode
+
+
+def refuse_unrunnable(path: str, exc: OSError) -> None:
+    """Stops with exit 2 for a runner that exec cannot start.
+
+    require_runner cannot see this shape: the file exists, it is a file, and it
+    is executable, but the kernel still refuses to start it. A wrapper whose
+    shebang names a missing interpreter is the common case. That is a
+    precondition like a missing path, so it must not read as a comparison that
+    failed.
+    """
+    print(f"error: {path} cannot run: {exc}", file=sys.stderr)
+    sys.exit(2)
 
 
 def require_runner(path: str) -> None:
