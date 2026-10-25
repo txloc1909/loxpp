@@ -34,20 +34,21 @@ function qbeJob(): string {
   return lines.slice(start, end === -1 ? undefined : end).join("\n");
 }
 
-/** The job's named steps, in order, with the body of each `run: |` block. */
+/** The job's named steps, in order, with the body of each `run:` block. */
 function ciSteps(job: string): CiStep[] {
   return job
     .split(/^ {6}- name: /m)
     .slice(1)
     .map((chunk) => {
       const [name, ...rest] = chunk.split("\n");
-      const runAt = rest.findIndex((line) => /^ {8}run: \|/.test(line));
+      const runAt = rest.findIndex((line) => /^ {8}run: [|>]/.test(line));
       if (runAt === -1) return { name: name.trim(), run: undefined };
       const body: string[] = [];
       for (const line of rest.slice(runAt + 1)) {
-        // The block body is indented past the `run:` key; the first shallower
-        // line ends it, so the prose comments above a step never count.
-        if (!/^ {10}/.test(line)) break;
+        // A block body is indented past its `run:` key at 8 spaces; the first
+        // line that is not ends it, so the prose comments above a step never
+        // count.
+        if (line.trim() !== "" && !/^ {9,}/.test(line)) break;
         body.push(line.trim());
       }
       return { name: name.trim(), run: body.join(" ") };
