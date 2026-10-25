@@ -12,11 +12,14 @@ Native (src/stdlib/net_api.cpp):
   - `raiseNet(KIND, ...)` is a catchable fault of the given kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
     Socket write path uses `writeStream` and `raiseNet`.
+  - `raiseFromNative(` outside `raiseNet`, and any other `native...Error(`
+    helper, are not in the table, so they fail.
 
 JVM (runtime/jvm/src/lox/LoxSocket.java and LoxServer.java):
   - `new LoxError(` is a halting fault. Only argument checks use it, and
     `readBytesFrom`, which Process shares.
   - `makeError("KIND"` is a catchable fault of the given kind.
+  - Any other `throw` fails, so a fault cannot use another exception.
 
 Usage:
     tools/check_net_faults.py [--native PATH] [--socket PATH] [--server PATH]
@@ -89,6 +92,11 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                 function = m.group(1)
         if "writeStreamOrError(" in line:
             problems.append(f"line {number}: writeStreamOrError is a halting write")
+        if function != "raiseNet" and re.search(r"\braiseFromNative\(", line):
+            problems.append(f"line {number}: raiseFromNative outside raiseNet")
+        for helper in re.findall(r"\b(native\w*Error)\(", line):
+            if helper != "nativeRuntimeError":
+                problems.append(f"line {number}: {helper} is not a known fault helper")
         if re.search(r"\bnativeRuntimeError\(", line) and function != "raiseNet":
             sites[(function, HALT)] += 1
         m = re.search(r"\braiseNet\((\w+)", line)
@@ -112,6 +120,10 @@ def java_sites(text: str) -> tuple[Counter, list[str]]:
             method = m.group(1)
         # A statement can wrap, so read the line and the next one.
         window = line + (lines[number] if number < len(lines) else "")
+        if re.search(r"\bthrow\b", line) and not re.search(
+            r"\bthrow (new LoxError\(|LoxOps\.makeError\()", line
+        ):
+            problems.append(f"line {number}: a throw other than LoxError or makeError")
         if "new LoxError(" in line:
             sites[(method, HALT)] += 1
         m = re.search(r'makeError\("(\w+)"', window)

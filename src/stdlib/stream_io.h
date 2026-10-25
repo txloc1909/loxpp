@@ -47,6 +47,10 @@ inline bool writeStream(FILE* handle, const char* method, std::string_view text,
             err = EPIPE;
         }
         message = std::string(method) + "(): " + std::strerror(err);
+        // A failed write leaves the stream error flag set. A program that
+        // catches the fault can read the peer's last bytes next, and a read
+        // that sees the old flag would raise a fault the network did not.
+        std::clearerr(handle);
         return false;
     }
     return true;

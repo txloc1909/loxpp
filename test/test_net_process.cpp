@@ -228,6 +228,25 @@ TEST(NetProcessTest, WriteToClosedPeerIsCatchableNotSignal) {
     EXPECT_EQ(stringify(h.lastResult()), "NetworkError");
 }
 
+TEST(NetProcessTest, ReadAfterAFailedWriteReturnsThePeersBytes) {
+    // The failed write must not leave a stream error that a later read
+    // reports as its own fault.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "s.write(\"bye\"); "
+                    "s.close(); "
+                    "var k = \"\"; "
+                    "var i = 0; "
+                    "while (i < 1000 and k == \"\") { "
+                    "try { c.write(\"xxxxxxxx\"); } catch (e) { k = e.kind; } "
+                    "i = i + 1; } "
+                    "k + \" \" + c.read_bytes(3);"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "NetworkError bye");
+}
+
 TEST(NetProcessTest, ReadAfterResetIsCatchableNotEndOfStream) {
     // The peer closes with unread bytes in its receive buffer, so the kernel
     // sends a reset. The read must not look like an end of stream.
@@ -238,7 +257,6 @@ TEST(NetProcessTest, ReadAfterResetIsCatchableNotEndOfStream) {
                     "c.write(\"unread\"); "
                     "sleep(0.2); "
                     "s.close(); "
-                    "sleep(0.2); "
                     "var k = \"\"; "
                     "try { c.read(); } catch (e) { k = e.kind; } "
                     "k;"),

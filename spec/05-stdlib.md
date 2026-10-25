@@ -565,9 +565,12 @@ Socket returns `"Socket"`. A Socket is a bidirectional stream of bytes.
 Reading a closed Socket, or writing to a Socket after `close_write()` or
 `close()`, raises a catchable `SocketClosedError`. A write that the peer has
 stopped reading raises a catchable `NetworkError`; it never ends the program
-by a signal. A read that the network ends with an error, such as a reset
-connection, also raises `NetworkError`; it is not an end of stream. A wrong
-argument type is a runtime error that halts the program.
+by a signal. A read that the network ends with an error also raises
+`NetworkError`. Whether the loss of a connection, for example a reset by the
+peer, shows as such an error or as an end of stream depends on the
+implementation; a portable program does not depend on it. A failed write does
+not change what a later read returns. A wrong argument type is a runtime error
+that halts the program.
 
 ### `s.read() -> String`
 

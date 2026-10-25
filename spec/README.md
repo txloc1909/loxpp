@@ -129,6 +129,8 @@ them:
    blocking call blocks only its own worker or every worker. A program whose
    progress needs two workers to run at the same time is not portable.
 6. **Speed**.
+7. **Connection loss on read**: whether a read on a Socket whose connection
+   the peer reset ends with a `NetworkError` or as an end of stream.
 
 Map iteration order is unspecified ([§03-types](03-types.md)), which is a
 separate rule.
