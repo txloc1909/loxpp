@@ -385,15 +385,22 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-    # Issue #858: an expected-failure entry that names no program of the run is
-    # an error (exit 2), as tools/check_spec_probes.py already makes it. A dead
-    # entry is otherwise silent, so a gate that runs only tools/diff_runtimes.py
-    # stays green over the gap the entry claims to record. The checker runs
-    # native against itself, so it needs no managed toolchain and no jar.
+    # Issue #858, #862, #868: an expected-failure entry that the run cannot grade
+    # is an error (exit 2), as tools/check_spec_probes.py already makes it, and a
+    # probe that sits on both lists is graded by the reason that explains the run.
+    # A dead or ungraded entry is otherwise silent, so a gate that runs only
+    # tools/diff_runtimes.py stays green over the gap the entry claims to record.
+    # Cases 1 to 6 need only the native binary; 7 to 11 add a stub runner, so the
+    # test needs no managed toolchain and no jar either way.
     add_test(NAME DiffRuntimesXfailNames
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_xfail.py
                 --native $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    # Cases 10 and 11 need a probe the build under test passes, which a build
+    # that prints its disassembly or its trace can never do. The checker exits
+    # 125 there, after the other nine cases pass, so the trace preset reports a
+    # skip instead of a false red.
+    set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC
