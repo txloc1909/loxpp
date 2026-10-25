@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Ten cases, each on an explicit program list, so no corpus is walked:
+Eleven cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -29,16 +29,18 @@ Ten cases, each on an explicit program list, so no corpus is walked:
      with that side's reason only, and claims nothing about the other side;
   10. a probe on both lists whose consumer fails while native passes reports
      the consumer reason and says native's entry is answered, never that
-     native regressed.
+     native regressed;
+  11. a probe on both lists that both runs pass reports XPASS citing BOTH
+     files, since both entries are stale.
 
 Cases 1 to 6 run native against itself, so they need no managed toolchain and
-no runtime jar. Cases 7 to 10 use a stub script as a runner, because they
+no runtime jar. Cases 7 to 11 use a stub script as a runner, because they
 need one side to pass, to fail, or to hang where the other side does not.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all ten cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all eleven cases hold, 1 with a report per failed case otherwise,
 and 2 when the probe this script needs is missing.
 """
 
@@ -296,6 +298,13 @@ def main() -> int:
             code == 0,
             f"exit {code}, expected 0: AHEAD is not a divergence",
         )
+        expects(
+            failures,
+            "a probe on both lists",
+            "can drop its line" in out and consumer_list.name in out,
+            f"did not say the consumer line is stale, so that clause has no "
+            f"case that can fail: {out.strip()!r}",
+        )
 
         # The same probe with the consumer list alone still reports XFAIL, so
         # case 7 measures the overlap rule and not the ordinary path.
@@ -416,6 +425,39 @@ def main() -> int:
             "consumer fails, native passes, both lists",
             "native passes it now" in out,
             f"did not say native's entry is answered: {out.strip()!r}",
+        )
+
+        # Case 11: both lists, and both runs pass the probe. The line must name
+        # both files, because both entries are stale; without that clause a
+        # reader would edit one list and leave the other.
+        passing_stub = work / "passing_runner.sh"
+        passing_stub.write_text('#!/bin/sh\necho ok\nexit 0\n')
+        passing_stub.chmod(0o755)
+        passing_probe = work / "both_pass.lox"
+        passing_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
+        consumer_list_3 = work / "consumer3.txt"
+        consumer_list_3.write_text(f"{passing_probe.name}  consumer reason\n")
+        oracle_list_3 = work / "oracle3.txt"
+        oracle_list_3.write_text(f"{passing_probe.name}  oracle reason\n")
+        code, out, err = run(
+            args.native,
+            [passing_probe],
+            [("--xfail", consumer_list_3), ("--oracle-xfail", oracle_list_3)],
+            runner=str(passing_stub),
+        )
+        expects(
+            failures,
+            "both lists, both runs pass",
+            "XPASS" in out and code == 1,
+            f"exit {code}, expected 1: XPASS fails the run. stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "both lists, both runs pass",
+            consumer_list_3.name in out and oracle_list_3.name in out,
+            f"named one file only, so that clause has no case that can fail: "
+            f"{out.strip()!r}",
         )
 
     if failures:
