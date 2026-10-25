@@ -29,29 +29,13 @@ import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } from "./agents.ts";
 import { childArgs, childEnv, type Dispatch, piInvocation } from "./child.ts";
 import { detectKitty, type KittySession } from "./kitty.ts";
+import { isFailed, resultOutput, type SingleResult } from "./result.ts";
 import { addUsage, finalOutput, formatUsage, type StreamState, type UsageStats } from "./stream.ts";
 import { checkRemoteControl, runInKittyWindow } from "./window.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
-
-interface SingleResult {
-  agent: string;
-  agentSource: "user" | "project" | "unknown";
-  task: string;
-  exitCode: number;
-  messages: StreamState["messages"];
-  stderr: string;
-  usage: UsageStats;
-  windowId?: string;
-  model?: string;
-  stopReason?: string;
-  errorMessage?: string;
-  closedByUser?: boolean;
-  interactive?: boolean;
-  step?: number;
-}
 
 interface SubagentDetails {
   mode: "single" | "parallel" | "chain";
@@ -97,7 +81,14 @@ async function runWindowAgent(opts: {
     result.usage = state.usage;
     if (state.model) result.model = state.model;
     opts.onUpdate?.({
-      content: [{ type: "text", text: finalOutput(state) || (state.idle ? "(waiting for you in the subagent window)" : "(running...)") }],
+      content: [
+        {
+          type: "text",
+          // Only an interactive child waits for a person; a print-mode child
+          // that ends a turn has already exited or starts the next turn.
+          text: finalOutput(state) || (opts.interactive && state.idle ? "(waiting for you in the subagent window)" : "(running...)"),
+        },
+      ],
       details: opts.makeDetails([result]),
     });
   };
@@ -164,26 +155,12 @@ async function runWindowAgent(opts: {
   }
 }
 
-function isFailed(result: SingleResult): boolean {
-  if (result.closedByUser && result.interactive) return false;
-  return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
-}
-
 /**
  * The mirror that feeds this child's events to the parent. Resolved from this
  * file so the child loads the copy that belongs to the running extension.
  */
 function mirrorExtensionPath(): string {
   return fileURLToPath(new URL("./mirror.ts", import.meta.url));
-}
-
-function finalOutputFrom(result: SingleResult): string {
-  return finalOutput({ messages: result.messages, usage: result.usage });
-}
-
-function resultOutput(result: SingleResult): string {
-  if (isFailed(result)) return result.errorMessage || result.stderr || finalOutputFrom(result) || "(no output)";
-  return finalOutputFrom(result) || "(no output)";
 }
 
 function capOutput(output: string): string {
@@ -371,10 +348,10 @@ export default function kittySubagent(pi: ExtensionAPI): void {
               isError: true,
             };
           }
-          previous = finalOutputFrom(result);
+          previous = finalOutput(result);
         }
         return {
-          content: [{ type: "text" as const, text: capOutput(finalOutputFrom(results[results.length - 1])) || "(no output)" }],
+          content: [{ type: "text" as const, text: capOutput(finalOutput(results[results.length - 1])) || "(no output)" }],
           details: makeDetails(results),
         };
       }
@@ -451,7 +428,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         };
       }
       return {
-        content: [{ type: "text" as const, text: capOutput(finalOutputFrom(result)) || "(no output)" }],
+        content: [{ type: "text" as const, text: capOutput(finalOutput(result)) || "(no output)" }],
         details: makeDetails([result]),
       };
     },
@@ -533,7 +510,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
             }
           }
         }
-        const output = finalOutput({ messages: entry.messages, usage: entry.usage }).trim();
+        const output = finalOutput(entry).trim();
         if (output) {
           container.addChild(new Spacer(1));
           container.addChild(new Markdown(output, 0, 0, markdown));
