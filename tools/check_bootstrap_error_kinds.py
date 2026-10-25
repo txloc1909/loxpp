@@ -82,6 +82,16 @@ REVIEWED_NON_TABLE_KINDS = {
     "LengthTypeError",
     "ReflectionNotCallableError",
     "ReflectionNativeArityError",
+    # int() and float() report their own faults the way native's stdlib natives
+    # do: halting there, catchable here by design, and one kind per function.
+    "IntegerConversionError",
+    "FloatConversionError",
+    # The `integer` module has three own-fault causes: a wrong argument kind, a
+    # zero divisor of udiv/urem, and a parse_unsigned String that does not
+    # parse.
+    "IntegerModuleArgumentError",
+    "IntegerModuleDivisionByZeroError",
+    "IntegerModuleParseError",
 }
 
 # The reviewed baseline: one (kind, message, status) entry per `.setError(`
@@ -136,16 +146,19 @@ EXPECTED_CALLS = [
     ('OperatorResultTypeError', '"Operator method must return a Boolean."', JUDGED),
     ('MapChangedError', '"Map changed during key hashing or equality."', JUDGED),
     ('MapChangedError', '"Map changed during key hashing or equality."', JUDGED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
     ('IndexTypeError', '"List index must be a number."', RECORDED),
     ('IndexNotIntegerError', '"List index must be an integer."', RECORDED),
     ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
+    ('IndexOutOfBoundsError', '"String index out of bounds."', RECORDED),
     ('IndexTypeError', '"String index must be a number."', RECORDED),
     ('IndexNotIntegerError', '"String index must be an integer."', RECORDED),
-    ('IndexOutOfBoundsError', '"String index out of bounds."', RECORDED),
+    ('IndexOutOfBoundsError', '"String index out of bounds."', JUDGED),
     ('NotIndexableError', '"Only lists, strings, and maps can be indexed."', RECORDED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', JUDGED),
     ('IndexTypeError', '"List index must be a number."', RECORDED),
     ('IndexNotIntegerError', '"List index must be an integer."', RECORDED),
-    ('IndexOutOfBoundsError', '"List index out of bounds."', RECORDED),
+    ('IndexOutOfBoundsError', '"List index out of bounds."', JUDGED),
     ('NotIndexableError', '"Only lists and maps support index assignment."', RECORDED),
     ('YieldAcrossNativeError', '"Cannot yield across a native callback."', JUDGED),
     ('DeadCoroutineError', '"Cannot resume a dead coroutine."', JUDGED),
@@ -160,6 +173,14 @@ EXPECTED_CALLS = [
     ('OperatorResultTypeError', '"Operator method must return a sequence."', JUDGED),
     ('OperatorResultTypeError', '"Operator method must return a Number."', JUDGED),
     ('OperatorResultTypeError', '"Operator method must return a String."', JUDGED),
+    ('IntegerConversionError', '"int() cannot convert this value."', JUDGED),
+    ('FloatConversionError', '"float() cannot convert this value."', JUDGED),
+    ('IntegerModuleArgumentError', '"integer function argument must be an Int."', JUDGED),
+    ('IntegerModuleDivisionByZeroError', '"integer unsigned division by zero."', JUDGED),
+    ('IntegerModuleParseError', '"integer.parse_unsigned() cannot read this String."', JUDGED),
+    ('BitwiseTypeError', '"Operands must be Ints."', JUDGED),
+    ('ShiftCountError', '"Shift count must be from 0 to 63."', JUDGED),
+    ('DivisionByZeroError', '"Division by zero."', JUDGED),
     ('ConcatenationTypeError', '"Operands must be two numbers, two strings, or a string and a number."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),
     ('ArithmeticTypeError', '"Operands must be numbers."', RECORDED),

@@ -30,11 +30,29 @@ var DIGIT_MAP = {
     "5": 5, "6": 6, "7": 7, "8": 8, "9": 9
 };
 
+var HEX_DIGIT_MAP = {
+    "0": 0i, "1": 1i, "2": 2i, "3": 3i, "4": 4i,
+    "5": 5i, "6": 6i, "7": 7i, "8": 8i, "9": 9i,
+    "a": 10i, "b": 11i, "c": 12i, "d": 13i, "e": 14i, "f": 15i,
+    "A": 10i, "B": 11i, "C": 12i, "D": 13i, "E": 14i, "F": 15i
+};
+
 fun isDigit(c) { return len(c) == 1 and c in "0123456789"; }
+fun isHexDigit(c) { return len(c) == 1 and c in "0123456789abcdefABCDEF"; }
+fun isBinaryDigit(c) { return c == "0" or c == "1"; }
 fun isAlpha(c) {
     return len(c) == 1 and c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
 }
 fun isAlphaNumeric(c) { return isDigit(c) or isAlpha(c); }
+
+// The digits of `s` from the first one that is not "0". A literal's range is
+// decided by value, so leading zeros never count (spec/01-lexical.md, Range).
+// An all-zero string gives "".
+fun stripLeadingZeros(s) {
+    var i = 0;
+    while (i < len(s) and s[i] == "0") i = i + 1;
+    return s[i : len(s)];
+}
 
 fun parseIntStr(s) {
     var n = 0;
@@ -57,19 +75,22 @@ fun parseNumber(s) {
     return float(s);
 }
 
-fun isLoxNum(v) {
-    if (v == nil or v == true or v == false) return false;
-    if (str(v) == v) return false;
-    var c = str(v)[0];
-    return (c in "0123456789-") or c == "i" or c == "n";
-}
+// Number and Int are two kinds that do not mix (spec/03-types.md, Int). The
+// host's type() is the only exact test: an Int prints the same digits as the
+// equal Number, so no text test can tell them apart.
+fun isNumberValue(v) { return type(v) == "Number"; }
+fun isIntValue(v)    { return type(v) == "Int"; }
+
+// The sites that accept either kind: equality, map keys, and an index.
+fun isNumberOrIntValue(v) { return isNumberValue(v) or isIntValue(v); }
 
 fun isLoxStr(v)  { return str(v) == v; }
 
 fun loxTag(v) {
     if (v == nil or v == true or v == false) return "primitive";
-    if (str(v) == v) return "string";
-    if (isLoxNum(v)) return "number";
+    if (isLoxStr(v)) return "string";
+    if (isNumberValue(v)) return "number";
+    if (isIntValue(v)) return "int";
     return v.loxTag;
 }
 
@@ -265,13 +286,51 @@ class Scanner {
     }
 
     scanNumber() {
+        // A `0x` or `0b` literal is an Int with no suffix. The prefix is lower
+        // case only and needs one digit of its own, or the longest match is
+        // the NUMBER `0` and the prefix starts a name (spec/01-lexical.md,
+        // Examples of the literal rules). The literal has no suffix, so it
+        // ends at its last digit of its base and `in` may follow it directly.
+        var prefixIsHex = this.peek() == "x";
+        var prefixHasDigit = false;
+        if (prefixIsHex) {
+            prefixHasDigit = isHexDigit(this.peekNext());
+        } else {
+            prefixHasDigit = isBinaryDigit(this.peekNext());
+        }
+        if (this.source[this.start] == "0" and (this.peek() == "x" or this.peek() == "b") and
+            prefixHasDigit) {
+            this.advance();
+            if (prefixIsHex) {
+                while (isHexDigit(this.peek())) this.advance();
+            } else {
+                while (isBinaryDigit(this.peek())) this.advance();
+            }
+            this.addToken("INT", nil);
+            return;
+        }
         while (isDigit(this.peek())) this.advance();
         if (this.peek() == "." and isDigit(this.peekNext())) {
             this.advance();
             while (isDigit(this.peek())) this.advance();
+            // A fractional literal with the suffix is one rejected lexeme, so
+            // `1.5in` is `1.5i` and then `n` (spec/01-lexical.md, BADINT).
+            if (this.peek() == "i") {
+                this.advance();
+                this.lexError("Int literal cannot have a fractional part.");
+                return;
+            }
+            this.addToken("NUMBER", parseNumber(this.source[this.start : this.current]));
+            return;
         }
-        var text = this.source[this.start : this.current];
-        this.addToken("NUMBER", parseNumber(text));
+        // The suffix is part of the token, so `1i in` and `1iin [1i]` both
+        // read the suffix first.
+        if (this.peek() == "i") {
+            this.advance();
+            this.addToken("INT", nil);
+            return;
+        }
+        this.addToken("NUMBER", parseNumber(this.source[this.start : this.current]));
     }
 
     scanIdentifier() {
@@ -314,15 +373,24 @@ class Scanner {
             return;
         }
         if (c == "<") {
-            if (this.tryMatch("=")) { this.addToken("LESS_EQUAL",    nil); }
-            else                    { this.addToken("LESS",          nil); }
+            if (this.tryMatch("="))      { this.addToken("LESS_EQUAL",    nil); }
+            else if (this.tryMatch("<")) { this.addToken("LESS_LESS",     nil); }
+            else                         { this.addToken("LESS",          nil); }
             return;
         }
         if (c == ">") {
-            if (this.tryMatch("=")) { this.addToken("GREATER_EQUAL", nil); }
-            else                    { this.addToken("GREATER",       nil); }
+            if (this.tryMatch("="))      { this.addToken("GREATER_EQUAL", nil); }
+            else if (this.tryMatch(">")) {
+                if (this.tryMatch(">"))  { this.addToken("GREATER_GREATER_GREATER", nil); }
+                else                     { this.addToken("GREATER_GREATER",         nil); }
+            }
+            else                         { this.addToken("GREATER",       nil); }
             return;
         }
+        if (c == "&") { this.addToken("AMPERSAND", nil); return; }
+        if (c == "|") { this.addToken("PIPE",      nil); return; }
+        if (c == "^") { this.addToken("CARET",     nil); return; }
+        if (c == "~") { this.addToken("TILDE",     nil); return; }
         if (c == "/") {
             if (this.tryMatch("/")) {
                 while (this.peek() != "\n" and !this.isAtEnd()) this.advance();
@@ -368,6 +436,10 @@ class Parser {
         this.hadError   = false;
         this.panicMode  = false;
         this.armChain   = nil;
+        // True while the operand a unary '-' takes is a bare Int literal, so
+        // 9223372036854775808i is valid there (spec/01-lexical.md, the
+        // unary-minus exception). intLiteral() reads and clears it.
+        this.intMinusOperand = false;
         // An enum name means the enum in the whole program, also before its
         // declaration, so the names are known before the parse starts.
         this.enumNames  = {};
@@ -716,10 +788,11 @@ class Parser {
     startsExpression() {
         var t = this.peek().type;
         return t == "IDENTIFIER" or t == "STRING" or t == "NUMBER" or
-               t == "FALSE" or t == "TRUE" or t == "NIL" or t == "THIS" or
-               t == "SUPER" or t == "LEN" or t == "STR" or t == "MATCH" or
-               t == "YIELD" or t == "LEFT_PAREN" or t == "LEFT_BRACKET" or
-               t == "LEFT_BRACE" or t == "MINUS" or t == "BANG";
+               t == "INT" or t == "FALSE" or t == "TRUE" or t == "NIL" or
+               t == "THIS" or t == "SUPER" or t == "LEN" or t == "STR" or
+               t == "MATCH" or t == "YIELD" or t == "LEFT_PAREN" or
+               t == "LEFT_BRACKET" or t == "LEFT_BRACE" or t == "MINUS" or
+               t == "BANG" or t == "TILDE";
     }
 
     // `yield` is valid only here, at the assignment level, and is a complete
@@ -812,8 +885,50 @@ class Parser {
     }
 
     comparison() {
-        var left = this.term();
+        var left = this.bitOr();
         while (this.matchAny(["GREATER", "GREATER_EQUAL", "LESS", "LESS_EQUAL", "IN"])) {
+            var op    = this.previous();
+            var right = this.bitOr();
+            left = Expr.Binary(op, left, right);
+        }
+        return left;
+    }
+
+    // Precedence rows 6 to 9 of spec/02-syntax.md: `|`, `^`, `&`, and the
+    // shifts bind between the comparisons and `+ -`, in the Python order.
+    bitOr() {
+        var left = this.bitXor();
+        while (this.matchT("PIPE")) {
+            var op    = this.previous();
+            var right = this.bitXor();
+            left = Expr.Binary(op, left, right);
+        }
+        return left;
+    }
+
+    bitXor() {
+        var left = this.bitAnd();
+        while (this.matchT("CARET")) {
+            var op    = this.previous();
+            var right = this.bitAnd();
+            left = Expr.Binary(op, left, right);
+        }
+        return left;
+    }
+
+    bitAnd() {
+        var left = this.shift();
+        while (this.matchT("AMPERSAND")) {
+            var op    = this.previous();
+            var right = this.shift();
+            left = Expr.Binary(op, left, right);
+        }
+        return left;
+    }
+
+    shift() {
+        var left = this.term();
+        while (this.matchAny(["LESS_LESS", "GREATER_GREATER", "GREATER_GREATER_GREATER"])) {
             var op    = this.previous();
             var right = this.term();
             left = Expr.Binary(op, left, right);
@@ -842,12 +957,79 @@ class Parser {
     }
 
     unary() {
-        if (this.matchAny(["BANG", "MINUS"])) {
+        if (this.matchAny(["BANG", "MINUS", "TILDE"])) {
             var op    = this.previous();
+            // The unary-minus exception is about the grammar: the literal is
+            // valid only as the whole operand of the `-` (spec/01-lexical.md).
+            // The flag is set only when the token right after the `-` is the
+            // literal, and intLiteral() withdraws it when a `(`, `.`, or `[`
+            // follows the literal, because that binds first.
+            this.intMinusOperand = op.lexeme == "-" and this.peek().type == "INT";
             var right = this.unary();
+            this.intMinusOperand = false;
             return Expr.Unary(op, right);
         }
         return this.call();
+    }
+
+    // The Int value of an INT token's lexeme, or an error before anything runs
+    // (spec/01-lexical.md, Static errors in Int literals). A decimal literal is
+    // valid up to 9223372036854775807, and 9223372036854775808 only as the
+    // direct operand of a unary '-' (the unary-minus exception). A hexadecimal
+    // or binary literal is a 64-bit pattern. Every range is by value, so the
+    // leading zeros are stripped before the comparison, and the magnitude is
+    // built with integer.parse_unsigned because the host Int wraps.
+    intLiteral(token) {
+        var minusOperand = this.intMinusOperand;
+        this.intMinusOperand = false;
+        if (this.peek().type == "LEFT_PAREN" or this.peek().type == "DOT" or
+            this.peek().type == "LEFT_BRACKET") {
+            minusOperand = false;
+        }
+        var text = token.lexeme;
+        if (len(text) > 1 and text[0] == "0" and (text[1] == "x" or text[1] == "b")) {
+            var isHex = text[1] == "x";
+            var significant = stripLeadingZeros(text[2 : len(text)]);
+            if (significant == "") return 0i;
+            if (isHex and len(significant) > 16) {
+                this.parseError(token, "Hexadecimal Int literal is wider than 64 bits.");
+                return 0i;
+            }
+            if (!isHex and len(significant) > 64) {
+                this.parseError(token, "Binary Int literal is wider than 64 bits.");
+                return 0i;
+            }
+            var base = 2i;
+            if (isHex) base = 16i;
+            var n = 0i;
+            var i = 0;
+            while (i < len(significant)) {
+                n = n * base + HEX_DIGIT_MAP[significant[i]];
+                i = i + 1;
+            }
+            return n;
+        }
+        var digits = stripLeadingZeros(text[0 : len(text) - 1]);
+        if (digits == "") return 0i;
+        if (digits == "9223372036854775808") {
+            if (minusOperand) return integer.parse_unsigned(digits);
+            this.parseError(token, "Decimal Int literal is above the largest Int.");
+            return 0i;
+        }
+        if (len(digits) > 19 or (len(digits) == 19 and digits > "9223372036854775807")) {
+            this.parseError(token, "Decimal Int literal is above the largest Int.");
+            return 0i;
+        }
+        return integer.parse_unsigned(digits);
+    }
+
+    // A name that follows a literal with no operator or punctuation between
+    // them is a static error (spec/01-lexical.md, row `suffix-boundary`). The
+    // longest match does not join the two, so `1in` is the Int `1i` and the
+    // name `n`.
+    checkLiteralBoundary(token) {
+        if (this.peek().type != "IDENTIFIER") return;
+        this.parseError(this.peek(), "Expect an operator or punctuation after a literal.");
     }
 
     call() {
@@ -898,8 +1080,20 @@ class Parser {
         if (this.matchT("FALSE"))  return Expr.Literal(false);
         if (this.matchT("TRUE"))   return Expr.Literal(true);
         if (this.matchT("NIL"))    return Expr.Literal(nil);
-        if (this.matchT("NUMBER")) return Expr.Literal(this.previous().literal);
-        if (this.matchT("STRING")) return Expr.Literal(this.previous().literal);
+        if (this.matchT("NUMBER")) {
+            this.checkLiteralBoundary(this.previous());
+            return Expr.Literal(this.previous().literal);
+        }
+        if (this.matchT("INT")) {
+            var intTok = this.previous();
+            var intValue = this.intLiteral(intTok);
+            this.checkLiteralBoundary(intTok);
+            return Expr.Literal(intValue);
+        }
+        if (this.matchT("STRING")) {
+            this.checkLiteralBoundary(this.previous());
+            return Expr.Literal(this.previous().literal);
+        }
 
         if (this.matchT("SUPER")) {
             var superTok = this.previous();
@@ -1152,8 +1346,20 @@ class Parser {
             return Pattern.WildPat();
         }
         if (this.matchT("LEFT_BRACKET")) return this.parseListPattern();
-        if (this.matchT("NUMBER")) return Pattern.LitPat(this.previous().literal);
-        if (this.matchT("STRING")) return Pattern.LitPat(this.previous().literal);
+        if (this.matchT("NUMBER")) {
+            this.checkLiteralBoundary(this.previous());
+            return Pattern.LitPat(this.previous().literal);
+        }
+        if (this.matchT("INT")) {
+            var patTok = this.previous();
+            var patValue = this.intLiteral(patTok);
+            this.checkLiteralBoundary(patTok);
+            return Pattern.LitPat(patValue);
+        }
+        if (this.matchT("STRING")) {
+            this.checkLiteralBoundary(this.previous());
+            return Pattern.LitPat(this.previous().literal);
+        }
         if (this.matchT("TRUE"))   return Pattern.LitPat(true);
         if (this.matchT("FALSE"))  return Pattern.LitPat(false);
         if (this.matchT("NIL"))    return Pattern.LitPat(nil);
@@ -2395,6 +2601,7 @@ fun reflectTypeName(v) {
         return "Boolean";
     }
     if (tag == "number") return "Number";
+    if (tag == "int") return "Int";
     if (tag == "string") return "String";
     if (tag == "function") {
         // bind() layers a fresh Environment defining "this" directly on the
@@ -2404,12 +2611,12 @@ fun reflectTypeName(v) {
         if (v.closure.values.has("this")) return "BoundMethod";
         return "Function";
     }
-    if (tag == "native" or tag == "mathfn") return "Function";
+    if (tag == "native" or tag == "mathfn" or tag == "integerfn") return "Function";
     if (tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") {
         return "BoundMethod";
     }
     if (tag == "class") return "Class";
-    if (tag == "instance" or tag == "math") return "Instance";
+    if (tag == "instance" or tag == "math" or tag == "integermodule") return "Instance";
     if (tag == "list") return "List";
     if (tag == "map") return "Map";
     if (tag == "file") return "File";
@@ -2443,7 +2650,7 @@ fun reflectTypeName(v) {
 fun isFunctionOrBoundMethod(v) {
     var tag = loxTag(v);
     if (tag == "function") return true;
-    if (tag == "native" or tag == "mathfn") return true;
+    if (tag == "native" or tag == "mathfn" or tag == "integerfn") return true;
     return tag == "mapmethod" or tag == "filemethod" or tag == "listmethod" or
            tag == "socketmethod" or tag == "servermethod" or
            tag == "processmethod" or tag == "comethod";
@@ -2618,6 +2825,8 @@ class LoxNative {
         if (this.name == "input") return input();
         if (this.name == "ord") return ord(args[0]);
         if (this.name == "chr") return chr(args[0]);
+        if (this.name == "int")   return interp.nativeInt(args[0]);
+        if (this.name == "float") return interp.nativeFloat(args[0]);
         if (this.name == "open") {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
@@ -2768,6 +2977,26 @@ class InterpList {
         this.loxTag   = "list";
     }
     toString() { return "<list>"; }
+}
+
+// The `integer` module (spec/05-stdlib.md, integer). Every member is an Int
+// function or constant; every argument must be an Int, except the String of
+// parse_unsigned.
+class InterpIntegerModule {
+    init() { this.loxTag = "integermodule"; }
+    toString() { return "<integer module>"; }
+}
+
+class InterpIntegerFn {
+    init(name) { this.name = name; this.loxTag = "integerfn"; }
+    arity() {
+        if (this.name == "min" or this.name == "max" or
+            this.name == "udiv" or this.name == "urem" or
+            this.name == "ult") return 2;
+        return 1;
+    }
+    call(interp, args) { return interp.integerModuleCall(this.name, args); }
+    toString() { return "<native fn>"; }
 }
 
 class InterpListMethod {
@@ -3213,7 +3442,7 @@ class LoxEnumCtor {
 // changes.
 fun isMessageValue(v) {
     var tag = loxTag(v);
-    if (tag == "primitive" or tag == "string" or tag == "number" or tag == "task") return true;
+    if (tag == "primitive" or tag == "string" or tag == "number" or tag == "int" or tag == "task") return true;
     if (tag == "enum_val") return v.sendable;
     return false;
 }
@@ -3337,6 +3566,9 @@ class Interpreter {
         env.define("spawn",   LoxNative("spawn"));
         env.define("run",     LoxNative("run"));
         env.define("math",  InterpMath());
+        env.define("integer", InterpIntegerModule());
+        env.define("int",   LoxNative("int"));
+        env.define("float", LoxNative("float"));
         env.define("coroutine", InterpCoroutineModule());
         env.define("task",      InterpTaskModule());
         env.define("type",       LoxNative("type"));
@@ -3584,7 +3816,8 @@ class Interpreter {
     isValidMapKey(v) {
         if (v == nil or v == true or v == false) return true;
         if (isLoxStr(v)) return true;
-        if (isLoxNum(v)) return v == v;
+        // No Int is NaN, so an Int is always a valid key.
+        if (isNumberOrIntValue(v)) return v == v;
         return this.instanceMapKeyValid(v);
     }
 
@@ -3606,7 +3839,9 @@ class Interpreter {
         if (key == false) return 1237;
         if (key == nil) return 0;
         if (isLoxStr(key)) return key;
-        if (isLoxNum(key)) {
+        // The host Map separates 1 and 1i as two keys by value and kind, so
+        // the bucket key keeps each kind as its own value.
+        if (isNumberOrIntValue(key)) {
             if (key == 0) return 0;
             return key;
         }
@@ -3615,7 +3850,7 @@ class Interpreter {
         var r = hash.bind(key).call(this, []);
         this.nativeDepth = this.nativeDepth - 1;
         if (this.throwFlag) return nil;
-        if (!isLoxNum(r)) {
+        if (!isNumberValue(r)) {
             this.setError("OperatorResultTypeError", "Operator method must return a Number.", 0);
             return nil;
         }
@@ -3776,7 +4011,7 @@ class Interpreter {
     }
 
     isNaNKey(v) {
-        if (isLoxNum(v)) return v != v;
+        if (isNumberOrIntValue(v)) return v != v;
         return false;
     }
 
@@ -3910,21 +4145,38 @@ class Interpreter {
             return this.mapGet(object, index);
         }
         if (tag == "list") {
-            if (!isLoxNum(index)) { this.setError("IndexTypeError", "List index must be a number.", line); return nil; }
+            // An Int is used as it is; math.floor must not see one
+            // (spec/03-types.md, Int: math.floor(1i) is a runtime error).
+            var count = len(object.elements);
+            if (isIntValue(index)) {
+                if (index < 0i or index >= int(count)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
+                return object.elements[index];
+            }
+            if (!isNumberValue(index)) { this.setError("IndexTypeError", "List index must be a number.", line); return nil; }
             var fl = math.floor(index);
             if (fl != index) { this.setError("IndexNotIntegerError", "List index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
+            if (fl < 0 or fl >= count) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             return object.elements[fl];
         }
         if (isLoxStr(object)) {
-            if (!isLoxNum(index)) { this.setError("IndexTypeError", "String index must be a number.", line); return nil; }
+            var count = len(object);
+            if (isIntValue(index)) {
+                if (index < 0i or index >= int(count)) { this.setError("IndexOutOfBoundsError", "String index out of bounds.", line); return nil; }
+                return object[index];
+            }
+            if (!isNumberValue(index)) { this.setError("IndexTypeError", "String index must be a number.", line); return nil; }
             var fl = math.floor(index);
             if (fl != index) { this.setError("IndexNotIntegerError", "String index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object)) { this.setError("IndexOutOfBoundsError", "String index out of bounds.", line); return nil; }
+            if (fl < 0 or fl >= count) { this.setError("IndexOutOfBoundsError", "String index out of bounds.", line); return nil; }
             return object[fl];
         }
         if (loxTag(object) == "enum_val") {
-            if (!isLoxNum(index)) { this.fatalError("Enum field index must be a number."); return nil; }
+            var count = len(object.fields);
+            if (isIntValue(index)) {
+                if (index < 0i or index >= int(count)) { this.fatalError("Enum field index " + str(index) + " out of range."); return nil; }
+                return object.fields[index];
+            }
+            if (!isNumberValue(index)) { this.fatalError("Enum field index must be a number."); return nil; }
             var fl;
             if (index >= 0) {
                 fl = math.floor(index);
@@ -3932,7 +4184,7 @@ class Interpreter {
                 fl = math.ceil(index);
             }
             if (fl != index) { this.fatalError("Enum field index must be an integer."); return nil; }
-            if (fl < 0 or fl >= len(object.fields)) { this.fatalError("Enum field index " + str(fl) + " out of range."); return nil; }
+            if (fl < 0 or fl >= count) { this.fatalError("Enum field index " + str(fl) + " out of range."); return nil; }
             return object.fields[fl];
         }
         var m = this.findDunder(object, "__index_get__");
@@ -3969,10 +4221,17 @@ class Interpreter {
             return val;
         }
         if (tag == "list") {
-            if (!isLoxNum(index)) { this.setError("IndexTypeError", "List index must be a number.", line); return nil; }
+            // An Int is used as it is; math.floor must not see one.
+            var count = len(object.elements);
+            if (isIntValue(index)) {
+                if (index < 0i or index >= int(count)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
+                object.elements[index] = val;
+                return val;
+            }
+            if (!isNumberValue(index)) { this.setError("IndexTypeError", "List index must be a number.", line); return nil; }
             var fl = math.floor(index);
             if (fl != index) { this.setError("IndexNotIntegerError", "List index must be an integer.", line); return nil; }
-            if (fl < 0 or fl >= len(object.elements)) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
+            if (fl < 0 or fl >= count) { this.setError("IndexOutOfBoundsError", "List index out of bounds.", line); return nil; }
             object.elements[fl] = val;
             return val;
         }
@@ -4012,28 +4271,46 @@ class Interpreter {
             this.fatalError("Slice requires a List or String.");
             return nil;
         }
-        if (!isLoxNum(startV)) { this.fatalError("Slice index must be a number."); return nil; }
-        if (math.floor(startV) != startV) { this.fatalError("Slice index must be an integer."); return nil; }
-        if (startV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
-        if (!isLoxNum(endV)) { this.fatalError("Slice index must be a number."); return nil; }
-        if (math.floor(endV) != endV) { this.fatalError("Slice index must be an integer."); return nil; }
-        if (endV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
-        var s = startV;
-        var e = endV;
+        if (!isNumberOrIntValue(startV)) { this.fatalError("Slice index must be a number."); return nil; }
+        if (isNumberValue(startV)) {
+            if (math.floor(startV) != startV) { this.fatalError("Slice index must be an integer."); return nil; }
+            if (startV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
+            startV = math.floor(startV);
+        } else if (startV < 0i) { this.fatalError("Slice index must be non-negative."); return nil; }
+        if (!isNumberOrIntValue(endV)) { this.fatalError("Slice index must be a number."); return nil; }
+        if (isNumberValue(endV)) {
+            if (math.floor(endV) != endV) { this.fatalError("Slice index must be an integer."); return nil; }
+            if (endV < 0) { this.fatalError("Slice index must be non-negative."); return nil; }
+            endV = math.floor(endV);
+        } else if (endV < 0i) { this.fatalError("Slice index must be non-negative."); return nil; }
         if (tag == "list") {
             var n = len(object.elements);
-            if (s > n) s = n;
-            if (e > n) e = n;
+            var s = this.clampSliceBound(startV, n);
+            var e = this.clampSliceBound(endV, n);
             var result = InterpList([]);
             var i = s;
             while (i < e) { result.elements.append(object.elements[i]); i = i + 1; }
             return result;
         }
         var n = len(object);
-        if (s > n) s = n;
-        if (e > n) e = n;
+        var s = this.clampSliceBound(startV, n);
+        var e = this.clampSliceBound(endV, n);
         if (s >= e) return "";
         return object[s:e];
+    }
+
+    // A validated slice bound, clamped to the length and given as the kind the
+    // loop needs. The clamp is exact for every Int; only a clamped value, which
+    // is at most the length, is converted to a Number, so the conversion is
+    // exact too (spec/04-semantics.md, Slice Get, step 5).
+    clampSliceBound(v, n) {
+        if (isNumberValue(v)) {
+            if (v > n) return n;
+            return v;
+        }
+        var count = int(n);
+        if (v > count) return n;
+        return float(v);
     }
 
     execForIn(varName, varLine, iterableExpr, body, env) {
@@ -4480,7 +4757,7 @@ class Interpreter {
             var callee = defer_item[0];
             var args = defer_item[1];
             var tag = loxTag(callee);
-            if (tag != "function" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod") {
+            if (tag != "function" and tag != "native" and tag != "mathfn" and tag != "integerfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod") {
                 i = i - 1;
                 this.fatalError("Deferred callable has unexpected type.");
             }
@@ -4570,8 +4847,16 @@ class Interpreter {
         var right = this.evalExpr(rightExpr, env);
         if (this.throwFlag) return nil;
         if (op.lexeme == "!") return !this.isTruthy(right);
+        // `~` works on Ints only and has no operator protocol
+        // (spec/04-semantics.md, Bit Operators).
+        if (op.lexeme == "~") {
+            if (isIntValue(right)) return ~right;
+            this.bitwiseTypeFault(op.line);
+            return nil;
+        }
         if (op.lexeme == "-") {
-            if (isLoxNum(right)) return -right;
+            if (isNumberValue(right)) return -right;
+            if (isIntValue(right)) return -right;
             var m = this.findDunder(right, "__neg__");
             if (m != nil) {
                 var r = m.bind(right).call(this, []);
@@ -4641,7 +4926,9 @@ class Interpreter {
     }
 
     validateNumber(v, line) {
-        if (isLoxNum(v)) return v;
+        // An Int is not a Number, so an Int result of __len__ or __hash__ is
+        // the same fault (spec/04-semantics.md, Operator Overloading).
+        if (isNumberValue(v)) return v;
         this.setError("OperatorResultTypeError", "Operator method must return a Number.", line);
         return nil;
     }
@@ -4652,6 +4939,168 @@ class Interpreter {
         return nil;
     }
 
+    // --- int(), float(), and the `integer` module (spec/05-stdlib.md) -----
+    //
+    // Native's stdlib natives report these faults through their own fatal
+    // path. The bootstrap keeps them catchable by design, with kinds that the
+    // spec's Runtime Errors table does not name (see REVIEWED_NON_TABLE_KINDS
+    // in tools/check_bootstrap_error_kinds.py).
+
+    intConversionFault() {
+        this.setError("IntegerConversionError", "int() cannot convert this value.", 0);
+    }
+
+    floatConversionFault() {
+        this.setError("FloatConversionError", "float() cannot convert this value.", 0);
+    }
+
+    integerArgumentFault() {
+        this.setError("IntegerModuleArgumentError", "integer function argument must be an Int.", 0);
+    }
+
+    integerDivisionByZeroFault() {
+        this.setError("IntegerModuleDivisionByZeroError", "integer unsigned division by zero.", 0);
+    }
+
+    integerParseFault() {
+        this.setError("IntegerModuleParseError", "integer.parse_unsigned() cannot read this String.", 0);
+    }
+
+    // int(x): an Int gives itself, an integral Number in the Int range gives
+    // the equal Int, and a decimal String gives its Int. int() never rounds.
+    nativeInt(v) {
+        if (isIntValue(v)) return v;
+        if (isNumberValue(v)) {
+            // The range check comes first: a cast of a NaN, an infinity, or a
+            // Number outside the range is undefined behaviour on the host.
+            if (v >= 9223372036854775808.0 or v < -9223372036854775808.0) {
+                this.intConversionFault();
+                return nil;
+            }
+            if (math.floor(v) != v) {
+                this.intConversionFault();
+                return nil;
+            }
+            return int(v);
+        }
+        if (isLoxStr(v)) return this.intFromDecimalString(v);
+        this.intConversionFault();
+        return nil;
+    }
+
+    // An optional `+` or `-`, one or more decimal digits, and nothing else.
+    // The range is by value, so a String of leading zeros is in range.
+    intFromDecimalString(s) {
+        var i = 0;
+        var negative = false;
+        if (len(s) > 0 and (s[0] == "+" or s[0] == "-")) {
+            negative = s[0] == "-";
+            i = 1;
+        }
+        if (i >= len(s)) { this.intConversionFault(); return nil; }
+        var digits = "";
+        while (i < len(s)) {
+            if (!isDigit(s[i])) { this.intConversionFault(); return nil; }
+            digits = digits + s[i];
+            i = i + 1;
+        }
+        var significant = stripLeadingZeros(digits);
+        if (significant == "") return 0i;
+        var limit = "9223372036854775807";
+        if (negative) limit = "9223372036854775808";
+        if (len(significant) > len(limit) or
+            (len(significant) == len(limit) and significant > limit)) {
+            this.intConversionFault();
+            return nil;
+        }
+        if (negative) return -integer.parse_unsigned(significant);
+        return integer.parse_unsigned(significant);
+    }
+
+    // float(x): a Number gives itself, an Int gives the nearest double, and a
+    // String of an optional sign, decimal digits, and an optional fractional
+    // part parses. No exponent form, no bare `.5`, no trailing `.`.
+    nativeFloat(v) {
+        if (isNumberValue(v)) return v;
+        if (isIntValue(v)) return float(v);
+        if (isLoxStr(v) and this.isDecimalNumberString(v)) return float(v);
+        this.floatConversionFault();
+        return nil;
+    }
+
+    isDecimalNumberString(s) {
+        var i = 0;
+        if (len(s) > 0 and (s[0] == "+" or s[0] == "-")) i = 1;
+        var digitsBefore = 0;
+        while (i < len(s) and isDigit(s[i])) { i = i + 1; digitsBefore = digitsBefore + 1; }
+        if (digitsBefore == 0) return false;
+        if (i < len(s) and s[i] == ".") {
+            i = i + 1;
+            var digitsAfter = 0;
+            while (i < len(s) and isDigit(s[i])) { i = i + 1; digitsAfter = digitsAfter + 1; }
+            if (digitsAfter == 0) return false;
+        }
+        return i == len(s);
+    }
+
+    integerModuleCall(name, args) {
+        if (name == "parse_unsigned") return this.integerParseUnsigned(args[0]);
+        if (!isIntValue(args[0])) { this.integerArgumentFault(); return nil; }
+        if (name == "abs") {
+            // The negation of the smallest Int is itself, so abs() wraps.
+            if (args[0] < 0i) return -args[0];
+            return args[0];
+        }
+        if (name == "ustr") return integer.ustr(args[0]);
+        if (!isIntValue(args[1])) { this.integerArgumentFault(); return nil; }
+        if (name == "min") {
+            if (args[0] < args[1]) return args[0];
+            return args[1];
+        }
+        if (name == "max") {
+            if (args[0] > args[1]) return args[0];
+            return args[1];
+        }
+        if (name == "ult") return integer.ult(args[0], args[1]);
+        if (args[1] == 0i) { this.integerDivisionByZeroFault(); return nil; }
+        if (name == "udiv") return integer.udiv(args[0], args[1]);
+        return integer.urem(args[0], args[1]);
+    }
+
+    // One or more decimal digits with no sign and nothing else, at most
+    // 18446744073709551615 (2^64 - 1). The value is held as a bit pattern.
+    integerParseUnsigned(s) {
+        if (!isLoxStr(s)) { this.integerArgumentFault(); return nil; }
+        if (len(s) == 0) { this.integerParseFault(); return nil; }
+        var i = 0;
+        while (i < len(s)) {
+            if (!isDigit(s[i])) { this.integerParseFault(); return nil; }
+            i = i + 1;
+        }
+        var significant = stripLeadingZeros(s);
+        if (significant == "") significant = "0";
+        if (len(significant) > 20 or
+            (len(significant) == 20 and significant > "18446744073709551615")) {
+            this.integerParseFault();
+            return nil;
+        }
+        return integer.parse_unsigned(significant);
+    }
+
+    // The catchable Int faults (spec/04-semantics.md, Runtime Errors). One
+    // helper per kind, so one reviewed kind and message covers every site.
+    bitwiseTypeFault(line) {
+        this.setError("BitwiseTypeError", "Operands must be Ints.", line);
+    }
+
+    shiftCountFault(line) {
+        this.setError("ShiftCountError", "Shift count must be from 0 to 63.", line);
+    }
+
+    divisionByZeroFault(line) {
+        this.setError("DivisionByZeroError", "Division by zero.", line);
+    }
+
     evalBinary(op, leftExpr, rightExpr, env) {
         var left = this.evalExpr(leftExpr, env);
         if (this.throwFlag) return nil;
@@ -4660,7 +5109,8 @@ class Interpreter {
         var opL = op.lexeme;
         var opLine = op.line;
         if (opL == "+") {
-            if (isLoxNum(left) and isLoxNum(right)) return left + right;
+            if (isNumberValue(left) and isNumberValue(right)) return left + right;
+            if (isIntValue(left) and isIntValue(right)) return left + right;
             if (isLoxStr(left) and isLoxStr(right)) return left + right;
             var m = this.findDunder(left, "__add__");
             if (m != nil) {
@@ -4678,7 +5128,8 @@ class Interpreter {
             return nil;
         }
         if (opL == "-") {
-            if (isLoxNum(left) and isLoxNum(right)) return left - right;
+            if (isNumberValue(left) and isNumberValue(right)) return left - right;
+            if (isIntValue(left) and isIntValue(right)) return left - right;
             var m = this.findDunder(left, "__sub__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
@@ -4695,7 +5146,8 @@ class Interpreter {
             return nil;
         }
         if (opL == "*") {
-            if (isLoxNum(left) and isLoxNum(right)) return left * right;
+            if (isNumberValue(left) and isNumberValue(right)) return left * right;
+            if (isIntValue(left) and isIntValue(right)) return left * right;
             var m = this.findDunder(left, "__mul__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
@@ -4712,7 +5164,13 @@ class Interpreter {
             return nil;
         }
         if (opL == "/") {
-            if (isLoxNum(left) and isLoxNum(right)) return left / right;
+            if (isNumberValue(left) and isNumberValue(right)) return left / right;
+            if (isIntValue(left) and isIntValue(right)) {
+                // Floor division wraps: the smallest Int divided by -1i is
+                // itself, which the host operator already gives.
+                if (right == 0i) { this.divisionByZeroFault(opLine); return nil; }
+                return left / right;
+            }
             var m = this.findDunder(left, "__div__");
             if (m != nil) {
                 var r = m.bind(left).call(this, [right]);
@@ -4729,7 +5187,8 @@ class Interpreter {
             return nil;
         }
         if (opL == "<") {
-            if (isLoxNum(left) and isLoxNum(right)) return left < right;
+            if (isNumberValue(left) and isNumberValue(right)) return left < right;
+            if (isIntValue(left) and isIntValue(right)) return left < right;
             if (isLoxStr(left) and isLoxStr(right)) return left < right;
             var m = this.findDunder(left, "__lt__");
             if (m != nil) {
@@ -4748,7 +5207,8 @@ class Interpreter {
         }
         // `<=` is `!(a > b)`: it dispatches __gt__ and negates.
         if (opL == "<=") {
-            if (isLoxNum(left) and isLoxNum(right)) return left <= right;
+            if (isNumberValue(left) and isNumberValue(right)) return left <= right;
+            if (isIntValue(left) and isIntValue(right)) return left <= right;
             if (isLoxStr(left) and isLoxStr(right)) return left <= right;
             var m = this.findDunder(left, "__gt__");
             if (m != nil) {
@@ -4766,7 +5226,8 @@ class Interpreter {
             return nil;
         }
         if (opL == ">") {
-            if (isLoxNum(left) and isLoxNum(right)) return left > right;
+            if (isNumberValue(left) and isNumberValue(right)) return left > right;
+            if (isIntValue(left) and isIntValue(right)) return left > right;
             if (isLoxStr(left) and isLoxStr(right)) return left > right;
             var m = this.findDunder(left, "__gt__");
             if (m != nil) {
@@ -4785,7 +5246,8 @@ class Interpreter {
         }
         // `>=` is `!(a < b)`: it dispatches __lt__ and negates.
         if (opL == ">=") {
-            if (isLoxNum(left) and isLoxNum(right)) return left >= right;
+            if (isNumberValue(left) and isNumberValue(right)) return left >= right;
+            if (isIntValue(left) and isIntValue(right)) return left >= right;
             if (isLoxStr(left) and isLoxStr(right)) return left >= right;
             var m = this.findDunder(left, "__lt__");
             if (m != nil) {
@@ -4832,10 +5294,42 @@ class Interpreter {
             }
             return left != right;
         }
+        // The bit operators work on Ints only, and they have no operator
+        // protocol (spec/04-semantics.md, Bit Operators).
+        if (opL == "&" or opL == "|" or opL == "^") {
+            if (!(isIntValue(left) and isIntValue(right))) {
+                this.bitwiseTypeFault(opLine);
+                return nil;
+            }
+            if (opL == "&") return left & right;
+            if (opL == "|") return left | right;
+            return left ^ right;
+        }
+        if (opL == "<<" or opL == ">>" or opL == ">>>") {
+            // The kind of both operands is checked before the range of the
+            // count, so `1 << 64i` is a BitwiseTypeError.
+            if (!(isIntValue(left) and isIntValue(right))) {
+                this.bitwiseTypeFault(opLine);
+                return nil;
+            }
+            if (right < 0i or right > 63i) {
+                this.shiftCountFault(opLine);
+                return nil;
+            }
+            if (opL == "<<")  return left << right;
+            if (opL == ">>")  return left >> right;
+            return left >>> right;
+        }
         if (opL == "%") {
-            if (isLoxNum(left) and isLoxNum(right)) {
+            if (isNumberValue(left) and isNumberValue(right)) {
                 // Floor-mod: result sign matches divisor.
                 return left - math.floor(left / right) * right;
+            }
+            if (isIntValue(left) and isIntValue(right)) {
+                // Floor modulo has the sign of the divisor; the smallest Int
+                // modulo -1i is 0i, which the host operator already gives.
+                if (right == 0i) { this.divisionByZeroFault(opLine); return nil; }
+                return left % right;
             }
             var m = this.findDunder(left, "__mod__");
             if (m != nil) {
@@ -4924,16 +5418,16 @@ class Interpreter {
             return r;
         }
         // Check if the callee is callable. All non-callable checks are handled here.
-        if (callee == nil or callee == true or callee == false or isLoxStr(callee) or isLoxNum(callee)) {
+        if (callee == nil or callee == true or callee == false or isLoxStr(callee) or isNumberOrIntValue(callee)) {
             this.setError("NotCallableError", "Can only call functions, classes and enums.", paren_line);
             return nil;
         }
         // Get the tag of the callee if it has one
         var tag = nil;
-        if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isLoxNum(callee)) {
+        if (callee != nil and callee != true and callee != false and !isLoxStr(callee) and !isNumberOrIntValue(callee)) {
             tag = callee.loxTag;
         }
-        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod" and tag != "enum_ctor") {
+        if (tag != "function" and tag != "class" and tag != "native" and tag != "mathfn" and tag != "integerfn" and tag != "listmethod" and tag != "mapmethod" and tag != "filemethod" and tag != "socketmethod" and tag != "servermethod" and tag != "processmethod" and tag != "comethod" and tag != "enum_ctor") {
             this.setError("NotCallableError", "Can only call functions, classes and enums.", paren_line);
             return nil;
         }
@@ -4947,7 +5441,7 @@ class Interpreter {
             this.fatalError("'" + callee.name + "' expects " + str(callee.arity()) + " " + noun + " but got " + str(len(args)) + ".");
             return nil;
         }
-        if ((tag == "native" or tag == "mathfn" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") and callee.arity() != -1 and len(args) != callee.arity()) {
+        if ((tag == "native" or tag == "mathfn" or tag == "integerfn" or tag == "mapmethod" or tag == "filemethod" or tag == "socketmethod" or tag == "servermethod" or tag == "processmethod" or tag == "comethod") and callee.arity() != -1 and len(args) != callee.arity()) {
             this.fatalError("Expected " + str(callee.arity()) + " arguments but got " + str(len(args)) + ".");
             return nil;
         }
@@ -5003,6 +5497,16 @@ class Interpreter {
             if (name == "inf") return math.inf;
             if (name == "nan") return math.nan;
             if (this.isMathFnName(name)) return InterpMathFn(name);
+            this.fatalError("Undefined property '" + name + "'.");
+            return nil;
+        }
+        if (loxTag(object) == "integermodule") {
+            // The two constants are Ints; every other member is a function.
+            if (name == "min_value") return -9223372036854775808i;
+            if (name == "max_value") return 9223372036854775807i;
+            if (name == "abs" or name == "min" or name == "max" or
+                name == "udiv" or name == "urem" or name == "ult" or
+                name == "ustr" or name == "parse_unsigned") return InterpIntegerFn(name);
             this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
@@ -5084,7 +5588,7 @@ class Interpreter {
             var val = object.fields[name];
             // Calling a non-callable field value is fatal on native. Check
             // before checking for basic non-callables.
-            if (isCallTarget and (val == nil or val == true or val == false or isLoxStr(val) or isLoxNum(val))) {
+            if (isCallTarget and (val == nil or val == true or val == false or isLoxStr(val) or isNumberOrIntValue(val))) {
                 this.fatalError("Can only call functions, classes and enums.");
                 return nil;
             }
@@ -5145,7 +5649,7 @@ class Interpreter {
         if (val == true)  return "true";
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
-        if (isLoxNum(val)) return str(val);
+        if (isNumberOrIntValue(val)) return str(val);
         this.stringifyDepth = this.stringifyDepth + 1;
         if (this.stringifyDepth > this.maxStringifyDepthSeen) {
             this.maxStringifyDepthSeen = this.stringifyDepth;
