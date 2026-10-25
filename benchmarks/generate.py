@@ -18,11 +18,10 @@ HotSpot tiered compilation keeps improving fasta/json for the first ~10
 measured batches otherwise; run.py additionally drops the first third of the
 measured batches before taking the median.
 
-richards is the one exception to the 80-250 ms target: its own scheduler
-runs a fixed 10000-tick workload tied to a hardcoded self-check, so its
-per-call cost cannot be scaled with SIZE_PATCHES without losing that check.
-A fixed pass costs well under 0.25 s natively, so a batch lands near the
-window's lower edge and reps stays 1.
+richards is tuned with REPS instead of SIZE_PATCHES: its scheduler runs a
+fixed 10000-tick workload tied to a hardcoded self-check, so the workload
+must not shrink. One pass costs about 65-70 ms natively, so three passes put
+a batch inside the same 80-250 ms window.
 """
 from __future__ import annotations
 
@@ -46,11 +45,12 @@ CONFIG = {
     "storage":            ("Storage",           25, 12, 8),
     "towers":             ("Towers",            25, 12, 12),
     "json":               ("Json",              25, 12, 8),
-    # reps=1: one call is one full 10000-tick scheduler pass, which costs
-    # well under 0.25 s natively. The pass is not reducible — Scheduler.start()'s
-    # self-check reads the canonical IDLER count of 10000 — so extra reps
-    # would only multiply the same fixed pass past the 80-250 ms window.
-    "richards":           ("Richards",          25, 12, 1),
+    # reps=3: one call is one full 10000-tick scheduler pass, about 65-70 ms
+    # natively, so three calls land inside the 80-250 ms window. The pass
+    # itself is not reducible: Scheduler.start()'s self-check reads the
+    # canonical IDLER count of 10000, so it cannot be scaled the way
+    # SIZE_PATCHES scales the other programs.
+    "richards":           ("Richards",          25, 12, 3),
     "binary_trees":       ("BinaryTrees",       25, 12, 1),
     "spectral_norm":      ("SpectralNorm",      25, 12, 1),
     "fasta":              ("Fasta",             25, 12, 40),
