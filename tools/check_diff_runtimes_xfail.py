@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Six cases, each on an explicit program list, so no corpus is walked:
+Seven cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -22,17 +22,18 @@ Six cases, each on an explicit program list, so no corpus is walked:
   6. a malformed probe in the run is a clean exit 2 with a message, not a
      Python traceback, which would read as a divergence of the whole run;
   7. a probe on BOTH lists reports AHEAD when native's gap is the reason a
-     reader needs, and still reports XFAIL when it is not. This case needs a
-     runner that passes a probe native fails, so it uses a stub script instead
-     of the native binary.
+     reader needs, and still reports XFAIL when it is not;
+  8. a probe on both lists that times out reports XFAIL with both reasons on
+     the line, because a side that produced no output cannot be graded AHEAD.
 
-Both runners are the native binary, so the comparison is native against
-itself: it needs no managed toolchain and no runtime jar.
+Cases 1 to 6 run native against itself, so they need no managed toolchain and
+no runtime jar. Cases 7 and 8 use a stub script as the other runner, because
+they need one side to pass, or to hang, where native does not.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all six cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all eight cases hold, 1 with a report per failed case otherwise,
 and 2 when the probe this script needs is missing.
 """
 
@@ -85,12 +86,15 @@ def run(
     lists: list[tuple[str, Path]],
     consumer: str | None = None,
     runner: str | None = None,
+    timeout: float | None = None,
 ) -> tuple[int, str, str]:
     argv = [sys.executable, str(DIFF_RUNTIMES), native, runner or native, *map(str, paths)]
     if consumer is not None:
         argv += ["--consumer", consumer]
     for flag, list_path in lists:
         argv += [flag, str(list_path)]
+    if timeout is not None:
+        argv += ["--timeout", str(timeout)]
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=300)
     return completed.returncode, completed.stdout, completed.stderr
 
@@ -301,6 +305,34 @@ def main() -> int:
             f"stdout {out.strip()!r}",
         )
 
+        # Case 8: both lists, and a side that never finishes. A run without
+        # output cannot be graded AHEAD, so the consumer entry still decides,
+        # and the oracle entry adds its reason to the same line instead of
+        # being dropped.
+        slow_stub = work / "slow_runner.sh"
+        slow_stub.write_text('#!/bin/sh\n# Never finishes within the timeout below.\nsleep 30\n')
+        slow_stub.chmod(0o755)
+        code, out, err = run(
+            args.native,
+            [both_probe],
+            [("--xfail", consumer_list), ("--oracle-xfail", oracle_list)],
+            runner=str(slow_stub),
+            timeout=1,
+        )
+        expects(
+            failures,
+            "a timeout on both lists",
+            "XFAIL" in out and "timeout" in out,
+            f"did not report XFAIL for the timeout: exit {code}, "
+            f"stdout {out.strip()!r}, stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a timeout on both lists",
+            "consumer is behind" in out and "native: native regressed" in out,
+            f"dropped a reason: expected both on the line, got {out.strip()!r}",
+        )
+
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
@@ -310,7 +342,7 @@ def main() -> int:
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
         "probe is a clean refusal, a real probe reaches the comparison, and a "
-        "probe on both lists reports the reason that explains the run"
+        "probe on both lists reports every reason that explains the run"
     )
     return 0
 
