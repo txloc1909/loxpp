@@ -335,6 +335,45 @@ CATCHABLE_ROWS = [
               "fun g() { defer note(); print \"g body\"; }\n",
         expected_kind="YieldAcrossNativeError",
     ),
+    # --- Sockets (spec/05-stdlib.md, Socket and Server) -------------------
+    # The two Socket rows. A call on a closed handle is a SocketClosedError;
+    # a failure of the network is a NetworkError. The loopback port is the
+    # port of a Server the program closed itself, so nothing listens on it.
+    Row(
+        "socket_closed_error",
+        "caught",
+        "l.accept();",
+        setup='var l = listen("127.0.0.1", 0);\nl.close();\n',
+        expected_kind="SocketClosedError",
+    ),
+    Row(
+        "socket_closed_error_read",
+        "caught",
+        "c.read();",
+        setup='var l = listen("127.0.0.1", 0);\nvar c = connect("127.0.0.1", l.port());\nc.close();\n',
+        expected_kind="SocketClosedError",
+    ),
+    Row(
+        "socket_closed_error_write_after_close_write",
+        "caught",
+        'c.write("x");',
+        setup='var l = listen("127.0.0.1", 0);\nvar c = connect("127.0.0.1", l.port());\nc.close_write();\n',
+        expected_kind="SocketClosedError",
+    ),
+    Row(
+        "network_error",
+        "caught",
+        'connect("127.0.0.1", port);',
+        setup='var l = listen("127.0.0.1", 0);\nvar port = l.port();\nl.close();\n',
+        expected_kind="NetworkError",
+    ),
+    Row(
+        "network_error_listen_in_use",
+        "caught",
+        'listen("127.0.0.1", a.port());',
+        setup='var a = listen("127.0.0.1", 0);\n',
+        expected_kind="NetworkError",
+    ),
     # --- Int (docs/decisions/integer-kind.md) -----------------------------
     # The mixed-kind operand rows widen three existing spec rows to a Number
     # together with an Int, so they are regression-only rows below.
@@ -923,6 +962,11 @@ CATCHABLE_REGRESSION_ROWS = {
     # An Int result of __len__ shares operator_result_type_error_number's
     # spec row: the result check of an operator method does not change.
     "operator_result_type_error_int",
+    # The Socket rows: each shares the spec row of socket_closed_error or
+    # network_error.
+    "socket_closed_error_read",
+    "socket_closed_error_write_after_close_write",
+    "network_error_listen_in_use",
 }
 
 FATAL_REGRESSION_ROWS = {

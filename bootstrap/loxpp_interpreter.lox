@@ -2831,8 +2831,20 @@ class LoxNative {
             var handle = open(args[0], args[1]);
             return InterpFile(handle);
         }
-        if (this.name == "connect") return InterpSocket(connect(args[0], args[1]));
-        if (this.name == "listen")  return InterpServer(listen(args[0], args[1]));
+        if (this.name == "connect") {
+            try {
+                return InterpSocket(connect(args[0], args[1]));
+            } catch (e) {
+                return hostNetFault(interp, e);
+            }
+        }
+        if (this.name == "listen") {
+            try {
+                return InterpServer(listen(args[0], args[1]));
+            } catch (e) {
+                return hostNetFault(interp, e);
+            }
+        }
         if (this.name == "spawn") {
             return InterpProcess(spawn(args[0], hostStringList(args[1])));
         }
@@ -3163,6 +3175,21 @@ class InterpFileMethod {
     toString() { return "<native fn>"; }
 }
 
+// The host raises a catchable NetworkError or SocketClosedError for a socket
+// fault. The interpreter delivers it to the interpreted program's catch with
+// the same kind; any other fault of the host passes through.
+fun hostNetFault(interp, e) {
+    if (e.kind == "NetworkError") {
+        interp.setError("NetworkError", e.message, 0);
+        return nil;
+    }
+    if (e.kind == "SocketClosedError") {
+        interp.setError("SocketClosedError", e.message, 0);
+        return nil;
+    }
+    throw e;
+}
+
 class InterpSocket {
     init(handle) {
         this.handle = handle;
@@ -3182,6 +3209,13 @@ class InterpSocketMethod {
         return 1;
     }
     call(interp, args) {
+        try {
+            return this.hostCall(args);
+        } catch (e) {
+            return hostNetFault(interp, e);
+        }
+    }
+    hostCall(args) {
         if (this.name == "read")      return this.socket.handle.read();
         if (this.name == "read_bytes") return this.socket.handle.read_bytes(args[0]);
         if (this.name == "readline")  return this.socket.handle.readline();
@@ -3217,6 +3251,13 @@ class InterpServerMethod {
     }
     arity() { return 0; }
     call(interp, args) {
+        try {
+            return this.hostCall();
+        } catch (e) {
+            return hostNetFault(interp, e);
+        }
+    }
+    hostCall() {
         if (this.name == "accept") return InterpSocket(this.server.handle.accept());
         if (this.name == "port")   return this.server.handle.port();
         if (this.name == "close")  { this.server.handle.close(); return nil; }

@@ -13,10 +13,10 @@
 // flushes. A peer that stopped reading makes write(2) fail with EPIPE and,
 // with the default disposition, raises SIGPIPE and kills the VM. SIGPIPE is
 // ignored only for this call, so the process-wide disposition and every
-// spawned child keep the default. A failed write is reported as a fatal
-// stdlib error, matching the JVM backend's IOException.
-inline bool writeStreamOrError(FILE* handle, const char* method,
-                               std::string_view text, bool newline) {
+// spawned child keep the default. Returns false and sets `message` when the
+// write fails.
+inline bool writeStream(FILE* handle, const char* method, std::string_view text,
+                        bool newline, std::string& message) {
     // memset, not `= {}`: clang-format 18 and 22 disagree on the spacing of an
     // empty braced init for a multi-word struct type.
     struct sigaction ign;
@@ -46,8 +46,19 @@ inline bool writeStreamOrError(FILE* handle, const char* method,
         if (err == 0) {
             err = EPIPE;
         }
-        std::string msg = std::string(method) + "(): " + std::strerror(err);
-        nativeRuntimeError(msg.c_str());
+        message = std::string(method) + "(): " + std::strerror(err);
+        return false;
+    }
+    return true;
+}
+
+// writeStream, with a failed write reported as a fatal stdlib error, matching
+// the JVM backend's IOException.
+inline bool writeStreamOrError(FILE* handle, const char* method,
+                               std::string_view text, bool newline) {
+    std::string message;
+    if (!writeStream(handle, method, text, newline, message)) {
+        nativeRuntimeError(message.c_str());
         return false;
     }
     return true;

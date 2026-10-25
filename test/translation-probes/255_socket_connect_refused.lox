@@ -1,0 +1,16 @@
+// STATUS: ok
+// CHECK: NetworkError
+// CHECK: after
+// A connect that the peer refuses is a catchable NetworkError
+// (spec/05-stdlib.md, connect). The port belongs to a Server that is closed,
+// so nothing listens on it. The message text is implementation-defined.
+var l = listen("127.0.0.1", 0);
+var port = l.port();
+l.close();
+try {
+    connect("127.0.0.1", port);
+    print "connected";
+} catch (e) {
+    print e.kind;
+}
+print "after";

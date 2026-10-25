@@ -2,6 +2,7 @@
 #include "stdlib_context.h"
 #include "stream_io.h"
 #include "../container_objects.h"
+#include "../runtime.h"
 #include "../vm_allocator.h"
 #include "../value.h"
 
@@ -23,6 +24,16 @@
 // Per thread: each worker registers the classes of its own heap.
 static thread_local ObjClass* s_socketClass = nullptr;
 static thread_local ObjClass* s_serverClass = nullptr;
+
+// A fault of the network or of a closed socket is catchable: it is delivered
+// as an Error of the given kind (spec/05-stdlib.md, Socket and Server). An
+// argument fault keeps nativeRuntimeError.
+static const char* const kNetworkError = "NetworkError";
+static const char* const kSocketClosedError = "SocketClosedError";
+
+static void raiseNet(const char* kind, const std::string& msg) {
+    getActiveRuntime()->raiseFromNative(kind, msg.c_str());
+}
 
 static bool asStringArg(const Value& v, std::string& out) {
     if (!isString(v)) {
@@ -99,7 +110,7 @@ static Value connectNative(int /*argc*/, Value* argv) {
     if (gai != 0) {
         std::string msg =
             "connect(): cannot resolve '" + host + "': " + gai_strerror(gai);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
 
@@ -124,7 +135,7 @@ static Value connectNative(int /*argc*/, Value* argv) {
         std::string msg = "connect(): cannot connect to '" +
                           hostPort(host, port) +
                           "': " + std::strerror(lastErrno);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
     FILE* fp = fdopen(fd, "r+");
@@ -133,7 +144,7 @@ static Value connectNative(int /*argc*/, Value* argv) {
         ::close(fd);
         std::string msg = "connect(): cannot open stream for '" +
                           hostPort(host, port) + "': " + std::strerror(err);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
     // A socket is not seekable, so stdio's update-mode rule (input then
@@ -174,7 +185,7 @@ static Value listenNative(int /*argc*/, Value* argv) {
     if (gai != 0) {
         std::string msg =
             "listen(): cannot resolve '" + host + "': " + gai_strerror(gai);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
 
@@ -202,7 +213,7 @@ static Value listenNative(int /*argc*/, Value* argv) {
         std::string msg = "listen(): cannot listen on '" +
                           hostPort(host, port) +
                           "': " + std::strerror(lastErrno);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
 
@@ -232,15 +243,15 @@ static Value listenNative(int /*argc*/, Value* argv) {
 }
 
 // The socket method natives read their receiver at args[-1], like the File
-// methods do. A read on a closed socket and a write after close_write() are
-// fatal, matching spec/05-stdlib.md's Socket section.
+// methods do. A read on a closed socket and a write after close_write() raise
+// SocketClosedError, matching spec/05-stdlib.md's Socket section.
 static ObjSocket* checkSocketRead(Value* args, const char* method) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->handle == nullptr) {
         std::string msg = "Cannot call '";
         msg += method;
         msg += "' on a closed socket.";
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kSocketClosedError, msg);
         return nullptr;
     }
     return s;
@@ -252,10 +263,23 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
         return nullptr;
     }
     if (s->writeClosed) {
-        nativeRuntimeError("Cannot write to a socket after close_write().");
+        raiseNet(kSocketClosedError,
+                 "Cannot write to a socket after close_write().");
         return nullptr;
     }
     return s;
+}
+
+// A read that stops on a stream error is a NetworkError, not an end of
+// stream. The error flag is cleared, so a later read starts clean.
+static bool readFailed(ObjSocket* s, const char* method) {
+    if (std::ferror(s->handle) == 0) {
+        return false;
+    }
+    int err = errno;
+    std::clearerr(s->handle);
+    raiseNet(kNetworkError, std::string(method) + "(): " + std::strerror(err));
+    return true;
 }
 
 static Value socketReadNative(int /*argc*/, Value* args) {
@@ -268,6 +292,9 @@ static Value socketReadNative(int /*argc*/, Value* args) {
     size_t got;
     while ((got = std::fread(chunk, 1, sizeof(chunk), s->handle)) > 0) {
         buf.append(chunk, got);
+    }
+    if (readFailed(s, "read")) {
+        return from<Nil>(Nil{});
     }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
@@ -282,6 +309,9 @@ static Value socketReadBytesNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     std::string buf = readStreamBytes(s->handle, n);
+    if (readFailed(s, "read_bytes")) {
+        return from<Nil>(Nil{});
+    }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
@@ -299,6 +329,9 @@ static Value socketReadlineNative(int /*argc*/, Value* args) {
             break;
         }
         line.push_back(static_cast<char>(c));
+    }
+    if (readFailed(s, "readline")) {
+        return from<Nil>(Nil{});
     }
     if (!sawByte) {
         return from<Nil>(Nil{});
@@ -336,6 +369,10 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
             }
         }
     }
+    if (readFailed(s, "readlines")) {
+        mm->popTempRoot();
+        return from<Nil>(Nil{});
+    }
     if (sawByte) {
         ObjString* str = mm->makeString(line);
         mm->pushTempRoot(str);
@@ -356,9 +393,12 @@ static Value socketWriteNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    writeStreamOrError(s->handle, "write",
-                       std::string_view(str->chars.data(), str->chars.size()),
-                       false);
+    std::string message;
+    if (!writeStream(s->handle, "write",
+                     std::string_view(str->chars.data(), str->chars.size()),
+                     false, message)) {
+        raiseNet(kNetworkError, message);
+    }
     return from<Nil>(Nil{});
 }
 
@@ -372,9 +412,12 @@ static Value socketWritelineNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* str = asObjString(as<Obj*>(args[0]));
-    writeStreamOrError(s->handle, "writeline",
-                       std::string_view(str->chars.data(), str->chars.size()),
-                       true);
+    std::string message;
+    if (!writeStream(s->handle, "writeline",
+                     std::string_view(str->chars.data(), str->chars.size()),
+                     true, message)) {
+        raiseNet(kNetworkError, message);
+    }
     return from<Nil>(Nil{});
 }
 
@@ -400,7 +443,8 @@ static Value socketCloseNative(int /*argc*/, Value* args) {
 static Value serverAcceptNative(int /*argc*/, Value* args) {
     ObjServer* s = asObjServer(as<Obj*>(args[-1]));
     if (s->fd < 0) {
-        nativeRuntimeError("Cannot call 'accept' on a closed server.");
+        raiseNet(kSocketClosedError,
+                 "Cannot call 'accept' on a closed server.");
         return from<Nil>(Nil{});
     }
     int cfd;
@@ -409,13 +453,13 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
     } while (cfd < 0 && errno == EINTR);
     if (cfd < 0) {
         std::string msg = std::string("accept(): ") + std::strerror(errno);
-        nativeRuntimeError(msg.c_str());
+        raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
     FILE* fp = fdopen(cfd, "r+");
     if (fp == nullptr) {
         ::close(cfd);
-        nativeRuntimeError("accept(): cannot open stream for connection.");
+        raiseNet(kNetworkError, "accept(): cannot open stream for connection.");
         return from<Nil>(Nil{});
     }
     // See connectNative: unbuffered I/O keeps readline()/write() interleaving

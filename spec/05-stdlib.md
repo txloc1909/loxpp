@@ -493,8 +493,8 @@ was called.
 Opens a TCP connection to `host` at `port`, and returns a connected Socket.
 Both arguments are required. `host` must be a String — a host name or a
 numeric address. `port` must be an integer Number from 1 through 65535. Any
-other argument is a runtime error, as is a failure to resolve the name or to
-connect, which includes a refused connection.
+other argument is a runtime error. A failure to resolve the name or to connect,
+which includes a refused connection, raises a catchable `NetworkError`.
 
 **Arity:** 2  
 **Returns:** Socket  
@@ -508,7 +508,8 @@ Binds a listening TCP socket to `host` at `port`, and returns a Server. Both
 arguments are required. `host` must be a String naming a local address.
 `port` must be an integer Number from 0 through 65535; `0` asks the operating
 system to choose an unused port, which `Server.port()` then reports. Any other
-argument is a runtime error, as is a failure to bind or to listen.
+argument is a runtime error. A failure to bind or to listen raises a
+catchable `NetworkError`.
 
 **Arity:** 2  
 **Returns:** Server
@@ -562,8 +563,11 @@ A Socket is returned by `connect`, or by `Server.accept()`. `type(s)` on a
 Socket returns `"Socket"`. A Socket is a bidirectional stream of bytes.
 
 Reading a closed Socket, or writing to a Socket after `close_write()` or
-`close()`, is a runtime error. A write that the peer has stopped reading also
-fails with a runtime error; it never ends the program by a signal.
+`close()`, raises a catchable `SocketClosedError`. A write that the peer has
+stopped reading raises a catchable `NetworkError`; it never ends the program
+by a signal. A read that the network ends with an error, such as a reset
+connection, also raises `NetworkError`; it is not an end of stream. A wrong
+argument type is a runtime error that halts the program.
 
 ### `s.read() -> String`
 
@@ -645,7 +649,8 @@ A Server is returned by `listen`. `type(s)` on a Server returns `"Server"`.
 ### `s.accept() -> Socket`
 
 Waits for the next inbound connection, and returns it as a new Socket. Calling
-`accept()` on a closed Server is a runtime error.
+`accept()` on a closed Server raises a catchable `SocketClosedError`. A
+failure of the accept itself raises a catchable `NetworkError`.
 
 **Arity:** 0  
 **Returns:** Socket  

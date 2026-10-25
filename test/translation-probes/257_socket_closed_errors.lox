@@ -1,0 +1,19 @@
+// STATUS: ok
+// CHECK: read after close: SocketClosedError
+// CHECK: write after close: SocketClosedError
+// CHECK: write after close_write: SocketClosedError
+// CHECK: accept after close: SocketClosedError
+// A call on a closed Socket, a write after close_write(), and accept() on a
+// closed Server each raise a catchable SocketClosedError (spec/05-stdlib.md,
+// Socket and Server).
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", l.port());
+var s = l.accept();
+c.close();
+try { c.read(); print "no fault"; } catch (e) { print "read after close: " + e.kind; }
+try { c.write("x"); print "no fault"; } catch (e) { print "write after close: " + e.kind; }
+s.close_write();
+try { s.write("x"); print "no fault"; } catch (e) { print "write after close_write: " + e.kind; }
+s.close();
+l.close();
+try { l.accept(); print "no fault"; } catch (e) { print "accept after close: " + e.kind; }
