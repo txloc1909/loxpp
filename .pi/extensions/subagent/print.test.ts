@@ -74,6 +74,24 @@ test("abort kills the child and marks the run aborted", async () => {
   assert.ok(Date.now() - started < 5000, "the tool call did not wait for the child's own exit");
 });
 
+test("abort ends the child and also the command that child started", { timeout: 5000 }, async () => {
+  // The inner subshell keeps its own `sleep` and holds the pipe. A signal aimed
+  // at the outer shell alone leaves the sleep behind, so the run never ends —
+  // which is what a non-forwarding /bin/sh does to a single-process kill.
+  const controller = new AbortController();
+  const running = runPrintChild({
+    command: "/bin/sh",
+    args: ["-c", "( sleep 30; exit 0 ) & wait"],
+    cwd: process.cwd(),
+    signal: controller.signal,
+    killGraceMs: 200,
+  });
+  setTimeout(() => controller.abort(), 100);
+  const run = await running;
+  assert.equal(run.aborted, true);
+  assert.equal(run.exitCode, 130);
+});
+
 test("a child that ignores SIGTERM is killed after the grace", async () => {
   const controller = new AbortController();
   const running = runPrintChild({

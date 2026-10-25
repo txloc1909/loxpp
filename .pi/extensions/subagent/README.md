@@ -158,8 +158,11 @@ session that started it, and every shutdown path stops its jobs.
 The child runs `--mode json -p --no-session` as a plain subprocess: stdout
 carries the event stream, stderr is kept for the tool result, and the exit code
 ends the run. Progress streams into the tool call. There is no window, no kitty
-call, and no temporary event file. An abort ends the child: `SIGTERM` first,
-then `SIGKILL` after two seconds.
+call, and no temporary event file. The child leads its own process group, so an
+abort ends it and the commands it started: `SIGTERM` first, then `SIGKILL` after
+two seconds. Without the group, a shell that does not forward signals leaves its
+own child holding the pipe, and the tool call waits for that child instead of
+ending. When pi exits, it kills the group of every run still alive.
 
 ## Tests
 

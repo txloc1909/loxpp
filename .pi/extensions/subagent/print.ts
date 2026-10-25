@@ -17,6 +17,30 @@ export const STDERR_CAP = 4000;
 export const KILL_GRACE_MS = 2000;
 const PROGRESS_MS = 250;
 
+/**
+ * Children of running jobs, so a pi exit takes them with it. A detached child
+ * leads its own process group, and nothing else would signal that group when
+ * this process goes away.
+ */
+const live = new Set<number>();
+let exitGuardInstalled = false;
+
+function killGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group is already gone; the child's close event is what ends the run.
+  }
+}
+
+function guardExits(): void {
+  if (exitGuardInstalled) return;
+  exitGuardInstalled = true;
+  process.once("exit", () => {
+    for (const pid of live) killGroup(pid, "SIGKILL");
+  });
+}
+
 export interface PrintRunOptions {
   command: string;
   args: string[];
@@ -42,18 +66,23 @@ export function runPrintChild(opts: PrintRunOptions): Promise<PrintRunResult> {
   let lastUpdate = 0;
 
   return new Promise((resolve) => {
+    // Detached, so the child leads a process group: an abort then reaches the
+    // commands the child started, not only the child. A shell that does not
+    // forward signals would otherwise leave its own child holding the pipe.
     const child = spawn(opts.command, opts.args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
+    const pid = child.pid;
+    if (pid !== undefined) {
+      live.add(pid);
+      guardExits();
+    }
 
     const kill = (signal: NodeJS.Signals): void => {
-      try {
-        child.kill(signal);
-      } catch {
-        // Already gone; the close event is the only thing this run waits for.
-      }
+      if (pid !== undefined) killGroup(pid, signal);
     };
     const onAbort = (): void => {
       aborted = true;
@@ -84,6 +113,7 @@ export function runPrintChild(opts: PrintRunOptions): Promise<PrintRunResult> {
 
     child.on("close", (code) => {
       opts.signal?.removeEventListener("abort", onAbort);
+      if (pid !== undefined) live.delete(pid);
       stream.push(decoder.end());
       stream.end();
       opts.onProgress?.(stream.state);
