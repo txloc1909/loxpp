@@ -46,7 +46,7 @@ Cases 10 and 11 need a probe that the build under test PASSES. A build that
 prints its disassembly or its execution trace can never pass one: the trace
 lands in stdout, where the probe's CHECK lines are read. On such a build the
 two cases are not judged, and this script exits 125 (ctest's SKIP_RETURN_CODE)
-after the other nine pass, so a trace preset reports a skip instead of a false
+after the other ten pass, so a trace preset reports a skip instead of a false
 red or a false green.
 
 Usage:
@@ -547,7 +547,7 @@ def main() -> int:
         print(
             f"SKIP: {args.native} prints a disassembly or an execution trace, so "
             f"no probe can pass on it and cases 10 and 11 cannot be judged. The "
-            f"other nine cases pass. Use the release preset for the full check."
+            f"other ten cases pass. Use the release preset for the full check."
         )
         return 125
 

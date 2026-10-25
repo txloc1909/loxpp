@@ -398,7 +398,7 @@ if(LOXPP_PYTHON3)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     # Cases 10 and 11 need a probe the build under test passes, which a build
     # that prints its disassembly or its trace can never do. The checker exits
-    # 125 there, after the other nine cases pass, so the trace preset reports a
+    # 125 there, after the other ten cases pass, so the trace preset reports a
     # skip instead of a false red.
     set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
 endif()
