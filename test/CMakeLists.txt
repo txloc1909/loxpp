@@ -387,13 +387,15 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-    # Issue #858, #862, #868: an expected-failure entry that the run cannot grade
-    # is an error (exit 2), as tools/check_spec_probes.py already makes it, and a
-    # probe that sits on both lists is graded by the reason that explains the run.
+    # Issues #858, #862, #868, #878, #885: an expected-failure entry that the run
+    # cannot grade is an error (exit 2), as tools/check_spec_probes.py already
+    # makes it, and a probe that sits on both lists is graded by the reason that
+    # explains the run.
     # A dead or ungraded entry is otherwise silent, so a gate that runs only
     # tools/diff_runtimes.py stays green over the gap the entry claims to record.
-    # Cases 1 to 6 and 12 need only the native binary; 7 to 11 add a stub runner,
-    # so the test needs no managed toolchain and no jar either way.
+    # Cases 1 to 6 and 12 need only the native binary; 7 to 11 and 13 add a stub
+    # runner, and 14 names a path that does not exist, so the test needs no
+    # managed toolchain and no jar either way.
     add_test(NAME DiffRuntimesXfailNames
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_xfail.py
                 --native $<TARGET_FILE:loxpp>

@@ -328,6 +328,26 @@ def run_program(
     return result.stdout, result.stderr, result.returncode
 
 
+def require_runner(path: str) -> None:
+    """Stops with exit 2 unless path names an executable file.
+
+    Both runners come from the command line, so a typo is a precondition of the
+    run, not a comparison that failed: it must fail here, before the first
+    program runs, and not as a traceback from inside subprocess or as a
+    divergence of the whole walk.
+    """
+    runner = Path(path)
+    if not runner.exists():
+        print(f"error: {path} does not exist", file=sys.stderr)
+        sys.exit(2)
+    if not runner.is_file():
+        print(f"error: {path} is not a file", file=sys.stderr)
+        sys.exit(2)
+    if not os.access(runner, os.X_OK):
+        print(f"error: {path} is not executable", file=sys.stderr)
+        sys.exit(2)
+
+
 def collect_programs(paths: list[str]) -> list[Path]:
     """Resolves each path to a .lox file or every .lox file in a directory.
 
@@ -485,6 +505,9 @@ def main() -> None:
     if args.skip_on_trace and os.environ.get("LOXPP_BOOTSTRAP_TRACE_ENABLED") == "1":
         print("SKIP: the build under test traces execution (release preset required)")
         sys.exit(125)
+
+    require_runner(args.native)
+    require_runner(args.other_runner)
 
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
     xfail = parse_xfail_file(args.xfail) if args.xfail else {}
