@@ -3,9 +3,10 @@
  *
  * An interactive child draws its TUI on stdout and reads the keyboard from the
  * same terminal, so the parent cannot read its event stream. This extension
- * writes the records the parent needs to the file named by `LOXPP_SUBAGENT_EVENTS`,
- * in the shape `pi --mode json` writes, so the parent parses one format for
- * both kinds of child.
+ * writes three record types to the file named by `LOXPP_SUBAGENT_EVENTS`:
+ * `message_end` for each finished message, and `agent_start`/`agent_end`
+ * around each run. They use the shape `pi --mode json` gives the same records,
+ * so the parent parses one format for both kinds of child.
  *
  * The parent loads this file with `--extension`. Without the environment
  * variable it registers nothing, so loading it by mistake does no harm.

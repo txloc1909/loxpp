@@ -109,8 +109,9 @@ Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `interactive`,
 3. An interactive child keeps the terminal: its keys and its TUI stay in the
    window, and only its stderr goes to a log file. It saves a session named
    `subagent: <agent>`. The parent cannot read that terminal, so the child
-   loads `mirror.ts`, which appends each finished message and each run boundary
-   to an event file in the same shape `pi --mode json` writes.
+   loads `mirror.ts`, which appends three record types to the event file:
+   `message_end` for each finished message, and `agent_start`/`agent_end`
+   around each run. They use the shape `pi --mode json` gives the same records.
 4. pi tails the event file. Progress and token counts stream into the pi
    session, and the child window's title shows the turn count, the current
    tool, or `waiting for you` when the child is back at its prompt.
