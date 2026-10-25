@@ -26,7 +26,7 @@ The mission started from the accepted decision of #823 and the tracking issue
 | 5 | N5: the JVM backend | #829 | #854 |
 | 6 (swapped) | N8: the QBE backend | #832 | #863 |
 | 7 (swapped) | N6: the bootstrap interpreter | #830 | #874 |
-| 8 | N9: the differential gate on both phases, and close | #833 | this pull request |
+| 8 | N9: the differential gate on both phases, and close | #833 | #890 |
 
 The owner swapped waves 6 and 7 on 2026-10-24, so N8 landed before N6: the QBE
 job compiles `bootstrap/loxpp_interpreter.lox`, and N6 puts Int operations in

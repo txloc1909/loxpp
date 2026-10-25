@@ -420,7 +420,7 @@ purpose programs are `examples/flag_set.lox`, `examples/bitboard.lox` and
 | N5: the JVM backend, as the semantic oracle | #829 | #854 | `b9f6fd9` | 2026-10-24 |
 | N8: the QBE backend | #832 | #863 | `663fcd0` | 2026-10-24 |
 | N6: the bootstrap interpreter | #830 | #874 | `25cee15` | 2026-10-25 |
-| N9: the differential gate on both phases, the examples, and close | #833 | this pull request | — | 2026-10-25 |
+| N9: the differential gate on both phases, the examples, and close | #833 | #890 | — | 2026-10-25 |
 
 The table is in the order of the DAG that the tracking issue, #824, records.
 The owner swapped waves 6 and 7 on 2026-10-24, so **N8 (#832) landed before
