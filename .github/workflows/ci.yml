@@ -181,9 +181,22 @@ jobs:
               # grammar rejects once it reads the suffix, and probes 245 to
               # 249 hold `0XFF`, `0xFFi`, `0b1i`, `0xFFand true`, and `0x`,
               # which it rejects too, so they are not in the parse. A probe
-              # that the grammar cannot parse yet would be listed in an
-              # expected-failure file and left out here; no probe is, so this
-              # step parses every probe the names above do not hold back.
+              # that the grammar cannot parse yet goes in
+              # tools/spec-probe-xfail/tree-sitter.txt, and this step leaves
+              # it out. No entry is there today and the file does not exist,
+              # so every probe the names above do not hold back is parsed; a
+              # listed name that is not a probe fails the step, so a rename
+              # cannot quietly widen the exclusion.
+              notyet=""
+              if [ -f ../../tools/spec-probe-xfail/tree-sitter.txt ]; then
+                notyet=$(grep -v "^#" ../../tools/spec-probe-xfail/tree-sitter.txt | awk "NF {print \$1}" | tr "\n" " ")
+                for name in $notyet; do
+                  if [ ! -f ../../test/translation-probes/$name ]; then
+                    echo "FAIL: tree-sitter.txt lists $name, which is not a probe"
+                    exit 1
+                  fi
+                done
+              fi
               files=""
               for f in ../../examples/*.lox ../../bootstrap/*.lox ../../test/translation-probes/*.lox; do
                 case "$f" in
@@ -194,6 +207,9 @@ jobs:
                   *242_int_fractional_suffix_before_in_rejected*|*244_int_fractional_suffix_before_if_rejected*) continue ;;
                   *245_int_uppercase_hex_prefix_rejected*|*246_int_hex_suffix_rejected*|*247_int_binary_suffix_rejected*) continue ;;
                   *248_int_hex_name_after_literal_rejected*|*249_int_hex_prefix_no_digit_rejected*) continue ;;
+                esac
+                case " $notyet " in
+                  *" $(basename "$f") "*) continue ;;
                 esac
                 files="$files $f"
               done
