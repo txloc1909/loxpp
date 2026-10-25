@@ -364,7 +364,10 @@ A consumer that does not pass a probe yet lists it in
 and its gate passes that file with `--xfail`: a listed probe must fail, and a
 listed probe that passes fails the gate until its line is deleted. A differential
 step also passes native's file as `--oracle-xfail`, so a backend that passes a
-probe before native does is not a divergence. Two more names serve walkers that
+probe before native does is not a divergence. That needs the oracle entry: a
+consumer entry whose probe the consumer passes while native fails it is a
+divergence, because the consumer's line is stale and no entry explains native's
+failure. Two more names serve walkers that
 are not a consumer's gate: `tooling.txt` for the tooling parser and resolver
 tests, and `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The
 C++ tests that compile every probe (`test/corpus.h`) leave out the probes in

@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Twelve cases, each on an explicit program list, so no corpus is walked:
+Fourteen cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -36,26 +36,36 @@ Twelve cases, each on an explicit program list, so no corpus is walked:
      path, and both flags grade every program. No expected-failure list exists
      in the tree today (test/translation-probes/README.md), so a call site that
      still names one must not turn a gate red on its own.
+  13. a probe on the consumer list alone that the consumer passes and native
+     fails is a divergence with exit 1, which says the consumer's line is
+     stale and names no consumer reason: the consumer has no gap here.
+  14. a runner that the run cannot start is exit 2 and names the path, in this
+     checker and in both runner slots of tools/diff_runtimes.py, and it is no
+     traceback: a setup mistake must not read as a failed case. Two shapes: a
+     path that does not exist, and a file that exists and is executable whose
+     shebang names a missing interpreter.
 
-Cases 1 to 6 and case 12 run native against itself, so they need no managed
-toolchain and no runtime jar. Cases 7 to 11 use a stub script as a runner,
-because they need one side to pass, to fail, or to hang where the other side
-does not.
+Cases 1 to 6 and 12 run native against itself, so they need no managed
+toolchain and no runtime jar. Cases 7 to 11 and 13 use a stub script as a
+runner, because they need one side to pass, to fail, or to hang where the other
+side does not. Case 14 gives both tools a path that does not exist, so it needs
+no runner either.
 
 Cases 10 and 11 need a probe that the build under test PASSES. A build that
 prints its disassembly or its execution trace can never pass one: the trace
 lands in stdout, where the probe's CHECK lines are read. On such a build the
 two cases are not judged, and this script exits 125 (ctest's SKIP_RETURN_CODE)
-after the other ten pass, so a trace preset reports a skip instead of a false
+after the other twelve pass, so a trace preset reports a skip instead of a false
 red or a false green.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all twelve cases hold, 1 with a report per failed case otherwise,
-2 when a precondition fails (the probe this script needs is missing, or the
-binary does not run a trivial program and print its line), and 125 when the
-build traces execution so that cases 10 and 11 cannot be judged.
+Exits 0 when all fourteen cases hold, 1 with a report per failed case otherwise,
+2 when a precondition fails (the probe this script needs is missing, the binary
+path does not exist, or the binary does not run a trivial program and print its
+line), and 125 when the build traces execution so that cases 10 and 11 cannot
+be judged.
 """
 
 import argparse
@@ -66,6 +76,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DIFF_RUNTIMES = REPO_ROOT / "tools" / "diff_runtimes.py"
+
+# This checker and tools/diff_runtimes.py are both run as scripts, so Python
+# puts tools/ on sys.path for them. Name it here too, so the import below does
+# not depend on how the file was started.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from diff_runtimes import refuse_unrunnable, require_runner
 
 # A spec probe of test/translation-probes/ that runs in milliseconds. Case 4
 # asserts only that the check let the run through, so whether this probe passes
@@ -144,9 +161,15 @@ def build_traces(native: str, work: Path) -> bool | None:
     """
     probe = work / "trace_check.lox"
     probe.write_text('print "trace check";\n')
-    completed = subprocess.run(
-        [native, str(probe)], capture_output=True, text=True, timeout=120
-    )
+    try:
+        completed = subprocess.run(
+            [native, str(probe)], capture_output=True, text=True, timeout=120
+        )
+    except OSError as exc:
+        # The path passed the precondition and still cannot be spawned: a
+        # wrapper whose interpreter is missing, for example. That is a
+        # precondition too, so it must not read as "traces" or as a failed case.
+        refuse_unrunnable(native, exc)
     if completed.returncode != 0:
         return None
     if completed.stdout == 'trace check\n':
@@ -165,6 +188,8 @@ def main() -> int:
         help="directory holding the spec probes, default test/translation-probes",
     )
     args = parser.parse_args()
+
+    require_runner(args.native)
 
     probe_dir = Path(args.probes)
     real_probe = probe_dir / REAL_PROBE
@@ -357,17 +382,54 @@ def main() -> int:
             f"case that can fail: {out.strip()!r}",
         )
 
-        # The same probe with the consumer list alone still reports XFAIL, so
-        # case 7 measures the overlap rule and not the ordinary path.
+        # Case 13: the same state with the consumer list ALONE, so case 7
+        # measures the overlap rule and this case measures the single-list one.
+        # The consumer passes a probe its own list calls a gap, and native fails
+        # it with no entry to explain that: the consumer's line is stale, and
+        # native's failure is the reason a reader needs. Printing the consumer's
+        # reason would state a gap the consumer does not have, and exit 0 would
+        # hide both facts.
+        consumer_only = work / "consumer_only.txt"
+        consumer_only.write_text(f"{both_probe.name}  consumer is behind\n")
         code, out, err = run(
-            args.native, [both_probe], [("--xfail", consumer_list)], runner=str(stub)
+            args.native, [both_probe], [("--xfail", consumer_only)], runner=str(stub)
         )
         expects(
             failures,
-            "a probe on the consumer list alone",
-            "XFAIL" in out and "consumer is behind" in out,
-            f"did not report XFAIL with the consumer reason: exit {code}, "
+            "the consumer list alone, consumer ahead of native",
+            "DIVERGE" in out,
+            f"did not report a divergence: exit {code}, stdout {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            code == 1,
+            f"exit {code}, expected 1 (a stale entry is not green): "
             f"stdout {out.strip()!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            "consumer is behind" not in out,
+            f"printed the consumer's reason for a probe the consumer passes: "
+            f"{out.strip()!r}",
+        )
+        diverge_line = next(
+            (line for line in out.splitlines() if line.startswith("DIVERGE")), ""
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            f"{consumer_only.name} lists it" in diverge_line,
+            f"did not name the file whose line is stale on the DIVERGE line: "
+            f"{diverge_line!r}",
+        )
+        expects(
+            failures,
+            "the consumer list alone, consumer ahead of native",
+            "is stale" in diverge_line,
+            f"the DIVERGE line does not say the consumer line is stale: "
+            f"{diverge_line!r}",
         )
 
         # Case 8: both lists, and both sides fail the probe. Neither list's
@@ -538,6 +600,126 @@ def main() -> int:
                 f"the run did not grade the program; stdout was {out.strip()!r}",
             )
 
+        # Case 14: a runner path that does not exist is a precondition, not a
+        # failed case. It must name the path and exit 2 in this checker, and in
+        # both runner slots of tools/diff_runtimes.py. A traceback would report
+        # a defect of the tool as a defect of the program under test (#885).
+        missing = work / "no_such_binary"
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--native", str(missing)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        expects(
+            failures,
+            "a --native path that does not exist",
+            completed.returncode == 2,
+            f"exit {completed.returncode}, expected 2 (a precondition): "
+            f"stderr {completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a --native path that does not exist",
+            f"error: {missing} does not exist" in completed.stderr,
+            f"stderr does not name the missing path: {completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a --native path that does not exist",
+            "Traceback" not in completed.stderr,
+            f"stderr holds a Python traceback: {completed.stderr.strip()!r}",
+        )
+
+        for role, invoke in (
+            ("--native", lambda: run(str(missing), [real_probe], [])),
+            (
+                "the other runner",
+                lambda: run(args.native, [real_probe], [], runner=str(missing)),
+            ),
+        ):
+            code, out, err = invoke()
+            expects(
+                failures,
+                f"a runner path that does not exist in diff_runtimes.py ({role})",
+                code == 2,
+                f"exit {code}, expected 2 (a precondition): stderr {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner path that does not exist in diff_runtimes.py ({role})",
+                f"error: {missing} does not exist" in err,
+                f"stderr does not name the missing path: {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner path that does not exist in diff_runtimes.py ({role})",
+                "Traceback" not in err,
+                f"stderr holds a Python traceback: {err.strip()!r}",
+            )
+
+        # A file that passes every path check and still cannot be spawned,
+        # because the interpreter in its shebang is missing. The kernel fails
+        # exec after require_runner has said the path is fine, so the spawn
+        # needs the precondition too, in this checker and in both runner slots
+        # of tools/diff_runtimes.py.
+        unrunnable = work / "unrunnable_runner.sh"
+        unrunnable.write_text("#!/nonexistent/interpreter\necho never\n")
+        unrunnable.chmod(0o755)
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--native", str(unrunnable)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            completed.returncode == 2,
+            f"exit {completed.returncode}, expected 2 (a precondition): "
+            f"stderr {completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            f"error: {unrunnable} cannot run" in completed.stderr,
+            f"stderr does not name the runner that cannot start: "
+            f"{completed.stderr.strip()!r}",
+        )
+        expects(
+            failures,
+            "a runner that cannot start",
+            "Traceback" not in completed.stderr,
+            f"stderr holds a Python traceback: {completed.stderr.strip()!r}",
+        )
+
+        for role, invoke in (
+            ("--native", lambda: run(str(unrunnable), [real_probe], [])),
+            (
+                "the other runner",
+                lambda: run(args.native, [real_probe], [], runner=str(unrunnable)),
+            ),
+        ):
+            code, out, err = invoke()
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                code == 2,
+                f"exit {code}, expected 2 (a precondition): stderr {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                f"error: {unrunnable} cannot run" in err,
+                f"stderr does not name the runner that cannot start: {err.strip()!r}",
+            )
+            expects(
+                failures,
+                f"a runner that cannot start in diff_runtimes.py ({role})",
+                "Traceback" not in err,
+                f"stderr holds a Python traceback: {err.strip()!r}",
+            )
+
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
@@ -547,15 +729,17 @@ def main() -> int:
         print(
             f"SKIP: {args.native} prints a disassembly or an execution trace, so "
             f"no probe can pass on it and cases 10 and 11 cannot be judged. The "
-            f"other ten cases pass. Use the release preset for the full check."
+            f"other twelve cases pass. Use the release preset for the full check."
         )
         return 125
 
     print(
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
-        "probe is a clean refusal, a real probe reaches the comparison, and a "
-        "probe on both lists reports every reason the run graded"
+        "probe is a clean refusal, a real probe reaches the comparison, a probe "
+        "on both lists reports every reason the run graded, a consumer entry the "
+        "consumer passes is a divergence rather than an XFAIL, and a runner the "
+        "run cannot start is a clean precondition (exit 2)"
     )
     return 0
 

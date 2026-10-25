@@ -59,12 +59,18 @@ run is an error (exit 2), as it is in tools/check_spec_probes.py. A name that
 no program backs says nothing at all, where a listed probe the consumer passes
 prints XPASS and exits 1, so after a rename the list would look satisfied and
 a gate that runs only this script would report green over the gap. A listed
-program reports one of two outcomes:
+program reports one of three outcomes:
   XFAIL        the other runner's run does not pass the probe, or native's
                does not. Not a divergence.
   XPASS        both runs pass the probe (tools/check_spec_probes.py). Exit
                code 1: the backend passes it now, so its line must be
                deleted.
+  DIVERGE      the other runner passes the probe and native does not, with no
+               --oracle-xfail entry for that probe. Exit code 1: the consumer
+               passes a probe its own list calls a gap, so the line is stale,
+               and native's failure is the side a reader must fix. The
+               consumer's reason would name a gap that does not exist, so the
+               line states native's failure instead.
 
 --oracle-xfail <file> is native's own expected-failure list, in the
 same form, with the same rule: a name that is not a spec probe of this run is
@@ -129,7 +135,11 @@ Usage:
 <path> is a .lox file, or a directory (every *.lox file inside it, sorted).
 A path that is neither a file nor a directory, a program list that ends up
 empty, or an --xfail or --oracle-xfail entry that is not a spec probe of the
-list, is an error (exit 2), not a silent zero-file pass.
+list, is an error (exit 2), not a silent zero-file pass. So is a runner that
+cannot start: a mistyped <native-loxpp> or <other-runner>, a path that is not an
+executable file, or a wrapper whose shebang names a missing interpreter. A
+precondition, not a failed comparison: it exits 2 and names the path, and it
+never prints a comparison first.
 
 --only-excluded <dir> ignores <path> and runs only the programs named in
 --exclude, resolved under <dir>. This wires the permutation guard: an
@@ -316,7 +326,42 @@ def run_program(
         )
     except subprocess.TimeoutExpired as exc:
         raise RunTimeout(f"{cmd[0]} did not finish in {timeout:.0f}s") from exc
+    except OSError as exc:
+        refuse_unrunnable(cmd[0], exc)
     return result.stdout, result.stderr, result.returncode
+
+
+def refuse_unrunnable(path: str, exc: OSError) -> None:
+    """Stops with exit 2 for a runner that exec cannot start.
+
+    require_runner cannot see this shape: the file exists, it is a file, and it
+    is executable, but the kernel still refuses to start it. A wrapper whose
+    shebang names a missing interpreter is the common case. That is a
+    precondition like a missing path, so it must not read as a comparison that
+    failed.
+    """
+    print(f"error: {path} cannot run: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+
+def require_runner(path: str) -> None:
+    """Stops with exit 2 unless path names an executable file.
+
+    Both runners come from the command line, so a typo is a precondition of the
+    run, not a comparison that failed: it must fail here, before the first
+    program runs, and not as a traceback from inside subprocess or as a
+    divergence of the whole walk.
+    """
+    runner = Path(path)
+    if not runner.exists():
+        print(f"error: {path} does not exist", file=sys.stderr)
+        sys.exit(2)
+    if not runner.is_file():
+        print(f"error: {path} is not a file", file=sys.stderr)
+        sys.exit(2)
+    if not os.access(runner, os.X_OK):
+        print(f"error: {path} is not executable", file=sys.stderr)
+        sys.exit(2)
 
 
 def collect_programs(paths: list[str]) -> list[Path]:
@@ -477,6 +522,9 @@ def main() -> None:
         print("SKIP: the build under test traces execution (release preset required)")
         sys.exit(125)
 
+    require_runner(args.native)
+    require_runner(args.other_runner)
+
     excluded = parse_exclude_file(args.exclude) if args.exclude else {}
     xfail = parse_xfail_file(args.xfail) if args.xfail else {}
     oracle_xfail = parse_xfail_file(args.oracle_xfail) if args.oracle_xfail else {}
@@ -588,6 +636,19 @@ def main() -> None:
                         detail += f" and from {args.oracle_xfail}"
                     print(f"XPASS       {lox_file}  ({detail})")
                     xpassed += 1
+                elif consumer_passes:
+                    # Reached only with no oracle entry for this probe: the
+                    # AHEAD branch above already took the state where one
+                    # explains native's gap. So native fails a probe the
+                    # consumer passes, and nothing accounts for it: the
+                    # consumer's line is stale and native is the side to fix.
+                    print(
+                        f"DIVERGE     {lox_file}  (native does not pass it; "
+                        f"{args.xfail} lists it as a gap of the consumer, which "
+                        f"passes it, so that line is stale, and no "
+                        f"--oracle-xfail entry explains native's gap)"
+                    )
+                    diverged += 1
                 else:
                     reasons = [xfail[lox_file.name]]
                     if listed_oracle:
