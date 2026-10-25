@@ -37,11 +37,20 @@ Cases 1 to 6 run native against itself, so they need no managed toolchain and
 no runtime jar. Cases 7 to 11 use a stub script as a runner, because they
 need one side to pass, to fail, or to hang where the other side does not.
 
+Cases 10 and 11 need a probe that the build under test PASSES. A build that
+prints its disassembly or its execution trace can never pass one: the trace
+lands in stdout, where the probe's CHECK lines are read. On such a build the
+two cases are not judged, and this script exits 125 (ctest's SKIP_RETURN_CODE)
+after the other nine pass, so a trace preset reports a skip instead of a false
+red or a false green.
+
+Usage:
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
 Exits 0 when all eleven cases hold, 1 with a report per failed case otherwise,
-and 2 when the probe this script needs is missing.
+2 when the probe this script needs is missing, and 125 when the build traces
+execution so that cases 10 and 11 cannot be judged.
 """
 
 import argparse
@@ -115,6 +124,21 @@ def expects(failures: list[str], case: str, condition: bool, detail: str) -> Non
         failures.append(f"{case}: {detail}")
 
 
+def build_traces(native: str, work: Path) -> bool:
+    """True when the build prints a trace, so no probe can pass on it.
+
+    The debug preset can leave the disassembly and the execution trace on, and
+    both write to stdout, where a probe's CHECK lines are read. One trivial
+    program settles it: a build that is not traced prints exactly its one line.
+    """
+    probe = work / "trace_check.lox"
+    probe.write_text('print "trace check";\n')
+    completed = subprocess.run(
+        [native, str(probe)], capture_output=True, text=True, timeout=120
+    )
+    return completed.stdout != "trace check\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", required=True, help="path to the native loxpp binary")
@@ -132,8 +156,10 @@ def main() -> int:
         return 2
 
     failures: list[str] = []
+    traced = False
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
+        traced = build_traces(args.native, work)
 
         # Cases 1 and 2: a name that no program of the run has.
         for flag in ("--xfail", "--oracle-xfail"):
@@ -391,79 +417,88 @@ def main() -> int:
             f"claimed a reason for the side that finished: {out.strip()!r}",
         )
 
-        # Case 10: both lists, the consumer fails the probe and native passes
-        # it. Native's entry is answered here, not confirmed, so the line must
-        # not claim native regressed. The probe is written here so native passes
-        # it on any build of the tree.
-        native_passes_probe = work / "native_passes.lox"
-        native_passes_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
-        consumer_list_2 = work / "consumer2.txt"
-        consumer_list_2.write_text(f"{native_passes_probe.name}  consumer is behind\n")
-        oracle_list_2 = work / "oracle2.txt"
-        oracle_list_2.write_text(f"{native_passes_probe.name}  native regressed\n")
-        code, out, err = run(
-            args.native,
-            [native_passes_probe],
-            [("--xfail", consumer_list_2), ("--oracle-xfail", oracle_list_2)],
-            runner=str(failing_stub),
-        )
-        expects(
-            failures,
-            "consumer fails, native passes, both lists",
-            "XFAIL" in out and "consumer is behind" in out,
-            f"did not report XFAIL with the consumer reason: exit {code}, "
-            f"stdout {out.strip()!r}, stderr {err.strip()!r}",
-        )
-        expects(
-            failures,
-            "consumer fails, native passes, both lists",
-            "native regressed" not in out,
-            f"claimed native regressed while native passes the probe: {out.strip()!r}",
-        )
-        expects(
-            failures,
-            "consumer fails, native passes, both lists",
-            "native passes it now" in out,
-            f"did not say native's entry is answered: {out.strip()!r}",
-        )
+        if not traced:
+            # Case 10: both lists, the consumer fails the probe and native passes
+            # it. Native's entry is answered here, not confirmed, so the line must
+            # not claim native regressed. The probe is written here so native passes
+            # it on any build of the tree.
+            native_passes_probe = work / "native_passes.lox"
+            native_passes_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
+            consumer_list_2 = work / "consumer2.txt"
+            consumer_list_2.write_text(f"{native_passes_probe.name}  consumer is behind\n")
+            oracle_list_2 = work / "oracle2.txt"
+            oracle_list_2.write_text(f"{native_passes_probe.name}  native regressed\n")
+            code, out, err = run(
+                args.native,
+                [native_passes_probe],
+                [("--xfail", consumer_list_2), ("--oracle-xfail", oracle_list_2)],
+                runner=str(failing_stub),
+            )
+            expects(
+                failures,
+                "consumer fails, native passes, both lists",
+                "XFAIL" in out and "consumer is behind" in out,
+                f"did not report XFAIL with the consumer reason: exit {code}, "
+                f"stdout {out.strip()!r}, stderr {err.strip()!r}",
+            )
+            expects(
+                failures,
+                "consumer fails, native passes, both lists",
+                "native regressed" not in out,
+                f"claimed native regressed while native passes the probe: {out.strip()!r}",
+            )
+            expects(
+                failures,
+                "consumer fails, native passes, both lists",
+                "native passes it now" in out,
+                f"did not say native's entry is answered: {out.strip()!r}",
+            )
 
-        # Case 11: both lists, and both runs pass the probe. The line must name
-        # both files, because both entries are stale; without that clause a
-        # reader would edit one list and leave the other.
-        passing_stub = work / "passing_runner.sh"
-        passing_stub.write_text('#!/bin/sh\necho ok\nexit 0\n')
-        passing_stub.chmod(0o755)
-        passing_probe = work / "both_pass.lox"
-        passing_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
-        consumer_list_3 = work / "consumer3.txt"
-        consumer_list_3.write_text(f"{passing_probe.name}  consumer reason\n")
-        oracle_list_3 = work / "oracle3.txt"
-        oracle_list_3.write_text(f"{passing_probe.name}  oracle reason\n")
-        code, out, err = run(
-            args.native,
-            [passing_probe],
-            [("--xfail", consumer_list_3), ("--oracle-xfail", oracle_list_3)],
-            runner=str(passing_stub),
-        )
-        expects(
-            failures,
-            "both lists, both runs pass",
-            "XPASS" in out and code == 1,
-            f"exit {code}, expected 1: XPASS fails the run. stdout {out.strip()!r}, "
-            f"stderr {err.strip()!r}",
-        )
-        expects(
-            failures,
-            "both lists, both runs pass",
-            consumer_list_3.name in out and oracle_list_3.name in out,
-            f"named one file only, so that clause has no case that can fail: "
-            f"{out.strip()!r}",
-        )
+            # Case 11: both lists, and both runs pass the probe. The line must name
+            # both files, because both entries are stale; without that clause a
+            # reader would edit one list and leave the other.
+            passing_stub = work / "passing_runner.sh"
+            passing_stub.write_text('#!/bin/sh\necho ok\nexit 0\n')
+            passing_stub.chmod(0o755)
+            passing_probe = work / "both_pass.lox"
+            passing_probe.write_text('print "ok";\n// STATUS: ok\n// CHECK: ok\n')
+            consumer_list_3 = work / "consumer3.txt"
+            consumer_list_3.write_text(f"{passing_probe.name}  consumer reason\n")
+            oracle_list_3 = work / "oracle3.txt"
+            oracle_list_3.write_text(f"{passing_probe.name}  oracle reason\n")
+            code, out, err = run(
+                args.native,
+                [passing_probe],
+                [("--xfail", consumer_list_3), ("--oracle-xfail", oracle_list_3)],
+                runner=str(passing_stub),
+            )
+            expects(
+                failures,
+                "both lists, both runs pass",
+                "XPASS" in out and code == 1,
+                f"exit {code}, expected 1: XPASS fails the run. stdout {out.strip()!r}, "
+                f"stderr {err.strip()!r}",
+            )
+            expects(
+                failures,
+                "both lists, both runs pass",
+                consumer_list_3.name in out and oracle_list_3.name in out,
+                f"named one file only, so that clause has no case that can fail: "
+                f"{out.strip()!r}",
+            )
 
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
         return 1
+
+    if traced:
+        print(
+            "SKIP: build/loxpp prints a disassembly or an execution trace, so no "
+            "probe can pass on it and cases 10 and 11 cannot be judged. The other "
+            "nine cases pass. Use the release preset for the full check."
+        )
+        return 125
 
     print(
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
