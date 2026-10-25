@@ -1,8 +1,9 @@
 # An Int kind beside Number
 
-**Status:** accepted. The owner approved it in #823 (2026-10-23). Tracking
-issue: #824. It replaces `docs/records/integer-type-split-model.md`, the
-decision of #792 that the owner dropped in #810 on 2026-10-23.
+**Status:** accepted, and complete. The owner approved it in #823
+(2026-10-23). Mission #824 shipped every consumer (see "Shipped" below). It
+replaces `docs/records/integer-type-split-model.md`, the decision of #792 that
+the owner dropped in #810 on 2026-10-23.
 
 ## Owner decisions
 
@@ -396,3 +397,124 @@ This is not a node list. The DAG is in the tracking issue, #824.
 6. QBE, last.
 7. The differential gate on both phases, the purpose examples under
    `examples/`, the "Shipped" section and the retrospective.
+
+## Shipped
+
+**Mission #824 is complete.** Every consumer named in "Consumers" implements
+the Int kind, and each one is graded in both phases of
+`spec/README.md`, "Conformance": a program with a static error is rejected,
+and a portable program gives the same output and the same exit status. The
+purpose programs are `examples/flag_set.lox`, `examples/bitboard.lox` and
+`examples/hash_mix.lox`. The retrospective is
+`docs/records/integer-kind-retro.md`.
+
+### Nodes
+
+| Node | Issue | Pull request | Squash commit | Merged (UTC) |
+|---|---|---|---|---|
+| N1: spec, probes, check scripts, and the expected-failure wiring | #825 | #835 | `e1296f0` | 2026-10-23 |
+| N2: native value layer and literals | #826 | #842 | `59576be` | 2026-10-24 |
+| N7: editors and LSP | #831 | #843 | `2f4e9d9` | 2026-10-24 |
+| N3: native operators | #827 | #844 | `6c67057` | 2026-10-24 |
+| N4: native conversions, the `integer` module, and indexing | #828 | #848 | `5b0af73` | 2026-10-24 |
+| N5: the JVM backend, as the semantic oracle | #829 | #854 | `b9f6fd9` | 2026-10-24 |
+| N8: the QBE backend | #832 | #863 | `663fcd0` | 2026-10-24 |
+| N6: the bootstrap interpreter | #830 | #874 | `25cee15` | 2026-10-25 |
+| N9: the differential gate on both phases, the examples, and close | #833 | this pull request | — | 2026-10-25 |
+
+The table is in the order of the DAG that the tracking issue, #824, records.
+The owner swapped waves 6 and 7 on 2026-10-24, so **N8 (#832) landed before
+N6 (#830)**: the QBE job compiles `bootstrap/loxpp_interpreter.lox` with the
+QBE backend, and N6 puts Int operations in that file. Before N8, each of the
+seven Int opcodes reached `default: unsupported(ins.op)` in
+`src/backend/qbe_emitter.cpp`, which is a compile failure of the interpreter
+itself, so no expected-failure file could cover it and `main` would have been
+red from the N6 merge until the N8 merge. With N8 first, the two backend
+nodes keep the obligations their issues state, and only the order changes.
+N3's pull request merged 14 minutes before N7's on 2026-10-24, though the DAG
+had N7 first; both were green and the two did not conflict.
+
+### The differential gate
+
+Each cell of this table is one named step of `.github/workflows/ci.yml`, so
+every consumer × phase pair has a gate that a red tree can fail.
+`tools/diff_runtimes.py` grades the compile phase per program: when native
+rejects a program, the other runner must exit non-zero with empty stdout, or
+the step reports `DIVERGE (compile phase)`.
+
+| Consumer | Compile phase | Run phase |
+|---|---|---|
+| Native | `Test` (the ctest static-error sweep); `Check spec probes - native` | `Check spec probes - native`; `Run example checks` |
+| Bootstrap interpreter | `Bootstrap differential suite - spec probes`; `Bootstrap differential suite - compile errors` | `Bootstrap differential suite - spec probes`; `Bootstrap differential suite - examples`; `Run examples through loxpp bootstrap interpreter` |
+| JVM | `JVM differential suite - probes`; `JVM differential suite - compile errors`; `Check spec probes - JVM` | `JVM differential suite - probes`; `JVM differential suite - full example corpus`; `JVM differential suite - examples through the self-hosted interpreter on the JVM backend` |
+| QBE | `Check QBE probes (S7)`; `QBE differential suite - compile errors`; `Check spec probes - QBE` | `Check QBE probes (S7)`; `QBE differential suite - full example corpus`; `QBE differential suite - full example corpus through the self-hosted interpreter` |
+
+Every cell was already a step, so N9 adds no check script: the compile phase
+is graded per probe by `tools/diff_runtimes.py` and `tools/check_spec_probes.py`,
+and constraint 6 of this decision forbids a check that reads prose.
+
+The compile phase has a countable ground truth: the Int probes that carry
+`// STATIC-ERROR`, found by
+`grep -l STATIC-ERROR test/translation-probes/*int*.lox`. There are 22 of
+them: 167 to 176, 237 to 239, 240 to 242, and 244 to 249. N9 ran
+`tools/diff_runtimes.py` on those 22 probes against each other consumer, and
+each line was `MATCH (rejected)`. A runner that printed `ran` would be a
+defect of that consumer.
+
+The measurements at N9, on the release build of this branch on 2026-10-25.
+Every number is the summary line of a command named here.
+
+| Check | Native | JVM | Bootstrap | QBE |
+|---|---|---|---|---|
+| The 22 Int static-error probes, `tools/diff_runtimes.py` | rejected (exit 65, empty stdout) | 22 MATCH (rejected) | 22 MATCH (rejected) | 22 MATCH (rejected) |
+| The spec probes, `tools/check_spec_probes.py` | 184 pass | 184 pass | 181 pass, 3 exempt | 184 pass |
+| The examples, `tools/check_examples.py` | 130 pass, 20 skip | 127 pass, 23 skip | 130 pass, 20 skip | 130 pass, 20 skip |
+| The probe corpus, `tools/diff_runtimes.py` | — | 287 matched | 181 matched, 3 exempt | `tools/check_qbe_probes.sh`: 0 diverged |
+| The example corpus, `tools/diff_runtimes.py` | — | 146 matched, 4 permutation-excused | — | 150 matched |
+| The examples through the self-hosted interpreter | (the bootstrap runs on native) 130 pass | 127 pass, 23 skip | — | 149 matched |
+| The tree-sitter parse of the corpus | 401 files, zero ERROR and zero MISSING nodes | | | |
+
+A skip in `tools/check_examples.py` is an example with no `CHECK` line, plus,
+for the JVM, the names that `tools/jvm_excluded_examples.txt` excludes
+because map iteration order is unspecified (`spec/03-types.md`).
+
+At close, no expected-failure file holds a probe line. PR #884 removes the
+six files and the C++ loader that reads them; it runs in parallel with this
+node and owns those edits. The three Int probes that the tree-sitter step
+names in `ci.yml` (174, 175 and 176) stay named there.
+
+### Follow-ups filed at close
+
+| Issue | Item | Why it is not in this mission | What it builds on |
+|---|---|---|---|
+| #886 | `integer.popcount`, `clz`, `ctz`, `rotl` and `rotr` | "The Int module" puts them out of scope | The module and its table checks; `std::popcount` and the JVM's `Long.bitCount` |
+| #888 | A `UInt` kind on the reserved inline tag bit 48 | "Why not UInt": about half of the Int effort again | Tag bit 49 and the box; the `u`-prefixed functions that already exist |
+| #887 | Digit separators in Int and Number literals | "Lexical" says there are none; constraint 5 makes it a table change | The table of examples and `tools/check_int_literal_rejections.py` |
+| #889 | A JIT path that keeps Ints in registers | "Native layout": not a language change, and the JIT is a proposal | The Int opcodes, the inline range, and QBE's S8 register promotion |
+
+A program can write a popcount with the `b & (b - 1i)` loop today, as
+`examples/bitboard.lox` does, and the unsigned views already exist as
+functions, so none of these four items is a capability gap of the kind
+`VISION.md` names.
+
+### Work that landed during the mission
+
+These pull requests changed shared tooling while the mission ran. None of
+them changes this decision.
+
+| Pull request | Issue it closes | What changed |
+|---|---|---|
+| #849 | #834 | The canonical string form of a Number, and the Int and Number print parity probes |
+| #857 | #855 | The `backend` scope of `loxpp_gate` runs the differential suite |
+| #861 | — | The mission role definitions move into the repository |
+| #866 | #862 | `tools/diff_runtimes.py` refuses a listed probe that the consumer exempts |
+| #867 | #852 | The bootstrap interpreter parses a Number literal as the nearest double |
+| #872 | #864 | `loxpp_gate` gains a `qbe` scope that matches CI's QBE steps |
+| #875 | #870 | A 16-digit fraction literal is pinned on every consumer |
+| #879 | #877 | A literal that a 17-significant-digit reader rounds the wrong way is pinned |
+| #884 (open at close) | #883 | The six expected-failure files that hold no probe line go, with the C++ loader |
+
+One issue stays open and is not a defect of this decision: #856, where
+`BootstrapStackOverflow` times out under the `debug` preset on a 12-core
+host. It makes the local `loxpp_gate` `native` scope red, so the native debug
+matrix is graded in CI, not locally.
