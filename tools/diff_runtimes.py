@@ -78,8 +78,11 @@ does not reports one more outcome:
 A probe may sit on both lists at once, which is what a native regression under
 a consumer that is also behind looks like. The oracle entry then decides when
 it is the one that explains the run (the other runner passes, native does not)
-and reports AHEAD; otherwise the consumer entry decides and reports XFAIL.
-Neither reason is dropped, and the overlap is not an error: refusing it would
+and reports AHEAD; otherwise the consumer entry decides, with XPASS when both
+runs pass and XFAIL when they do not. A listed probe that times out reports
+XFAIL when the consumer lists it, with both reasons on the line, because a run
+that produced no output for one side cannot be graded as AHEAD. No reason a
+list gives is dropped, and the overlap is not an error: refusing it would
 block a state that is real.
 
 --consumer <name> names the consumer the other runner is. A spec probe whose
@@ -525,7 +528,14 @@ def main() -> None:
             )
         except RunTimeout as exc:
             if lox_file.name in xfail:
-                print(f"XFAIL       {lox_file}  (timeout: {exc}; {xfail[lox_file.name]})")
+                # A timeout leaves one side without output, so AHEAD is not
+                # decidable here. The consumer entry still grades the run, and
+                # an oracle entry on the same probe adds its reason instead of
+                # being dropped.
+                reasons = [xfail[lox_file.name]]
+                if lox_file.name in oracle_xfail:
+                    reasons.append(f"native: {oracle_xfail[lox_file.name]}")
+                print(f"XFAIL       {lox_file}  (timeout: {exc}; {'; '.join(reasons)})")
                 xfailed += 1
                 continue
             print(f"DIVERGE     {lox_file}  (timeout: {exc})")
