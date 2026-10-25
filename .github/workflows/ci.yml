@@ -58,6 +58,13 @@ jobs:
       - name: Check number-format spec table
         run: tools/check_number_format.py
 
+      # spec/01-lexical.md's table of the range of a Number literal and its
+      # spec probes must stay in lockstep. This fails when a row loses its
+      # probe, a probe names no row, or a CHECK disagrees with its row. Pure
+      # Python, so it needs no build.
+      - name: Check Number literal range spec table
+        run: tools/check_number_literal_range.py
+
       # The countable sets of the concurrency model in spec/. Each script
       # fails when its table loses a row or disagrees with the rule
       # sentences the spec states for it. Pure Python, so it needs no build.

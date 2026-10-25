@@ -1,5 +1,6 @@
 #include "compiler.h"
 #include "debug.h"
+#include "decimal_number.h"
 #include "escape.h"
 #include "memory_manager.h"
 #include "objects.h"
@@ -311,12 +312,12 @@ void Compiler::literal() {
 }
 
 void Compiler::number() {
-    // Construct a bounded std::string from the lexeme view: the view's data()
-    // is not NUL-terminated at the token's end (it points into the source), so
-    // passing it straight to std::stod would scan to the end of the whole
-    // source — O(source length) per literal, i.e. O(N^2) over a large program.
-    double num = std::stod(std::string(m_parser->m_previous.lexeme));
-    emitConstantOp(Op::CONSTANT, makeConstant(from<Number>(num)));
+    // The scanner hands a NUMBER lexeme here: digits, and at most one '.' with
+    // digits after it. The lexeme is a view into the source, so it is not
+    // NUL-terminated at its end; the bounded read of from_chars keeps a long
+    // literal at one pass.
+    const Number value = nearestDoubleFromDecimal(m_parser->m_previous.lexeme);
+    emitConstantOp(Op::CONSTANT, makeConstant(from<Number>(value)));
 }
 
 // Reinterprets a 64-bit magnitude as the two's-complement Int of that bit

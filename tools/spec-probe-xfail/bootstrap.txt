@@ -79,3 +79,7 @@
 241_int_suffix_before_if_rejected.lox  N6 #830: bootstrap interpreter scanner
 242_int_fractional_suffix_before_in_rejected.lox  N6 #830: bootstrap interpreter scanner
 244_int_fractional_suffix_before_if_rejected.lox  N6 #830: bootstrap interpreter scanner
+
+# ---- the range of a Number literal (issue #852) ----
+251_number_literal_range_ends.lox  #852: bootstrap interpreter decimal conversion
+252_float_string_range.lox  N6 #830: bootstrap interpreter
