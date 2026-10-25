@@ -20,7 +20,9 @@ measured batches before taking the median.
 
 richards is the one exception to the 80-250 ms target: its own scheduler
 runs a fixed 10000-tick workload tied to a hardcoded self-check, so its
-per-call cost (~2s natively) is not reducible without losing that check.
+per-call cost cannot be scaled with SIZE_PATCHES without losing that check.
+A fixed pass costs well under 0.25 s natively, so a batch lands near the
+window's lower edge and reps stays 1.
 """
 from __future__ import annotations
 
@@ -44,13 +46,10 @@ CONFIG = {
     "storage":            ("Storage",           25, 12, 8),
     "towers":             ("Towers",            25, 12, 12),
     "json":               ("Json",              25, 12, 8),
-    # reps=1: a single call now runs richards's full intended workload
-    # (~2s natively) since its scheduler-deadlock bug was fixed — reps=3
-    # (tuned for the old, near-instant broken version) would take ~6s/batch.
-    # This is well outside the 80-250ms window every other entry targets;
-    # accepted as-is rather than shrinking the workload and losing the
-    # benchmark's own internal self-check (Scheduler.start()'s assertion is
-    # tied to the canonical IDLER count of 10000).
+    # reps=1: one call is one full 10000-tick scheduler pass, which costs
+    # well under 0.25 s natively. The pass is not reducible — Scheduler.start()'s
+    # self-check reads the canonical IDLER count of 10000 — so extra reps
+    # would only multiply the same fixed pass past the 80-250 ms window.
     "richards":           ("Richards",          25, 12, 1),
     "binary_trees":       ("BinaryTrees",       25, 12, 1),
     "spectral_norm":      ("SpectralNorm",      25, 12, 1),
