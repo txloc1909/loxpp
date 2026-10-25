@@ -723,6 +723,19 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapStackOverflow --output-on-failure --no-tests=error"
 
+      # Issue #868: DiffRuntimesXfailNames needs a probe the build under test
+      # passes, and a trace build can never pass one, so it skips on the debug
+      # leg (SKIP_RETURN_CODE 125). This step is where it runs; without it the
+      # test would run in no leg at all.
+      - name: Run the expected-failure list checks at run time
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R DiffRuntimesXfailNames --output-on-failure --no-tests=error"
+
       # BootstrapOperatorOverload and BootstrapMatchArmBreak are registered in test/CMakeLists.txt but
       # self-skip on debug (SKIP_RETURN_CODE 125), so they only run on the
       # release leg, where the trace macros are off. --no-tests=error fails
