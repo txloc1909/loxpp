@@ -1,0 +1,33 @@
+// A fraction of 16 digits is not a fraction a digit-accumulating parser can
+// round. `0.9999999999999999` has the numerator 9999999999999999, which is
+// above 2^53, so a parser that reads the fraction into one Number and divides
+// by 10^16 rounds the numerator to 1e16 and returns 1.0 (issue #772). The
+// nearest double is the value the literal spells.
+//
+// The same fault reaches the index rule: a fractional List index is the
+// catchable `IndexNotIntegerError` of spec/04-semantics.md, Index Get step 4b,
+// so a consumer that rounds the literal to 1 prints `8` here instead of the
+// kind. The fault is inside a `try` because the spec makes it catchable; an
+// uncaught one halts (spec/04-semantics.md, Halting Faults).
+
+print 0.9999999999999999;
+print 0.9999999999999999 == 1;
+try {
+    print [7, 8][0.9999999999999999];
+} catch (e) {
+    print e.kind;
+}
+
+// The numerator 9007199254740993 is 2^53 + 1, which a parser that keeps the
+// fraction in a Number cannot hold. This is the same defect without a run of
+// nines, so the probe is not one value's shape.
+
+print 0.9007199254740993;
+print 0.9007199254740993 == 0.9007199254740992;
+
+// STATUS: ok
+// CHECK: 0.9999999999999999
+// CHECK: false
+// CHECK: IndexNotIntegerError
+// CHECK: 0.9007199254740993
+// CHECK: false
