@@ -171,7 +171,7 @@ class HandlerTaskDataRecord < RBObject {
 
 class IdleTaskDataRecord < RBObject {
   init() {
-    this.control = 1;
+    this.control = 1i;
     this.count   = 10000;
   }
 }
@@ -184,9 +184,8 @@ class WorkerTaskDataRecord < RBObject {
 }
 
 // ---------- Task runner objects (replace JS lambdas) ----------
-// JS idler uses bitwise ops: (ctrl & 1), (ctrl >> 1), (ctrl ^ 0xd008).
-// Lox++ has no bitwise ops; we emulate via modulo (bit-test) and floor-divide (right-shift),
-// then call bitwiseXor() for the XOR with the constant 0xd008 = 53256.
+// The idler's control word is an Int bit pattern, as it is in the upstream
+// JS source: (ctrl & 1), (ctrl >> 1), and (ctrl ^ 0xd008).
 
 class IdlerTask {
   init() { this.scheduler = nil; }
@@ -195,12 +194,12 @@ class IdlerTask {
     handle.count = handle.count - 1;
     if (handle.count == 0) return this.scheduler.holdCurrent();
     var ctrl = handle.control;
-    var bit0 = ctrl % 2;
-    if (bit0 == 0) {
-      handle.control = math.floor(ctrl / 2);
+    var bit0 = ctrl & 1i;
+    if (bit0 == 0i) {
+      handle.control = ctrl >> 1i;
       return this.scheduler.releaseTask(DEVICE_A);
     }
-    handle.control = bitwiseXor(math.floor(ctrl / 2), 53256);
+    handle.control = (ctrl >> 1i) ^ 0xd008;
     return this.scheduler.releaseTask(DEVICE_B);
   }
 }
@@ -294,23 +293,6 @@ class DeviceTask {
     handle.pending = work;
     return this.scheduler.holdCurrent();
   }
-}
-
-// ---------- Bitwise XOR helper (for non-negative integers, small values) ----------
-// We simulate integer XOR by processing bit-by-bit.
-
-fun bitwiseXor(a, b) {
-  var result = 0;
-  var bit    = 1;
-  var i      = 0;
-  while (i < 30) {
-    var aBit = math.floor(a / bit) % 2;
-    var bBit = math.floor(b / bit) % 2;
-    if (aBit != bBit) result = result + bit;
-    bit = bit * 2;
-    i   = i + 1;
-  }
-  return result;
 }
 
 // ---------- Scheduler ----------

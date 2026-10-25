@@ -14,6 +14,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -71,25 +72,51 @@ def engine_rows(db, query):
     return sorted(lines)
 
 
+def make_big_int_db(directory):
+    """A fixture with 64-bit integers above 2^53, where a double would round.
+
+    The values cover the top of the signed range and the first integer a
+    double cannot hold exactly. Both the rowid varint and the 8-byte record
+    value must decode without rounding.
+    """
+    path = os.path.join(directory, "big.db")
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE big (id integer primary key, v integer)")
+    con.executemany(
+        "INSERT INTO big (id, v) VALUES (?, ?)",
+        [
+            (9007199254740993, -9007199254740993),
+            (9223372036854775807, 9223372036854775807),
+            (42, -9223372036854775808 + 1),
+        ],
+    )
+    con.commit()
+    con.close()
+    return path
+
+
 def main():
     fails = 0
-    for db, query in CASES:
-        want = oracle_rows(db, query)
-        try:
-            got = engine_rows(db, query)
-        except RuntimeError as e:
-            print("FAIL %s | %s\n  %s" % (os.path.basename(db), query, e))
-            fails += 1
-            continue
-        if want != got:
-            print("FAIL %s | %s" % (os.path.basename(db), query))
-            print("  want:", want[:5], "..." if len(want) > 5 else "")
-            print("  got: ", got[:5], "..." if len(got) > 5 else "")
-            fails += 1
-        else:
-            print("ok   %s | %s (%d rows)" % (os.path.basename(db), query, len(want)))
+    cases = list(CASES)
+    with tempfile.TemporaryDirectory(prefix="loxpp-sqlite-") as tmp:
+        cases.append((make_big_int_db(tmp), "SELECT id, v FROM big"))
+        for db, query in cases:
+            want = oracle_rows(db, query)
+            try:
+                got = engine_rows(db, query)
+            except RuntimeError as e:
+                print("FAIL %s | %s\n  %s" % (os.path.basename(db), query, e))
+                fails += 1
+                continue
+            if want != got:
+                print("FAIL %s | %s" % (os.path.basename(db), query))
+                print("  want:", want[:5], "..." if len(want) > 5 else "")
+                print("  got: ", got[:5], "..." if len(got) > 5 else "")
+                fails += 1
+            else:
+                print("ok   %s | %s (%d rows)" % (os.path.basename(db), query, len(want)))
 
-    print("\n%d/%d cases passed" % (len(CASES) - fails, len(CASES)))
+    print("\n%d/%d cases passed" % (len(cases) - fails, len(cases)))
     return 1 if fails else 0
 
 
