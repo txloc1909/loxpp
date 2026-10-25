@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { EVENTS_ENV } from "./child.ts";
 import {
   buildRunScript,
   closeWindowArgv,
@@ -132,6 +133,12 @@ export interface WindowRunOptions {
   env: Record<string, string>;
   hold: boolean;
   keepFocus: boolean;
+  /**
+   * The child owns the terminal: a person chats with it in the window, and its
+   * stdout carries the TUI rather than the event stream. The child then writes
+   * its events itself, through the mirror this module points at `EVENTS_ENV`.
+   */
+  interactive?: boolean;
   signal: AbortSignal | undefined;
   onProgress: (state: StreamState) => void;
   kitten?: string;
@@ -150,6 +157,7 @@ export interface WindowRunResult {
 
 export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRunResult> {
   const kitten = opts.kitten ?? "kitten";
+  const interactive = opts.interactive ?? false;
   const target = requireListenOn(opts.session);
   const pollMs = opts.pollMs ?? POLL_MS;
   const livenessMs = opts.livenessMs ?? LIVENESS_MS;
@@ -170,9 +178,15 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
       eventsPath,
       stderrPath,
       exitPath,
+      terminal: interactive,
     }),
     { mode: 0o700 },
   );
+
+  // An interactive child writes its own events, so it needs the path. kitty
+  // starts the child from its own environment, and `childEnv` forwards only
+  // PATH and `PI_*`, so this one travels as a launch flag.
+  const env = interactive ? { ...opts.env, [EVENTS_ENV]: eventsPath } : opts.env;
 
   const launched = await runProcess(
     launchArgv(
@@ -183,7 +197,7 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
         command: ["/bin/sh", scriptPath],
         hold: opts.hold,
         keepFocus: opts.keepFocus,
-        env: opts.env,
+        env,
       },
       kitten,
     ),
@@ -249,7 +263,7 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
         const listing = await runProcess(listWindowsArgv(target, kitten));
         if (listing.code === 0) {
           if (windowIds(listing.stdout).includes(windowId)) {
-            const title = progressTitle(opts.title, stream.state);
+            const title = progressTitle(opts.title, stream.state, interactive);
             if (title !== lastTitle) {
               lastTitle = title;
               void runProcess(setTitleArgv(windowId, title, target, kitten));
@@ -263,6 +277,14 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
       // A window closed by hand takes the exit code with it. Report what the
       // stream holds instead of waiting for a file that cannot appear.
       if (goneSince !== null && Date.now() - goneSince >= deadWindowGraceMs) {
+        // The child may have written its last message just before the window
+        // went away: the person closing an interactive child ends the run, and
+        // that last answer is the result.
+        const tail = await readNew(eventsPath, offset);
+        if (tail.length > 0) {
+          offset += tail.length;
+          stream.push(tail.toString("utf8"));
+        }
         stream.end();
         return {
           windowId,
@@ -287,10 +309,14 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
 const UPDATE_MS = 250; // progress updates for the caller's UI
 const STDERR_CAP = 4000;
 
-export function progressTitle(base: string, state: StreamState): string {
-  const tool = lastToolCall(state);
+export function progressTitle(base: string, state: StreamState, interactive = false): string {
   const turns = state.usage.turns;
-  return `${base}${turns ? ` · ${turns} turn${turns > 1 ? "s" : ""}` : ""}${tool ? ` · ${tool.name}` : ""}`;
+  const turnsPart = turns ? ` · ${turns} turn${turns > 1 ? "s" : ""}` : "";
+  // Only an interactive child waits for a person. A print-mode child that ends
+  // a turn may start another one at once, so its title keeps the last tool.
+  if (interactive && state.idle) return `${base}${turnsPart} · waiting for you`;
+  const tool = lastToolCall(state);
+  return `${base}${turnsPart}${tool ? ` · ${tool.name}` : ""}`;
 }
 
 async function readNew(file: string, offset: number): Promise<Buffer> {

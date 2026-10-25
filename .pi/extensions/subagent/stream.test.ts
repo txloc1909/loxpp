@@ -63,8 +63,21 @@ test("malformed and unrelated lines are ignored", () => {
   assert.equal(stream.push("not json\n"), false);
   assert.equal(stream.push("\n"), false);
   assert.equal(stream.push('{"type":"tool_result_end"}\n'), false);
-  assert.equal(stream.push('{"type":"agent_start"}\n'), false);
+  assert.equal(stream.push('{"type":"turn_start"}\n'), false);
   assert.equal(stream.state.messages.length, 0);
+});
+
+test("the run boundaries say whether the child waits at its prompt", () => {
+  const stream = new EventStream();
+  assert.equal(stream.state.idle, false, "a starting child is not idle");
+  assert.equal(stream.push('{"type":"agent_start"}\n'), false, "no change while it already runs");
+  assert.equal(stream.push('{"type":"agent_end"}\n'), true);
+  assert.equal(stream.state.idle, true);
+  // A person typing into an interactive child starts another run.
+  assert.equal(stream.push('{"type":"agent_start"}\n'), true);
+  assert.equal(stream.state.idle, false);
+  assert.equal(stream.push(assistant("done")), true);
+  assert.equal(finalOutput(stream.state), "done");
 });
 
 test("stop and error reasons surface from the last assistant message", () => {

@@ -2,9 +2,14 @@
  * Subagent tool: delegate a task to a separate `pi` process that runs in a new
  * window in pi's kitty tab.
  *
- * The child owns its terminal, so the event stream, the stderr log and the
- * exit code travel through files that `window.ts` tails. When the child exits,
- * kitty closes the window.
+ * The window is one run. By default the child is interactive: a person chats
+ * with it there, and it ends when that person quits or closes the window. Else
+ * the child prints its events and exits by itself.
+ *
+ * The parent never shares the child's terminal. An interactive child mirrors
+ * its messages to a file through `mirror.ts`; a print-mode child writes the
+ * same records to stdout, which the parent captures. `window.ts` tails that
+ * file in both cases, plus stderr and the exit code.
  *
  * The extension registers nothing unless pi runs inside a kitty window.
  *
@@ -15,6 +20,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, type ExtensionAPI, getAgentDir, getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
@@ -43,6 +49,7 @@ interface SingleResult {
   stopReason?: string;
   errorMessage?: string;
   closedByUser?: boolean;
+  interactive?: boolean;
   step?: number;
 }
 
@@ -65,6 +72,7 @@ async function runWindowAgent(opts: {
   agent: AgentConfig;
   task: string;
   cwd: string;
+  interactive: boolean;
   hold: boolean;
   keepFocus: boolean;
   step?: number;
@@ -80,6 +88,7 @@ async function runWindowAgent(opts: {
     messages: [],
     stderr: "",
     usage: emptyUsage(),
+    interactive: opts.interactive,
     step: opts.step,
   };
 
@@ -88,7 +97,7 @@ async function runWindowAgent(opts: {
     result.usage = state.usage;
     if (state.model) result.model = state.model;
     opts.onUpdate?.({
-      content: [{ type: "text", text: finalOutput(state) || "(running...)" }],
+      content: [{ type: "text", text: finalOutput(state) || (state.idle ? "(waiting for you in the subagent window)" : "(running...)") }],
       details: opts.makeDetails([result]),
     });
   };
@@ -102,20 +111,35 @@ async function runWindowAgent(opts: {
     }
 
     const pi = piInvocation();
-    const command = [pi.command, ...pi.args, ...childArgs(opts.agent, opts.task, promptPath, opts.dispatch)];
+    const command = [
+      pi.command,
+      ...pi.args,
+      ...childArgs(opts.agent, opts.task, promptPath, opts.dispatch, {
+        interactive: opts.interactive,
+        mirrorPath: opts.interactive ? mirrorExtensionPath() : undefined,
+      }),
+    ];
 
     const run = await runInKittyWindow({
       session: opts.session,
       cwd: opts.cwd,
       title: `pi subagent: ${opts.agent.name}`,
-      header: [
-        `pi subagent: ${opts.agent.name}`,
-        opts.agent.description,
-        `cwd: ${opts.cwd}`,
-        "this window closes when the subagent exits",
-      ],
+      header: opts.interactive
+        ? [
+            `pi subagent: ${opts.agent.name}`,
+            opts.agent.description,
+            `cwd: ${opts.cwd}`,
+            "chat here to direct the subagent; quit it (Ctrl+D) or close this window to return the result",
+          ]
+        : [
+            `pi subagent: ${opts.agent.name}`,
+            opts.agent.description,
+            `cwd: ${opts.cwd}`,
+            "this window closes when the subagent exits",
+          ],
       command,
       env: childEnv(),
+      interactive: opts.interactive,
       hold: opts.hold,
       keepFocus: opts.keepFocus,
       signal: opts.signal,
@@ -131,7 +155,9 @@ async function runWindowAgent(opts: {
     result.stopReason = run.state.stopReason;
     result.errorMessage = run.state.errorMessage;
     result.closedByUser = run.closedByUser;
-    if (run.closedByUser) result.errorMessage = "the subagent window was closed before the run finished";
+    // Closing an interactive child's window is how a person ends that run, so
+    // it is a normal end there. A print-mode run cut short is a failure.
+    if (run.closedByUser && !opts.interactive) result.errorMessage = "the subagent window was closed before the run finished";
     return result;
   } finally {
     await fs.promises.rm(promptDir, { recursive: true, force: true });
@@ -139,7 +165,16 @@ async function runWindowAgent(opts: {
 }
 
 function isFailed(result: SingleResult): boolean {
+  if (result.closedByUser && result.interactive) return false;
   return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+}
+
+/**
+ * The mirror that feeds this child's events to the parent. Resolved from this
+ * file so the child loads the copy that belongs to the running extension.
+ */
+function mirrorExtensionPath(): string {
+  return fileURLToPath(new URL("./mirror.ts", import.meta.url));
 }
 
 function finalOutputFrom(result: SingleResult): string {
@@ -195,6 +230,13 @@ const SubagentParams = Type.Object({
     Type.Boolean({ description: "Ask before running repo-controlled project agents in an untrusted project", default: true }),
   ),
   cwd: Type.Optional(Type.String({ description: "Working directory for the subagent window. Default the session cwd" })),
+  interactive: Type.Optional(
+    Type.Boolean({
+      description:
+        "Run the child as an interactive pi session in its window, so a person can chat with it and direct the work. The call returns when the child exits, which for an interactive child means when the person quits its window or closes it. Default true. Set false for an unattended run that ends by itself.",
+      default: true,
+    }),
+  ),
   hold: Type.Optional(
     Type.Boolean({ description: "Keep the window open at a shell after the subagent exits. Default false: it closes", default: false }),
   ),
@@ -216,8 +258,10 @@ export default function kittySubagent(pi: ExtensionAPI): void {
     name: "subagent",
     label: "Subagent",
     description: [
-      "Delegate a task to a subagent: a separate pi process with its own context, running in a new kitty window.",
-      "The window closes when the subagent exits, and its progress streams back into this session.",
+      "Delegate a task to a subagent: a separate pi process with its own context, running in a new kitty window in this tab.",
+      "By default the child is an interactive pi session in that window: a person can chat with it and direct the work, and the call returns when the person quits or closes the window.",
+      "Set interactive: false for an unattended run that ends by itself; the window then closes when the child exits.",
+      "Progress streams back into this session either way.",
       "Modes: single (agent + task), parallel (tasks array, max 8), chain (sequential, {previous} placeholder).",
       'Default agent scope is "user"; set agentScope: "both" to allow project-local agents.',
     ].join(" "),
@@ -229,6 +273,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
       if (!check.ok) return { content: [{ type: "text" as const, text: check.problem }], details: undefined, isError: true };
 
       const agentScope: AgentScope = params.agentScope ?? "user";
+      const interactive = params.interactive ?? true;
       const hold = params.hold ?? false;
       const keepFocus = params.keepFocus ?? false;
       const discovery = discoverAgents(ctx.cwd, agentScope);
@@ -290,6 +335,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
           agent,
           task,
           cwd: cwd ? path.resolve(baseCwd, cwd) : baseCwd,
+          interactive,
           hold,
           keepFocus,
           step,

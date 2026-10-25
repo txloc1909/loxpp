@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { checkRemoteControl, runInKittyWindow } from "./window.ts";
+import { finalOutput } from "./stream.ts";
 
 const FAKE_KITTEN = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -27,13 +28,21 @@ fs.appendFileSync(file("calls.log"), JSON.stringify(args) + "\\n");
 
 if (sub === "launch") {
   const command = [];
+  const env = { ...process.env };
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i].startsWith("--")) continue;
+    const arg = rest[i];
+    if (arg.startsWith("--env=")) {
+      const pair = arg.slice("--env=".length);
+      const eq = pair.indexOf("=");
+      if (eq > 0) env[pair.slice(0, eq)] = pair.slice(eq + 1);
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
     command.push(...rest.slice(i));
     break;
   }
   fs.writeFileSync(file("launch.argv"), JSON.stringify(rest));
-  const child = spawn(command[0], command.slice(1), { detached: true, stdio: "ignore" });
+  const child = spawn(command[0], command.slice(1), { detached: true, stdio: "ignore", env });
   child.unref();
   fs.writeFileSync(file("window.pid"), String(child.pid));
   process.stdout.write(String(windowId) + "\\n");
@@ -245,5 +254,90 @@ test("a window closed by hand ends the run instead of hanging", async () => {
     for (const call of calls) {
       assert.equal(call[0], "--to=unix:/tmp/fake-kitty.sock", `kitten ${call[1]} names the socket`);
     }
+  });
+});
+
+test("an interactive child keeps the terminal and writes its own events", async () => {
+  await withFakeKitten(async (cwd, kitten) => {
+    // What mirror.ts writes in the child: the parent gets no stdout from an
+    // interactive child, so the launch flag carries the path.
+    const records = [
+      { type: "agent_start" },
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "from the mirror" }], usage: { input: 4 } } },
+      { type: "agent_end" },
+    ];
+    await fs.promises.writeFile(path.join(cwd, "mirror.jsonl"), `${records.map((r) => JSON.stringify(r)).join("\n")}\n`);
+
+    const dir = process.env.FAKE_KITTY_DIR!;
+    const running = runInKittyWindow({
+      ...baseOptions(kitten, cwd),
+      interactive: true,
+      // The child waits for the test, so the script can be read while it lives.
+      // The wait is bounded: a failed assertion above must not leave it behind.
+      command: [
+        "/bin/sh",
+        "-c",
+        'cat mirror.jsonl >> "$LOXPP_SUBAGENT_EVENTS"; i=0; while [ ! -e go ] && [ "$i" -lt 200 ]; do i=$((i + 1)); sleep 0.02; done; exit 0',
+      ],
+      onProgress: () => {},
+    });
+
+    const argv = (await waitForFile(path.join(dir, "launch.argv"), (text) => JSON.parse(text) as string[])) as string[];
+    const eventFlag = argv.find((arg) => arg.startsWith("--env=LOXPP_SUBAGENT_EVENTS="));
+    assert.ok(eventFlag, "the child is told where to write its events");
+
+    // The script the window runs must leave stdin and stdout alone: that is
+    // what makes the window a live session instead of a log sink.
+    const eventsPath = eventFlag.slice("--env=LOXPP_SUBAGENT_EVENTS=".length);
+    const script = await fs.promises.readFile(path.join(path.dirname(eventsPath), "run.sh"), "utf8");
+    assert.equal(script.includes("</dev/null"), false, "stdin stays with the terminal");
+    assert.equal(script.includes(`> ${eventsPath}`), false, "stdout stays with the terminal");
+    assert.match(script, /2> /, "stderr still goes to the log");
+
+    await fs.promises.writeFile(path.join(cwd, "go"), "");
+    const run = await running;
+    assert.equal(run.exitCode, 0);
+    assert.equal(finalOutput(run.state), "from the mirror");
+    assert.equal(run.state.idle, true);
+    assert.equal(run.state.usage.input, 4);
+  });
+});
+
+/** Poll until the fake kitten has recorded the launch, then parse it. */
+async function waitForFile<T>(file: string, parse: (text: string) => T, timeoutMs = 3000): Promise<T> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return parse(await fs.promises.readFile(file, "utf8"));
+    } catch (error) {
+      if (Date.now() >= until) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+test("a print-mode child still captures its event stream", async () => {
+  await withFakeKitten(async (cwd, kitten) => {
+    const record = JSON.stringify({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "printed" }] },
+    });
+    await fs.promises.writeFile(path.join(cwd, "printed.jsonl"), `${record}\n`);
+
+    const run = await runInKittyWindow({
+      ...baseOptions(kitten, cwd),
+      command: ["/bin/sh", "-c", "cat printed.jsonl; exit 0"],
+      onProgress: () => {},
+    });
+
+    assert.equal(finalOutput(run.state), "printed");
+    const argv = JSON.parse(
+      await fs.promises.readFile(path.join(process.env.FAKE_KITTY_DIR!, "launch.argv"), "utf8"),
+    ) as string[];
+    assert.equal(
+      argv.some((arg) => arg.startsWith("--env=LOXPP_SUBAGENT_EVENTS=")),
+      false,
+      "a print-mode child needs no mirror",
+    );
   });
 });
