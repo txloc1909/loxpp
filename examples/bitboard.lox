@@ -1,0 +1,80 @@
+// bitboard.lox — a 64-square chess bitboard held in one Int.
+//
+// One bit per square, a1 = bit 0 and h8 = bit 63, so the board needs all 64
+// bits, the sign bit included. A knight's attacks are four shifted copies of
+// the board, each masked against the files that a shift would wrap around.
+// `popcount` clears the lowest set bit with `b & (b - 1i)`, which also works
+// on the smallest Int.
+//
+// Demonstrates: a 0x hexadecimal Int literal, `<<`, `>>>`, `&`, `|`, and a
+//               wrap on the full 64-bit range.
+// The expected values are the same steps in Python.
+
+var NOT_A = 0xFEFEFEFEFEFEFEFE;
+var NOT_AB = 0xFCFCFCFCFCFCFCFC;
+var NOT_H = 0x7F7F7F7F7F7F7F7F;
+var NOT_GH = 0x3F3F3F3F3F3F3F3F;
+
+fun bit(square) {
+    return 1i << square;
+}
+
+fun popcount(board) {
+    var count = 0i;
+    while (board != 0i) {
+        board = board & (board - 1i);
+        count = count + 1i;
+    }
+    return count;
+}
+
+fun knight(square) {
+    var board = bit(square);
+    var left1 = (board >>> 1i) & NOT_H;
+    var left2 = (board >>> 2i) & NOT_GH;
+    var right1 = (board << 1i) & NOT_A;
+    var right2 = (board << 2i) & NOT_AB;
+    var one = left1 | right1;
+    var two = left2 | right2;
+    return (one << 16i) | (one >>> 16i) | (two << 8i) | (two >>> 8i);
+}
+
+var corners = bit(0i) | bit(7i) | bit(56i) | bit(63i);
+print corners;
+print popcount(corners);
+print popcount(0xFFFFFFFFFFFFFFFF);
+print popcount(0x8000000000000000);
+print popcount(0i);
+
+// d4 is square 27 and e4 is square 28: each has eight moves, and no square is
+// a knight's move from both.
+print knight(27i);
+print popcount(knight(27i));
+print knight(28i);
+print popcount(knight(28i));
+print popcount(knight(27i) & knight(28i));
+
+print knight(0i);
+print popcount(knight(0i));
+print knight(63i);
+print popcount(knight(63i));
+
+print corners >>> 63i;
+print corners >> 63i;
+
+// CHECK: -9151314442816847743
+// CHECK: 4
+// CHECK: 64
+// CHECK: 1
+// CHECK: 0
+// CHECK: 22136263676928
+// CHECK: 8
+// CHECK: 44272527353856
+// CHECK: 8
+// CHECK: 0
+// CHECK: 132096
+// CHECK: 2
+// CHECK: 9077567998918656
+// CHECK: 2
+// CHECK: 1
+// CHECK: -1

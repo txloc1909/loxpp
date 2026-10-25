@@ -1,0 +1,41 @@
+// hash_mix.lox — a splitmix64 hash mix on the full 64 bits.
+//
+// splitmix64 adds a constant with a wrap, then alternates `^` of a right
+// shift with a multiplication that wraps. Every step needs all 64 bits, and a
+// 53-bit Number cannot hold one. The first two outputs for the seed 0 are the
+// published 0xE220A8397B1DCDAF and 0x6E789E6AA1B965F4, and the mix is printed
+// as the signed decimal value of each 64-bit result.
+//
+// Demonstrates: `0x` Int literals wider than 53 bits, and a wrap on `+` and
+//               `*`.
+// The expected values are the published ones and the same steps in Python.
+
+var GOLDEN = 0x9E3779B97F4A7C15;
+var MIX1 = 0xBF58476D1CE4E5B9;
+var MIX2 = 0x94D049BB133111EB;
+
+var state = 0i;
+
+fun next() {
+    state = state + GOLDEN;
+    var z = state;
+    z = (z ^ (z >>> 30i)) * MIX1;
+    z = (z ^ (z >>> 27i)) * MIX2;
+    return z ^ (z >>> 31i);
+}
+
+print next() == 0xE220A8397B1DCDAF;
+print next() == 0x6E789E6AA1B965F4;
+print next();
+print next();
+print next();
+print next();
+print state == GOLDEN * 6i;
+
+// CHECK: true
+// CHECK: true
+// CHECK: 487617019471545679
+// CHECK: -537132696929009172
+// CHECK: 1961750202426094747
+// CHECK: 6038094601263162090
+// CHECK: true
