@@ -835,8 +835,8 @@ send never suspends and never fails for lack of room.
 
 Removes and returns the message at the head of the mailbox of the current
 task. If the mailbox is empty, the current task suspends until a message
-arrives. A receive on an empty mailbox while a native callback is on the
-call chain raises `YieldAcrossNativeError`.
+arrives. A receive on an empty mailbox while a native callback is between the
+start of the task and the receive raises `YieldAcrossNativeError`.
 
 **Arity:** 0  
 **Returns:** the message

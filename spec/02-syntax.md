@@ -223,8 +223,9 @@ rule is in [Binding Identity](04-semantics.md#binding-identity).
 
 `elem in seq` is a binary expression that evaluates to a Boolean:
 
-- If `seq` is a **List**: `true` if any element compares equal to `elem` under
-  the `==` operator.
+- If `seq` is a **List**: `true` if any element is equal to `elem` under internal
+  equality, which never calls `__eq__` (see
+  [Equality](03-types.md#equality)).
 - If `seq` is a **String**: `elem` must be a String; `true` if `elem` appears
   as a substring of `seq`.
 - If `seq` is a **Map**: `true` if `elem` is a valid map key and is present in

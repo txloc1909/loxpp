@@ -593,12 +593,15 @@ is discarded, the task joins the back of its worker's run queue, and the
 `yield` evaluates to `nil` when the task runs again. This holds for a
 `yield` at the top level of the program, which the main task runs.
 
-A `yield` reached while a native callback is on the call chain — for example
-inside `__str__`, `__hash__`, or `__eq__` while `print` or a map operation
-called it — is a **runtime error** (`YieldAcrossNativeError`; see
+A `yield` reached while a native callback is between the resume of the
+coroutine and the `yield` — for example inside `__str__`, `__hash__`, or
+`__eq__` while `print` or a map operation called it, and that call runs
+inside the coroutine — is a **runtime error** (`YieldAcrossNativeError`; see
 [Runtime Errors](#runtime-errors)). A native callback's own continuation is
 not part of the coroutine's stack and cannot be suspended, so such a yield
-cannot resume.
+cannot resume. A coroutine that the callback itself creates and resumes can
+yield to the callback, because the resume and the `yield` are in the same
+native frame.
 
 A `yield` reached while a deferred call runs — a call recorded by a
 [`defer`](#defer-statement) statement whose enclosing function call has
@@ -1677,8 +1680,9 @@ current task, and returns it.
    not suspend.
 2. If the mailbox is empty, the current task suspends until a message
    arrives. Then the call returns that message.
-3. If the mailbox is empty while a native callback is on the call chain —
-   for example inside `__str__` while `print` called it — or while a
+3. If the mailbox is empty while a native callback is between the start of
+   the task and the receive — for example inside `__str__` while `print`
+   called it — or while a
    deferred call runs, the call raises `YieldAcrossNativeError`, for the
    same reason a `yield` there does (see [`yield` Expression](#yield-expression)).
 
@@ -1811,7 +1815,7 @@ Faults](#halting-faults)). The report can list the tasks that wait.
 |---|---|---|
 | `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes |
 | `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes |
-| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is on the call chain, or while a deferred call runs | yes |
+| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is between the start of the task and the receive, or while a deferred call runs | yes |
 | `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no |
 
 A catchable fault in this table is delivered to a `catch` block as an
@@ -1941,8 +1945,8 @@ whose text is implementation-defined.
 | `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
 | `yield` in a deferred call | `fun note() { var v = yield 1; } fun g() { defer note(); } g();` | `"YieldAcrossNativeError"` |
 
-**The two map-key rows above cover an index read or write, a map or set
-literal, and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
+**The two map-key rows above cover an index read or write, a map literal,
+and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
 methods, not one of those four forms, and an invalid key given to either
 is a halting fault — see the `Map.has`/`Map.del` row of [Halting
 Faults](#halting-faults).

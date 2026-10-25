@@ -198,7 +198,7 @@ addition to the mutation methods:
 | `list[i]` | Element at index `i` (0-based). Runtime error if `i` is not an integer or is out of range. |
 | `list[i] = v` | Sets element at index `i`. Runtime error if out of range. |
 | `list[start:end]` | New List of elements from index `start` (inclusive) to `end` (exclusive). Both bounds required. Out-of-range bounds are clamped to `[0, len(list)]`. Runtime error if either index is negative, non-integer, or non-number. |
-| `elem in list` | `true` if any element compares equal to `elem` under `==`. |
+| `elem in list` | `true` if any element is equal to `elem` under internal equality, which never calls `__eq__` (see [Equality](#equality)). |
 | `for (var x in list)` | Iterates over elements in order. |
 
 The maximum number of elements in a list literal is implementation-defined
