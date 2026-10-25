@@ -46,25 +46,15 @@ fun parseIntStr(s) {
     return n;
 }
 
+// A NUMBER literal denotes the nearest double to the decimal that it spells
+// (spec/01-lexical.md, the range of a Number literal). The host's float() is
+// that conversion, and stringify() already takes a Number's string form from
+// the host's str(), so both directions of the text conversion stay with the
+// host primitive that the spec probes pin. Reading the digits here instead
+// loses the value at the ends of the double range: a fraction of more than
+// about 308 digits leaves the range on both sides of a division.
 fun parseNumber(s) {
-    var dotIdx = -1;
-    var i = 0;
-    while (i < len(s)) {
-        if (s[i] == ".") dotIdx = i;
-        i = i + 1;
-    }
-    if (dotIdx == -1) return parseIntStr(s);
-    var intPart = parseIntStr(s[0:dotIdx]);
-    var fracStr = s[dotIdx + 1 : len(s)];
-    if (len(fracStr) == 0) return intPart + 0.0;
-    var fracPart = parseIntStr(fracStr);
-    var denom = 1;
-    var j = 0;
-    while (j < len(fracStr)) {
-        denom = denom * 10;
-        j = j + 1;
-    }
-    return intPart + fracPart / denom;
+    return float(s);
 }
 
 fun isLoxNum(v) {
