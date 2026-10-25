@@ -137,22 +137,25 @@ that could not fail on the object they named.
 ## The bug classes
 
 The decision names six classes before any node started. Constraints 5 and 6
-fired, each as a referee ruling, and each one changed the design. The other
-four did not fire: no node's review and no gate found a defect of one of those
-classes, so their cost was the guards, the probes and the named skips, not a
-fix.
+fired, and each one changed the design. The other four did not fire: no node's
+review and no gate found a defect of one of those classes, so their cost was
+the guards, the probes and the named skips, not a fix. The table gives the
+state of each class and the finding that shows it.
 
-| Constraint | What it predicted | What happened |
-|---|---|---|
-| 1. Undefined behavior under the test gate | Wrapping in `uint64_t`, the smallest Int over `-1i`, a range check before every double-to-int cast | The debug gate (`-fsanitize=address,undefined`) stayed green on every node; the probes for the smallest Int over `-1i` and for `int()` at both ends of the range are the ones that would have fired |
-| 2. A new object kind touches every switch over `ObjType` | GC mark and free, `isMessage`, `stringify`, equality, hashing, the type name, the QBE C API | N2's review checked the site counts by `grep`, and N2 added a boxed `Int` at each of them as probes |
-| 3. The constant pool keys by bit pattern, not by `==` | `1` and `1i` are two constants | Probe 177 holds both in one function, and its header states them as two constants; the JVM's `Long.equals(Double)` is `false` for the same reason |
-| 4. Four forms change meaning under the longest match | `1in`, `1if`, `1.5in`, `1.5if` | Probes 240 to 242 and 244 pin them, and the tree-sitter step keeps them named; no program in the repository wrote one |
-| 5. One normative statement per lexical question | The class of the first referee ruling | The redesign and the examples table; every scanner implements the rules, and the check reads the table |
-| 6. A check reads one object, never prose | The class of the second referee ruling | The prose checks deleted, the 72 sites audited with one mutation each |
+| Constraint | What it predicted | Fired | The finding that shows it |
+|---|---|---|---|
+| 1. Undefined behavior under the test gate | Wrapping in `uint64_t`, the smallest Int over `-1i`, a range check before every double-to-int cast | No | None. The debug gate (`-fsanitize=address,undefined`) stayed green on every node. The probes for the smallest Int over `-1i` and for `int()` at both ends of the range are the ones that would have fired |
+| 2. A new object kind touches every switch over `ObjType` | GC mark and free, `isMessage`, `stringify`, equality, hashing, the type name, the QBE C API | No | None. N2's review checked the site counts by `grep`, and N2 added a boxed `Int` at each of them as probes, so the guard came first |
+| 3. The constant pool keys by bit pattern, not by `==` | `1` and `1i` are two constants | No | None. Probe 177 holds both in one function, and its header states them as two constants; the JVM's `Long.equals(Double)` is `false` for the same reason |
+| 4. Four forms change meaning under the longest match | `1in`, `1if`, `1.5in`, `1.5if` | No | None. Probes 240 to 242 and 244 pin them, and the tree-sitter step keeps them named; no program in the repository wrote one, so no program changed meaning. The two findings that name `1.5in` and `1.5if`, below under class 5, are defects in a consumer that reads the rules, not a program that changed meaning |
+| 5. One normative statement per lexical question | The class of the first referee ruling | Yes, three times | The first referee ruling on #835, "the design of the section is wrong", and the redesign and the examples table that followed it. Then the review of #842: `print 0x;` read `0x` as the Int 0, because `INT` needs one digit of its base. Then the review of #843: `1.5i` was unmarked in `1.5in` and `1.5if`, and `1i` had no scope before `and`. Each named a rule of `spec/01-lexical.md` that a consumer of it did not implement |
+| 6. A check reads one object, never prose | The class of the second referee ruling | Yes, once | The second referee ruling on #835. The prose checks are deleted, and the 72 sites are audited with one mutation each |
 
-Constraint 5 and constraint 6 are the two that a review cannot find by reading
-a diff of language code. Both came from a referee, not from a reviewer.
+Constraint 5 and constraint 6 are the two that a review of a language diff does
+not reach. Constraint 5's first firing and constraint 6's only firing came from
+a referee, not from a reviewer. Constraint 5 then fired twice more in node
+reviews, once for each consumer that spells the lexical rules out again: the
+native scanner at N2, and the editor syntaxes at N7.
 
 ## Work that changed the mission's edges
 
