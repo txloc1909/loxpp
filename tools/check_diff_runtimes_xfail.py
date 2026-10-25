@@ -45,7 +45,6 @@ after the other nine pass, so a trace preset reports a skip instead of a false
 red or a false green.
 
 Usage:
-Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
 Exits 0 when all eleven cases hold, 1 with a report per failed case otherwise,
@@ -124,19 +123,26 @@ def expects(failures: list[str], case: str, condition: bool, detail: str) -> Non
         failures.append(f"{case}: {detail}")
 
 
-def build_traces(native: str, work: Path) -> bool:
+def build_traces(native: str, work: Path) -> bool | None:
     """True when the build prints a trace, so no probe can pass on it.
 
     The debug preset can leave the disassembly and the execution trace on, and
     both write to stdout, where a probe's CHECK lines are read. One trivial
     program settles it: a build that is not traced prints exactly its one line.
+
+    Returns None when the binary cannot run that program at all. That is a
+    different fault — a missing toolchain, a broken binary — and must not read
+    as "traces", which would turn a broken CI leg into a quiet skip.
     """
     probe = work / "trace_check.lox"
     probe.write_text('print "trace check";\n')
     completed = subprocess.run(
         [native, str(probe)], capture_output=True, text=True, timeout=120
     )
-    return completed.stdout != "trace check\n"
+    if completed.returncode != 0:
+        return None
+    return completed.stdout != 'trace check\n'
+
 
 
 def main() -> int:
@@ -159,7 +165,15 @@ def main() -> int:
     traced = False
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        traced = build_traces(args.native, work)
+        traced_state = build_traces(args.native, work)
+        if traced_state is None:
+            print(
+                f"error: {args.native} cannot run a trivial program, so this "
+                f"checker cannot read a probe's output",
+                file=sys.stderr,
+            )
+            return 2
+        traced = traced_state
 
         # Cases 1 and 2: a name that no program of the run has.
         for flag in ("--xfail", "--oracle-xfail"):
