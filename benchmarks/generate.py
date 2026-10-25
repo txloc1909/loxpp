@@ -18,9 +18,10 @@ HotSpot tiered compilation keeps improving fasta/json for the first ~10
 measured batches otherwise; run.py additionally drops the first third of the
 measured batches before taking the median.
 
-richards is the one exception to the 80-250 ms target: its own scheduler
-runs a fixed 10000-tick workload tied to a hardcoded self-check, so its
-per-call cost (~2s natively) is not reducible without losing that check.
+richards is tuned with REPS instead of SIZE_PATCHES: its scheduler runs a
+fixed 10000-tick workload tied to a hardcoded self-check, so the workload
+must not shrink. One pass costs about 65-70 ms natively, so three passes put
+a batch inside the same 80-250 ms window.
 """
 from __future__ import annotations
 
@@ -44,14 +45,12 @@ CONFIG = {
     "storage":            ("Storage",           25, 12, 8),
     "towers":             ("Towers",            25, 12, 12),
     "json":               ("Json",              25, 12, 8),
-    # reps=1: a single call now runs richards's full intended workload
-    # (~2s natively) since its scheduler-deadlock bug was fixed — reps=3
-    # (tuned for the old, near-instant broken version) would take ~6s/batch.
-    # This is well outside the 80-250ms window every other entry targets;
-    # accepted as-is rather than shrinking the workload and losing the
-    # benchmark's own internal self-check (Scheduler.start()'s assertion is
-    # tied to the canonical IDLER count of 10000).
-    "richards":           ("Richards",          25, 12, 1),
+    # reps=3: one call is one full 10000-tick scheduler pass, about 65-70 ms
+    # natively, so three calls land inside the 80-250 ms window. The pass
+    # itself is not reducible: Scheduler.start()'s self-check reads the
+    # canonical IDLER count of 10000, so it cannot be scaled the way
+    # SIZE_PATCHES scales the other programs.
+    "richards":           ("Richards",          25, 12, 3),
     "binary_trees":       ("BinaryTrees",       25, 12, 1),
     "spectral_norm":      ("SpectralNorm",      25, 12, 1),
     "fasta":              ("Fasta",             25, 12, 40),

@@ -174,6 +174,8 @@ loxpp_add_test(test_enum_names      test_enum_names.cpp      CORE loxpp_test_cor
 loxpp_add_test(test_backend_rt_capi test_backend_rt_capi.cpp CORE loxpp_test_core)
 loxpp_add_test(test_backend_qbe_emitter test_backend_qbe_emitter.cpp
                                                             CORE loxpp_test_core)
+loxpp_add_test(test_richards_benchmark test_richards_benchmark.cpp
+                                                            CORE loxpp_test_core PROBE)
 
 # loxpp-lsp building blocks: JSON-RPC framing, CRLF handling, the
 # diagnostics debounce, and the stdlib doc table. Links the src/lsp sources
@@ -437,7 +439,7 @@ set(LOXPP_GTEST_TARGETS
     test_backend_native_pops
     test_stringify_depth_guard
     test_check_diagnostics test_enum_names test_tooling_parser test_tooling_resolver
-    test_backend_rt_capi test_backend_qbe_emitter
+    test_backend_rt_capi test_backend_qbe_emitter test_richards_benchmark
     test_token_roundtrip)
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)

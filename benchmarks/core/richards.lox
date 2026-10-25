@@ -74,7 +74,9 @@ class TaskState < RBObject {
   }
 
   isTaskHoldingOrWaiting() {
-    return this.taskHolding_ or (this.input == NO_WORK and this.taskWaiting_);
+    // The task-state flags decide readiness, not the input queue: a task can
+    // hold a packet (packetPending) and still be runnable.
+    return this.taskHolding_ or (!this.packetPending_ and this.taskWaiting_);
   }
 
   isWaitingWithPacket() {
@@ -139,7 +141,9 @@ class TaskControlBlock < TaskState {
 
   runTask() {
     var message;
-    if (this.input != NO_WORK) {
+    // Only a task that is waiting with a packet consumes one; a holding task
+    // keeps its queue and is called with no work.
+    if (this.isWaitingWithPacket()) {
       message    = this.input;
       this.input = message.link;
       if (this.input == NO_WORK) {
@@ -219,7 +223,8 @@ class WorkerTask {
     var i = 0;
     while (i < DATA_SIZE) {
       handle.count = handle.count + 1;
-      work.data[i] = handle.count % 26 + 65; // ASCII 'A'=65
+      if (handle.count > 26) handle.count = 1; // one A..Z letter per byte
+      work.data[i] = 65 + handle.count - 1;
       i = i + 1;
     }
     return this.scheduler.queuePacket(work);
@@ -376,7 +381,9 @@ class Scheduler < RBObject {
   }
 
   waitCurrent() {
-    this.currentTask.waiting();
+    // Waiting only sets taskWaiting_: a pending packet must keep the task
+    // runnable on the next sweep.
+    this.currentTask.setTaskWaiting(true);
     return this.currentTask;
   }
 
