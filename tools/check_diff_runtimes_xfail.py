@@ -20,7 +20,11 @@ Six cases, each on an explicit program list, so no corpus is walked:
   5. a listed probe that --consumer exempts is refused: the run skips it before
      either flag is consulted;
   6. a malformed probe in the run is a clean exit 2 with a message, not a
-     Python traceback, which would read as a divergence of the whole run.
+     Python traceback, which would read as a divergence of the whole run;
+  7. a probe on BOTH lists reports AHEAD when native's gap is the reason a
+     reader needs, and still reports XFAIL when it is not. This case needs a
+     runner that passes a probe native fails, so it uses a stub script instead
+     of the native binary.
 
 Both runners are the native binary, so the comparison is native against
 itself: it needs no managed toolchain and no runtime jar.
@@ -65,17 +69,28 @@ MALFORMED_PROBE = """print 1;
 """
 
 
+# A probe whose program fails on native and passes on a runner that only echoes
+# the CHECK line, so case 7 can hold "native does not pass it" and "the other
+# runner does" at once.
+BOTH_LISTS_PROBE = """print "boom";
+print undeclared_name;
+// STATUS: ok
+// CHECK: boom
+"""
+
+
 def run(
     native: str,
     paths: list[Path],
-    flag: str,
-    list_path: Path,
+    lists: list[tuple[str, Path]],
     consumer: str | None = None,
+    runner: str | None = None,
 ) -> tuple[int, str, str]:
-    argv = [sys.executable, str(DIFF_RUNTIMES), native, native, *map(str, paths)]
+    argv = [sys.executable, str(DIFF_RUNTIMES), native, runner or native, *map(str, paths)]
     if consumer is not None:
         argv += ["--consumer", consumer]
-    argv += [flag, str(list_path)]
+    for flag, list_path in lists:
+        argv += [flag, str(list_path)]
     completed = subprocess.run(argv, capture_output=True, text=True, timeout=300)
     return completed.returncode, completed.stdout, completed.stderr
 
@@ -116,7 +131,7 @@ def main() -> int:
                 f"# a list whose only entry no program of this run backs\n"
                 f"{BOGUS_PROBE}  a reason that does not save it\n"
             )
-            code, out, err = run(args.native, [real_probe], flag, list_path)
+            code, out, err = run(args.native, [real_probe], [(flag, list_path)])
             expects(
                 failures,
                 flag,
@@ -145,7 +160,7 @@ def main() -> int:
         plain.write_text(NOT_A_PROBE + "\n")
         list_path = work / "nonprobe.txt"
         list_path.write_text(f"{plain.name}  a reason\n")
-        code, out, err = run(args.native, [plain], "--xfail", list_path)
+        code, out, err = run(args.native, [plain], [("--xfail", list_path)])
         expects(
             failures,
             "a non-probe program",
@@ -164,7 +179,7 @@ def main() -> int:
         # Case 4: a real spec probe of the run must get past the check.
         real_list = work / "real.txt"
         real_list.write_text(f"{REAL_PROBE}  a reason\n")
-        code, out, err = run(args.native, [real_probe], "--xfail", real_list)
+        code, out, err = run(args.native, [real_probe], [("--xfail", real_list)])
         expects(
             failures,
             "a real spec probe",
@@ -188,7 +203,10 @@ def main() -> int:
         list_path = work / "exempt.txt"
         list_path.write_text(f"{exempt_probe.name}  a reason\n")
         code, out, err = run(
-            args.native, [exempt_probe], "--xfail", list_path, consumer="bootstrap"
+            args.native,
+            [exempt_probe],
+            [("--xfail", list_path)],
+            consumer="bootstrap",
         )
         expected = f"{list_path} lists {exempt_probe.name}, which does not bind bootstrap"
         expects(
@@ -214,7 +232,7 @@ def main() -> int:
         bad_probe.write_text(MALFORMED_PROBE)
         list_path = work / "malformed.txt"
         list_path.write_text(f"{bad_probe.name}  a reason\n")
-        code, out, err = run(args.native, [bad_probe], "--xfail", list_path)
+        code, out, err = run(args.native, [bad_probe], [("--xfail", list_path)])
         expects(
             failures,
             "a malformed probe",
@@ -234,6 +252,55 @@ def main() -> int:
             f"stderr does not name the malformed directive: {err.strip()!r}",
         )
 
+        # Case 7: one probe on both lists. The consumer entry used to continue
+        # first, so native's reason was never shown. A stub runner passes where
+        # native fails, which is the state the overlap describes: native
+        # regressed under a consumer that did not notice.
+        both_dir = work / "both"
+        both_dir.mkdir()
+        both_probe = both_dir / "both_lists.lox"
+        both_probe.write_text(BOTH_LISTS_PROBE)
+        stub = work / "stub_runner.sh"
+        stub.write_text('#!/bin/sh\n# Ignores its argument on purpose: it stands in for a consumer that\n# passes a probe native still fails.\necho boom\nexit 0\n')
+        stub.chmod(0o755)
+        consumer_list = work / "both_consumer.txt"
+        consumer_list.write_text(f"{both_probe.name}  consumer is behind\n")
+        oracle_list = work / "both_oracle.txt"
+        oracle_list.write_text(f"{both_probe.name}  native regressed\n")
+
+        code, out, err = run(
+            args.native,
+            [both_probe],
+            [("--xfail", consumer_list), ("--oracle-xfail", oracle_list)],
+            runner=str(stub),
+        )
+        expects(
+            failures,
+            "a probe on both lists",
+            "AHEAD" in out and "native regressed" in out,
+            f"did not report AHEAD with the oracle reason: exit {code}, "
+            f"stdout {out.strip()!r}, stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a probe on both lists",
+            code == 0,
+            f"exit {code}, expected 0: AHEAD is not a divergence",
+        )
+
+        # The same probe with the consumer list alone still reports XFAIL, so
+        # case 7 measures the overlap rule and not the ordinary path.
+        code, out, err = run(
+            args.native, [both_probe], [("--xfail", consumer_list)], runner=str(stub)
+        )
+        expects(
+            failures,
+            "a probe on the consumer list alone",
+            "XFAIL" in out and "consumer is behind" in out,
+            f"did not report XFAIL with the consumer reason: exit {code}, "
+            f"stdout {out.strip()!r}",
+        )
+
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
@@ -242,7 +309,8 @@ def main() -> int:
     print(
         "check_diff_runtimes_xfail.py: both flags refuse an entry the run cannot "
         "grade (no probe, a non-probe program, an exempted probe), a malformed "
-        "probe is a clean refusal, and a real probe reaches the comparison"
+        "probe is a clean refusal, a real probe reaches the comparison, and a "
+        "probe on both lists reports the reason that explains the run"
     )
     return 0
 
