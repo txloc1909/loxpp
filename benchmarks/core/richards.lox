@@ -224,7 +224,8 @@ class WorkerTask {
     var i = 0;
     while (i < DATA_SIZE) {
       handle.count = handle.count + 1;
-      work.data[i] = handle.count % 26 + 65; // ASCII 'A'=65
+      if (handle.count > 26) handle.count = 1; // one A..Z letter per byte
+      work.data[i] = 65 + handle.count - 1;
       i = i + 1;
     }
     return this.scheduler.queuePacket(work);
