@@ -75,6 +75,12 @@ jobs:
           tools/check_suspend_points.py
           tools/check_blocking_calls.py
 
+      # The fault sites of the Socket and Server natives, native and JVM: each
+      # one is a catchable fault of a named kind or an argument fault that
+      # halts the program. Pure Python, so it needs no build.
+      - name: Check Socket fault sites
+        run: tools/check_net_faults.py
+
       # The countable sets of the Int kind in spec/: the operand-kind table,
       # the precedence table, the operator protocol table, the static errors
       # of Int literals, the run-time fault rows, and the edge rows. Each
