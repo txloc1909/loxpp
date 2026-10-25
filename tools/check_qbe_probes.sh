@@ -48,12 +48,11 @@ run_diff() {
     fi
 }
 
-# A spec probe that QBE does not pass yet is on QBE's expected-failure list,
-# and one that native does not pass yet is on native's.
+# QBE passes every spec probe today. A probe it does not pass yet would go on
+# QBE's expected-failure list, passed here with --xfail, and one that native
+# does not pass yet on native's, passed as --oracle-xfail.
 run_diff "test/translation-probes/ (main directory)" \
-    "$root/test/translation-probes/" \
-    --xfail "$root/tools/spec-probe-xfail/qbe.txt" \
-    --oracle-xfail "$root/tools/spec-probe-xfail/native.txt"
+    "$root/test/translation-probes/"
 
 run_diff "test/translation-probes/qbe-only/" \
     "$root/test/translation-probes/qbe-only/"
