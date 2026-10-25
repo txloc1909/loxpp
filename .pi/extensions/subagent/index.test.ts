@@ -256,6 +256,19 @@ const ctx = (box: Box, statuses?: Array<[string, string | undefined]>): Record<s
 const textOf = (result: { content: Array<{ type: string; text?: string }> }): string =>
   result.content.map((part) => part.text ?? "").join("\n");
 
+/** Every `kitten @ ... launch ...` the fake kitty saw. A liveness `ls` is not one. */
+function kittenLaunches(dir: string): string[][] {
+  const file = path.join(dir, "calls.log");
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as string[])
+    .filter((call) => call.includes("launch"));
+}
+
 async function waitFor(check: () => boolean, message: string, timeoutMs = 5000): Promise<void> {
   const until = Date.now() + timeoutMs;
   for (;;) {
@@ -323,7 +336,7 @@ test("an unattended call opens no window and returns its answer", { skip, timeou
     );
 
     assert.match(textOf(result), /unattended answer/);
-    assert.equal(fs.existsSync(path.join(box.kittenDir, "calls.log")), false, "an unattended run never asks kitty for a window");
+    assert.deepEqual(kittenLaunches(box.kittenDir), [], "an unattended run never asks kitty for a window");
     assert.equal(harness.sent.length, 0, "an unattended run reports through the tool result");
   });
 });
@@ -348,7 +361,7 @@ test("an unattended call works outside kitty", { skip, timeout: 10_000 }, async 
       ctx(box),
     );
     assert.match(textOf(result), /unattended answer/);
-    assert.equal(fs.existsSync(path.join(box.kittenDir, "calls.log")), false);
+    assert.deepEqual(kittenLaunches(box.kittenDir), []);
   });
 });
 
@@ -363,7 +376,7 @@ test("an explicit interactive batch is refused before any window opens", { skip,
     );
     assert.equal(result.isError, true);
     assert.match(textOf(result), /interactive applies to a single task only/);
-    assert.equal(fs.existsSync(path.join(box.kittenDir, "calls.log")), false);
+    assert.deepEqual(kittenLaunches(box.kittenDir), []);
   });
 });
 
