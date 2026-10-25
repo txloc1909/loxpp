@@ -1,0 +1,22 @@
+// A reader that keeps 17 significant digits of the decimal text and then
+// converts is wrong on this literal. The literal is the midpoint between `1.0`
+// and its successor plus one digit, so it is strictly above the midpoint and
+// the nearest double is the successor, `1.0000000000000002`
+// (spec/01-lexical.md, the range of a Number literal). The text rounded to 17
+// significant digits is `1.0000000000000001`, whose nearest double is `1.0`,
+// and 17 digits is the obvious width to keep because that width round-trips
+// every double and no shorter one does.
+//
+// Probe 251 already separates that reader, at its overflow row of 18
+// significant digits. What no probe held is the same class in a fraction: a
+// reader with 17 digits passes probes 243, 250 and 253, and fails only probe
+// 251 and this one (issue #877).
+
+print 1.000000000000000111022302462515654042363166809082031251;
+print 1.000000000000000111022302462515654042363166809082031251 == 1;
+print 1.000000000000000111022302462515654042363166809082031251 == 1.0000000000000002;
+
+// STATUS: ok
+// CHECK: 1.0000000000000002
+// CHECK: false
+// CHECK: true
