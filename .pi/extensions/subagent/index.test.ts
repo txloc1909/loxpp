@@ -26,32 +26,49 @@ import { pathToFileURL } from "node:url";
 const HERE = import.meta.dirname;
 
 /**
- * The directory that holds `@earendil-works/*` and `typebox` for the running pi
- * installation. npm puts a global package's dependencies either inside the
- * package or hoisted beside it, so both layouts are candidates.
+ * Where the pi packages are, and where `typebox` is. npm puts a global
+ * scoped package's dependencies inside that package, so `typebox` is not
+ * necessarily beside `@earendil-works`.
  */
-function piPackagesDir(): string | null {
-  const globalRoots: string[] = [];
+interface PiModules {
+  /** Every directory that holds an `@earendil-works` scope, nearest first. */
+  scopes: string[];
+  typebox: string;
+}
+
+function piModules(): PiModules | null {
+  const roots: string[] = [];
+  if (process.env.PI_PACKAGES_DIR) roots.push(process.env.PI_PACKAGES_DIR);
   try {
-    globalRoots.push(execFileSync("npm", ["root", "-g"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+    roots.push(execFileSync("npm", ["root", "-g"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
   } catch {
     // npm is not installed; the fixed candidates still count.
   }
-  globalRoots.push(path.join(path.dirname(process.execPath), "..", "lib", "node_modules"));
-  globalRoots.push("/usr/lib/node_modules", "/usr/local/lib/node_modules");
+  roots.push(path.join(path.dirname(process.execPath), "..", "lib", "node_modules"));
+  roots.push("/usr/lib/node_modules", "/usr/local/lib/node_modules");
 
-  const candidates: string[] = [];
-  if (process.env.PI_PACKAGES_DIR) candidates.push(process.env.PI_PACKAGES_DIR);
-  for (const root of globalRoots) candidates.push(path.join(root, "pi", "node_modules"), root);
-  for (const dir of candidates) {
-    const hasPi = fs.existsSync(path.join(dir, "@earendil-works/pi-coding-agent"));
-    if (hasPi && fs.existsSync(path.join(dir, "typebox"))) return dir;
+  for (const root of roots) {
+    for (const dir of [path.join(root, "pi", "node_modules"), root]) {
+      const scope = path.join(dir, "@earendil-works");
+      if (!fs.existsSync(path.join(scope, "pi-coding-agent"))) continue;
+      // A global install nests the sibling pi packages inside pi-coding-agent,
+      // so the sibling scope is a second source for the same names.
+      const scopes = [scope, path.join(scope, "pi-coding-agent", "node_modules", "@earendil-works")].filter((entry) =>
+        fs.existsSync(entry),
+      );
+      const typebox = [
+        path.join(dir, "typebox"),
+        path.join(scope, "pi-coding-agent", "node_modules", "typebox"),
+        path.join(dir, "..", "typebox"),
+      ].find((candidate) => fs.existsSync(candidate));
+      if (typebox) return { scopes, typebox };
+    }
   }
   return null;
 }
 
-const PACKAGES = piPackagesDir();
-const skip = PACKAGES ? false : "the pi packages are not installed here; set PI_PACKAGES_DIR";
+const MODULES = piModules();
+const skip = MODULES ? false : "the pi packages are not installed here; set PI_PACKAGES_DIR";
 
 const FAKE_KITTEN = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -155,9 +172,19 @@ async function sandbox(): Promise<Box> {
     if (!entry.endsWith(".ts") || entry.endsWith(".test.ts")) continue;
     await fs.promises.copyFile(path.join(HERE, entry), path.join(ext, entry));
   }
-  // One symlink to the pi installation's own modules: the copy then resolves
-  // `@earendil-works/*` and `typebox` exactly as pi itself does.
-  await fs.promises.symlink(PACKAGES!, path.join(root, "node_modules"), "dir");
+  // A copy, so the pi packages resolve from this directory, and a link to the
+  // installation's own copy of each one.
+  const modules = path.join(root, "node_modules");
+  const scopeDir = path.join(modules, "@earendil-works");
+  await fs.promises.mkdir(scopeDir, { recursive: true });
+  for (const scope of MODULES!.scopes) {
+    for (const entry of await fs.promises.readdir(scope)) {
+      const link = path.join(scopeDir, entry);
+      if (fs.existsSync(link)) continue;
+      await fs.promises.symlink(path.join(scope, entry), link, "dir");
+    }
+  }
+  await fs.promises.symlink(MODULES!.typebox, path.join(modules, "typebox"), "dir");
   return { root, bin, work, kittenDir, ext, agentDir };
 }
 
