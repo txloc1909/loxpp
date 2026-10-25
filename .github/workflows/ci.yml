@@ -130,9 +130,11 @@ jobs:
         run: npm install -g @earendil-works/pi-coding-agent@1.4.0
 
       # Each guard of the autonomous-mode policy has a unit test, so a broken
-      # guard fails by name. Pure node, so it needs no build.
-      - name: Unit-test the turn policy
-        run: node --test .pi/extensions/lib/mode-policy.test.ts
+      # guard fails by name, and the gate-scope test compares the qbe scope's
+      # steps against the QBE toolchain job's steps, so the two cannot drift.
+      # Pure node, so it needs no build.
+      - name: Unit-test the turn policy and the gate scopes
+        run: node --test .pi/extensions/lib/*.test.ts
 
       # A real `pi --mode rpc` session with a scripted model: it proves the
       # guards fire in the extension, not only in the policy module.

@@ -113,6 +113,24 @@ const SCENARIOS = {
     step: (turn) => ({ tool: { name: "write", args: { path: "a b.txt", content: `v${turn}` } } }),
     expect: { stop: false, started: true, gateRuns: 0 },
   },
+  // A gate run on the qbe scope. The scope must reach the container with the
+  // QBE image and the QBE step list: a scope the tool schema rejects, or one
+  // wired to the wrong image, leaves the QBE checks unrun.
+  qbe_scope: {
+    turns: 12,
+    step: (turn) =>
+      turn === 0
+        ? { tool: { name: "write", args: { path: "work.txt", content: "v0" } } }
+        : turn % 2 === 1
+          ? { text: `thinking ${turn}` }
+          : { tool: { name: "loxpp_gate", args: { scope: "qbe" } } },
+    expect: {
+      stop: false,
+      gateRuns: 5,
+      shimRuns: 5,
+      shimArgvIncludes: ["loxpp-dev-qbe", "tools/check_qbe_s8_promotion.sh"],
+    },
+  },
   // A tree-changing turn on every turn with no gate run: the idle cap never
   // fires, so only the total-turn backstop can stop it.
   endless_edits: {
@@ -198,6 +216,7 @@ case "$1" in
     n=$(cat "${counter}" 2>/dev/null || echo 0)
     n=$((n + 1))
     echo "$n" > "${counter}"
+    echo "$*" >> "${counter}.argv"
     case "${mode}" in
       fail-each) echo "failure number $n"; exit 1 ;;
       fail-then-pass) if [ "$n" -ge 12 ]; then echo "ok"; exit 0; else echo "failure number $n"; exit 1; fi ;;
@@ -354,8 +373,10 @@ async function run(name) {
     });
     const { messages, state } = collect(entries);
     const gateRuns = existsSync(gateCounter) ? Number(readFileSync(gateCounter, "utf8")) : 0;
+    // What the shim actually received: the image and the script the gate ran.
+    const shimArgv = existsSync(`${gateCounter}.argv`) ? readFileSync(`${gateCounter}.argv`, "utf8") : "";
     const turns = entries.filter((e) => e.type === "message" && e.message?.role === "assistant").length;
-    return { messages, state, gateRuns, turns, stderr };
+    return { messages, state, gateRuns, shimArgv, turns, stderr };
   } finally {
     server.close();
   }
@@ -404,6 +425,11 @@ for (const name of only ? [only] : Object.keys(SCENARIOS)) {
   // executes. It proves the gate really ran, separately from the policy counter.
   if (expect.shimRuns !== undefined && result.gateRuns !== expect.shimRuns) {
     failures.push(`expected ${expect.shimRuns} gate container runs, got ${result.gateRuns}`);
+  }
+  for (const needle of expect.shimArgvIncludes ?? []) {
+    if (!result.shimArgv.includes(needle)) {
+      failures.push(`expected the gate's container run to carry "${needle}"`);
+    }
   }
   if (expect.doneRuns !== undefined && result.state?.doneRuns !== expect.doneRuns) {
     failures.push(`expected the persisted doneRuns to be ${expect.doneRuns}, got ${result.state?.doneRuns}`);
