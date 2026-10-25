@@ -8,7 +8,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isFailed, resultOutput, type SingleResult } from "./result.ts";
+import { isFailed, resultOutput, runResult, runStatus, type SingleResult } from "./result.ts";
+import { emptyState } from "./stream.ts";
 
 const answer = (text: string): SingleResult["messages"] => [
   { role: "assistant", content: [{ type: "text", text }] },
@@ -49,7 +50,7 @@ test("an interrupted turn stays a failure when the person then closes the window
   assert.equal(isFailed(aborted), true);
 });
 
-test("a print-mode window closed by hand is a failure", () => {
+test("a closed window in an unattended run is a failure", () => {
   const closed = result({ interactive: false, closedByUser: true, exitCode: 128, messages: answer("partial") });
   assert.equal(isFailed(closed), true);
 });
@@ -69,4 +70,43 @@ test("a run that closed with no output says so", () => {
   const closed = result({ closedByUser: true, exitCode: 128 });
   assert.equal(isFailed(closed), false);
   assert.equal(resultOutput(closed), "(no output)");
+});
+
+test("runStatus separates a completed run from one cut off mid-turn", () => {
+  assert.equal(runStatus(result({ stopReason: "stop" })), "completed");
+  assert.equal(runStatus(result({ closedByUser: true, exitCode: 128, idle: true, stopReason: "stop" })), "completed");
+  assert.equal(
+    runStatus(result({ closedByUser: true, exitCode: 128, idle: false, messages: answer("earlier") })),
+    "stopped",
+    "a window that went away during a turn is not a completed run",
+  );
+  assert.equal(
+    runStatus(result({ closedByUser: true, exitCode: 128 })),
+    "completed",
+    "without proof that a turn was running, do not call a run stopped",
+  );
+  assert.equal(runStatus(result({ exitCode: 1 })), "failed");
+  assert.equal(runStatus(result({ stopReason: "error", exitCode: 0 })), "failed");
+});
+
+test("runResult carries the child's state into the result", () => {
+  const state = emptyState();
+  state.idle = true;
+  state.model = "anthropic/x";
+  state.stopReason = "stop";
+  const built = runResult({
+    agent: "scout",
+    agentSource: "user",
+    task: "t",
+    exitCode: 0,
+    state,
+    stderr: "",
+    windowId: "42",
+    interactive: true,
+  });
+  assert.equal(built.idle, true);
+  assert.equal(built.model, "anthropic/x");
+  assert.equal(built.stopReason, "stop");
+  assert.equal(built.windowId, "42");
+  assert.equal(built.interactive, true);
 });

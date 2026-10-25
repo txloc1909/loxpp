@@ -1,8 +1,8 @@
 /**
- * Event mirror for an interactive subagent child.
+ * Event mirror for a watched subagent child.
  *
- * An interactive child draws its TUI on stdout and reads the keyboard from the
- * same terminal, so the parent cannot read its event stream. This extension
+ * A watched child draws its TUI on stdout and reads the keyboard from the same
+ * terminal, so the parent cannot read its event stream. This extension
  * writes three record types to the file named by `LOXPP_SUBAGENT_EVENTS`:
  * `message_end` for each finished message, and `agent_start`/`agent_end`
  * around each run. They use the shape `pi --mode json` gives the same records,

@@ -1,17 +1,19 @@
 /**
- * Subagent tool: delegate a task to a separate `pi` process that runs in a new
- * window in pi's kitty tab.
+ * Subagent tool: delegate a task to a separate `pi` process.
  *
- * The window is one run. By default the child is interactive: a person chats
- * with it there, and it ends when that person quits or closes the window. Else
- * the child prints its events and exits by itself.
+ * Two kinds of run, and only one of them has a window.
  *
- * The parent never shares the child's terminal. An interactive child mirrors
- * its messages to a file through `mirror.ts`; a print-mode child writes the
- * same records to stdout, which the parent captures. `window.ts` tails that
- * file in both cases, plus stderr and the exit code.
+ * - A watched run (the default for a single task) opens a window in pi's kitty
+ *   tab and runs a normal interactive pi session there, so a person can chat
+ *   with it and redirect it. The tool call returns as soon as the window opens;
+ *   the end of the run arrives later as a `subagent-result` message that wakes
+ *   this session. Nothing here waits for a person.
+ * - An unattended run (`interactive: false`, or a parallel/chain batch) opens no
+ *   window: it is a child process with pipes, and the tool call waits for it.
  *
- * The extension registers nothing unless pi runs inside a kitty window.
+ * The parent never shares a watched child's terminal. That child mirrors its
+ * messages to a file through `mirror.ts`, which `window.ts` tails. An
+ * unattended child writes the same records to stdout, which `print.ts` reads.
  *
  * Modes: single ({ agent, task }), parallel ({ tasks: [...] }), and chain
  * ({ chain: [...] }, with a `{previous}` placeholder in later tasks).
@@ -23,25 +25,38 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { CONFIG_DIR_NAME, type ExtensionAPI, getAgentDir, getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import {
+  CONFIG_DIR_NAME,
+  type ExtensionAPI,
+  type ExtensionContext,
+  getAgentDir,
+  getMarkdownTheme,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
+import { Box, Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } from "./agents.ts";
 import { childArgs, childEnv, type Dispatch, piInvocation } from "./child.ts";
+import { createJobManager, type JobView } from "./jobs.ts";
 import { detectKitty, type KittySession } from "./kitty.ts";
-import { isFailed, resultOutput, type SingleResult } from "./result.ts";
+import { RESULT_CUSTOM_TYPE, capText, deliverResult, launchText, statusText } from "./notify.ts";
+import { planRun } from "./plan.ts";
+import { runPrintChild } from "./print.ts";
+import { isFailed, resultOutput, runResult, type SingleResult } from "./result.ts";
 import { addUsage, finalOutput, formatUsage, type StreamState, type UsageStats } from "./stream.ts";
 import { checkRemoteControl, runInKittyWindow } from "./window.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
-const PER_TASK_OUTPUT_CAP = 50 * 1024;
+const STATUS_KEY = "subagent";
 
 interface SubagentDetails {
   mode: "single" | "parallel" | "chain";
   agentScope: AgentScope;
   projectAgentsDir: string | null;
   results: SingleResult[];
+  /** Set on a launch: the watched runs this call started. */
+  jobs?: JobView[];
 }
 
 type OnUpdate = (partial: AgentToolResult<SubagentDetails>) => void;
@@ -50,126 +65,19 @@ function emptyUsage(): UsageStats {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
 }
 
-async function runWindowAgent(opts: {
-  session: KittySession;
-  dispatch: Dispatch;
-  agent: AgentConfig;
-  task: string;
-  cwd: string;
-  interactive: boolean;
-  hold: boolean;
-  keepFocus: boolean;
-  step?: number;
-  signal: AbortSignal | undefined;
-  onUpdate: OnUpdate | undefined;
-  makeDetails: (results: SingleResult[]) => SubagentDetails;
-}): Promise<SingleResult> {
-  const result: SingleResult = {
-    agent: opts.agent.name,
-    agentSource: opts.agent.source,
-    task: opts.task,
-    exitCode: -1,
-    messages: [],
-    stderr: "",
-    usage: emptyUsage(),
-    interactive: opts.interactive,
-    step: opts.step,
-  };
-
-  const emit = (state: StreamState): void => {
-    result.messages = state.messages;
-    result.usage = state.usage;
-    if (state.model) result.model = state.model;
-    opts.onUpdate?.({
-      content: [
-        {
-          type: "text",
-          // Only an interactive child waits for a person; a print-mode child
-          // that ends a turn has already exited or starts the next turn.
-          text: finalOutput(state) || (opts.interactive && state.idle ? "(waiting for you in the subagent window)" : "(running...)"),
-        },
-      ],
-      details: opts.makeDetails([result]),
-    });
-  };
-
-  const promptDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-prompt-"));
-  try {
-    let promptPath: string | undefined;
-    if (opts.agent.systemPrompt.trim()) {
-      promptPath = path.join(promptDir, `prompt-${opts.agent.name.replace(/[^\w.-]+/g, "_")}.md`);
-      await fs.promises.writeFile(promptPath, opts.agent.systemPrompt, { encoding: "utf-8", mode: 0o600 });
-    }
-
-    const pi = piInvocation();
-    const command = [
-      pi.command,
-      ...pi.args,
-      ...childArgs(opts.agent, opts.task, promptPath, opts.dispatch, {
-        interactive: opts.interactive,
-        mirrorPath: opts.interactive ? mirrorExtensionPath() : undefined,
-      }),
-    ];
-
-    const run = await runInKittyWindow({
-      session: opts.session,
-      cwd: opts.cwd,
-      title: `pi subagent: ${opts.agent.name}`,
-      header: opts.interactive
-        ? [
-            `pi subagent: ${opts.agent.name}`,
-            opts.agent.description,
-            `cwd: ${opts.cwd}`,
-            "chat here to direct the subagent; quit it (Ctrl+D) or close this window to return the result",
-          ]
-        : [
-            `pi subagent: ${opts.agent.name}`,
-            opts.agent.description,
-            `cwd: ${opts.cwd}`,
-            "this window closes when the subagent exits",
-          ],
-      command,
-      env: childEnv(),
-      interactive: opts.interactive,
-      hold: opts.hold,
-      keepFocus: opts.keepFocus,
-      signal: opts.signal,
-      onProgress: emit,
-    });
-
-    result.windowId = run.windowId;
-    result.exitCode = run.exitCode;
-    result.messages = run.state.messages;
-    result.usage = run.state.usage;
-    result.stderr = run.stderr;
-    result.model = run.state.model ?? result.model;
-    result.stopReason = run.state.stopReason;
-    result.errorMessage = run.state.errorMessage;
-    result.closedByUser = run.closedByUser;
-    // Closing an interactive child's window is how a person ends that run, so
-    // it is a normal end there. A print-mode run cut short is a failure.
-    if (run.closedByUser && !opts.interactive) result.errorMessage = "the subagent window was closed before the run finished";
-    return result;
-  } finally {
-    await fs.promises.rm(promptDir, { recursive: true, force: true });
-  }
-}
-
 /**
- * The mirror that feeds this child's events to the parent. Resolved from this
- * file so the child loads the copy that belongs to the running extension.
+ * The mirror that feeds a watched child's events to the parent. Resolved from
+ * this file so the child loads the copy that belongs to the running extension.
  */
 function mirrorExtensionPath(): string {
   return fileURLToPath(new URL("./mirror.ts", import.meta.url));
 }
 
-function capOutput(output: string): string {
-  const bytes = Buffer.byteLength(output, "utf8");
-  if (bytes <= PER_TASK_OUTPUT_CAP) return output;
-  let truncated = output.slice(0, PER_TASK_OUTPUT_CAP);
-  while (Buffer.byteLength(truncated, "utf8") > PER_TASK_OUTPUT_CAP) truncated = truncated.slice(0, -1);
-  const omitted = bytes - Buffer.byteLength(truncated, "utf8");
-  return `${truncated}\n\n[Output truncated: ${omitted} bytes omitted. Full output preserved in tool details.]`;
+function kittyRequiredMessage(): string {
+  return [
+    "A watched subagent needs a kitty window, and this pi session is not inside one.",
+    "Pass interactive: false to run the task unattended: no window, and the tool call waits for the result.",
+  ].join("\n");
 }
 
 async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<void>): Promise<void> {
@@ -189,14 +97,14 @@ async function mapWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
 const TaskItem = Type.Object({
   agent: Type.String({ description: "Name of the agent to invoke" }),
   task: Type.String({ description: "Task to delegate to the agent" }),
-  cwd: Type.Optional(Type.String({ description: "Working directory for the subagent window" })),
+  cwd: Type.Optional(Type.String({ description: "Working directory for the subagent" })),
 });
 
 const SubagentParams = Type.Object({
   agent: Type.Optional(Type.String({ description: "Agent name (single mode)" })),
   task: Type.Optional(Type.String({ description: "Task to delegate (single mode)" })),
-  tasks: Type.Optional(Type.Array(TaskItem, { description: "Parallel tasks" })),
-  chain: Type.Optional(Type.Array(TaskItem, { description: "Sequential tasks; later tasks may use {previous}" })),
+  tasks: Type.Optional(Type.Array(TaskItem, { description: "Parallel tasks; always unattended" })),
+  chain: Type.Optional(Type.Array(TaskItem, { description: "Sequential tasks; later tasks may use {previous}. Always unattended" })),
   agentScope: Type.Optional(
     StringEnum(["user", "project", "both"] as const, {
       description: `Which agent directories to use. Default "user" (${path.join(getAgentDir(), "agents")}). Use "both" to include project-local ${CONFIG_DIR_NAME}/agents.`,
@@ -206,64 +114,131 @@ const SubagentParams = Type.Object({
   confirmProjectAgents: Type.Optional(
     Type.Boolean({ description: "Ask before running repo-controlled project agents in an untrusted project", default: true }),
   ),
-  cwd: Type.Optional(Type.String({ description: "Working directory for the subagent window. Default the session cwd" })),
+  cwd: Type.Optional(Type.String({ description: "Working directory for the subagent. Default the session cwd" })),
   interactive: Type.Optional(
     Type.Boolean({
       description:
-        "Run the child as an interactive pi session in its window, so a person can chat with it and direct the work. The call returns when the child exits, which for an interactive child means when the person quits its window or closes it. Default true. Set false for an unattended run that ends by itself.",
-      default: true,
+        "Run one task as a watched job in a kitty window: a person can steer it, the call returns as soon as the window opens, and the result arrives later as a subagent-result message that wakes this session. Default true for a single task. Set false for an unattended run: no window, and the call waits for the result. An explicit true with tasks or chain is refused, because a batch has no one window to steer.",
     }),
   ),
   hold: Type.Optional(
-    Type.Boolean({ description: "Keep the window open at a shell after the subagent exits. Default false: it closes", default: false }),
+    Type.Boolean({ description: "Watched runs only: keep the window open at a shell after the child exits. Default false", default: false }),
   ),
-  keepFocus: Type.Optional(Type.Boolean({ description: "Leave focus in pi's window. Default false", default: false })),
+  keepFocus: Type.Optional(Type.Boolean({ description: "Watched runs only: leave focus in pi's window. Default false", default: false })),
 });
 
-export default function kittySubagent(pi: ExtensionAPI): void {
-  const session = detectKitty();
-  // The extension exists to open kitty windows. Outside kitty it registers no
-  // tool at all, rather than one that can only fail.
-  if (!session) return;
+export default function subagentExtension(pi: ExtensionAPI): void {
+  // A window is only needed for a watched run, so the tool registers even
+  // outside kitty: an unattended run works in any terminal.
+  const session: KittySession | null = detectKitty();
+  let ui: ExtensionContext["ui"] | undefined;
+
+  const jobs = createJobManager({
+    notify: (view) => deliverResult((message, options) => pi.sendMessage(message, options), view),
+    onProgress: (running) => {
+      try {
+        ui?.setStatus(STATUS_KEY, statusText(running));
+      } catch {
+        // A session replacement invalidates the captured ctx. The footer is not
+        // worth a failed run, and session_shutdown already stopped the jobs.
+        ui = undefined;
+      }
+    },
+  });
 
   pi.on("session_start", async (_event, ctx) => {
+    ui = ctx.ui;
+    if (!session) return;
     const check = await checkRemoteControl(session);
     if (!check.ok && ctx.hasUI) ctx.ui.notify(check.problem, "error");
+  });
+
+  // A job belongs to the session that started it: its result must not land in
+  // the session that replaced it, so every shutdown path stops and forgets it.
+  pi.on("session_shutdown", () => {
+    jobs.abandonAll();
+    ui = undefined;
+  });
+
+  pi.registerMessageRenderer<JobView>(RESULT_CUSTOM_TYPE, (message, { expanded, outputPad }, theme) => {
+    const view = message.details;
+    const status = view?.status ?? "completed";
+    const icon =
+      status === "failed" ? theme.fg("error", "✗") : status === "stopped" ? theme.fg("warning", "⏹") : theme.fg("success", "✓");
+    const name = view ? `${theme.fg("toolTitle", theme.bold(view.agent))} ${theme.fg("muted", `#${view.id}`)}` : "subagent";
+    const usage = view?.usage ? formatUsage(view.usage, view.model) : "";
+    const lines = [`${icon} ${name}${usage ? ` ${theme.fg("dim", usage)}` : ""}`];
+    const output = (view?.output ?? "").trim();
+    if (output) {
+      const all = output.split("\n");
+      const shown = expanded ? all : all.slice(0, 4);
+      for (const line of shown) lines.push(theme.fg("toolOutput", line));
+      if (shown.length < all.length) lines.push(theme.fg("dim", `... ${all.length - shown.length} more lines`));
+    } else if (view?.errorMessage) {
+      lines.push(theme.fg("error", view.errorMessage));
+    }
+    const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
+    box.addChild(new Text(lines.join("\n"), 0, 0));
+    return box;
   });
 
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
     description: [
-      "Delegate a task to a subagent: a separate pi process with its own context, running in a new kitty window in this tab.",
-      "By default the child is an interactive pi session in that window: a person can chat with it and direct the work, and the call returns when the person quits or closes the window.",
-      "Set interactive: false for an unattended run that ends by itself; the window then closes when the child exits.",
-      "Progress streams back into this session either way.",
+      "Delegate a task to a subagent: a separate pi process with its own context.",
+      "A single task by default runs as a watched job in a new kitty window, where a person can chat with it and redirect it. That call returns as soon as the window opens, so keep working or end your turn; a subagent-result message arrives when the run ends and wakes this session. Never report a watched run's answer before that message arrives.",
+      "Set interactive: false for an unattended run: no window, and the call waits for the result. Parallel (tasks) and chain runs are always unattended, and the call waits for them.",
       "Modes: single (agent + task), parallel (tasks array, max 8), chain (sequential, {previous} placeholder).",
       'Default agent scope is "user"; set agentScope: "both" to allow project-local agents.',
     ].join(" "),
-    promptSnippet: "delegate a task to a subagent in a new kitty window",
+    promptSnippet: "delegate a task to a subagent; a watched run returns at once and its result wakes you later",
     parameters: SubagentParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const check = await checkRemoteControl(session);
-      if (!check.ok) return { content: [{ type: "text" as const, text: check.problem }], details: undefined, isError: true };
+      // A fresh ctx is the only one the footer can trust after a session
+      // replacement; session_start sets it first, and a reload clears it.
+      ui = ctx.ui;
+      const plan = planRun(params);
+      if (plan.kind === "invalid") {
+        return { content: [{ type: "text" as const, text: plan.problem }], details: undefined, isError: true };
+      }
+      const watched = plan.kind === "watched";
 
       const agentScope: AgentScope = params.agentScope ?? "user";
-      const interactive = params.interactive ?? true;
       const hold = params.hold ?? false;
       const keepFocus = params.keepFocus ?? false;
       const discovery = discoverAgents(ctx.cwd, agentScope);
       const agents = discovery.agents;
       const baseCwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
-
       const mode = params.chain?.length ? "chain" : params.tasks?.length ? "parallel" : "single";
-      const makeDetails = (results: SingleResult[]): SubagentDetails => ({
+      const makeDetails = (results: SingleResult[], jobList?: JobView[]): SubagentDetails => ({
         mode,
         agentScope,
         projectAgentsDir: discovery.projectAgentsDir,
         results,
+        ...(jobList && jobList.length > 0 ? { jobs: jobList } : {}),
       });
+
+      if (watched) {
+        if (!session) {
+          return { content: [{ type: "text" as const, text: kittyRequiredMessage() }], details: makeDetails([]), isError: true };
+        }
+        if (!ctx.hasUI) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "A watched subagent needs an interactive session: this one has no UI, so nobody could steer the run. Pass interactive: false.",
+              },
+            ],
+            details: makeDetails([]),
+            isError: true,
+          };
+        }
+        const check = await checkRemoteControl(session);
+        if (!check.ok) return { content: [{ type: "text" as const, text: check.problem }], details: makeDetails([]), isError: true };
+      }
 
       const wanted = new Set<string>();
       for (const step of params.chain ?? []) wanted.add(step.agent);
@@ -286,7 +261,109 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         thinking: ctx.thinkingLevel,
       };
 
-      const run = (
+      /**
+       * Start the child and wait for it. `onWindow` reports the window id of a
+       * watched run before the run ends; `onProgress` feeds both the tool card
+       * (unattended) and the footer (watched).
+       */
+      const startChild = async (
+        agent: AgentConfig,
+        task: string,
+        cwd: string,
+        opts: {
+          title: string;
+          signal: AbortSignal | undefined;
+          onWindow?: (windowId: string) => void;
+          onProgress?: (state: StreamState) => void;
+        },
+      ): Promise<SingleResult> => {
+        const promptDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-prompt-"));
+        try {
+          let promptPath: string | undefined;
+          if (agent.systemPrompt.trim()) {
+            promptPath = path.join(promptDir, `prompt-${agent.name.replace(/[^\w.-]+/g, "_")}.md`);
+            await fs.promises.writeFile(promptPath, agent.systemPrompt, { encoding: "utf-8", mode: 0o600 });
+          }
+          const pi = piInvocation();
+          const command = [
+            pi.command,
+            ...pi.args,
+            ...childArgs(agent, task, promptPath, dispatch, {
+              interactive: watched,
+              mirrorPath: watched ? mirrorExtensionPath() : undefined,
+            }),
+          ];
+
+          if (watched) {
+            const run = await runInKittyWindow({
+              session: session!,
+              cwd,
+              title: opts.title,
+              header: [
+                opts.title,
+                agent.description,
+                `cwd: ${cwd}`,
+                hold
+                  ? "chat here to direct the subagent; quit it (Ctrl+D) or close this window to send its last answer back, and this window stays open"
+                  : "chat here to direct the subagent; quit it (Ctrl+D) or close this window to send its last answer back",
+              ],
+              command,
+              env: childEnv(),
+              hold,
+              keepFocus,
+              signal: opts.signal,
+              onWindow: opts.onWindow,
+              onProgress: opts.onProgress ?? (() => {}),
+            });
+            return runResult({
+              agent: agent.name,
+              agentSource: agent.source,
+              task,
+              exitCode: run.exitCode,
+              state: run.state,
+              stderr: run.stderr,
+              windowId: run.windowId,
+              interactive: true,
+              closedByUser: run.closedByUser,
+            });
+          }
+
+          const run = await runPrintChild({
+            command: command[0],
+            args: command.slice(1),
+            cwd,
+            signal: opts.signal,
+            onProgress: opts.onProgress,
+          });
+          const result = runResult({
+            agent: agent.name,
+            agentSource: agent.source,
+            task,
+            exitCode: run.exitCode,
+            state: run.state,
+            stderr: run.stderr,
+            interactive: false,
+          });
+          // An abort kills the child, so its exit code alone does not say why.
+          if (run.aborted) result.errorMessage = "the run was aborted";
+          return result;
+        } finally {
+          await fs.promises.rm(promptDir, { recursive: true, force: true });
+        }
+      };
+
+      const unknownAgent = (agentName: string, task: string, step?: number): SingleResult => ({
+        agent: agentName,
+        agentSource: "unknown",
+        task,
+        exitCode: 1,
+        messages: [],
+        stderr: `Unknown agent "${agentName}". Available agents: ${formatAgentList(agents)}.`,
+        usage: emptyUsage(),
+        step,
+      });
+
+      const runUnattended = (
         agentName: string,
         task: string,
         cwd: string | undefined,
@@ -294,31 +371,32 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         update: OnUpdate | undefined,
       ): Promise<SingleResult> => {
         const agent = agents.find((candidate) => candidate.name === agentName);
-        if (!agent) {
-          return Promise.resolve({
-            agent: agentName,
-            agentSource: "unknown",
-            task,
-            exitCode: 1,
-            messages: [],
-            stderr: `Unknown agent "${agentName}". Available agents: ${formatAgentList(agents)}.`,
-            usage: emptyUsage(),
-            step,
-          });
-        }
-        return runWindowAgent({
-          session,
-          dispatch,
-          agent,
+        if (!agent) return Promise.resolve(unknownAgent(agentName, task, step));
+        const preview: SingleResult = {
+          agent: agentName,
+          agentSource: agent.source,
           task,
-          cwd: cwd ? path.resolve(baseCwd, cwd) : baseCwd,
-          interactive,
-          hold,
-          keepFocus,
+          exitCode: -1,
+          messages: [],
+          stderr: "",
+          usage: emptyUsage(),
           step,
+        };
+        const emit = update
+          ? (state: StreamState): void => {
+              preview.messages = state.messages;
+              preview.usage = state.usage;
+              preview.model = state.model;
+              update({
+                content: [{ type: "text", text: finalOutput(state) || "(running...)" }],
+                details: makeDetails([preview]),
+              });
+            }
+          : undefined;
+        return startChild(agent, task, cwd ? path.resolve(baseCwd, cwd) : baseCwd, {
+          title: `pi subagent: ${agent.name}`,
           signal,
-          onUpdate: update,
-          makeDetails,
+          onProgress: emit,
         });
       };
 
@@ -328,7 +406,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         let previous = "";
         for (let i = 0; i < chain.length; i++) {
           const step = chain[i];
-          const result = await run(
+          const result = await runUnattended(
             step.agent,
             step.task.replace(/\{previous\}/g, previous),
             step.cwd,
@@ -351,7 +429,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
           previous = finalOutput(result);
         }
         return {
-          content: [{ type: "text" as const, text: capOutput(finalOutput(results[results.length - 1])) || "(no output)" }],
+          content: [{ type: "text" as const, text: capText(finalOutput(results[results.length - 1])) || "(no output)" }],
           details: makeDetails(results),
         };
       }
@@ -383,7 +461,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         };
 
         await mapWithConcurrency(tasks, MAX_CONCURRENCY, async (task, index) => {
-          slots[index] = await run(
+          slots[index] = await runUnattended(
             task.agent,
             task.task,
             task.cwd,
@@ -404,7 +482,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         const succeeded = slots.filter((slot) => !isFailed(slot)).length;
         const summaries = slots.map((slot) => {
           const status = isFailed(slot) ? `failed${slot.stopReason && slot.stopReason !== "end" ? ` (${slot.stopReason})` : ""}` : "completed";
-          return `### [${slot.agent}] ${status}\n\n${capOutput(resultOutput(slot))}`;
+          return `### [${slot.agent}] ${status}\n\n${capText(resultOutput(slot))}`;
         });
         return {
           content: [{ type: "text" as const, text: `Parallel: ${succeeded}/${slots.length} succeeded\n\n${summaries.join("\n\n---\n\n")}` }],
@@ -419,7 +497,46 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         };
       }
 
-      const result = await run(params.agent, params.task, params.cwd, undefined, onUpdate);
+      const agent = agents.find((candidate) => candidate.name === params.agent);
+      if (!agent) {
+        return {
+          content: [{ type: "text" as const, text: `Unknown agent "${params.agent}". Available agents: ${formatAgentList(agents)}.` }],
+          details: makeDetails([]),
+          isError: true,
+        };
+      }
+      const cwd = params.cwd ? path.resolve(baseCwd, params.cwd) : baseCwd;
+      const task = params.task;
+
+      if (watched) {
+        try {
+          const view = await jobs.launch({
+            agent: agent.name,
+            task,
+            cwd,
+            run: ({ id, signal: jobSignal, onWindow, onProgress }) =>
+              startChild(agent, task, cwd, {
+                title: `pi subagent: ${agent.name} #${id}`,
+                signal: jobSignal,
+                onWindow,
+                onProgress,
+              }),
+          });
+          return {
+            content: [{ type: "text" as const, text: launchText(view) }],
+            details: makeDetails([], [view]),
+          };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text" as const, text: `Could not start the subagent: ${reason}` }],
+            details: makeDetails([]),
+            isError: true,
+          };
+        }
+      }
+
+      const result = await runUnattended(params.agent, params.task, params.cwd, undefined, onUpdate);
       if (isFailed(result)) {
         return {
           content: [{ type: "text" as const, text: `Agent ${result.stopReason || "failed"}: ${resultOutput(result)}` }],
@@ -428,7 +545,7 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         };
       }
       return {
-        content: [{ type: "text" as const, text: capOutput(finalOutput(result)) || "(no output)" }],
+        content: [{ type: "text" as const, text: capText(finalOutput(result)) || "(no output)" }],
         details: makeDetails([result]),
       };
     },
@@ -459,17 +576,19 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         }
         return new Text(text, 0, 0);
       }
+      const kind = args.interactive === false ? "unattended" : "watched";
       const text =
         theme.fg("toolTitle", theme.bold("subagent ")) +
         theme.fg("accent", args.agent ?? "...") +
         theme.fg("muted", ` [${scope}]`) +
+        theme.fg("muted", ` ${kind}`) +
         `\n  ${theme.fg("dim", preview(args.task, 60))}`;
       return new Text(text, 0, 0);
     },
 
     renderResult(result, { expanded }, theme, _context) {
       const details = result.details as SubagentDetails | undefined;
-      if (!details || details.results.length === 0) {
+      if (!details || (details.results.length === 0 && !details.jobs?.length)) {
         const first = result.content[0];
         return new Text(first?.type === "text" ? first.text : "(no output)", 0, 0);
       }
@@ -483,6 +602,15 @@ export default function kittySubagent(pi: ExtensionAPI): void {
         if (usage) parts.push(theme.fg("dim", usage));
         return parts.join(" ");
       };
+
+      if (details.jobs?.length) {
+        const lines = details.jobs.map((view) => {
+          const where = view.windowId ? ` ${theme.fg("muted", `window ${view.windowId}`)}` : "";
+          return `⏳ ${theme.fg("toolTitle", theme.bold(view.agent))} ${theme.fg("muted", `#${view.id}`)}${where}`;
+        });
+        lines.push(theme.fg("dim", "the result arrives as a message when the run ends"));
+        return new Text(lines.join("\n"), 0, 0);
+      }
 
       if (!expanded) {
         if (details.results.length === 1) {
