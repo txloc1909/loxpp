@@ -93,7 +93,8 @@ about the other side.
 EXEMPT and is not run: the probe depends on implementation-defined behavior
 that the consumer chooses differently. An --xfail or --oracle-xfail entry that
 names such a probe is an error (exit 2), as it is in tools/check_spec_probes.py:
-this run never grades it, so the entry would read as satisfied.
+this run never grades it, so the entry would read as satisfied. A list path that
+does not exist is no gap: it is reported as a NOTE and grades every probe.
 
 --only-spec-probes keeps only the spec probes (the .lox files with a
 `// STATUS:` line) of the program list, so a walk of a directory runs the

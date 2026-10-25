@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Eleven cases, each on an explicit program list, so no corpus is walked:
+Twelve cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -31,23 +31,28 @@ Eleven cases, each on an explicit program list, so no corpus is walked:
      the consumer reason and says native's entry is answered, never that
      native regressed;
   11. a probe on both lists that both runs pass reports XPASS citing BOTH
-     files, since both entries are stale.
+     files, since both entries are stale;
+  12. a list path that does not exist is no gap: exit 0, a NOTE that names the
+     path, and both flags grade every program. No expected-failure list exists
+     in the tree today (test/translation-probes/README.md), so a call site that
+     still names one must not turn a gate red on its own.
 
-Cases 1 to 6 run native against itself, so they need no managed toolchain and
-no runtime jar. Cases 7 to 11 use a stub script as a runner, because they
-need one side to pass, to fail, or to hang where the other side does not.
+Cases 1 to 6 and case 12 run native against itself, so they need no managed
+toolchain and no runtime jar. Cases 7 to 11 use a stub script as a runner,
+because they need one side to pass, to fail, or to hang where the other side
+does not.
 
 Cases 10 and 11 need a probe that the build under test PASSES. A build that
 prints its disassembly or its execution trace can never pass one: the trace
 lands in stdout, where the probe's CHECK lines are read. On such a build the
 two cases are not judged, and this script exits 125 (ctest's SKIP_RETURN_CODE)
-after the other nine pass, so a trace preset reports a skip instead of a false
+after the other ten pass, so a trace preset reports a skip instead of a false
 red or a false green.
 
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all eleven cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all twelve cases hold, 1 with a report per failed case otherwise,
 2 when a precondition fails (the probe this script needs is missing, or the
 binary does not run a trivial program and print its line), and 125 when the
 build traces execution so that cases 10 and 11 cannot be judged.
@@ -507,6 +512,32 @@ def main() -> int:
                 f"{out.strip()!r}",
             )
 
+        # Case 12: a list path that does not exist. No consumer lists a gap
+        # today, so no expected-failure file is in the tree, and a call site
+        # that still names one must not turn the gate red on its own. An absent
+        # path is a NOTE and grades every program, in both flags.
+        for flag in ("--xfail", "--oracle-xfail"):
+            absent = work / f"absent{flag.lstrip('-')}.txt"
+            code, out, err = run(args.native, [real_probe], [(flag, absent)])
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                code == 0,
+                f"exit {code}, expected 0 (an absent list is no gap)",
+            )
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                f"NOTE: {absent} does not exist" in out,
+                f"no NOTE names the absent path; stdout was {out.strip()!r}",
+            )
+            expects(
+                failures,
+                f"an absent list path ({flag})",
+                "MATCH" in out,
+                f"the run did not grade the program; stdout was {out.strip()!r}",
+            )
+
     if failures:
         for failure in failures:
             print(f"FAIL {failure}", file=sys.stderr)
@@ -516,7 +547,7 @@ def main() -> int:
         print(
             f"SKIP: {args.native} prints a disassembly or an execution trace, so "
             f"no probe can pass on it and cases 10 and 11 cannot be judged. The "
-            f"other nine cases pass. Use the release preset for the full check."
+            f"other ten cases pass. Use the release preset for the full check."
         )
         return 125
 

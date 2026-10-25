@@ -322,10 +322,11 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
 
 // The bytecode sweeps leave out every probe marked `// STATIC-ERROR`, so a
 // marker on a probe that native compiles would hide that probe from them. A
-// static-error probe that native does not reject yet is on
+// static-error probe that native does not reject yet goes on
 // tools/spec-probe-xfail/native.txt, and then the check turns round: native
 // must still compile it, so that the node that makes native reject it deletes
-// the line, as check_spec_probes.py asks for a listed probe that passes.
+// the line, as check_spec_probes.py asks for a listed probe that passes. No
+// such file exists today, so every static-error probe must be rejected.
 TEST(ChunkDecoderTest, StaticErrorProbesDoNotCompile) {
     const std::set<std::string> notYet = loxpp_test::specProbeXfail("native");
     int checked = 0;

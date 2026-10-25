@@ -357,16 +357,22 @@ backend, and the QBE backend. `tools/diff_runtimes.py` compares the JVM, QBE,
 and bootstrap runs with native; the bootstrap walk takes only the spec
 probes (`--only-spec-probes`), and separate CI steps name `32_string_nul`,
 `56_file_nul`, and `bootstrap-only/stdout_no_trailing_newline` for the JVM and
-QBE bootstrap wrappers (issue #654). A consumer that does not pass a probe yet
-can list it in its expected-failure file under `tools/spec-probe-xfail/`
-(`native`, `jvm`, `bootstrap`, `qbe`), which both tools read with `--xfail`: a
-listed probe must fail, and a listed probe that passes fails the gate until its
-line is deleted. The differential steps also read native's file with
-`--oracle-xfail`, so a backend that passes a probe before native does is not a
-divergence. Two more files serve the walkers that are not a consumer's own gate:
-`tooling.txt` for the tooling parser and resolver tests (`test/corpus.h`), and
-`tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The C++ tests
-that compile every probe (`test/corpus.h`) leave out the probes in `native.txt`.
+QBE bootstrap wrappers (issue #654).
+
+A consumer that does not pass a probe yet lists it in
+`tools/spec-probe-xfail/<consumer>.txt` (`native`, `jvm`, `bootstrap`, `qbe`),
+and its gate passes that file with `--xfail`: a listed probe must fail, and a
+listed probe that passes fails the gate until its line is deleted. A differential
+step also passes native's file as `--oracle-xfail`, so a backend that passes a
+probe before native does is not a divergence. Two more names serve walkers that
+are not a consumer's gate: `tooling.txt` for the tooling parser and resolver
+tests, and `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The
+C++ tests that compile every probe (`test/corpus.h`) leave out the probes in
+`native.txt`.
+
+No consumer lists a gap today, so no such file exists: an absent file is an empty
+list, and every probe of this directory is graded on every consumer. A node that
+finds a gap creates the file it needs; nothing else changes.
 
 The probes `165` to `242` and `244` to `247` are the spec probes of the Int kind
 (`docs/decisions/integer-kind.md`). Each ends with `// COVERS: <set> <id>`
