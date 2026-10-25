@@ -714,7 +714,7 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapStackOverflow --output-on-failure --no-tests=error"
 
-      # Issue #869: DiffRuntimesXfailNames needs a probe the build under test
+      # Issue #868: DiffRuntimesXfailNames needs a probe the build under test
       # passes, and a trace build can never pass one, so it skips on the debug
       # leg (SKIP_RETURN_CODE 125). This step is where it runs; without it the
       # test would run in no leg at all.

@@ -48,8 +48,9 @@ Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
 Exits 0 when all eleven cases hold, 1 with a report per failed case otherwise,
-2 when the probe this script needs is missing, and 125 when the build traces
-execution so that cases 10 and 11 cannot be judged.
+2 when a precondition fails (the probe this script needs is missing, or the
+binary does not run a trivial program and print its line), and 125 when the
+build traces execution so that cases 10 and 11 cannot be judged.
 """
 
 import argparse
@@ -128,10 +129,12 @@ def build_traces(native: str, work: Path) -> bool | None:
 
     The debug preset can leave the disassembly and the execution trace on, and
     both write to stdout, where a probe's CHECK lines are read. One trivial
-    program settles it: a build that is not traced prints exactly its one line.
+    program settles it: a build that is not traced prints exactly its one line,
+    and a traced one prints that line among others.
 
-    Returns None when the binary cannot run that program at all. That is a
-    different fault — a missing toolchain, a broken binary — and must not read
+    Returns None when the output is not a probe's output at all: a non-zero
+    exit, or a run that never prints the program's own line. That is a different
+    fault — a missing toolchain, a binary that is not loxpp — and must not read
     as "traces", which would turn a broken CI leg into a quiet skip.
     """
     probe = work / "trace_check.lox"
@@ -141,8 +144,11 @@ def build_traces(native: str, work: Path) -> bool | None:
     )
     if completed.returncode != 0:
         return None
-    return completed.stdout != 'trace check\n'
-
+    if completed.stdout == 'trace check\n':
+        return False
+    if "trace check" in completed.stdout:
+        return True
+    return None
 
 
 def main() -> int:
@@ -168,8 +174,8 @@ def main() -> int:
         traced_state = build_traces(args.native, work)
         if traced_state is None:
             print(
-                f"error: {args.native} cannot run a trivial program, so this "
-                f"checker cannot read a probe's output",
+                f"error: {args.native} does not run a trivial program and print "
+                f"its line, so this checker cannot read a probe's output",
                 file=sys.stderr,
             )
             return 2
@@ -508,9 +514,9 @@ def main() -> int:
 
     if traced:
         print(
-            "SKIP: build/loxpp prints a disassembly or an execution trace, so no "
-            "probe can pass on it and cases 10 and 11 cannot be judged. The other "
-            "nine cases pass. Use the release preset for the full check."
+            f"SKIP: {args.native} prints a disassembly or an execution trace, so "
+            f"no probe can pass on it and cases 10 and 11 cannot be judged. The "
+            f"other nine cases pass. Use the release preset for the full check."
         )
         return 125
 
