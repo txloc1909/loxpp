@@ -130,26 +130,6 @@ class Row:
         return text
 
 
-# A row of the Int kind (docs/decisions/integer-kind.md) is skipped on a
-# consumer until the node that builds that part of the consumer lands. The node
-# deletes its own entry. Each call returns a new dict, so no two rows share
-# one.
-def _int_operator_skip() -> dict[str, str]:
-    # Native passes these rows since #827, and the JVM backend passes them
-    # since #829. The bootstrap interpreter names its own node until it lands.
-    return {
-        BOOTSTRAP: "#830: bootstrap interpreter for Int",
-    }
-
-
-def _int_conversion_skip() -> dict[str, str]:
-    # Native passes these rows since #828, and the JVM backend passes them
-    # since #829. The bootstrap interpreter names its own node until it lands.
-    return {
-        BOOTSTRAP: "#830: bootstrap interpreter for Int",
-    }
-
-
 # --- Catchable Runtime Errors table (spec/04-semantics.md, 18 rows) -------
 #
 # Most Example cells are bare expressions the spec table lists standalone;
@@ -363,28 +343,24 @@ CATCHABLE_ROWS = [
         "caught",
         "1i - 1;",
         expected_kind="ArithmeticTypeError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "comparison_type_error_mixed_int",
         "caught",
         "1i < 1;",
         expected_kind="ComparisonTypeError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "concatenation_type_error_mixed_int",
         "caught",
         "1i + 1;",
         expected_kind="ConcatenationTypeError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "bitwise_type_error",
         "caught",
         "1i & 1;",
         expected_kind="BitwiseTypeError",
-        skip=_int_operator_skip(),
     ),
     # A bit operator has no protocol: an Instance operand is the same fault
     # as a Number operand, and so is a shift count that is not an Int.
@@ -394,35 +370,30 @@ CATCHABLE_ROWS = [
         "C() & 1i;",
         setup="class C {}\n",
         expected_kind="BitwiseTypeError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "bitwise_type_error_shift_count",
         "caught",
         "1i << 1;",
         expected_kind="BitwiseTypeError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "shift_count_error",
         "caught",
         "1i << 64i;",
         expected_kind="ShiftCountError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "division_by_zero_error",
         "caught",
         "1i / 0i;",
         expected_kind="DivisionByZeroError",
-        skip=_int_operator_skip(),
     ),
     Row(
         "division_by_zero_error_modulo",
         "caught",
         "1i % 0i;",
         expected_kind="DivisionByZeroError",
-        skip=_int_operator_skip(),
     ),
     # The result check of an operator method does not change: an Int is not
     # a Number.
@@ -432,7 +403,6 @@ CATCHABLE_ROWS = [
         "len(C());",
         setup="class C { __len__() { return 1i; } }\n",
         expected_kind="OperatorResultTypeError",
-        skip=_int_operator_skip(),
     ),
 ]
 
@@ -787,26 +757,24 @@ FATAL_ROWS = [
         "fun g() { var x = 42; defer x(); } g();",
     ),
     # --- Int (docs/decisions/integer-kind.md): the natives that convert ----
-    Row("int_fractional", "fatal", "int(1.5);", skip=_int_conversion_skip()),
-    Row("int_nan", "fatal", "int(math.nan);", skip=_int_conversion_skip()),
-    Row("int_infinity", "fatal", "int(math.inf);", skip=_int_conversion_skip()),
-    Row("int_out_of_range", "fatal", "int(9223372036854775808.0);", skip=_int_conversion_skip()),
-    Row("int_string_not_decimal", "fatal", 'int("1.5");', skip=_int_conversion_skip()),
-    Row("int_other_kind", "fatal", "int(nil);", skip=_int_conversion_skip()),
-    Row("float_string_not_number", "fatal", 'float("abc");', skip=_int_conversion_skip()),
-    Row("float_other_kind", "fatal", "float(nil);", skip=_int_conversion_skip()),
-    Row("integer_module_non_int", "fatal", "integer.abs(1);", skip=_int_conversion_skip()),
+    Row("int_fractional", "fatal", "int(1.5);"),
+    Row("int_nan", "fatal", "int(math.nan);"),
+    Row("int_infinity", "fatal", "int(math.inf);"),
+    Row("int_out_of_range", "fatal", "int(9223372036854775808.0);"),
+    Row("int_string_not_decimal", "fatal", 'int("1.5");'),
+    Row("int_other_kind", "fatal", "int(nil);"),
+    Row("float_string_not_number", "fatal", 'float("abc");'),
+    Row("float_other_kind", "fatal", "float(nil);"),
+    Row("integer_module_non_int", "fatal", "integer.abs(1);"),
     Row(
         "integer_unsigned_division_by_zero",
         "fatal",
         "integer.udiv(1i, 0i);",
-        skip=_int_conversion_skip(),
     ),
     Row(
         "integer_parse_unsigned_invalid",
         "fatal",
         'integer.parse_unsigned("18446744073709551616");',
-        skip=_int_conversion_skip(),
     ),
 ]
 
