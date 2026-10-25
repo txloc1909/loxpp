@@ -1,0 +1,92 @@
+// flag_set.lox — a permission flag set held in one Int.
+//
+// One Int holds every permission bit: 0 READ, 1 WRITE, 2 EXEC, 62 HIDDEN and
+// 63 SYSTEM. The sign bit is a flag like any other, so `system < 0i` reports
+// that bit. `set`, `clear`, `toggle` and `has` are one bit operation each,
+// and `x & m == 0i` groups as `(x & m) == 0i`, so a test needs no
+// parentheses. `>>` copies the sign bit and `>>>` fills with zero bits.
+//
+// Demonstrates: Int literals, `|`, `&`, `~`, `^`, `<<`, `>>`, `>>>` on the
+//               full 64-bit range.
+// Every printed value is the same step done in Python.
+
+var READ = 1i;
+var WRITE = 2i;
+var EXEC = 4i;
+var HIDDEN = 1i << 62i;
+var SYSTEM = 1i << 63i;
+var ALL = READ | WRITE | EXEC;
+
+fun has(flags, flag) {
+    return (flags & flag) == flag;
+}
+
+fun set(flags, flag) {
+    return flags | flag;
+}
+
+fun clear(flags, flag) {
+    return flags & ~flag;
+}
+
+fun toggle(flags, flag) {
+    return flags ^ flag;
+}
+
+var none = 0i;
+var some = set(set(none, READ), WRITE);
+print some;
+print has(some, READ);
+print has(some, EXEC);
+print has(some, READ | WRITE);
+print has(some, EXEC | READ);
+
+var all = set(set(set(none, READ), WRITE), EXEC);
+print all;
+print all == ALL;
+print all & EXEC == EXEC;
+
+var system = set(some, SYSTEM);
+print system;
+print system < 0i;
+print has(system, SYSTEM);
+print has(system, HIDDEN);
+
+var hidden = set(system, HIDDEN);
+print hidden;
+print has(hidden, SYSTEM | HIDDEN);
+print hidden >>> 62i;
+print hidden >> 62i;
+
+var cleared = clear(hidden, READ);
+print cleared;
+print has(cleared, READ);
+print clear(some, EXEC) == some;
+
+var toggled = toggle(cleared, HIDDEN);
+print toggled;
+print has(toggled, HIDDEN);
+print toggle(toggled, HIDDEN) == cleared;
+
+// CHECK: 3
+// CHECK: true
+// CHECK: false
+// CHECK: true
+// CHECK: false
+// CHECK: 7
+// CHECK: true
+// CHECK: true
+// CHECK: -9223372036854775805
+// CHECK: true
+// CHECK: true
+// CHECK: false
+// CHECK: -4611686018427387901
+// CHECK: true
+// CHECK: 3
+// CHECK: -1
+// CHECK: -4611686018427387902
+// CHECK: false
+// CHECK: true
+// CHECK: -9223372036854775806
+// CHECK: false
+// CHECK: true
