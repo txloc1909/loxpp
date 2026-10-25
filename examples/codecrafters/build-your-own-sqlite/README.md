@@ -50,12 +50,8 @@ the full-scan path from the earlier stages.
   challenge's own stage-3 notes say overflow handling is out of scope, and
   no base-stage sample database triggers it.
 - **Serial type 7 (IEEE-754 float column) decodes as `nil`.** No base-stage
-  query touches a float column, and reconstructing a 64-bit float from
-  bytes without bitwise operators was not worth the complexity here.
-- **8-byte signed integers (serial type 6) lose precision near the top of
-  the 64-bit range**, because Lox++ Numbers are IEEE-754 doubles (53-bit
-  mantissa) with no separate integer type. Every rowid and every integer
-  value in these fixtures stays far below that range.
+  query touches a float column, and rebuilding a double from its bits needs
+  more than the Int bit operations alone.
 - **The whole database file is read into memory up front.** Lox++'s
   `File` type has no seek/pread — only sequential `read()`/`readline()` —
   so random access to a page requires the file to already be in memory as

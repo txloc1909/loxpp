@@ -6,10 +6,11 @@
 // string: "SELECT COUNT(*) FROM t", "SELECT a, b FROM t",
 // "SELECT a, b FROM t WHERE c = 'literal'".
 //
-// Lox++ has no bitwise operators, but a SQLite file is pure binary: varints,
-// big-endian ints, and 256 distinct byte values. ord()/chr() convert between
-// a one-byte String and its byte value, and Strings compare by byte, so the
-// reader needs no lookup table or hand-rolled comparison.
+// A SQLite file is pure binary: varints, big-endian ints, and 256 distinct
+// byte values. Int holds every 64-bit field and varint exactly, and the bit
+// operators unpack it. ord()/chr() convert between a one-byte String and its
+// byte value, and Strings compare by byte, so the reader needs no lookup
+// table or hand-rolled comparison.
 
 // ---------- low-level byte / varint / signed-int decoding ----------
 
@@ -18,28 +19,34 @@ fun byteAt(s, i) {
 }
 
 fun u16(s, off) {
-    return byteAt(s, off) * 256 + byteAt(s, off + 1);
+    return float((int(byteAt(s, off)) << 8i) | int(byteAt(s, off + 1)));
 }
 
 fun u32(s, off) {
-    return ((byteAt(s, off) * 256 + byteAt(s, off + 1)) * 256 + byteAt(s, off + 2)) * 256
-        + byteAt(s, off + 3);
-}
-
-// Signed big-endian integer of n bytes. Exact for n <= 6 (fits a double's
-// 53-bit mantissa); n == 8 (record serial type 6, a rare column type) loses
-// precision near the top of the 64-bit range, same documented trade-off as
-// the varint/page-count decoding below.
-fun signedInt(s, off, n) {
-    var v = 0;
+    var v = 0i;
     var i = 0;
-    while (i < n) {
-        v = v * 256 + byteAt(s, off + i);
+    while (i < 4) {
+        v = (v << 8i) | int(byteAt(s, off + i));
         i = i + 1;
     }
-    var half = math.pow(2, n * 8 - 1);
-    if (v >= half) {
-        v = v - math.pow(2, n * 8);
+    return float(v);
+}
+
+// Signed big-endian integer of n bytes. The Int accumulator is exact for
+// every width, including the full 8 bytes of record serial type 6: the top
+// bit lands in the Int's own sign bit.
+fun signedInt(s, off, n) {
+    var v = 0i;
+    var i = 0;
+    while (i < n) {
+        v = (v << 8i) | int(byteAt(s, off + i));
+        i = i + 1;
+    }
+    if (n < 8) {
+        var signBit = 1i << int(n * 8 - 1);
+        if ((v & signBit) != 0i) {
+            v = v - (1i << int(n * 8));
+        }
     }
     return v;
 }
@@ -48,19 +55,19 @@ fun signedInt(s, off, n) {
 // as a continuation flag, byte 9 (if reached) contributes all 8 bits.
 // Returns [value, bytesConsumed].
 fun readVarint(s, off) {
-    var value = 0;
+    var value = 0i;
     var i = 0;
     while (i < 8) {
-        var b = byteAt(s, off + i);
-        if (b >= 128) {
-            value = value * 128 + (b - 128);
+        var b = int(byteAt(s, off + i));
+        if (b >= 128i) {
+            value = (value << 7i) | (b & 0x7F);
             i = i + 1;
         } else {
-            return [value * 128 + b, i + 1];
+            return [(value << 7i) | b, i + 1];
         }
     }
-    var last = byteAt(s, off + 8);
-    return [value * 256 + last, 9];
+    var last = int(byteAt(s, off + 8));
+    return [(value << 8i) | last, 9];
 }
 
 // ---------- page access ----------
@@ -123,7 +130,7 @@ fun collectRows(pageNum, out) {
         while (i < h["numCells"]) {
             var off = h["offsets"][i];
             var sizeR = readVarint(h["bytes"], off);
-            var payloadSize = sizeR[0];
+            var payloadSize = float(sizeR[0]);
             var p = off + sizeR[1];
             var ridR = readVarint(h["bytes"], p);
             var rowid = ridR[0];
@@ -156,7 +163,7 @@ fun findRowByRowid(pageNum, rowid) {
         while (i < h["numCells"]) {
             var off = h["offsets"][i];
             var sizeR = readVarint(h["bytes"], off);
-            var payloadSize = sizeR[0];
+            var payloadSize = float(sizeR[0]);
             var p = off + sizeR[1];
             var ridR = readVarint(h["bytes"], p);
             if (ridR[0] == rowid) {
@@ -183,17 +190,17 @@ fun findRowByRowid(pageNum, rowid) {
 // ---------- record format ----------
 
 // Serial type -> value. Column type 7 (IEEE-754 float) is not decoded: no
-// base-stage test uses a float column, and 64-bit bit-twiddling without
-// bitwise operators is not worth the complexity here; it decodes as nil,
-// an honest gap rather than a wrong number.
+// base-stage test uses a float column, and rebuilding a double from its bits
+// needs more than the Int bit operations alone; it decodes as nil, an honest
+// gap rather than a wrong number.
 fun parseRecord(payload) {
     var hdrR = readVarint(payload, 0);
-    var headerLen = hdrR[0];
+    var headerLen = float(hdrR[0]);
     var pos = hdrR[1];
     var serialTypes = [];
     while (pos < headerLen) {
         var r = readVarint(payload, pos);
-        serialTypes.append(r[0]);
+        serialTypes.append(float(r[0]));
         pos = pos + r[1];
     }
     var values = [];
@@ -227,9 +234,9 @@ fun parseRecord(payload) {
             size = 8;
             val = nil;
         } else if (st == 8) {
-            val = 0;
+            val = 0i;
         } else if (st == 9) {
-            val = 1;
+            val = 1i;
         } else if (st >= 12 and st % 2 == 0) {
             size = (st - 12) / 2;
             val = payload[bodyPos:bodyPos + size];
@@ -252,7 +259,7 @@ fun parseRecord(payload) {
 fun indexLeafPayload(bytes, off) {
     var sizeR = readVarint(bytes, off);
     var p = off + sizeR[1];
-    return bytes[p:p + sizeR[0]];
+    return bytes[p:p + float(sizeR[0])];
 }
 
 // An index interior cell is a 4-byte left-child pointer followed by the
@@ -263,7 +270,7 @@ fun indexInteriorCell(bytes, off) {
     var child = u32(bytes, off);
     var sizeR = readVarint(bytes, off + 4);
     var p = off + 4 + sizeR[1];
-    return [child, bytes[p:p + sizeR[0]]];
+    return [child, bytes[p:p + float(sizeR[0])]];
 }
 
 // Collects the rowids of every index entry whose (single, text) key
@@ -348,7 +355,7 @@ fun loadSchema() {
             "type": vals[0],
             "name": vals[1],
             "tblName": vals[2],
-            "rootpage": vals[3],
+            "rootpage": float(vals[3]),
             "sql": vals[4]
         });
         i = i + 1;
@@ -590,7 +597,7 @@ fun stringify(v) {
     if (v == nil) {
         return "";
     }
-    if (type(v) == "Number") {
+    if (type(v) == "Number" or type(v) == "Int") {
         return str(v);
     }
     return v;
