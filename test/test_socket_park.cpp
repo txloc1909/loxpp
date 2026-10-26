@@ -659,6 +659,12 @@ TEST_F(SocketParkTest, ALargeWriteWaitsForRoomAndSendsEveryByte) {
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
         std::string buf(65536, '\0');
         for (;;) {
+            // A write that failed leaves the connection open; do not wait on
+            // it.
+            struct pollfd pfd = {fd, POLLIN, 0};
+            if (poll(&pfd, 1, 5000) <= 0) {
+                break;
+            }
             ssize_t n = recv(fd, buf.data(), buf.size(), 0);
             if (n <= 0) {
                 break;
