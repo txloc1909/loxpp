@@ -20,7 +20,7 @@ var peer = connect("127.0.0.1", srv.port());
 var conn = srv.accept();
 var me = task.self();
 fun reader() {
-    var got = conn.readlines(); print "reader got: " + len(got) + " " + got[0] + got[1];
+    var got = conn.readlines(); print "reader got: " + str(len(got)) + " " + got[0] + got[1];
     task.send(me, "done");
 }
 fun ticker() {

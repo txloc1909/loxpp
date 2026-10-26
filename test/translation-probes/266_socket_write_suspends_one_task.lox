@@ -44,5 +44,5 @@ while (total < want) {
     if (chunk == "") break;
     total = total + len(chunk);
 }
-print "read all: " + (total == want);
+print "read all: " + str(total == want);
 print task.receive();
