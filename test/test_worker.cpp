@@ -453,8 +453,8 @@ TEST_F(WorkerTest, AnIdleWorkerUsesNoCpu) {
 
 // --- The poller of a worker --------------------------------------------------
 //
-// Nothing in the language registers a wait yet, so these tests register one
-// from the host, through Runtime::poller().
+// These tests register the wait from the host, through Runtime::poller(), and
+// handle it with Runtime::setPollHandler().
 
 namespace {
 
@@ -507,6 +507,11 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(300));
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
+        // C7: the worker holds a wait, so it never counted itself idle.
+        // This is the test that ties waitForWork to WaitReason::Poller.
+        Inbox& inbox = rt.memoryManager().inbox();
+        EXPECT_FALSE(inbox.idle);
+        EXPECT_EQ(inbox.group->busy.load(), 1);
         auto me = vm.getGlobal("me");
         ASSERT_TRUE(me.has_value());
         ASSERT_TRUE(postEnvelope(
@@ -523,6 +528,34 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     EXPECT_EQ(err.find("Deadlock"), std::string::npos) << err;
     EXPECT_EQ(fired, 1);
     EXPECT_EQ(globalString(vm, "got"), "7");
+}
+
+// The runtime clears the pointers that senders use before the poller is
+// destroyed, and the inbox outlives the runtime while a message is held.
+TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
+    MemoryManager* heap = nullptr;
+    Value held;
+    {
+        VM vm;
+        ASSERT_EQ(vm.interpret("var s = [1];"), InterpretResult::OK);
+        heap = &vm.runtime().memoryManager();
+        vm.runtime().poller();
+        {
+            std::lock_guard<std::mutex> lock(heap->inbox().mutex);
+            EXPECT_NE(heap->inbox().poller, nullptr);
+            heap->inbox().polling = true;
+        }
+        Obj* obj = globalObj(vm, "s");
+        ASSERT_NE(obj, nullptr);
+        heap->hold(obj);
+        held = Value{obj};
+    }
+    {
+        std::lock_guard<std::mutex> lock(heap->inbox().mutex);
+        EXPECT_EQ(heap->inbox().poller, nullptr);
+        EXPECT_FALSE(heap->inbox().polling);
+    }
+    MemoryManager::releaseValue(held);
 }
 
 // When the registered wait ends and nothing can send, the deadlock is real.
