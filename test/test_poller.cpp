@@ -145,7 +145,7 @@ TEST(PollerTest, WriteInterestAndReadInterestOnOneDescriptor) {
     Poller poller;
     Pipe p;
     // The write end of an empty pipe is writable; the read end is not
-    // readable yet. Two waits on the read end of a socketpair would do the
+    // readable. Two waits on the read end of a socketpair would do the
     // same for both; this checks that the mask follows the records.
     const auto w = poller.waitFd(p.wr, Poller::Interest::Write);
     const auto r = poller.waitFd(p.wr, Poller::Interest::Read);
@@ -360,6 +360,37 @@ TEST(IdleAccountingTest, WorkerThatLosesItsWaitsCountsAsIdle) {
     EXPECT_FALSE(w.group->deadlock.load());
     EXPECT_TRUE(w.group->goIdle(w.other, WaitReason::Inbox));
     EXPECT_TRUE(w.group->deadlock.load() || w.group->busy.load() == 0);
+}
+
+// The end of the program wakes a worker that sleeps in its poller.
+TEST(IdleAccountingTest, EndOfTheProgramWakesAWorkerThatSleepsInItsPoller) {
+    TwoWorkers w;
+    Poller poller;
+    Pipe unused;
+    poller.waitFd(unused.rd, Poller::Interest::Read);
+    // A bound, so that a lost wake fails the test and does not hang it.
+    poller.waitUntil(Clock::now() + std::chrono::seconds(3));
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.poller = &poller;
+        w.other.polling = true;
+    }
+    std::thread ender([&] {
+        std::this_thread::sleep_for(milliseconds(50));
+        w.group->end();
+    });
+    std::vector<Poller::Token> ready;
+    const auto start = Clock::now();
+    poller.wait(ready);
+    ender.join();
+    EXPECT_TRUE(ready.empty());
+    EXPECT_LT(msSince(start), 2000);
+    EXPECT_TRUE(w.group->ended.load());
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.polling = false;
+        w.other.poller = nullptr;
+    }
 }
 
 // A send to a worker that sleeps in its poller writes the wakeup descriptor.

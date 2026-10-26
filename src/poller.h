@@ -37,7 +37,7 @@ class Poller {
     Token waitFd(int fd, Interest interest);
     // Registers a wait for `deadline`. One-shot.
     Token waitUntil(Clock::time_point deadline);
-    // Removes a wait that was not reported yet. False when it is not there.
+    // Removes a wait that was not reported. False when it is not there.
     bool cancel(Token token);
     // Removes every wait on `fd` and appends their tokens to `cancelled`, in
     // registration order. Call it before closing `fd`: epoll keeps its
