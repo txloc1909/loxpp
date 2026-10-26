@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <unistd.h>
 
 // Ignores SIGPIPE for its lifetime. A peer that stopped reading makes write(2)
@@ -71,16 +72,17 @@ inline bool writeStream(FILE* handle, const char* method, std::string_view text,
     return true;
 }
 
-// Writes every byte of `text` to a descriptor, retrying on EINTR and on a
-// short write, then writes the newline if asked. A descriptor has no error
-// flag, so a failed write leaves nothing behind for the next read to see.
-// Returns false and sets `message` when a write fails.
+// Writes every byte of `text` to a socket, retrying on EINTR and on a short
+// write, then writes the newline if asked. MSG_NOSIGNAL makes a closed peer
+// fail with EPIPE without a SIGPIPE, so the process-wide disposition is not
+// touched and two threads cannot race on it. A descriptor has no error flag,
+// so a failed write leaves nothing behind for the next read to see. Returns
+// false and sets `message` when a write fails.
 inline bool writeFd(int fd, const char* method, std::string_view text,
                     bool newline, std::string& message) {
-    SigpipeIgnored guard;
     auto writeAll = [fd](const char* data, size_t size) -> int {
         while (size > 0) {
-            ssize_t n = ::write(fd, data, size);
+            ssize_t n = ::send(fd, data, size, MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR) {
                     continue;
