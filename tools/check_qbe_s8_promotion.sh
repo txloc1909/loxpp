@@ -41,14 +41,9 @@ run_diff() {
     fi
 }
 
-# A spec probe that QBE does not pass yet is on QBE's expected-failure list,
-# and one that native does not pass yet is on native's, as
-# tools/check_qbe_probes.sh does.
 run_diff "test/translation-probes/ + qbe-only/ (stress GC)" \
     "$root/test/translation-probes/" \
-    "$root/test/translation-probes/qbe-only/" \
-    --xfail "$root/tools/spec-probe-xfail/qbe.txt" \
-    --oracle-xfail "$root/tools/spec-probe-xfail/native.txt"
+    "$root/test/translation-probes/qbe-only/"
 
 run_diff "jvm-only/61_operator_overload.lox (stress GC)" \
     "$root/test/translation-probes/jvm-only/61_operator_overload.lox"

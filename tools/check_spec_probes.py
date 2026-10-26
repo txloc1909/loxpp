@@ -45,8 +45,8 @@ A probe passes when its stdout and its exit status agree.
 
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
-'#' are comments. The lists are native.txt, jvm.txt, and qbe.txt under
-tools/spec-probe-xfail/, each passed with --xfail. The bootstrap interpreter
+'#' are comments. The lists are files under tools/spec-probe-xfail/, one for each
+consumer, each passed with --xfail. The bootstrap interpreter
 has no list: it uses NOT-BINDING lines. A consumer that has no gap needs no
 file, and a node that finds a gap creates one. A path that does not exist is no gap: it is reported as
 a NOTE and grades every probe. Outcomes:
