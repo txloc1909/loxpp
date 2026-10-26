@@ -1,0 +1,33 @@
+// When several waits end together, the tasks whose descriptors are ready join the
+// run queue in the order in which their calls began to wait (spec/04-semantics.md,
+// Scheduling). `reader_a` waits first, then `reader_b`. The `writer` task sends to
+// the second peer first and to the first peer second, in one run, so both
+// descriptors are ready together. The readers still wake in the order a, b.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: a got A
+// CHECK: b got B
+var srv = listen("127.0.0.1", 0);
+var a_out = connect("127.0.0.1", srv.port());
+var a_in = srv.accept();
+var b_out = connect("127.0.0.1", srv.port());
+var b_in = srv.accept();
+var me = task.self();
+fun reader_a() { print "a got " + a_in.readline(); task.send(me, "done"); }
+fun reader_b() { print "b got " + b_in.readline(); task.send(me, "done"); }
+fun writer() {
+    b_out.writeline("B");
+    a_out.writeline("A");
+    task.send(me, "done");
+}
+task.spawn(reader_a);
+task.spawn(reader_b);
+task.spawn(writer);
+task.receive();
+task.receive();
+task.receive();

@@ -1,0 +1,20 @@
+// Tasks whose timers have expired join the run queue in the order of their
+// deadlines (spec/04-semantics.md, Scheduling). `late` calls sleep() first, with
+// the longer time, and `early` second, with the shorter time. `early` wakes
+// first.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: early woke
+// CHECK: late woke
+var me = task.self();
+fun late() { sleep(0.4); print "late woke"; task.send(me, "done"); }
+fun early() { sleep(0.1); print "early woke"; task.send(me, "done"); }
+task.spawn(late);
+task.spawn(early);
+task.receive();
+task.receive();

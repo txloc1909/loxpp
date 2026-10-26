@@ -1,0 +1,20 @@
+// A call of class blocks stays a call that blocks its worker: run() does not let
+// another task of the worker run while the child runs (spec/05-stdlib.md,
+// Blocking calls). The child ends after half a second, so `runner` returns from
+// run() before `ticker` of the same worker runs.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: blocks-call run
+// CHECK: run status: 0
+// CHECK: ticker ran
+var me = task.self();
+fun runner() {
+    var r = run("sh", ["-c", "sleep 0.5"]);
+    print "run status: " + str(r["status"]);
+    task.send(me, "done");
+}
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(runner);
+task.spawn(ticker);
+task.receive();
+task.receive();

@@ -1,0 +1,42 @@
+// A task of a worker can close a Socket or a Server while another task of the
+// same worker waits on it. The waiting call raises a catchable SocketClosedError
+// in the waiting task (spec/05-stdlib.md, Socket and Server). `closer` closes the
+// Socket first and the Server second, so the readers wake in that order
+// (spec/04-semantics.md, Scheduling).
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: closing
+// CHECK: reader: SocketClosedError
+// CHECK: acceptor: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var idle = listen("127.0.0.1", 0);
+var me = task.self();
+fun reader() {
+    try { conn.readline(); print "reader: no fault"; }
+    catch (e) { print "reader: " + e.kind; }
+    task.send(me, "done");
+}
+fun acceptor() {
+    try { idle.accept(); print "acceptor: no fault"; }
+    catch (e) { print "acceptor: " + e.kind; }
+    task.send(me, "done");
+}
+fun closer() {
+    print "closing";
+    conn.close();
+    idle.close();
+    task.send(me, "done");
+}
+task.spawn(reader);
+task.spawn(acceptor);
+task.spawn(closer);
+task.receive();
+task.receive();
+task.receive();

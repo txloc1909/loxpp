@@ -1,0 +1,27 @@
+// A connect to a numeric address and the accept of that connection can sit in
+// two tasks of one worker. Whether connect() has to wait for the connection
+// depends on the network (a connection to the local host can complete at once),
+// so no portable order of the two tasks exists, and the probe does not check one.
+// It checks what binds: the task that connects and the task that accepts both
+// finish, whichever way they are scheduled (spec/05-stdlib.md, connect).
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-call connect
+// CHECK: both finished
+var srv = listen("127.0.0.1", 0);
+var me = task.self();
+fun server() {
+    var c = srv.accept();
+    c.close();
+    task.send(me, "done");
+}
+fun client() {
+    var c = connect("127.0.0.1", srv.port());
+    c.close();
+    task.send(me, "done");
+}
+task.spawn(client);
+task.spawn(server);
+task.receive();
+task.receive();
+print "both finished";

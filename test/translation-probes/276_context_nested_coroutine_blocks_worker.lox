@@ -1,0 +1,25 @@
+// A call that waits for the network or for time blocks the worker, and does not
+// raise, where the task cannot suspend (spec/04-semantics.md, Contexts where a
+// task cannot suspend). Here the call is a sleep() inside a coroutine that `__str__` resumes. The `worker` task prints its lines
+// before `ticker` of the same worker runs, because nothing lets `ticker` run
+// during the call.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-context nested-coroutine
+// CHECK: slow
+// CHECK: worker done
+// CHECK: ticker ran
+fun inner() { sleep(0.1); return "slow"; }
+var co = coroutine.create(inner);
+class Slow { __str__() { return co.resume(); } }
+var me = task.self();
+fun worker() {
+    print Slow();
+    print "worker done";
+    task.send(me, "done");
+}
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(worker);
+task.spawn(ticker);
+task.receive();
+task.receive();

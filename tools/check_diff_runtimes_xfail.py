@@ -33,9 +33,9 @@ Fourteen cases, each on an explicit program list, so no corpus is walked:
   11. a probe on both lists that both runs pass reports XPASS citing BOTH
      files, since both entries are stale;
   12. a list path that does not exist is no gap: exit 0, a NOTE that names the
-     path, and both flags grade every program. No expected-failure list exists
-     in the tree today (test/translation-probes/README.md), so a call site that
-     still names one must not turn a gate red on its own.
+     path, and both flags grade every program. A call site may
+     name a list that a node has not created yet (test/translation-probes/README.md),
+     and that must not turn a gate red on its own.
   13. a probe on the consumer list alone that the consumer passes and native
      fails is a divergence with exit 1, which says the consumer's line is
      stale and names no consumer reason: the consumer has no gap here.
@@ -574,9 +574,8 @@ def main() -> int:
                 f"{out.strip()!r}",
             )
 
-        # Case 12: a list path that does not exist. No consumer lists a gap
-        # today, so no expected-failure file is in the tree, and a call site
-        # that still names one must not turn the gate red on its own. An absent
+        # Case 12: a list path that does not exist. A call site that names a
+        # list that is not in the tree must not turn the gate red on its own. An absent
         # path is a NOTE and grades every program, in both flags.
         for flag in ("--xfail", "--oracle-xfail"):
             absent = work / f"absent{flag.lstrip('-')}.txt"
