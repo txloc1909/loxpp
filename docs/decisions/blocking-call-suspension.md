@@ -1,9 +1,8 @@
 # Network calls and `sleep` suspend only their own task
 
-**Status:** proposal. Waits for the owner's approval. On acceptance it moves to
-`docs/decisions/` and names its tracking issue.
-**Tracking (draft):** #711. The DAG and the node body drafts are there. Node
-issues open only after acceptance.
+**Status:** accepted. The owner approved it in #711 (2026-10-26). Node issues
+open against this decision.
+**Tracking:** #711. The DAG and the node body drafts are there.
 
 ## Owner decisions
 
