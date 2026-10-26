@@ -1845,8 +1845,9 @@ first in, first out, and it has no priorities.
 
 When several waits have ended by the time the worker has no task that is
 ready to run, the tasks join the run queue in this order: first the tasks
-whose Sockets or Servers are ready, in the order in which their calls began to
-wait, then the tasks whose sleep has expired, in the order of their deadlines.
+whose wait is for a connection, a Socket, or a Server and has ended, in the
+order in which their calls began to wait, then the tasks whose sleep has
+expired, in the order of their deadlines.
 
 The order in which the tasks of one worker run is therefore defined, with one
 limit: an event outside the program decides when a wait ends, and so which
