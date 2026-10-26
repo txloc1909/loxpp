@@ -468,7 +468,13 @@ enum class IoOp : std::uint8_t {
     READLINE,
     READLINES,
     WRITE,
+    CONNECT,
 };
+
+// The state of a connect() between its attempts, defined with the Socket
+// natives. No Socket exists until an attempt succeeds, so the state owns the
+// descriptor of the attempt in progress and closes it when the record dies.
+struct ConnectState;
 
 struct ParkedIo {
     IoOp op{IoOp::NONE};
@@ -487,6 +493,9 @@ struct ParkedIo {
     Obj* text{nullptr};
     bool newline{false};
     std::size_t offset{0};
+    // connect: the addresses left to try and the attempt in progress. There is
+    // no target, because the Socket does not exist yet.
+    std::shared_ptr<ConnectState> connect;
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

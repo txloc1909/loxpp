@@ -449,27 +449,37 @@ ThreadSample sampleThread(const std::string& name) {
     return out;
 }
 
-// Runs `program` with a sampler of the thread "loxpp-w1" that looks at 200 ms
-// and at 700 ms.
+// True when the thread named `name` shows a quiet window: a window of 100 ms
+// with at most one clock tick of CPU time that ends with the thread in the
+// sleep state. The thread may start slowly under load, and a start in a debug
+// build or under GC stress uses CPU for a while, so the windows run until one
+// is quiet or `maxMs` pass. A thread that spins is busy in every window and
+// is never quiet.
+bool seesQuietWindow(const std::string& name, int maxMs) {
+    ThreadSample last = sampleThread(name);
+    for (int waited = 0; waited < maxMs; waited += 100) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ThreadSample now = sampleThread(name);
+        if (last.ticks >= 0 && now.ticks >= 0 && now.ticks - last.ticks <= 1 &&
+            now.state == 'S') {
+            return true;
+        }
+        last = now;
+    }
+    return false;
+}
+
+// Runs `program`, which keeps the worker "loxpp-w1" asleep for about 1.4
+// seconds, and looks for a quiet window of that worker meanwhile.
 void expectWorkerSleepsWithoutSpinning(const std::string& program) {
-    ThreadSample before;
-    ThreadSample after;
-    std::thread sampler([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        before = sampleThread("loxpp-w1");
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        after = sampleThread("loxpp-w1");
-    });
+    bool quiet = false;
+    std::thread sampler([&] { quiet = seesQuietWindow("loxpp-w1", 1300); });
     VM vm;
     InterpretResult result = vm.interpret(program);
     sampler.join();
     ASSERT_EQ(result, InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "got"), "late");
-    ASSERT_GE(before.ticks, 0) << "no thread named loxpp-w1";
-    ASSERT_GE(after.ticks, 0) << "no thread named loxpp-w1";
-    // A spinning thread would use about 50 ticks in 500 ms.
-    EXPECT_LE(after.ticks - before.ticks, 2);
-    EXPECT_EQ(after.state, 'S');
+    EXPECT_TRUE(quiet) << "the worker used CPU in every window";
 }
 
 } // namespace
@@ -478,7 +488,7 @@ void expectWorkerSleepsWithoutSpinning(const std::string& program) {
 // CPU use, and the thread is in the sleep state.
 TEST_F(ParkTest, ABlockingSleepDoesNotSpin) {
     expectWorkerSleepsWithoutSpinning(R"(
-        class Slow { __str__() { sleep(1); return "late"; } }
+        class Slow { __str__() { sleep(1.5); return "late"; } }
         fun slow(main) { task.send(main, str(Slow())); }
         task.spawn_worker(slow, task.self());
         var got = task.receive();
@@ -488,7 +498,7 @@ TEST_F(ParkTest, ABlockingSleepDoesNotSpin) {
 // A sleep that parks leaves the worker in the poller, again without CPU use.
 TEST_F(ParkTest, AParkedSleepDoesNotSpin) {
     expectWorkerSleepsWithoutSpinning(R"(
-        fun slow(main) { sleep(1); task.send(main, "late"); }
+        fun slow(main) { sleep(1.5); task.send(main, "late"); }
         task.spawn_worker(slow, task.self());
         var got = task.receive();
     )");

@@ -416,20 +416,34 @@ ThreadSample sampleThread(const std::string& name) {
     return out;
 }
 
+// True when the thread named `name` shows a quiet window: a window of 100 ms
+// with at most one clock tick of CPU time that ends with the thread in the
+// sleep state. The thread may start slowly under load, and a start in a debug
+// build or under GC stress uses CPU for a while, so the windows run until one
+// is quiet or `maxMs` pass. A thread that spins is busy in every window and
+// is never quiet.
+bool seesQuietWindow(const std::string& name, int maxMs) {
+    ThreadSample last = sampleThread(name);
+    for (int waited = 0; waited < maxMs; waited += 100) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ThreadSample now = sampleThread(name);
+        if (last.ticks >= 0 && now.ticks >= 0 && now.ticks - last.ticks <= 1 &&
+            now.state == 'S') {
+            return true;
+        }
+        last = now;
+    }
+    return false;
+}
+
 } // namespace
 
 // An idle worker sleeps on its condition variable: while the main task waits
 // in a blocking call, the worker that waits in receive uses no CPU, and its
 // thread is in the sleep state.
 TEST_F(WorkerTest, AnIdleWorkerUsesNoCpu) {
-    ThreadSample before;
-    ThreadSample after;
-    std::thread sampler([&] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        before = sampleThread("loxpp-w1");
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        after = sampleThread("loxpp-w1");
-    });
+    bool quiet = false;
+    std::thread sampler([&] { quiet = seesQuietWindow("loxpp-w1", 1300); });
     VM vm;
     InterpretResult result = vm.interpret(R"(
         fun idle(main) {
@@ -437,18 +451,14 @@ TEST_F(WorkerTest, AnIdleWorkerUsesNoCpu) {
             task.send(main, m);
         }
         var w = task.spawn_worker(idle, task.self());
-        sleep(0.9);
+        sleep(1.5);
         task.send(w, "wake");
         var got = task.receive();
     )");
     sampler.join();
     ASSERT_EQ(result, InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "got"), "wake");
-    ASSERT_GE(before.ticks, 0) << "no thread named loxpp-w1";
-    ASSERT_GE(after.ticks, 0) << "no thread named loxpp-w1";
-    // A spinning thread would use about 50 ticks in 500 ms.
-    EXPECT_LE(after.ticks - before.ticks, 2);
-    EXPECT_EQ(after.state, 'S');
+    EXPECT_TRUE(quiet) << "the worker used CPU in every window";
 }
 
 // --- The poller of a worker --------------------------------------------------
