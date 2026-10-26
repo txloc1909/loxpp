@@ -113,6 +113,7 @@ set(LOXPP_CORE_SOURCES
     src/table.cpp
     src/memory_manager.cpp
     src/worker.cpp
+    src/poller.cpp
     src/math.cpp
     src/runtime.cpp
     src/vm.cpp
