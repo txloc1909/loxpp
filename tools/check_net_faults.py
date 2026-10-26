@@ -11,7 +11,9 @@ Native (src/stdlib/net_api.cpp):
   - `nativeRuntimeError(` is a halting fault. Only argument checks use it.
   - `raiseNet(KIND, ...)` is a catchable fault of the given kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
-    Socket write path uses `writeStream` and `raiseNet`.
+    Socket write path uses `writeFd` and `raiseNet`.
+  - `FILE`, `fdopen`, `fread`, `fgetc` and `writeStream(` must not appear:
+    the Socket and Server natives use raw descriptors.
   - `raiseFromNative(` outside `raiseNet`, and any other `native...Error(`
     helper, are not in the table, so they fail.
 
@@ -47,15 +49,15 @@ NATIVE_SITES = {
     ("asByteCount", HALT): 2,
     ("socketWriteNative", HALT): 1,
     ("socketWritelineNative", HALT): 1,
-    ("connectNative", NETWORK): 3,
+    ("connectNative", NETWORK): 2,
     ("listenNative", NETWORK): 2,
-    ("readFailed", NETWORK): 1,
+    ("readRetry", NETWORK): 1,
     ("checkSocketRead", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
     ("socketWriteNative", NETWORK): 1,
     ("socketWritelineNative", NETWORK): 1,
     ("serverAcceptNative", CLOSED): 1,
-    ("serverAcceptNative", NETWORK): 2,
+    ("serverAcceptNative", NETWORK): 1,
 }
 
 SOCKET_SITES = {
@@ -92,6 +94,9 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                 function = m.group(1)
         if "writeStreamOrError(" in line:
             problems.append(f"line {number}: writeStreamOrError is a halting write")
+        stdio = re.search(r"\b(FILE|fdopen|fread|fgetc|fclose|writeStream)\b", line)
+        if stdio:
+            problems.append(f"line {number}: {stdio.group(1)} is stdio, the natives use raw descriptors")
         if function != "raiseNet" and re.search(r"\braiseFromNative\(", line):
             problems.append(f"line {number}: raiseFromNative outside raiseNet")
         for helper in re.findall(r"\b(native\w*Error)\(", line):

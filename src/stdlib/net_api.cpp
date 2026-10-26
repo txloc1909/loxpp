@@ -117,7 +117,8 @@ static Value connectNative(int /*argc*/, Value* argv) {
     int fd = -1;
     int lastErrno = 0;
     for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        fd =
+            socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
         if (fd < 0) {
             lastErrno = errno;
             continue;
@@ -138,26 +139,10 @@ static Value connectNative(int /*argc*/, Value* argv) {
         raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
-    FILE* fp = fdopen(fd, "r+");
-    if (fp == nullptr) {
-        int err = errno;
-        ::close(fd);
-        std::string msg = "connect(): cannot open stream for '" +
-                          hostPort(host, port) + "': " + std::strerror(err);
-        raiseNet(kNetworkError, msg);
-        return from<Nil>(Nil{});
-    }
-    // A socket is not seekable, so stdio's update-mode rule (input then
-    // output needs a file-positioning call) would make readline() followed
-    // by write() fail with ESPIPE. Unbuffered I/O writes straight through
-    // and never seeks, so the stream stays a true bidirectional byte stream.
-    std::setvbuf(fp, nullptr, _IONBF, 0);
-
     MemoryManager* mm = getActiveMM();
     ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
     mm->pushTempRoot(sock);
     sock->fd = fd;
-    sock->handle = fp;
     mm->popTempRoot();
     return Value{static_cast<Obj*>(sock)};
 }
@@ -192,7 +177,8 @@ static Value listenNative(int /*argc*/, Value* argv) {
     int fd = -1;
     int lastErrno = 0;
     for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        fd =
+            socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
         if (fd < 0) {
             lastErrno = errno;
             continue;
@@ -247,7 +233,7 @@ static Value listenNative(int /*argc*/, Value* argv) {
 // SocketClosedError, matching spec/05-stdlib.md's Socket section.
 static ObjSocket* checkSocketRead(Value* args, const char* method) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
-    if (s->handle == nullptr) {
+    if (s->fd < 0) {
         std::string msg = "Cannot call '";
         msg += method;
         msg += "' on a closed socket.";
@@ -270,16 +256,67 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
     return s;
 }
 
-// A read that stops on a stream error is a NetworkError, not an end of
-// stream. The error flag is cleared, so a later read starts clean.
-static bool readFailed(ObjSocket* s, const char* method) {
-    if (std::ferror(s->handle) == 0) {
-        return false;
+// Size of one read from the descriptor.
+static constexpr size_t kReadChunk = 4096;
+
+enum class Fill { Data, Eof, Failed };
+
+// read(2) with EINTR retried. A failure, other than EINTR, is a NetworkError:
+// it is not an end of stream.
+static ssize_t readRetry(ObjSocket* s, char* dst, size_t size,
+                         const char* method) {
+    for (;;) {
+        ssize_t n = ::read(s->fd, dst, size);
+        if (n >= 0) {
+            return n;
+        }
+        if (errno != EINTR) {
+            raiseNet(kNetworkError,
+                     std::string(method) + "(): " + std::strerror(errno));
+            return -1;
+        }
     }
-    int err = errno;
-    std::clearerr(s->handle);
-    raiseNet(kNetworkError, std::string(method) + "(): " + std::strerror(err));
-    return true;
+}
+
+// Drop the bytes already returned, so the buffer holds only the unread tail.
+static void compactInput(ObjSocket* s) {
+    if (s->inPos > 0) {
+        s->inbuf.erase(0, s->inPos);
+        s->inPos = 0;
+    }
+}
+
+// Append one read chunk to the input buffer. The buffer is the only place a
+// read can hold bytes past the end of the line it returns, because a
+// descriptor has no stdio buffer. So readline() keeps what follows the line
+// here, and read(), read_bytes() and readlines() consume it first. The
+// buffer holds the line being built plus at most one chunk past its end.
+static Fill fillInput(ObjSocket* s, const char* method) {
+    char chunk[kReadChunk];
+    ssize_t n = readRetry(s, chunk, sizeof(chunk), method);
+    if (n < 0) {
+        return Fill::Failed;
+    }
+    if (n == 0) {
+        return Fill::Eof;
+    }
+    s->inbuf.append(chunk, static_cast<size_t>(n));
+    return Fill::Data;
+}
+
+// Read to the end of the stream into the input buffer. Returns false after
+// raising a fault.
+static bool fillToEof(ObjSocket* s, const char* method) {
+    for (;;) {
+        switch (fillInput(s, method)) {
+        case Fill::Data:
+            break;
+        case Fill::Eof:
+            return true;
+        case Fill::Failed:
+            return false;
+        }
+    }
 }
 
 static Value socketReadNative(int /*argc*/, Value* args) {
@@ -287,15 +324,12 @@ static Value socketReadNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    std::string buf;
-    char chunk[4096];
-    size_t got;
-    while ((got = std::fread(chunk, 1, sizeof(chunk), s->handle)) > 0) {
-        buf.append(chunk, got);
-    }
-    if (readFailed(s, "read")) {
+    compactInput(s);
+    if (!fillToEof(s, "read")) {
         return from<Nil>(Nil{});
     }
+    std::string buf = std::move(s->inbuf);
+    s->inbuf.clear();
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
@@ -308,11 +342,32 @@ static Value socketReadBytesNative(int /*argc*/, Value* args) {
     if (!asByteCount(args[0], "read_bytes", n)) {
         return from<Nil>(Nil{});
     }
-    std::string buf = readStreamBytes(s->handle, n);
-    if (readFailed(s, "read_bytes")) {
-        return from<Nil>(Nil{});
+    std::string out;
+    size_t buffered = s->inbuf.size() - s->inPos;
+    size_t take = buffered < n ? buffered : n;
+    out.assign(s->inbuf, s->inPos, take);
+    s->inPos += take;
+    // Read the rest straight into the result: the want is bounded by the
+    // count, so no byte past it is read and none needs buffering.
+    char chunk[kReadChunk];
+    while (out.size() < n) {
+        size_t want = n - out.size();
+        if (want > sizeof(chunk)) {
+            want = sizeof(chunk);
+        }
+        ssize_t got = readRetry(s, chunk, want, "read_bytes");
+        if (got < 0) {
+            // Keep what arrived, so a later read does not lose it.
+            compactInput(s);
+            s->inbuf.insert(0, out);
+            return from<Nil>(Nil{});
+        }
+        if (got == 0) {
+            break;
+        }
+        out.append(chunk, static_cast<size_t>(got));
     }
-    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
+    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(out)))};
 }
 
 static Value socketReadlineNative(int /*argc*/, Value* args) {
@@ -320,23 +375,31 @@ static Value socketReadlineNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    std::string line;
-    bool sawByte = false;
-    int c;
-    while ((c = std::fgetc(s->handle)) != EOF) {
-        sawByte = true;
-        if (c == '\n') {
-            break;
+    compactInput(s);
+    size_t scanned = 0;
+    for (;;) {
+        size_t nl = s->inbuf.find('\n', scanned);
+        if (nl != std::string::npos) {
+            std::string line = s->inbuf.substr(0, nl);
+            s->inPos = nl + 1;
+            return Value{
+                static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
         }
-        line.push_back(static_cast<char>(c));
+        scanned = s->inbuf.size();
+        Fill f = fillInput(s, "readline");
+        if (f == Fill::Failed) {
+            return from<Nil>(Nil{});
+        }
+        if (f == Fill::Eof) {
+            if (s->inbuf.empty()) {
+                return from<Nil>(Nil{});
+            }
+            std::string line = std::move(s->inbuf);
+            s->inbuf.clear();
+            return Value{
+                static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
+        }
     }
-    if (readFailed(s, "readline")) {
-        return from<Nil>(Nil{});
-    }
-    if (!sawByte) {
-        return from<Nil>(Nil{});
-    }
-    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
 }
 
 static Value socketReadlinesNative(int /*argc*/, Value* args) {
@@ -344,40 +407,24 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
+    compactInput(s);
+    if (!fillToEof(s, "readlines")) {
+        return from<Nil>(Nil{});
+    }
+    std::string data = std::move(s->inbuf);
+    s->inbuf.clear();
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
-    std::string line;
-    bool sawByte = false;
-    int c;
-    bool done = false;
-    while (!done) {
-        c = std::fgetc(s->handle);
-        if (c == EOF) {
-            done = true;
-        } else {
-            sawByte = true;
-            if (c == '\n') {
-                ObjString* str = mm->makeString(line);
-                mm->pushTempRoot(str);
-                list->elements.emplace_back(static_cast<Obj*>(str));
-                mm->popTempRoot();
-                line.clear();
-                sawByte = false; // a fresh line begins after a newline
-            } else {
-                line.push_back(static_cast<char>(c));
-            }
-        }
-    }
-    if (readFailed(s, "readlines")) {
-        mm->popTempRoot();
-        return from<Nil>(Nil{});
-    }
-    if (sawByte) {
-        ObjString* str = mm->makeString(line);
+    size_t start = 0;
+    while (start < data.size()) {
+        size_t nl = data.find('\n', start);
+        size_t end = nl == std::string::npos ? data.size() : nl;
+        ObjString* str = mm->makeString(data.substr(start, end - start));
         mm->pushTempRoot(str);
         list->elements.emplace_back(static_cast<Obj*>(str));
         mm->popTempRoot();
+        start = end + 1;
     }
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
@@ -394,9 +441,9 @@ static Value socketWriteNative(int /*argc*/, Value* args) {
     }
     auto* str = asObjString(as<Obj*>(args[0]));
     std::string message;
-    if (!writeStream(s->handle, "write",
-                     std::string_view(str->chars.data(), str->chars.size()),
-                     false, message)) {
+    if (!writeFd(s->fd, "write",
+                 std::string_view(str->chars.data(), str->chars.size()), false,
+                 message)) {
         raiseNet(kNetworkError, message);
     }
     return from<Nil>(Nil{});
@@ -413,9 +460,9 @@ static Value socketWritelineNative(int /*argc*/, Value* args) {
     }
     auto* str = asObjString(as<Obj*>(args[0]));
     std::string message;
-    if (!writeStream(s->handle, "writeline",
-                     std::string_view(str->chars.data(), str->chars.size()),
-                     true, message)) {
+    if (!writeFd(s->fd, "writeline",
+                 std::string_view(str->chars.data(), str->chars.size()), true,
+                 message)) {
         raiseNet(kNetworkError, message);
     }
     return from<Nil>(Nil{});
@@ -432,9 +479,8 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
 
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
-    if (s->handle != nullptr) {
-        std::fclose(s->handle);
-        s->handle = nullptr;
+    if (s->fd >= 0) {
+        ::close(s->fd);
         s->fd = -1;
     }
     return from<Nil>(Nil{});
@@ -449,27 +495,17 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
     }
     int cfd;
     do {
-        cfd = accept(s->fd, nullptr, nullptr);
+        cfd = accept4(s->fd, nullptr, nullptr, SOCK_CLOEXEC);
     } while (cfd < 0 && errno == EINTR);
     if (cfd < 0) {
         std::string msg = std::string("accept(): ") + std::strerror(errno);
         raiseNet(kNetworkError, msg);
         return from<Nil>(Nil{});
     }
-    FILE* fp = fdopen(cfd, "r+");
-    if (fp == nullptr) {
-        ::close(cfd);
-        raiseNet(kNetworkError, "accept(): cannot open stream for connection.");
-        return from<Nil>(Nil{});
-    }
-    // See connectNative: unbuffered I/O keeps readline()/write() interleaving
-    // from needing a seek, which a socket cannot perform.
-    std::setvbuf(fp, nullptr, _IONBF, 0);
     MemoryManager* mm = getActiveMM();
     ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
     mm->pushTempRoot(sock);
     sock->fd = cfd;
-    sock->handle = fp;
     mm->popTempRoot();
     return Value{static_cast<Obj*>(sock)};
 }

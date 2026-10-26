@@ -12,6 +12,7 @@
 #include <deque>
 #include <functional>
 #include <string>
+#include <string>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -85,16 +86,18 @@ inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 // ---------------------------------------------------------------------------
 // ObjSocket — a connected TCP stream (net_api.cpp)
 // ---------------------------------------------------------------------------
-// `handle` owns `fd`: fclose() closes it. `fd` is kept separately only so
-// close_write() can shutdown(SHUT_WR) the half-close without tearing down the
-// read direction. Do not rely on the destructor to close sockets; like
-// ObjFile, GC timing is non-deterministic. Call close() explicitly, or use
-// `defer s.close()`.
+// The Socket owns `fd`; close() or the destructor closes it. Do not rely on
+// the destructor to close sockets; like ObjFile, GC timing is
+// non-deterministic. Call close() explicitly, or use `defer s.close()`.
 struct ObjSocket : public Obj {
-    ObjClass* klass;       // shared Socket class; GC-tracked
-    int fd{-1};            // raw descriptor; -1 when closed
-    FILE* handle{nullptr}; // fdopen'd stream; null when closed
+    ObjClass* klass; // shared Socket class; GC-tracked
+    int fd{-1};      // raw descriptor; -1 when closed
     bool writeClosed{false};
+    // Bytes read from the descriptor and not yet returned. A read may take
+    // more than the line it returns; the rest stays here for the next read.
+    // The bytes before `inPos` are already returned.
+    std::string inbuf;
+    size_t inPos{0};
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;

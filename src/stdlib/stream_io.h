@@ -8,39 +8,54 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <unistd.h>
+
+// Ignores SIGPIPE for its lifetime. A peer that stopped reading makes write(2)
+// fail with EPIPE and, with the default disposition, raises SIGPIPE and kills
+// the VM. SIGPIPE is ignored only for one call, so the process-wide
+// disposition and every spawned child keep the default.
+class SigpipeIgnored {
+  public:
+    SigpipeIgnored() {
+        // memset, not `= {}`: clang-format 18 and 22 disagree on the spacing
+        // of an empty braced init for a multi-word struct type.
+        struct sigaction ign;
+        std::memset(&ign, 0, sizeof(ign));
+        std::memset(&m_old, 0, sizeof(m_old));
+        ign.sa_handler = SIG_IGN;
+        sigemptyset(&ign.sa_mask);
+        sigaction(SIGPIPE, &ign, &m_old);
+    }
+    ~SigpipeIgnored() { sigaction(SIGPIPE, &m_old, nullptr); }
+    SigpipeIgnored(const SigpipeIgnored&) = delete;
+    SigpipeIgnored& operator=(const SigpipeIgnored&) = delete;
+
+  private:
+    struct sigaction m_old;
+};
 
 // Writes text (and an optional trailing newline) to a stdio stream, then
-// flushes. A peer that stopped reading makes write(2) fail with EPIPE and,
-// with the default disposition, raises SIGPIPE and kills the VM. SIGPIPE is
-// ignored only for this call, so the process-wide disposition and every
-// spawned child keep the default. Returns false and sets `message` when the
-// write fails.
+// flushes. Returns false and sets `message` when the write fails.
 inline bool writeStream(FILE* handle, const char* method, std::string_view text,
                         bool newline, std::string& message) {
-    // memset, not `= {}`: clang-format 18 and 22 disagree on the spacing of an
-    // empty braced init for a multi-word struct type.
-    struct sigaction ign;
-    std::memset(&ign, 0, sizeof(ign));
-    struct sigaction old;
-    std::memset(&old, 0, sizeof(old));
-    ign.sa_handler = SIG_IGN;
-    sigemptyset(&ign.sa_mask);
-    sigaction(SIGPIPE, &ign, &old);
-
-    errno = 0;
-    size_t written = std::fwrite(text.data(), 1, text.size(), handle);
-    if (newline) {
-        std::fputc('\n', handle);
-    }
-    bool ok = written == text.size();
-    int err = errno;
-    if (std::fflush(handle) != 0) {
-        ok = false;
-        if (err == 0) {
-            err = errno;
+    bool ok;
+    int err;
+    {
+        SigpipeIgnored guard;
+        errno = 0;
+        size_t written = std::fwrite(text.data(), 1, text.size(), handle);
+        if (newline) {
+            std::fputc('\n', handle);
+        }
+        ok = written == text.size();
+        err = errno;
+        if (std::fflush(handle) != 0) {
+            ok = false;
+            if (err == 0) {
+                err = errno;
+            }
         }
     }
-    sigaction(SIGPIPE, &old, nullptr);
 
     if (!ok) {
         if (err == 0) {
@@ -51,6 +66,38 @@ inline bool writeStream(FILE* handle, const char* method, std::string_view text,
         // catches the fault can read the peer's last bytes next, and a read
         // that sees the old flag would raise a fault the network did not.
         std::clearerr(handle);
+        return false;
+    }
+    return true;
+}
+
+// Writes every byte of `text` to a descriptor, retrying on EINTR and on a
+// short write, then writes the newline if asked. A descriptor has no error
+// flag, so a failed write leaves nothing behind for the next read to see.
+// Returns false and sets `message` when a write fails.
+inline bool writeFd(int fd, const char* method, std::string_view text,
+                    bool newline, std::string& message) {
+    SigpipeIgnored guard;
+    auto writeAll = [fd](const char* data, size_t size) -> int {
+        while (size > 0) {
+            ssize_t n = ::write(fd, data, size);
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return errno;
+            }
+            data += n;
+            size -= static_cast<size_t>(n);
+        }
+        return 0;
+    };
+    int err = writeAll(text.data(), text.size());
+    if (err == 0 && newline) {
+        err = writeAll("\n", 1);
+    }
+    if (err != 0) {
+        message = std::string(method) + "(): " + std::strerror(err);
         return false;
     }
     return true;
