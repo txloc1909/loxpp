@@ -410,6 +410,9 @@ TEST_F(SocketParkTest, ABlockingWaitSurvivesSignals) {
     std::atomic<bool> stop{false};
     std::thread shooter([&] {
         const pid_t self = static_cast<pid_t>(syscall(SYS_gettid));
+        // The program connects first, and connect() does not retry on a
+        // signal, so the signals start after the connection is open.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         while (!stop.load()) {
             DIR* dir = opendir("/proc/self/task");
             while (dir != nullptr) {
