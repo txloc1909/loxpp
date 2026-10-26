@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct epoll_event;
+
 class Poller {
   public:
     using Clock = std::chrono::steady_clock;
@@ -58,7 +60,7 @@ class Poller {
     // Makes a current or the next wait() return. Any thread. Sticky: a call
     // that comes before wait() makes that wait() return at once, so a wake
     // between the caller's last check and the wait is not lost.
-    void wake();
+    void wake() const;
 
   private:
     struct FdWait {
@@ -71,6 +73,9 @@ class Poller {
     };
 
     void dropFdWait(int fd, Token token);
+    [[nodiscard]] int nextTimeoutMs() const;
+    void collectFdWaits(const epoll_event& ev, std::vector<Token>& fired) const;
+    void collectTimers(std::vector<Token>& ready);
 
     int m_epoll{-1};
     int m_wakeFd{-1};

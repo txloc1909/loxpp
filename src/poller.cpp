@@ -3,6 +3,7 @@
 #include "worker.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <climits>
 #include <cstdint>
@@ -141,7 +142,7 @@ void Poller::cancelFd(int fd, std::vector<Token>& cancelled) {
     m_fds.erase(found);
 }
 
-void Poller::wake() {
+void Poller::wake() const {
     const std::uint64_t one = 1;
     // A full counter (EAGAIN) means a wake is already pending. EINTR cannot
     // happen on a nonblocking eventfd write.
@@ -149,50 +150,63 @@ void Poller::wake() {
     (void)n;
 }
 
+int Poller::nextTimeoutMs() const {
+    if (m_timerQueue.empty()) {
+        return -1;
+    }
+    const auto left = m_timerQueue.begin()->first - Clock::now();
+    if (left <= Clock::duration::zero()) {
+        return 0;
+    }
+    // Round up: a wait that ends a little early would spin.
+    const auto ms = std::chrono::ceil<std::chrono::milliseconds>(left).count();
+    return static_cast<int>(std::min<long long>(ms, INT_MAX));
+}
+
+void Poller::collectFdWaits(const epoll_event& ev,
+                            std::vector<Token>& fired) const {
+    auto found = m_fds.find(ev.data.fd);
+    if (found == m_fds.end()) {
+        return;
+    }
+    // An error or a hangup is ready for every interest: the call that waits
+    // reads or writes and sees the error itself.
+    const bool failed = (ev.events & (EPOLLERR | EPOLLHUP)) != 0;
+    for (const FdWait& w : found->second.waits) {
+        if (failed || (ev.events & eventBit(w.interest)) != 0) {
+            fired.push_back(w.token);
+        }
+    }
+}
+
+void Poller::collectTimers(std::vector<Token>& ready) {
+    const auto now = Clock::now();
+    while (!m_timerQueue.empty() && m_timerQueue.begin()->first <= now) {
+        const Token token = m_timerQueue.begin()->second;
+        m_timerQueue.erase(m_timerQueue.begin());
+        m_timers.erase(token);
+        ready.push_back(token);
+    }
+}
+
 void Poller::wait(std::vector<Token>& ready) {
     ready.clear();
-    epoll_event events[kMaxEvents];
+    std::array<epoll_event, kMaxEvents> events{};
     for (;;) {
         // Computed again on every pass, so an early return or a signal does
         // not stretch or cut the wait.
-        int timeoutMs = -1;
-        if (!m_timerQueue.empty()) {
-            const auto left = m_timerQueue.begin()->first - Clock::now();
-            if (left <= Clock::duration::zero()) {
-                timeoutMs = 0;
-            } else {
-                // Round up: a wait that ends a little early would spin.
-                const auto ms =
-                    std::chrono::ceil<std::chrono::milliseconds>(left).count();
-                timeoutMs = static_cast<int>(std::min<long long>(ms, INT_MAX));
-            }
-        }
-        const int n = ::epoll_wait(m_epoll, events, kMaxEvents, timeoutMs);
-        if (n < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+        const int n =
+            ::epoll_wait(m_epoll, events.data(), kMaxEvents, nextTimeoutMs());
+        if (n < 0 && errno != EINTR) {
             fatal("epoll_wait");
         }
         bool woken = false;
         std::vector<Token> fired;
         for (int i = 0; i < n; ++i) {
-            const epoll_event& ev = events[i];
-            if (ev.data.fd == m_wakeFd) {
+            if (events[i].data.fd == m_wakeFd) {
                 woken = true;
-                continue;
-            }
-            auto found = m_fds.find(ev.data.fd);
-            if (found == m_fds.end()) {
-                continue;
-            }
-            // An error or a hangup is ready for every interest: the call that
-            // waits reads or writes and sees the error itself.
-            const bool failed = (ev.events & (EPOLLERR | EPOLLHUP)) != 0;
-            for (const FdWait& w : found->second.waits) {
-                if (failed || (ev.events & eventBit(w.interest)) != 0) {
-                    fired.push_back(w.token);
-                }
+            } else {
+                collectFdWaits(events[i], fired);
             }
         }
         if (woken) {
@@ -202,17 +216,10 @@ void Poller::wait(std::vector<Token>& ready) {
         }
         std::sort(fired.begin(), fired.end());
         for (Token token : fired) {
-            auto fd = m_tokenFd.find(token);
-            dropFdWait(fd->second, token);
+            dropFdWait(m_tokenFd.find(token)->second, token);
         }
         ready.insert(ready.end(), fired.begin(), fired.end());
-        const auto now = Clock::now();
-        while (!m_timerQueue.empty() && m_timerQueue.begin()->first <= now) {
-            const Token token = m_timerQueue.begin()->second;
-            m_timerQueue.erase(m_timerQueue.begin());
-            m_timers.erase(token);
-            ready.push_back(token);
-        }
+        collectTimers(ready);
         if (woken || !ready.empty()) {
             return;
         }

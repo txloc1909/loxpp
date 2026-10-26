@@ -1292,14 +1292,48 @@ void Runtime::drainInbox() {
     batch.clear();
 }
 
+Poller& Runtime::poller() {
+    if (m_poller == nullptr) {
+        m_poller = std::make_unique<Poller>();
+        std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
+        m_mm.inbox().poller = m_poller.get();
+    }
+    return *m_poller;
+}
+
 Runtime::WaitResult Runtime::waitForWork() {
     Inbox& inbox = m_mm.inbox();
     std::unique_lock<std::mutex> lock(inbox.mutex);
-    if (!inbox.queue.empty()) {
-        return WaitResult::Work;
-    }
-    if (!m_isMainWorker && m_group->ended.load()) {
-        return WaitResult::Ended;
+    std::vector<Poller::Token> ready;
+    for (;;) {
+        if (!inbox.queue.empty()) {
+            return WaitResult::Work;
+        }
+        if (!m_isMainWorker && m_group->ended.load()) {
+            return WaitResult::Ended;
+        }
+        const bool polls = m_poller != nullptr && m_poller->hasWaits();
+        if (!polls) {
+            break;
+        }
+        // A worker with a registered wait stays busy for the deadlock count.
+        m_group->goIdle(inbox, WaitReason::Poller);
+        // A sender that appends after this unlock sees `polling` and writes
+        // the wakeup descriptor, which stays readable until wait() reads it:
+        // a send between the check of the queue above and epoll_wait is not
+        // lost.
+        inbox.polling = true;
+        lock.unlock();
+        m_poller->wait(ready);
+        lock.lock();
+        inbox.polling = false;
+        if (!ready.empty()) {
+            lock.unlock();
+            if (m_pollHandler) {
+                m_pollHandler(ready);
+            }
+            return WaitResult::Work;
+        }
     }
     if (m_group->goIdle(inbox) && m_isMainWorker) {
         inbox.idle = false;
@@ -1682,6 +1716,8 @@ Runtime::~Runtime() {
     {
         std::lock_guard<std::mutex> lock(m_mm.inbox().mutex);
         m_mm.inbox().runtime = nullptr;
+        m_mm.inbox().poller = nullptr;
+        m_mm.inbox().polling = false;
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());

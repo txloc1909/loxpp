@@ -31,6 +31,7 @@
 #include "exec_objects.h"
 #include "class_objects.h"
 #include "memory_manager.h"
+#include "poller.h"
 #include "table.h"
 #include "vm_limits.h"
 #include "stdlib/stdlib_context.h"
@@ -864,6 +865,18 @@ class Runtime {
     // and maps with no VM::run() opcode wrapping it (backend/rt_capi.cpp).
     [[nodiscard]] MemoryManager& memoryManager() { return m_mm; }
 
+    // The wait set of this worker. Created by the first call, which a park
+    // makes; a worker that never parks never makes one. Owner thread only.
+    Poller& poller();
+    [[nodiscard]] bool hasPoller() const { return m_poller != nullptr; }
+    // Called on the owner thread, outside every lock, with the tokens that
+    // one wait of the poller reported, in the order the Poller gives them.
+    // The scheduler looks at its run queue again after the call returns.
+    using PollHandler = std::function<void(const std::vector<Poller::Token>&)>;
+    void setPollHandler(PollHandler handler) {
+        m_pollHandler = std::move(handler);
+    }
+
     // Clears any error a previous stdlib native call left set. Op::PRINT
     // (vm.cpp) calls the equivalent of this before stringify(), because
     // stringify() can call back into stdlib code (e.g. a Map's own
@@ -953,8 +966,9 @@ class Runtime {
     // Delivers every envelope in the inbound queue to its task's mailbox.
     void drainInbox();
     enum class WaitResult : std::uint8_t { Work, Deadlock, Ended };
-    // No task is ready: waits until a message arrives, the program ends, or
-    // (main worker only) every worker waits.
+    // No task is ready: waits until a message arrives, a wait of the poller
+    // is reported, the program ends, or (main worker only) every worker
+    // waits.
     WaitResult waitForWork();
     // Reports DeadlockError with every task that waits in receive, on every
     // worker. The main worker only, after waitForWork() returned Deadlock.
@@ -1211,6 +1225,8 @@ class Runtime {
     };
     HeapOwner m_heapOwner;
     MemoryManager& m_mm;
+    std::unique_ptr<Poller> m_poller;
+    PollHandler m_pollHandler;
 
     CallFrame m_frames[FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE];
     int m_frameCount{0};

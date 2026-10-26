@@ -1,6 +1,8 @@
-// test_poller.cpp — the wait set of one worker (src/poller.h).
+// test_poller.cpp — the wait set of one worker (src/poller.h) and the idle
+// accounting that knows about it (WorkerGroup::goIdle, src/worker.h).
 
 #include "poller.h"
+#include "worker.h"
 
 #include <gtest/gtest.h>
 
@@ -303,4 +305,85 @@ TEST(PollerTest, DescriptorsAreCloseOnExecAndClosedWithThePoller) {
         }
     }
     EXPECT_EQ(openFds(), before);
+}
+
+// --- Idle accounting (C7) ----------------------------------------------------
+
+namespace {
+
+// Two workers of one group, built by hand: the main inbox and one more.
+struct TwoWorkers {
+    std::shared_ptr<WorkerGroup> group = std::make_shared<WorkerGroup>();
+    Inbox mainInbox;
+    Inbox other;
+    TwoWorkers() {
+        group->mainInbox = &mainInbox;
+        group->addWorker(&mainInbox);
+        group->addWorker(&other);
+        group->busy.store(2);
+        mainInbox.group = group;
+        other.group = group;
+    }
+};
+
+} // namespace
+
+TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
+    EXPECT_FALSE(w.other.idle);
+    EXPECT_EQ(w.group->busy.load(), 2);
+    // The main worker waits in receive with nothing inbound. The other can
+    // still end a wait, so this is not a deadlock.
+    EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_FALSE(w.group->deadlock.load());
+    EXPECT_EQ(w.group->busy.load(), 1);
+}
+
+TEST(IdleAccountingTest, RealDeadlockIsStillReported) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Inbox));
+    EXPECT_TRUE(w.group->goIdle(w.mainInbox, WaitReason::Inbox));
+    EXPECT_TRUE(w.group->deadlock.load());
+}
+
+// The wait ended and the worker waits for a message only: now it counts.
+TEST(IdleAccountingTest, WorkerThatLosesItsWaitsCountsAsIdle) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
+    EXPECT_FALSE(w.group->deadlock.load());
+    EXPECT_TRUE(w.group->goIdle(w.other, WaitReason::Inbox));
+    EXPECT_TRUE(w.group->deadlock.load() || w.group->busy.load() == 0);
+}
+
+// A send to a worker that sleeps in its poller writes the wakeup descriptor.
+TEST(IdleAccountingTest, SendWakesAWorkerThatSleepsInItsPoller) {
+    TwoWorkers w;
+    Poller poller;
+    Pipe unused;
+    poller.waitFd(unused.rd, Poller::Interest::Read);
+    // A bound, so that a lost wake fails the test and does not hang it.
+    poller.waitUntil(Clock::now() + std::chrono::seconds(3));
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.poller = &poller;
+        w.other.polling = true;
+    }
+    std::thread sender([&] {
+        std::this_thread::sleep_for(milliseconds(50));
+        EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
+    });
+    std::vector<Poller::Token> ready;
+    const auto start = Clock::now();
+    poller.wait(ready);
+    sender.join();
+    EXPECT_TRUE(ready.empty());
+    EXPECT_LT(msSince(start), 2000);
+    EXPECT_TRUE(w.other.nonEmpty.load());
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.polling = false;
+        w.other.poller = nullptr;
+    }
 }
