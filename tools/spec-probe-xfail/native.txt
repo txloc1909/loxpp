@@ -1,5 +1,4 @@
 # Spec probes that the native VM does not pass: file name, then the reason.
-260_sleep_suspends_one_task.lox sleep() blocks the worker, so ticker runs after the sleep
 261_accept_suspends_one_task.lox accept() blocks the worker, so ticker never runs and the probe times out
 262_socket_read_suspends_one_task.lox read() blocks the worker, so ticker never runs and the probe times out
 263_socket_readline_suspends_one_task.lox readline() blocks the worker, so ticker never runs and the probe times out
@@ -8,9 +7,7 @@
 266_socket_write_suspends_one_task.lox write() blocks the worker when the connection is full, so ticker never runs and the probe times out
 267_socket_writeline_suspends_one_task.lox writeline() blocks the worker when the connection is full, so ticker never runs and the probe times out
 278_ready_descriptors_wake_in_registration_order.lox readline() blocks the worker, so the writer never runs and the probe times out
-279_sleepers_wake_in_deadline_order.lox sleep() blocks the worker, so the tasks wake in the order they started
 280_parked_task_is_not_deadlock.lox readline() blocks the worker, so the feeder never runs and the probe times out
 281_close_while_parked_raises.lox readline() blocks the worker, so the closer never runs and the probe times out
-282_for_in_map_changed_while_parked_is_fatal.lox sleep() blocks the worker, so the adder runs after the loop ends and the program does not halt
 284_coroutine_with_parked_call_stays_running.lox readline() blocks the worker, so checker never runs and the probe times out
 285_no_deferred_call_runs_while_parked.lox readline() blocks the worker, so checker never runs and the probe times out

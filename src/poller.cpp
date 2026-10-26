@@ -189,14 +189,14 @@ void Poller::collectTimers(std::vector<Token>& ready) {
     }
 }
 
-void Poller::wait(std::vector<Token>& ready) {
+void Poller::wait(std::vector<Token>& ready, bool block) {
     ready.clear();
     std::array<epoll_event, kMaxEvents> events{};
     for (;;) {
         // Computed again on every pass, so an early return or a signal does
         // not stretch or cut the wait.
-        const int n =
-            ::epoll_wait(m_epoll, events.data(), kMaxEvents, nextTimeoutMs());
+        const int n = ::epoll_wait(m_epoll, events.data(), kMaxEvents,
+                                   block ? nextTimeoutMs() : 0);
         if (n < 0 && errno != EINTR) {
             fatal("epoll_wait");
         }
@@ -220,7 +220,7 @@ void Poller::wait(std::vector<Token>& ready) {
         }
         ready.insert(ready.end(), fired.begin(), fired.end());
         collectTimers(ready);
-        if (woken || !ready.empty()) {
+        if (woken || !ready.empty() || !block) {
             return;
         }
     }

@@ -30,6 +30,7 @@
 
 #include "exec_objects.h"
 #include "class_objects.h"
+#include "container_objects.h"
 #include "memory_manager.h"
 #include "poller.h"
 #include "table.h"
@@ -44,6 +45,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -420,6 +422,25 @@ class Runtime {
     // callNative suspends the task when the native returns) or raised
     // YieldAcrossNativeError (outcome recorded for callNative).
     bool receiveFromNative(Value* out);
+
+    // A native that waits for time or a descriptor calls this instead of
+    // waiting. True: the current task suspends when the native returns, and
+    // the native returns a placeholder; the task is PARKED and leaves the run
+    // queue. False: the task cannot suspend here (taskCanSuspend()), nothing
+    // changed, and the native waits in place without spinning, then returns
+    // its result. `fd` is read only for FD_READ and FD_WRITE; `deadline` only
+    // for TIMER.
+    bool parkCurrentTask(ParkReason reason, int fd = -1,
+                         Poller::Clock::time_point deadline = {});
+    // Ends the wait of a PARKED task of this worker, on the owner thread. The
+    // task joins the back of the run queue and its call returns `value`
+    // (completePark) or raises a catchable fault of `kind` (failPark) when it
+    // runs again. Both cancel the wait if it is still registered.
+    void completePark(ObjTask* task, Value value);
+    void failPark(ObjTask* task, const char* kind, const char* msg);
+    // Adds a global native function. For a host that embeds natives, and for
+    // tests that need a native the stdlib does not have.
+    void defineNative(const char* name, NativeFn fn, int arity);
 
     // Raises a catchable fault from inside a native. The native then returns
     // a placeholder, and callNative propagates the recorded outcome.
@@ -988,6 +1009,27 @@ class Runtime {
     // Abandons every task but the main task: the run of the program ended.
     void endTasks();
 
+    // Puts the task that a park request suspended into the parked set and
+    // registers its wait. Called by resumeTask after the task's frames
+    // unwound.
+    void parkTask(ObjTask* task);
+    // Cancels the wait of a parked task and erases it from the parked set.
+    // No-op for a task that is not parked.
+    void releasePark(ObjTask* task);
+    // Looks at the poller without blocking, at a bounded rate, between two
+    // tasks of a busy worker.
+    void pollWhileBusy();
+    // Moves a PARKED task to the back of the run queue.
+    void unparkTask(ObjTask* task);
+    // Handles the tokens that one wait of the poller reported: wakes the
+    // parked tasks they name, then calls the handler of setPollHandler().
+    void onPollReady(const std::vector<Poller::Token>& ready);
+    // The continuation of a task that resumes with a pending fault: raises it
+    // in the innermost coroutine of the task, whose frames are restored and
+    // whose native has returned. `entry` is the loop boundary of that
+    // coroutine. False when the fault ended the program.
+    bool raiseResumeFault(int entry);
+
     // True when a receive on an empty mailbox can suspend the current task:
     // every C++ frame between the task's base and the receive native is the
     // resume of a coroutine the task resumed, so a suspension loses no C++
@@ -1296,6 +1338,27 @@ class Runtime {
     // The tasks that wait in task.receive(), rooted so the deadlock report
     // can name each one.
     std::unordered_set<ObjTask*> m_waitingTasks;
+    // What parkCurrentTask asked for, until resumeTask carries it out.
+    struct ParkRequest {
+        ParkReason reason{ParkReason::NONE};
+        int fd{-1};
+        Poller::Clock::time_point deadline{};
+    };
+    ParkRequest m_parkRequest;
+    // The PARKED tasks of this worker by the token of their wait, rooted for
+    // the collector (pushTempRoot cannot span a suspension). Not the same as
+    // m_waitingTasks: those wait for a message, not for time or a descriptor.
+    std::unordered_map<Poller::Token, ObjTask*> m_parkedTasks;
+    // A fault a resumed task raises before it runs on. Set by resumeTask,
+    // consumed by the resume of the innermost coroutine of the task.
+    struct ResumeFault {
+        bool pending{false};
+        std::string kind;
+        std::string message;
+    };
+    ResumeFault m_resumeFault;
+    int m_switchesSincePoll{0};
+    Poller::Clock::time_point m_lastPoll{};
     // Tasks of this run that have not ended, the main task included.
     int m_liveTasks{0};
     std::uint64_t m_nextTaskSerial{0};

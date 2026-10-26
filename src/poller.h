@@ -55,7 +55,9 @@ class Poller {
     // holds the reported tokens: the descriptor waits in registration order,
     // then the timers in deadline order. It is empty when only wake() ended
     // the call. With no wait registered, it returns after wake() only.
-    void wait(std::vector<Token>& ready);
+    // With `block` false it looks once, never sleeps, and returns with `ready`
+    // empty when nothing is due.
+    void wait(std::vector<Token>& ready, bool block = true);
 
     // Makes a current or the next wait() return. Any thread. Sticky: a call
     // that comes before wait() makes that wait() return at once, so a wake

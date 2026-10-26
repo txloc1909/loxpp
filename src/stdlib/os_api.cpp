@@ -1,10 +1,13 @@
 #include "os_api.h"
 #include "stdlib_context.h"
+#include "../poller.h"
+#include "../runtime.h"
 #include "../worker.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
 #include "../value.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -100,9 +103,28 @@ static Value sleepNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     double seconds = as<Number>(argv[0]);
-    if (seconds > 0) {
-        std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+    // Zero, a negative duration and NaN return at once with no suspension.
+    if (!(seconds > 0)) {
+        return from<Nil>(Nil{});
     }
+    // The deadline is `seconds` from now, or the latest time the clock can
+    // represent when `seconds` reaches that limit (about 292 years): such a
+    // wait does not end, and the sum never overflows. The 1 second margin
+    // keeps the double conversion below the clock's range.
+    const auto now = Poller::Clock::now();
+    const double room =
+        std::chrono::duration<double>(Poller::Clock::time_point::max() - now)
+            .count();
+    const auto deadline =
+        seconds >= room - 1.0
+            ? Poller::Clock::time_point::max()
+            : now + std::chrono::duration_cast<Poller::Clock::duration>(
+                        std::chrono::duration<double>(seconds));
+    if (getActiveRuntime()->parkCurrentTask(ParkReason::TIMER, -1, deadline)) {
+        return from<Nil>(Nil{});
+    }
+    // The task cannot suspend here, so the worker waits in the kernel.
+    std::this_thread::sleep_until(deadline);
     return from<Nil>(Nil{});
 }
 

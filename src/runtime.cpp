@@ -824,11 +824,16 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                                   ? callerFrame->ip
                                   : Chunk::const_iterator{};
         WakeResult wake = WakeResult::Run;
-        if (co->waitingInner != nullptr) {
+        // The coroutine that holds the suspended call is the one at the end
+        // of the chain; a parked call's fault is raised there.
+        const bool innermost = co->waitingInner == nullptr;
+        if (!innermost) {
             wake = resumeWaitingInner(co, entry);
         }
         if (wake == WakeResult::Run) {
-            loopOk = runNestedLoop(entry);
+            loopOk = (innermost && m_resumeFault.pending)
+                         ? raiseResumeFault(entry)
+                         : runNestedLoop(entry);
         } else if (wake == WakeResult::Fatal) {
             loopOk = false;
         }
@@ -1061,6 +1066,151 @@ void Runtime::suspendForTaskSwitch(ObjIterator* iter) {
     m_taskSwitchInner = co;
 }
 
+bool Runtime::raiseResumeFault(int entry) {
+    std::string kind = std::move(m_resumeFault.kind);
+    std::string message = std::move(m_resumeFault.message);
+    m_resumeFault = ResumeFault{};
+    // The native that made the call returned when the task parked, so the
+    // value that the resume put on the stack is not a result: a handler
+    // truncates the stack, and the other outcomes reset it.
+    switch (raiseThrowableError(kind.c_str(), message.c_str(), entry)) {
+    case ThrowOutcome::HandledContinue:
+        return runNestedLoop(entry);
+    case ThrowOutcome::HandledStop:
+        // A handler in a frame below this coroutine caught it. The caller of
+        // this function sees the redirected resumer and ends the coroutine.
+        return true;
+    case ThrowOutcome::Uncaught:
+    case ThrowOutcome::Pushed:
+        break;
+    }
+    return false;
+}
+
+bool Runtime::parkCurrentTask(ParkReason reason, int fd,
+                              Poller::Clock::time_point deadline) {
+    if (!taskCanSuspend()) {
+        return false;
+    }
+    m_parkRequest = ParkRequest{reason, fd, deadline};
+    m_taskSwitchPending = true;
+    m_taskSwitchInner = nullptr;
+    return true;
+}
+
+void Runtime::parkTask(ObjTask* task) {
+    const ParkRequest request = m_parkRequest;
+    m_parkRequest = ParkRequest{};
+    Poller::Token token = 0;
+    switch (request.reason) {
+    case ParkReason::TIMER:
+        token = poller().waitUntil(request.deadline);
+        break;
+    case ParkReason::FD_READ:
+        token = poller().waitFd(request.fd, Poller::Interest::Read);
+        break;
+    case ParkReason::FD_WRITE:
+        token = poller().waitFd(request.fd, Poller::Interest::Write);
+        break;
+    case ParkReason::NONE:
+        break;
+    }
+    task->pendingValue = Value{};
+    if (token == 0) {
+        // epoll refuses the descriptor (a regular file): it never blocks, so
+        // the call continues at once.
+        task->state = TaskState::READY;
+        m_runQueue.push_back(task);
+        return;
+    }
+    task->state = TaskState::PARKED;
+    task->parkReason = request.reason;
+    task->parkToken = token;
+    m_parkedTasks.emplace(token, task);
+}
+
+void Runtime::releasePark(ObjTask* task) {
+    if (task->parkReason == ParkReason::NONE) {
+        return;
+    }
+    // A wait that the poller reported is gone already; cancel() is then a
+    // no-op that returns false.
+    if (m_poller != nullptr) {
+        m_poller->cancel(task->parkToken);
+    }
+    m_parkedTasks.erase(task->parkToken);
+    task->parkReason = ParkReason::NONE;
+    task->parkToken = 0;
+}
+
+void Runtime::unparkTask(ObjTask* task) {
+    if (task->state != TaskState::PARKED) {
+        return;
+    }
+    releasePark(task);
+    task->state = TaskState::READY;
+    m_runQueue.push_back(task);
+}
+
+void Runtime::completePark(ObjTask* task, Value value) {
+    if (task->state != TaskState::PARKED) {
+        return;
+    }
+    task->pendingValue = value;
+    unparkTask(task);
+}
+
+void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
+    if (task->state != TaskState::PARKED) {
+        return;
+    }
+    task->hasPendingFault = true;
+    task->faultKind = kind;
+    task->faultMessage = msg;
+    unparkTask(task);
+}
+
+void Runtime::pollWhileBusy() {
+    // A task that is ready must not starve a wait that is over. A syscall per
+    // switch would tax every task switch while any wait exists, so the poll
+    // runs at most once per kPollInterval, and the clock is read only every
+    // kSwitchesPerClockRead switches.
+    constexpr int kSwitchesPerClockRead = 16;
+    constexpr auto kPollInterval = std::chrono::milliseconds(1);
+    if (!m_poller->hasWaits() ||
+        ++m_switchesSincePoll < kSwitchesPerClockRead) {
+        return;
+    }
+    m_switchesSincePoll = 0;
+    const auto now = Poller::Clock::now();
+    if (now - m_lastPoll < kPollInterval) {
+        return;
+    }
+    m_lastPoll = now;
+    std::vector<Poller::Token> ready;
+    m_poller->wait(ready, false);
+    if (!ready.empty()) {
+        onPollReady(ready);
+    }
+}
+
+void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
+    for (Poller::Token token : ready) {
+        auto found = m_parkedTasks.find(token);
+        if (found != m_parkedTasks.end()) {
+            completePark(found->second, from<Nil>(Nil{}));
+        }
+    }
+    if (m_pollHandler) {
+        m_pollHandler(ready);
+    }
+}
+
+void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
+    StdlibRegistrar reg(m_mm, m_globals);
+    reg.defineGlobal(name, fn, arity);
+}
+
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
     return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
@@ -1102,6 +1252,9 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->co = nullptr;
     task->mailbox.clear();
     task->startArg = Value{};
+    task->pendingValue = Value{};
+    task->hasPendingFault = false;
+    releasePark(task);
     m_waitingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
@@ -1192,7 +1345,14 @@ bool Runtime::resumeTask(ObjTask* task) {
         if (!task->mailbox.empty() && task->receiving) {
             received = task->mailbox.front();
             task->mailbox.pop_front();
+        } else if (task->hasPendingFault) {
+            m_resumeFault = ResumeFault{true, std::move(task->faultKind),
+                                        std::move(task->faultMessage)};
+            task->hasPendingFault = false;
+        } else {
+            received = task->pendingValue;
         }
+        task->pendingValue = Value{};
         task->receiving = false;
         push(received);
         argCount = 1;
@@ -1211,6 +1371,7 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
     m_currentTask = nullptr;
+    m_resumeFault = ResumeFault{};
 
     if (!ok) {
         endTaskOrLine(task);
@@ -1230,6 +1391,10 @@ bool Runtime::resumeTask(ObjTask* task) {
     if (m_taskSwitchPending) {
         m_taskSwitchPending = false;
         m_taskSwitchInner = nullptr;
+        if (m_parkRequest.reason != ParkReason::NONE) {
+            parkTask(task);
+            return true;
+        }
         task->state = TaskState::WAITING;
         task->receiving = true;
         m_waitingTasks.insert(task);
@@ -1247,13 +1412,25 @@ void Runtime::endTasks() {
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    for (const auto& parked : m_parkedTasks) {
+        left.push_back(parked.second);
+    }
     for (ObjTask* task : left) {
         if (task != m_mainTask || !m_isMainWorker) {
             markTaskDead(task);
+        } else {
+            // The main task of a session survives the line, but its wait does
+            // not: nothing would end it once m_parkedTasks is cleared below.
+            releasePark(task);
+            task->pendingValue = Value{};
+            task->hasPendingFault = false;
         }
     }
     m_runQueue.clear();
     m_waitingTasks.clear();
+    m_parkedTasks.clear();
+    m_parkRequest = ParkRequest{};
+    m_resumeFault = ResumeFault{};
     m_liveTasks = 0;
     m_currentTask = nullptr;
     m_taskSwitchPending = false;
@@ -1329,9 +1506,7 @@ Runtime::WaitResult Runtime::waitForWork() {
         inbox.polling = false;
         if (!ready.empty()) {
             lock.unlock();
-            if (m_pollHandler) {
-                m_pollHandler(ready);
-            }
+            onPollReady(ready);
             return WaitResult::Work;
         }
     }
@@ -1421,6 +1596,9 @@ InterpretResult Runtime::schedule() {
             return InterpretResult::OK;
         }
         drainInbox();
+        if (m_poller != nullptr && !m_runQueue.empty()) {
+            pollWhileBusy();
+        }
         if (m_runQueue.empty()) {
             switch (waitForWork()) {
             case WaitResult::Work:
@@ -1721,6 +1899,9 @@ Runtime::~Runtime() {
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    for (const auto& parked : m_parkedTasks) {
+        left.push_back(parked.second);
+    }
     if (m_mainTask != nullptr) {
         left.push_back(m_mainTask);
     }
@@ -2198,6 +2379,9 @@ void Runtime::markRoots() {
     }
     for (ObjTask* task : m_waitingTasks) {
         m_mm.markObject(task);
+    }
+    for (const auto& parked : m_parkedTasks) {
+        m_mm.markObject(parked.second);
     }
     if (m_taskSwitchInner != nullptr) {
         m_mm.markObject(m_taskSwitchInner);

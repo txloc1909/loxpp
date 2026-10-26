@@ -2640,6 +2640,20 @@ fun reflectTypeName(v) {
     return "Unknown";
 }
 
+// The interpreted program runs as host tasks, and a host sleep() that can
+// suspend would let the other interpreted tasks run. The bootstrap keeps its
+// one-thread form: a sleep blocks every task (spec/README.md, Conformance).
+// The host cannot suspend a task inside the __str__ that str() calls, so the
+// sleep happens there and blocks the host worker.
+class BlockingSleeper {
+    init(seconds) { this.seconds = seconds; }
+    __str__() { sleep(this.seconds); return ""; }
+}
+fun blockingSleep(seconds) {
+    str(BlockingSleeper(seconds));
+    return nil;
+}
+
 // True when v is a Function or a BoundMethod, the exact set type() reports as
 // "Function" or "BoundMethod" (see reflectTypeName above). coroutine.create
 // and task.spawn accept exactly this set: a closure, a native, a math
@@ -2865,7 +2879,7 @@ class LoxNative {
         if (this.name == "env") return env(args[0]);
         if (this.name == "exit") return exit(args[0]);
         if (this.name == "time") return time();
-        if (this.name == "sleep") return sleep(args[0]);
+        if (this.name == "sleep") return blockingSleep(args[0]);
         if (this.name == "exists") return exists(args[0]);
         if (this.name == "is_dir") return is_dir(args[0]);
         if (this.name == "is_file") return is_file(args[0]);

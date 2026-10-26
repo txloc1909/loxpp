@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <deque>
 #include <functional>
+#include <string>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -431,7 +432,16 @@ enum class TaskState : std::uint8_t {
     READY,   // in the run queue
     RUNNING, // the scheduler resumed it and it has not suspended yet
     WAITING, // suspended in task.receive() on an empty mailbox
+    PARKED,  // suspended in a native call that waits for time or a descriptor
     DEAD,    // its function returned, or the program ended it
+};
+
+// What a parked task waits for. The wait is one wait of the worker's Poller.
+enum class ParkReason : std::uint8_t {
+    NONE,
+    FD_READ,
+    FD_WRITE,
+    TIMER,
 };
 
 // The object lives in the heap of its worker. A handle on another worker is
@@ -449,6 +459,17 @@ struct ObjTask : public Obj {
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
     bool receiving{false};
+    // Set while the task is PARKED: what it waits for and the Poller token of
+    // that wait. A parked task keeps its result and its fault here, not in the
+    // mailbox, so task.pending() never sees them.
+    ParkReason parkReason{ParkReason::NONE};
+    std::uint64_t parkToken{0};
+    // The value of the parked call when the task runs again, unless a fault
+    // is set. `hasPendingFault` and the strings are plain C++ data.
+    Value pendingValue;
+    bool hasPendingFault{false};
+    std::string faultKind;
+    std::string faultMessage;
     // The first resume calls the function with this one argument when
     // `hasStartArg` is set: the message of task.spawn_worker.
     bool hasStartArg{false};
