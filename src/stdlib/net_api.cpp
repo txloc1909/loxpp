@@ -259,14 +259,13 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
 // Size of one read from the descriptor.
 static constexpr size_t kReadChunk = 4096;
 
-enum class Fill { Data, Eof, Failed };
+enum class Fill : unsigned char { Data, Eof, Failed };
 
-// read(2) with EINTR retried. A failure, other than EINTR, is a NetworkError:
-// it is not an end of stream.
-static ssize_t readRetry(ObjSocket* s, char* dst, size_t size,
-                         const char* method) {
+// read(2) into `dst`, with EINTR retried. A failure, other than EINTR, is a
+// NetworkError: it is not an end of stream.
+static ssize_t readRetry(int fd, char* dst, size_t size, const char* method) {
     for (;;) {
-        ssize_t n = ::read(s->fd, dst, size);
+        ssize_t n = ::read(fd, dst, size);
         if (n >= 0) {
             return n;
         }
@@ -278,34 +277,48 @@ static ssize_t readRetry(ObjSocket* s, char* dst, size_t size,
     }
 }
 
-// Drop the bytes already returned, so the buffer holds only the unread tail.
-static void compactInput(ObjSocket* s) {
-    if (s->inPos > 0) {
-        s->inbuf.erase(0, s->inPos);
-        s->inPos = 0;
-    }
+// Read up to `want` bytes and append them to `buf`. Returns the count, 0 at
+// the end of the stream, or -1 after raising a fault. `buf` is unchanged
+// unless bytes arrive.
+static ssize_t appendRead(int fd, std::string& buf, size_t want,
+                          const char* method) {
+    size_t old = buf.size();
+    buf.resize(old + want);
+    ssize_t n = readRetry(fd, &buf[old], want, method);
+    buf.resize(old + (n > 0 ? static_cast<size_t>(n) : 0));
+    return n;
 }
 
-// Append one read chunk to the input buffer. The buffer is the only place a
-// read can hold bytes past the end of the line it returns, because a
-// descriptor has no stdio buffer. So readline() keeps what follows the line
-// here, and read(), read_bytes() and readlines() consume it first. The
-// buffer holds the line being built plus at most one chunk past its end.
+// The input buffer holds exactly the bytes read from the descriptor and not
+// yet returned. A descriptor has no stdio buffer, so readline() keeps what
+// follows its line here, and read(), read_bytes(), readlines() and readline()
+// consume it first. While readline() builds a line the buffer holds that line
+// plus at most one chunk past its end. After any read returns, the buffer
+// holds only the unread tail in storage of its own (takeInput moves the old
+// storage out with the result), so a socket does not keep the memory of its
+// longest line.
+
+// Move the first `n` bytes of the input buffer out as a result, and keep the
+// tail. The prefix is moved, not copied, so a long line exists once.
+static std::string takeInput(ObjSocket* s, size_t n) {
+    std::string tail(s->inbuf, n);
+    std::string out = std::move(s->inbuf);
+    out.resize(n);
+    s->inbuf = std::move(tail);
+    return out;
+}
+
+// Append one read chunk to the input buffer.
 static Fill fillInput(ObjSocket* s, const char* method) {
-    char chunk[kReadChunk];
-    ssize_t n = readRetry(s, chunk, sizeof(chunk), method);
+    ssize_t n = appendRead(s->fd, s->inbuf, kReadChunk, method);
     if (n < 0) {
         return Fill::Failed;
     }
-    if (n == 0) {
-        return Fill::Eof;
-    }
-    s->inbuf.append(chunk, static_cast<size_t>(n));
-    return Fill::Data;
+    return n == 0 ? Fill::Eof : Fill::Data;
 }
 
 // Read to the end of the stream into the input buffer. Returns false after
-// raising a fault.
+// raising a fault; the bytes that arrived stay in the buffer.
 static bool fillToEof(ObjSocket* s, const char* method) {
     for (;;) {
         switch (fillInput(s, method)) {
@@ -324,12 +337,10 @@ static Value socketReadNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    compactInput(s);
     if (!fillToEof(s, "read")) {
         return from<Nil>(Nil{});
     }
-    std::string buf = std::move(s->inbuf);
-    s->inbuf.clear();
+    std::string buf = takeInput(s, s->inbuf.size());
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
@@ -342,30 +353,25 @@ static Value socketReadBytesNative(int /*argc*/, Value* args) {
     if (!asByteCount(args[0], "read_bytes", n)) {
         return from<Nil>(Nil{});
     }
-    std::string out;
-    size_t buffered = s->inbuf.size() - s->inPos;
-    size_t take = buffered < n ? buffered : n;
-    out.assign(s->inbuf, s->inPos, take);
-    s->inPos += take;
+    size_t take = s->inbuf.size() < n ? s->inbuf.size() : n;
+    std::string out = takeInput(s, take);
     // Read the rest straight into the result: the want is bounded by the
     // count, so no byte past it is read and none needs buffering.
-    char chunk[kReadChunk];
     while (out.size() < n) {
         size_t want = n - out.size();
-        if (want > sizeof(chunk)) {
-            want = sizeof(chunk);
+        if (want > kReadChunk) {
+            want = kReadChunk;
         }
-        ssize_t got = readRetry(s, chunk, want, "read_bytes");
+        ssize_t got = appendRead(s->fd, out, want, "read_bytes");
         if (got < 0) {
             // Keep what arrived, so a later read does not lose it.
-            compactInput(s);
-            s->inbuf.insert(0, out);
+            out.append(s->inbuf);
+            s->inbuf = std::move(out);
             return from<Nil>(Nil{});
         }
         if (got == 0) {
             break;
         }
-        out.append(chunk, static_cast<size_t>(got));
     }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(out)))};
 }
@@ -375,13 +381,12 @@ static Value socketReadlineNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    compactInput(s);
     size_t scanned = 0;
     for (;;) {
         size_t nl = s->inbuf.find('\n', scanned);
         if (nl != std::string::npos) {
-            std::string line = s->inbuf.substr(0, nl);
-            s->inPos = nl + 1;
+            std::string line = takeInput(s, nl);
+            s->inbuf.erase(0, 1); // the newline
             return Value{
                 static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
         }
@@ -394,8 +399,7 @@ static Value socketReadlineNative(int /*argc*/, Value* args) {
             if (s->inbuf.empty()) {
                 return from<Nil>(Nil{});
             }
-            std::string line = std::move(s->inbuf);
-            s->inbuf.clear();
+            std::string line = takeInput(s, s->inbuf.size());
             return Value{
                 static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
         }
@@ -407,12 +411,10 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    compactInput(s);
     if (!fillToEof(s, "readlines")) {
         return from<Nil>(Nil{});
     }
-    std::string data = std::move(s->inbuf);
-    s->inbuf.clear();
+    std::string data = takeInput(s, s->inbuf.size());
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);

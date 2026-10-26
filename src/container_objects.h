@@ -94,9 +94,7 @@ struct ObjSocket : public Obj {
     bool writeClosed{false};
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
-    // The bytes before `inPos` are already returned.
     std::string inbuf;
-    size_t inPos{0};
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;
