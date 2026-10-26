@@ -137,7 +137,8 @@ separate rule.
 
 A program is **portable** when it does not catch a halting fault, does not
 depend on the text of a message, stays within the limits of each
-implementation, and does not need two workers to run at the same time. Every
+implementation, does not need two workers to run at the same time, and does
+not depend on connection loss on read. Every
 conforming implementation gives a portable program the same output and the
 same exit status.
 
