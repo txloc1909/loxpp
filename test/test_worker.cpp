@@ -451,6 +451,133 @@ TEST_F(WorkerTest, AnIdleWorkerUsesNoCpu) {
     EXPECT_EQ(after.state, 'S');
 }
 
+// --- The poller of a worker --------------------------------------------------
+//
+// These tests register the wait from the host, through Runtime::poller(), and
+// handle it with Runtime::setPollHandler().
+
+namespace {
+
+using PClock = Poller::Clock;
+
+long msSince(PClock::time_point start) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(PClock::now() -
+                                                                 start)
+        .count();
+}
+
+} // namespace
+
+// A program that never parks makes no poller, and opens no descriptor.
+TEST_F(WorkerTest, AWorkerThatNeverParksMakesNoPoller) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(R"(
+        fun far(main) { sleep(0.01); task.send(main, "x"); }
+        task.spawn_worker(far, task.self());
+        var got = task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_FALSE(vm.runtime().hasPoller());
+}
+
+// The main task waits in receive while its worker sleeps in the poller, on a
+// timer that is far away. A send from another worker must wake it at once. If
+// the sender does not write the wakeup descriptor, the worker sleeps until the
+// timer.
+TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
+    VM vm;
+    vm.runtime().poller().waitUntil(PClock::now() + std::chrono::seconds(8));
+    const auto start = PClock::now();
+    ASSERT_EQ(vm.interpret(R"(
+        fun far(main) { sleep(0.1); task.send(main, "hi"); }
+        task.spawn_worker(far, task.self());
+        var got = task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "got"), "hi");
+    EXPECT_LT(msSince(start), 4000);
+}
+
+// The main worker holds a timer, so it is busy, and the main task waits in
+// receive. The timer posts the message: no DeadlockError may come first.
+TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
+    VM vm;
+    int fired = 0;
+    Runtime& rt = vm.runtime();
+    rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(300));
+    rt.setPollHandler([&](const std::vector<Poller::Token>&) {
+        ++fired;
+        // C7: the worker holds a wait, so it never counted itself idle.
+        // This is the test that ties waitForWork to WaitReason::Poller.
+        Inbox& inbox = rt.memoryManager().inbox();
+        EXPECT_FALSE(inbox.idle);
+        EXPECT_EQ(inbox.group->busy.load(), 1);
+        auto me = vm.getGlobal("me");
+        ASSERT_TRUE(me.has_value());
+        ASSERT_TRUE(postEnvelope(
+            rt.memoryManager().inbox(),
+            Envelope{static_cast<ObjTask*>(as<Obj*>(*me)), Value{Number{7}}}));
+    });
+    testing::internal::CaptureStderr();
+    InterpretResult result = vm.interpret(R"(
+        var me = task.self();
+        var got = task.receive();
+    )");
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, InterpretResult::OK) << err;
+    EXPECT_EQ(err.find("Deadlock"), std::string::npos) << err;
+    EXPECT_EQ(fired, 1);
+    EXPECT_EQ(globalString(vm, "got"), "7");
+}
+
+// The runtime clears the pointers that senders use before the poller is
+// destroyed, and the inbox outlives the runtime while a message is held.
+TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
+    MemoryManager* heap = nullptr;
+    Value held;
+    {
+        VM vm;
+        ASSERT_EQ(vm.interpret("var s = [1];"), InterpretResult::OK);
+        heap = &vm.runtime().memoryManager();
+        vm.runtime().poller();
+        {
+            std::lock_guard<std::mutex> lock(heap->inbox().mutex);
+            EXPECT_NE(heap->inbox().poller, nullptr);
+            heap->inbox().polling = true;
+        }
+        Obj* obj = globalObj(vm, "s");
+        ASSERT_NE(obj, nullptr);
+        heap->hold(obj);
+        held = Value{obj};
+    }
+    {
+        std::lock_guard<std::mutex> lock(heap->inbox().mutex);
+        EXPECT_EQ(heap->inbox().poller, nullptr);
+        EXPECT_FALSE(heap->inbox().polling);
+    }
+    MemoryManager::releaseValue(held);
+}
+
+// When the registered wait ends and nothing can send, the deadlock is real.
+TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
+    VM vm;
+    int fired = 0;
+    const auto start = PClock::now();
+    vm.runtime().poller().waitUntil(PClock::now() +
+                                    std::chrono::milliseconds(200));
+    vm.runtime().setPollHandler(
+        [&](const std::vector<Poller::Token>&) { ++fired; });
+    testing::internal::CaptureStderr();
+    InterpretResult result = vm.interpret("var got = task.receive();");
+    std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("Deadlock: every task waits in receive.\n"),
+              std::string::npos)
+        << err;
+    EXPECT_EQ(fired, 1);
+    EXPECT_GE(msSince(start), 190);
+}
+
 // Two workers exchange many messages, enum values with a string field, both
 // ways, under collection on both sides. The `_gc` twin collects on every
 // allocation. A count off by one in either direction frees a message that

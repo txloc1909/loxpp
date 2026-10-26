@@ -47,6 +47,7 @@ struct Envelope {
 };
 
 class WorkerGroup;
+class Poller;
 
 // One per heap. A sender takes the lock, appends, releases, and signals. The
 // receiving worker swaps the queue out under the lock between tasks.
@@ -67,6 +68,13 @@ struct Inbox {
     std::shared_ptr<WorkerGroup> group;
     Runtime* runtime{nullptr};
     int workerNumber{0};
+    // Guarded by `mutex`. The poller of this worker, null until its first
+    // park (src/poller.h), and true while the worker sleeps in it. A sender
+    // that sees `polling` also wakes the poller, as `wake` does not reach a
+    // thread that waits in epoll. The worker clears `polling` and `poller`
+    // under `mutex` before it destroys the poller.
+    Poller* poller{nullptr};
+    bool polling{false};
     // A hint that `queue` is not empty, so a worker reads one atomic between
     // two tasks and takes the lock only when there is work.
     std::atomic<bool> nonEmpty{false};
@@ -75,6 +83,22 @@ struct Inbox {
 // Appends `env` to the queue of `target` and wakes its worker. Returns false,
 // and appends nothing, when that worker ended.
 bool postEnvelope(Inbox& target, const Envelope& env);
+
+// Wakes the worker of `inbox` wherever it sleeps: on `wake`, or in its poller.
+// The caller must not hold `inbox.mutex`. The mutex is taken and dropped
+// first, so a state change that the caller made before cannot fall between
+// the worker's check of it and its sleep.
+void wakeWorker(Inbox& inbox);
+
+// Why a worker has no task to run. Both reasons sleep the thread; they differ
+// in what the worker can still do.
+enum class WaitReason : std::uint8_t {
+    // Only a message, or the end of the program, can wake it.
+    Inbox,
+    // A descriptor or a timer is registered with its poller. It can make
+    // progress with no message, so it counts as busy.
+    Poller,
+};
 
 // --- One run of a program across its workers --------------------------------
 
@@ -115,8 +139,10 @@ class WorkerGroup {
     // Called with `inbox.mutex` held and `inbox.queue` empty. Marks the
     // worker idle. Returns true when it was the last busy worker: then the
     // program is in deadlock, `deadlock` is set, and the main worker is
-    // woken to report it.
-    bool goIdle(Inbox& inbox);
+    // woken to report it. With WaitReason::Poller the worker stays busy and
+    // the result is false: a registered wait can end with no message, so the
+    // program is not in deadlock while one exists.
+    bool goIdle(Inbox& inbox, WaitReason reason = WaitReason::Inbox);
     // A worker leaves the group for good (its tasks all ended). Returns true
     // when that makes every worker idle: a deadlock, as for goIdle().
     bool leave(Inbox& inbox);

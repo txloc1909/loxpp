@@ -43,6 +43,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/worker.cpp
+    ${PROJECT_SOURCE_DIR}/src/poller.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
     ${PROJECT_SOURCE_DIR}/src/scanner.cpp
     ${PROJECT_SOURCE_DIR}/src/stdlib/stdlib_context.cpp
@@ -136,6 +137,7 @@ loxpp_add_test(test_coroutine       test_coroutine.cpp       CORE loxpp_test_cor
 loxpp_add_test(test_coroutine_gc    test_coroutine.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_task            test_task.cpp            CORE loxpp_test_core PROBE)
 loxpp_add_test(test_task_gc         test_task.cpp            CORE loxpp_test_core PROBE)
+loxpp_add_test(test_poller          test_poller.cpp          CORE loxpp_test_core)
 loxpp_add_test(test_worker          test_worker.cpp          CORE loxpp_test_core)
 loxpp_add_test(test_worker_gc       test_worker.cpp          CORE loxpp_test_core)
 loxpp_add_test(test_repl            test_repl.cpp            CORE loxpp_test_core)
@@ -433,7 +435,7 @@ set(LOXPP_GTEST_TARGETS
     test_operator_overload
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
-    test_coroutine test_coroutine_gc test_task test_task_gc test_worker
+    test_coroutine test_coroutine_gc test_task test_task_gc test_poller test_worker
     test_worker_gc test_repl test_repl_gc
     test_chunk_decoder test_backend_cfg test_backend_abstract_stack
     test_backend_capture test_nonlocal_cfg test_handler_stack_leak

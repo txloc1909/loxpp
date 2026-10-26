@@ -1,5 +1,7 @@
 #include "worker.h"
 
+#include "poller.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -74,9 +76,23 @@ bool postEnvelope(Inbox& target, const Envelope& env) {
             target.idle = false;
             target.group->busy.fetch_add(1);
         }
+        // Inside the lock: the poller is alive while `polling` is set.
+        if (target.polling) {
+            target.poller->wake();
+        }
     }
     target.wake.notify_one();
     return true;
+}
+
+void wakeWorker(Inbox& inbox) {
+    {
+        std::lock_guard<std::mutex> lock(inbox.mutex);
+        if (inbox.polling) {
+            inbox.poller->wake();
+        }
+    }
+    inbox.wake.notify_all();
 }
 
 void WorkerGroup::addWorker(Inbox* inbox) {
@@ -90,7 +106,10 @@ void WorkerGroup::removeWorker(Inbox* inbox) {
                   inboxes.end());
 }
 
-bool WorkerGroup::goIdle(Inbox& inbox) {
+bool WorkerGroup::goIdle(Inbox& inbox, WaitReason reason) {
+    if (reason == WaitReason::Poller) {
+        return false;
+    }
     inbox.idle = true;
     if (busy.fetch_sub(1) != 1) {
         return false;
@@ -131,20 +150,14 @@ bool WorkerGroup::leave(Inbox& inbox) {
 
 void WorkerGroup::signalDeadlock() {
     deadlock.store(true);
-    // Take and drop the main worker's lock, so the store cannot fall between
-    // its check of the wait condition and its wait.
-    { std::lock_guard<std::mutex> lock(mainInbox->mutex); }
-    mainInbox->wake.notify_all();
+    wakeWorker(*mainInbox);
 }
 
 void WorkerGroup::end() {
     ended.store(true);
     std::lock_guard<std::mutex> lock(mutex);
     for (Inbox* inbox : inboxes) {
-        {
-            std::lock_guard<std::mutex> inner(inbox->mutex);
-        }
-        inbox->wake.notify_all();
+        wakeWorker(*inbox);
     }
 }
 
