@@ -6,6 +6,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <poll.h>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
@@ -85,6 +86,17 @@ inline bool writeFd(int fd, const char* method, std::string_view text,
             ssize_t n = ::send(fd, data, size, MSG_NOSIGNAL);
             if (n < 0) {
                 if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // The descriptor is nonblocking and the connection is
+                    // full. A write blocks its worker, so wait in the kernel.
+                    struct pollfd pfd = {fd, POLLOUT, 0};
+                    while (::poll(&pfd, 1, -1) < 0) {
+                        if (errno != EINTR) {
+                            return errno;
+                        }
+                    }
                     continue;
                 }
                 return errno;

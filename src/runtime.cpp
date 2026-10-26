@@ -1116,6 +1116,20 @@ void Runtime::parkTask(ObjTask* task) {
         break;
     }
     task->pendingValue = Value{};
+    if (token == 0 && task->io.op != IoOp::NONE) {
+        // A socket that epoll refuses (the kernel is out of watches, for one)
+        // cannot be waited on, and the call must not return a value it did not
+        // read.
+        const std::string message =
+            std::string(task->io.method) + "(): " + std::strerror(errno);
+        task->io = ParkedIo{};
+        task->hasPendingFault = true;
+        task->faultKind = "NetworkError";
+        task->faultMessage = message;
+        task->state = TaskState::READY;
+        m_runQueue.push_back(task);
+        return;
+    }
     if (token == 0) {
         // epoll refuses the descriptor (a regular file): it never blocks, so
         // the call continues at once.
@@ -1141,6 +1155,38 @@ void Runtime::releasePark(ObjTask* task) {
     m_parkedTasks.erase(task->parkToken);
     task->parkReason = ParkReason::NONE;
     task->parkToken = 0;
+    task->io = ParkedIo{};
+}
+
+void Runtime::rearmPark(ObjTask* task, int fd) {
+    m_parkedTasks.erase(task->parkToken);
+    const auto interest = task->parkReason == ParkReason::FD_WRITE
+                              ? Poller::Interest::Write
+                              : Poller::Interest::Read;
+    const Poller::Token token = poller().waitFd(fd, interest);
+    if (token == 0) {
+        const std::string message =
+            std::string(task->io.method) + "(): " + std::strerror(errno);
+        task->parkToken = 0;
+        failPark(task, "NetworkError", message.c_str());
+        return;
+    }
+    task->parkToken = token;
+    m_parkedTasks.emplace(token, task);
+}
+
+void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
+    if (m_poller == nullptr) {
+        return;
+    }
+    std::vector<Poller::Token> cancelled;
+    m_poller->cancelFd(fd, cancelled);
+    for (Poller::Token token : cancelled) {
+        auto found = m_parkedTasks.find(token);
+        if (found != m_parkedTasks.end()) {
+            tasks.push_back(found->second);
+        }
+    }
 }
 
 void Runtime::unparkTask(ObjTask* task) {
@@ -1197,8 +1243,14 @@ void Runtime::pollWhileBusy() {
 void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
     for (Poller::Token token : ready) {
         auto found = m_parkedTasks.find(token);
-        if (found != m_parkedTasks.end()) {
-            completePark(found->second, from<Nil>(Nil{}));
+        if (found == m_parkedTasks.end()) {
+            continue;
+        }
+        ObjTask* task = found->second;
+        if (task->io.op != IoOp::NONE) {
+            resumeParkedIo(*this, task);
+        } else {
+            completePark(task, from<Nil>(Nil{}));
         }
     }
     if (m_pollHandler) {
@@ -1254,6 +1306,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->startArg = Value{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
+    task->io = ParkedIo{};
     releasePark(task);
     m_waitingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
@@ -1414,6 +1467,10 @@ void Runtime::endTasks() {
     left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
     for (const auto& parked : m_parkedTasks) {
         left.push_back(parked.second);
+        // No deferred call will close the descriptor of a parked call.
+        if (parked.second->io.op != IoOp::NONE) {
+            closeParkedDescriptor(*this, parked.second);
+        }
     }
     for (ObjTask* task : left) {
         if (task != m_mainTask || !m_isMainWorker) {

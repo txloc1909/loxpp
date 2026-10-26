@@ -10,3 +10,14 @@ struct NetClasses {
 };
 
 NetClasses registerNetAPI(StdlibRegistrar& reg);
+
+class Runtime;
+struct ObjTask;
+
+// The poller reported the descriptor of a PARKED task that waits in a network
+// call. Goes on with the call: the task completes with the call's value, fails
+// with its fault, or waits again.
+void resumeParkedIo(Runtime& rt, ObjTask* task);
+
+// Closes the descriptor that a PARKED task waits on, at the end of the run.
+void closeParkedDescriptor(Runtime& rt, ObjTask* task);

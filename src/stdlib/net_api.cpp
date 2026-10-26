@@ -9,15 +9,19 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cmath>
+#include <algorithm>
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 // Module-local class pointers, used to stamp new instances and register the
 // method tables Runtime::opGetProperty/opInvoke dispatch to.
@@ -33,6 +37,11 @@ static const char* const kSocketClosedError = "SocketClosedError";
 
 static void raiseNet(const char* kind, const std::string& msg) {
     getActiveRuntime()->raiseFromNative(kind, msg.c_str());
+}
+
+static std::string closedMessage(const char* method, const char* noun) {
+    return std::string("Cannot call '") + method + "' on a closed " + noun +
+           ".";
 }
 
 static bool asStringArg(const Value& v, std::string& out) {
@@ -123,7 +132,9 @@ static Value connectNative(int /*argc*/, Value* argv) {
             lastErrno = errno;
             continue;
         }
-        if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) {
+        // The connect blocks; the socket turns nonblocking once it is open.
+        if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0 &&
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0) {
             break;
         }
         lastErrno = errno;
@@ -177,8 +188,8 @@ static Value listenNative(int /*argc*/, Value* argv) {
     int fd = -1;
     int lastErrno = 0;
     for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-        fd =
-            socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+        fd = socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK,
+                    p->ai_protocol);
         if (fd < 0) {
             lastErrno = errno;
             continue;
@@ -234,10 +245,7 @@ static Value listenNative(int /*argc*/, Value* argv) {
 static ObjSocket* checkSocketRead(Value* args, const char* method) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd < 0) {
-        std::string msg = "Cannot call '";
-        msg += method;
-        msg += "' on a closed socket.";
-        raiseNet(kSocketClosedError, msg);
+        raiseNet(kSocketClosedError, closedMessage(method, "socket"));
         return nullptr;
     }
     return s;
@@ -259,34 +267,61 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
 // Size of one read from the descriptor.
 static constexpr size_t kReadChunk = 4096;
 
-enum class Fill : unsigned char { Data, Eof, Failed };
+// Every read-side call is a step function over the socket and a ParkedIo. A
+// step does as much as it can without waiting and reports one of three
+// outcomes. The caller decides what waiting means: a task that cannot suspend
+// waits in the kernel, and a task that can suspend parks and runs the step
+// again when the descriptor is ready. A step keeps what it has done in the
+// ParkedIo and in the socket, so a call that waits many times loses nothing.
+struct IoOutcome {
+    enum class Kind : unsigned char { Done, Wait, Fault };
+    Kind kind{Kind::Wait};
+    bool isNil{false};
+    std::string text; // the result; for readlines, the whole stream
+    int fd{-1};       // accept: the descriptor of the new connection
+    const char* faultKind{nullptr};
+    std::string faultMessage;
+};
 
-// read(2) into `dst`, with EINTR retried. A failure, other than EINTR, is a
-// NetworkError: it is not an end of stream.
-static ssize_t readRetry(int fd, char* dst, size_t size, const char* method) {
-    for (;;) {
-        ssize_t n = ::read(fd, dst, size);
-        if (n >= 0) {
-            return n;
-        }
-        if (errno != EINTR) {
-            raiseNet(kNetworkError,
-                     std::string(method) + "(): " + std::strerror(errno));
-            return -1;
-        }
-    }
+static void setFault(IoOutcome& out, const char* kind, std::string message) {
+    out.kind = IoOutcome::Kind::Fault;
+    out.faultKind = kind;
+    out.faultMessage = std::move(message);
 }
 
-// Read up to `want` bytes and append them to `buf`. Returns the count, 0 at
-// the end of the stream, or -1 after raising a fault. `buf` is unchanged
-// unless bytes arrive.
-static ssize_t appendRead(int fd, std::string& buf, size_t want,
-                          const char* method) {
+static void setDone(IoOutcome& out, std::string text) {
+    out.kind = IoOutcome::Kind::Done;
+    out.text = std::move(text);
+}
+
+enum class Fill : unsigned char { Data, Eof, Block, Failed };
+
+// Reads up to `want` bytes and appends them to `buf`, with EINTR retried.
+// `buf` is unchanged unless bytes arrive. A failure other than EINTR and
+// EAGAIN is a NetworkError, not an end of stream; `err` holds its message.
+static Fill appendRead(int fd, std::string& buf, size_t want,
+                       const char* method, std::string& err) {
     size_t old = buf.size();
     buf.resize(old + want);
-    ssize_t n = readRetry(fd, &buf[old], want, method);
-    buf.resize(old + (n > 0 ? static_cast<size_t>(n) : 0));
-    return n;
+    for (;;) {
+        ssize_t n = ::read(fd, &buf[old], want);
+        if (n > 0) {
+            buf.resize(old + static_cast<size_t>(n));
+            return Fill::Data;
+        }
+        buf.resize(old);
+        if (n == 0) {
+            return Fill::Eof;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return Fill::Block;
+        }
+        err = std::string(method) + "(): " + std::strerror(errno);
+        return Fill::Failed;
+    }
 }
 
 // The input buffer holds exactly the bytes read from the descriptor and not
@@ -309,113 +344,181 @@ static std::string takeInput(ObjSocket* s, size_t n) {
 }
 
 // Append one read chunk to the input buffer.
-static Fill fillInput(ObjSocket* s, const char* method) {
-    ssize_t n = appendRead(s->fd, s->inbuf, kReadChunk, method);
-    if (n < 0) {
-        return Fill::Failed;
+static Fill fillInput(ObjSocket* s, const char* method, IoOutcome& out) {
+    Fill f = appendRead(s->fd, s->inbuf, kReadChunk, method, out.faultMessage);
+    if (f == Fill::Failed) {
+        setFault(out, kNetworkError, std::move(out.faultMessage));
     }
-    return n == 0 ? Fill::Eof : Fill::Data;
+    return f;
 }
 
-// Read to the end of the stream into the input buffer. Returns false after
-// raising a fault; the bytes that arrived stay in the buffer.
-static bool fillToEof(ObjSocket* s, const char* method) {
+// Read to the end of the stream into the input buffer, or until the descriptor
+// has no more bytes yet. Sets `out` for a fault or an end of stream, and
+// leaves it at Wait when the call must wait; the bytes that arrived stay in
+// the buffer.
+static void fillToEof(ObjSocket* s, const char* method, IoOutcome& out) {
     for (;;) {
-        switch (fillInput(s, method)) {
+        switch (fillInput(s, method, out)) {
         case Fill::Data:
             break;
         case Fill::Eof:
-            return true;
+            out.kind = IoOutcome::Kind::Done;
+            return;
+        case Fill::Block:
+            out.kind = IoOutcome::Kind::Wait;
+            return;
         case Fill::Failed:
-            return false;
+            return;
         }
     }
 }
 
-static Value socketReadNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketRead(args, "read");
-    if (s == nullptr) {
-        return from<Nil>(Nil{});
+static void stepRead(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+    fillToEof(s, io.method, out);
+    if (out.kind == IoOutcome::Kind::Done) {
+        setDone(out, takeInput(s, s->inbuf.size()));
     }
-    if (!fillToEof(s, "read")) {
-        return from<Nil>(Nil{});
-    }
-    std::string buf = takeInput(s, s->inbuf.size());
-    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(buf)))};
 }
 
-static Value socketReadBytesNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketRead(args, "read_bytes");
-    if (s == nullptr) {
-        return from<Nil>(Nil{});
+static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+    size_t take = std::min(s->inbuf.size(), io.want - io.buf.size());
+    if (take > 0) {
+        if (io.buf.empty()) {
+            io.buf = takeInput(s, take);
+        } else {
+            io.buf.append(takeInput(s, take));
+        }
     }
-    size_t n = 0;
-    if (!asByteCount(args[0], "read_bytes", n)) {
-        return from<Nil>(Nil{});
-    }
-    size_t take = s->inbuf.size() < n ? s->inbuf.size() : n;
-    std::string out = takeInput(s, take);
     // Read the rest straight into the result: the want is bounded by the
     // count, so no byte past it is read and none needs buffering.
-    while (out.size() < n) {
-        size_t want = n - out.size();
-        if (want > kReadChunk) {
-            want = kReadChunk;
-        }
-        ssize_t got = appendRead(s->fd, out, want, "read_bytes");
-        if (got < 0) {
+    while (io.buf.size() < io.want) {
+        size_t want = std::min(io.want - io.buf.size(), kReadChunk);
+        switch (appendRead(s->fd, io.buf, want, io.method, out.faultMessage)) {
+        case Fill::Data:
+            continue;
+        case Fill::Eof:
+            setDone(out, std::move(io.buf));
+            return;
+        case Fill::Block:
+            out.kind = IoOutcome::Kind::Wait;
+            return;
+        case Fill::Failed:
             // Keep what arrived, so a later read does not lose it.
-            out.append(s->inbuf);
-            s->inbuf = std::move(out);
-            return from<Nil>(Nil{});
-        }
-        if (got == 0) {
-            break;
+            io.buf.append(s->inbuf);
+            s->inbuf = std::move(io.buf);
+            setFault(out, kNetworkError, std::move(out.faultMessage));
+            return;
         }
     }
-    return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(out)))};
+    setDone(out, std::move(io.buf));
 }
 
-static Value socketReadlineNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketRead(args, "readline");
-    if (s == nullptr) {
-        return from<Nil>(Nil{});
-    }
+static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+    // The scan restarts at the front of the buffer in each step. Another task
+    // that waits on the same socket can take bytes from the front while this
+    // call is parked, so an offset kept across the park could point past
+    // bytes that nobody scanned. Inside one step nothing else runs.
     size_t scanned = 0;
     for (;;) {
         size_t nl = s->inbuf.find('\n', scanned);
         if (nl != std::string::npos) {
             std::string line = takeInput(s, nl);
             s->inbuf.erase(0, 1); // the newline
-            return Value{
-                static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
+            setDone(out, std::move(line));
+            return;
         }
         scanned = s->inbuf.size();
-        Fill f = fillInput(s, "readline");
-        if (f == Fill::Failed) {
-            return from<Nil>(Nil{});
-        }
-        if (f == Fill::Eof) {
+        switch (fillInput(s, io.method, out)) {
+        case Fill::Data:
+            break;
+        case Fill::Eof:
             if (s->inbuf.empty()) {
-                return from<Nil>(Nil{});
+                out.kind = IoOutcome::Kind::Done;
+                out.isNil = true;
+            } else {
+                setDone(out, takeInput(s, s->inbuf.size()));
             }
-            std::string line = takeInput(s, s->inbuf.size());
-            return Value{
-                static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
+            return;
+        case Fill::Block:
+            out.kind = IoOutcome::Kind::Wait;
+            return;
+        case Fill::Failed:
+            return;
         }
     }
 }
 
-static Value socketReadlinesNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketRead(args, "readlines");
-    if (s == nullptr) {
-        return from<Nil>(Nil{});
+static void stepAccept(ObjServer* srv, IoOutcome& out) {
+    int cfd;
+    do {
+        cfd = accept4(srv->fd, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+    } while (cfd < 0 && errno == EINTR);
+    if (cfd >= 0) {
+        out.kind = IoOutcome::Kind::Done;
+        out.fd = cfd;
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        out.kind = IoOutcome::Kind::Wait;
+    } else {
+        setFault(out, kNetworkError,
+                 std::string("accept(): ") + std::strerror(errno));
     }
-    if (!fillToEof(s, "readlines")) {
-        return from<Nil>(Nil{});
+}
+
+static void step(ParkedIo& io, IoOutcome& out) {
+    if (io.op == IoOp::ACCEPT) {
+        auto* srv = asObjServer(io.target);
+        if (srv->fd < 0) {
+            setFault(out, kSocketClosedError,
+                     closedMessage(io.method, "server"));
+            return;
+        }
+        stepAccept(srv, out);
+        return;
     }
-    std::string data = takeInput(s, s->inbuf.size());
+    auto* s = asObjSocket(io.target);
+    if (s->fd < 0) {
+        setFault(out, kSocketClosedError, closedMessage(io.method, "socket"));
+        return;
+    }
+    switch (io.op) {
+    case IoOp::READ:
+    case IoOp::READLINES:
+        stepRead(s, io, out);
+        return;
+    case IoOp::READ_BYTES:
+        stepReadBytes(s, io, out);
+        return;
+    case IoOp::READLINE:
+        stepReadline(s, io, out);
+        return;
+    case IoOp::ACCEPT:
+    case IoOp::NONE:
+        return;
+    }
+}
+
+static int descriptorOf(const ParkedIo& io) {
+    return io.op == IoOp::ACCEPT ? asObjServer(io.target)->fd
+                                 : asObjSocket(io.target)->fd;
+}
+
+// The value of a finished call.
+static Value finish(const ParkedIo& io, IoOutcome& out) {
     MemoryManager* mm = getActiveMM();
+    if (io.op == IoOp::ACCEPT) {
+        ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
+        mm->pushTempRoot(sock);
+        sock->fd = out.fd;
+        mm->popTempRoot();
+        return Value{static_cast<Obj*>(sock)};
+    }
+    if (out.isNil) {
+        return from<Nil>(Nil{});
+    }
+    if (io.op != IoOp::READLINES) {
+        return Value{static_cast<Obj*>(mm->makeString(std::move(out.text)))};
+    }
+    const std::string& data = out.text;
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
     size_t start = 0;
@@ -430,6 +533,120 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
     }
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
+}
+
+// Waits in the kernel until `fd` can be read. The worker does not run another
+// task meanwhile. False, with `err` set, when poll(2) itself fails.
+static bool waitReadable(int fd, std::string& err) {
+    struct pollfd pfd = {fd, POLLIN, 0};
+    while (::poll(&pfd, 1, -1) < 0) {
+        if (errno != EINTR) {
+            err = std::strerror(errno);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Runs a read-side call to its end, or to the point where the task parks.
+static Value runIo(ParkedIo io) {
+    Runtime* rt = getActiveRuntime();
+    for (;;) {
+        IoOutcome out;
+        step(io, out);
+        switch (out.kind) {
+        case IoOutcome::Kind::Done:
+            return finish(io, out);
+        case IoOutcome::Kind::Fault:
+            raiseNet(out.faultKind, out.faultMessage);
+            return from<Nil>(Nil{});
+        case IoOutcome::Kind::Wait:
+            break;
+        }
+        // The task leaves the run queue; the poller reports the descriptor and
+        // resumeParkedIo goes on. The record moves to the task, because this
+        // frame is gone by then. A task that cannot suspend waits here.
+        const int fd = descriptorOf(io);
+        if (rt->parkCurrentTask(ParkReason::FD_READ, fd)) {
+            rt->currentTask()->io = std::move(io);
+            return from<Nil>(Nil{});
+        }
+        std::string err;
+        if (!waitReadable(descriptorOf(io), err)) {
+            raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
+            return from<Nil>(Nil{});
+        }
+    }
+}
+
+void resumeParkedIo(Runtime& rt, ObjTask* task) {
+    ParkedIo& io = task->io;
+    IoOutcome out;
+    step(io, out);
+    switch (out.kind) {
+    case IoOutcome::Kind::Done:
+        rt.completePark(task, finish(io, out));
+        return;
+    case IoOutcome::Kind::Fault:
+        rt.failPark(task, out.faultKind, out.faultMessage.c_str());
+        return;
+    case IoOutcome::Kind::Wait:
+        rt.rearmPark(task, descriptorOf(io));
+        return;
+    }
+}
+
+static Value socketReadNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "read");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    ParkedIo io;
+    io.op = IoOp::READ;
+    io.target = s;
+    io.method = "read";
+    return runIo(std::move(io));
+}
+
+static Value socketReadBytesNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "read_bytes");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    size_t n = 0;
+    if (!asByteCount(args[0], "read_bytes", n)) {
+        return from<Nil>(Nil{});
+    }
+    ParkedIo io;
+    io.op = IoOp::READ_BYTES;
+    io.target = s;
+    io.method = "read_bytes";
+    io.want = n;
+    return runIo(std::move(io));
+}
+
+static Value socketReadlineNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "readline");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    ParkedIo io;
+    io.op = IoOp::READLINE;
+    io.target = s;
+    io.method = "readline";
+    return runIo(std::move(io));
+}
+
+static Value socketReadlinesNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "readlines");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    ParkedIo io;
+    io.op = IoOp::READLINES;
+    io.target = s;
+    io.method = "readlines";
+    return runIo(std::move(io));
 }
 
 static Value socketWriteNative(int /*argc*/, Value* args) {
@@ -479,11 +696,39 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
     return from<Nil>(Nil{});
 }
 
+// Closes a descriptor that tasks of this worker may wait on. The waits end
+// before the descriptor does: epoll keeps its reference to the open file after
+// close(2), and the next socket can get the same number. Each parked call
+// fails with the fault of a call on a closed socket, in the order the calls
+// began to wait.
+static void closeDescriptor(int& fd, const char* noun) {
+    Runtime* rt = getActiveRuntime();
+    std::vector<ObjTask*> waiting;
+    rt->cancelFdWaits(fd, waiting);
+    ::close(fd);
+    fd = -1;
+    for (ObjTask* task : waiting) {
+        rt->failPark(task, kSocketClosedError,
+                     closedMessage(task->io.method, noun).c_str());
+    }
+}
+
+void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
+    int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
+                                          : asObjSocket(task->io.target)->fd;
+    if (fd < 0) {
+        return;
+    }
+    std::vector<ObjTask*> waiting;
+    rt.cancelFdWaits(fd, waiting);
+    ::close(fd);
+    fd = -1;
+}
+
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        ::close(s->fd);
-        s->fd = -1;
+        closeDescriptor(s->fd, "socket");
     }
     return from<Nil>(Nil{});
 }
@@ -491,25 +736,14 @@ static Value socketCloseNative(int /*argc*/, Value* args) {
 static Value serverAcceptNative(int /*argc*/, Value* args) {
     ObjServer* s = asObjServer(as<Obj*>(args[-1]));
     if (s->fd < 0) {
-        raiseNet(kSocketClosedError,
-                 "Cannot call 'accept' on a closed server.");
+        raiseNet(kSocketClosedError, closedMessage("accept", "server"));
         return from<Nil>(Nil{});
     }
-    int cfd;
-    do {
-        cfd = accept4(s->fd, nullptr, nullptr, SOCK_CLOEXEC);
-    } while (cfd < 0 && errno == EINTR);
-    if (cfd < 0) {
-        std::string msg = std::string("accept(): ") + std::strerror(errno);
-        raiseNet(kNetworkError, msg);
-        return from<Nil>(Nil{});
-    }
-    MemoryManager* mm = getActiveMM();
-    ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
-    mm->pushTempRoot(sock);
-    sock->fd = cfd;
-    mm->popTempRoot();
-    return Value{static_cast<Obj*>(sock)};
+    ParkedIo io;
+    io.op = IoOp::ACCEPT;
+    io.target = s;
+    io.method = "accept";
+    return runIo(std::move(io));
 }
 
 static Value serverPortNative(int /*argc*/, Value* args) {
@@ -520,8 +754,7 @@ static Value serverPortNative(int /*argc*/, Value* args) {
 static Value serverCloseNative(int /*argc*/, Value* args) {
     ObjServer* s = asObjServer(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        ::close(s->fd);
-        s->fd = -1;
+        closeDescriptor(s->fd, "server");
     }
     return from<Nil>(Nil{});
 }

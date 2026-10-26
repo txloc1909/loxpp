@@ -10,6 +10,12 @@ cannot be fatal by accident, and a catchable one cannot go back to fatal.
 Native (src/stdlib/net_api.cpp):
   - `nativeRuntimeError(` is a halting fault. Only argument checks use it.
   - `raiseNet(KIND, ...)` is a catchable fault of the given kind.
+  - `setFault(out, KIND, ...)` records a catchable fault in the outcome of a
+    read-side step. The caller raises it with `raiseNet(out.faultKind, ...)`
+    where the task runs, or `failPark(task, out.faultKind, ...)` where the task
+    was parked. Those two pass a kind through and are not sites.
+  - `failPark(task, KIND, ...)` with a constant kind ends a parked call with a
+    catchable fault of that kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
     Socket write path uses `writeFd` and `raiseNet`.
   - `FILE`, `fdopen`, `fread`, `fgetc`, `fgets`, `fwrite`, `fflush` and other
@@ -52,13 +58,17 @@ NATIVE_SITES = {
     ("socketWritelineNative", HALT): 1,
     ("connectNative", NETWORK): 2,
     ("listenNative", NETWORK): 2,
-    ("readRetry", NETWORK): 1,
+    ("fillInput", NETWORK): 1,
+    ("stepReadBytes", NETWORK): 1,
+    ("stepAccept", NETWORK): 1,
+    ("step", CLOSED): 2,
+    ("runIo", NETWORK): 1,
+    ("closeDescriptor", CLOSED): 1,
     ("checkSocketRead", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
     ("socketWriteNative", NETWORK): 1,
     ("socketWritelineNative", NETWORK): 1,
     ("serverAcceptNative", CLOSED): 1,
-    ("serverAcceptNative", NETWORK): 1,
 }
 
 SOCKET_SITES = {
@@ -86,7 +96,8 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     function = None
-    for number, line in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    for number, line in enumerate(lines, 1):
         if line and not line[0].isspace() and not line.startswith(("//", "}", "#")):
             m = NATIVE_FUNCTION.match(line)
             if m:
@@ -103,13 +114,34 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                 problems.append(f"line {number}: {helper} is not a known fault helper")
         if re.search(r"\bnativeRuntimeError\(", line) and function != "raiseNet":
             sites[(function, HALT)] += 1
-        m = re.search(r"\braiseNet\((\w+)", line)
-        if m and not line.lstrip().startswith("static void raiseNet"):
-            kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(m.group(1))
-            if kind is None:
-                problems.append(f"line {number}: raiseNet names an unknown kind {m.group(1)}")
-            else:
-                sites[(function, kind)] += 1
+        if function not in ("raiseNet", "setFault"):
+            # A formatter can split a call after its open parenthesis or after
+            # the first argument, so the kind is read from this line and the
+            # next one.
+            window = line
+            if line.rstrip().endswith(("(", ",")) and number < len(lines):
+                window += " " + lines[number].strip()
+            for head in re.finditer(r"\b(raiseNet|setFault|failPark)\(", line):
+                pattern = {
+                    "raiseNet": r"raiseNet\(\s*([\w.]+)",
+                    "setFault": r"setFault\(\s*out,\s*([\w.]+)",
+                    "failPark": r"failPark\(\s*task,\s*([\w.]+)",
+                }[head.group(1)]
+                arg = re.match(pattern, window[head.start():])
+                if arg is None:
+                    problems.append(f"line {number}: cannot read the kind of {head.group(1)}")
+                elif arg.group(1) == "out.faultKind":
+                    continue
+                elif not re.fullmatch(r"k\w+", arg.group(1)):
+                    problems.append(f"line {number}: a fault kind that is not a constant: {arg.group(1)}")
+                else:
+                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(arg.group(1))
+                    if kind is None:
+                        problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
+                    else:
+                        sites[(function, kind)] += 1
+        if function != "setFault" and re.search(r"\bfaultKind\s*=(?!=)", line):
+            problems.append(f"line {number}: faultKind is set outside setFault")
     return sites, problems
 
 

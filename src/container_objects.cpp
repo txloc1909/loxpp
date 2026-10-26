@@ -9,6 +9,11 @@
 // safety net only: a program must close() a Socket/Server and wait() a
 // Process for deterministic cleanup. A child still running when its process
 // object is collected is not killed; it is reaped only if already exited.
+// A descriptor has a registered wait only while a task is parked on it, and
+// that task keeps the object alive through ParkedIo::target. Every wait ends
+// before the task does (releasePark), and a close cancels its waits first. So
+// no wait exists when a destructor runs, and a closed number cannot meet a
+// stale one.
 ObjSocket::~ObjSocket() {
     if (fd >= 0) {
         ::close(fd);

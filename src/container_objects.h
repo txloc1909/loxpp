@@ -444,6 +444,34 @@ enum class ParkReason : std::uint8_t {
     TIMER,
 };
 
+// A network call that waits for its descriptor and goes on when the descriptor
+// is ready. The state of the call lives here and not on a C++ stack, because a
+// task that waits has no stack: the task owns the record while it is PARKED.
+// The record holds only what the call alone owns or what never changes: the
+// operation, the target, the method name, the count, and the bytes that
+// read_bytes took out of the socket already. It holds no offset into the
+// socket's input buffer, because another task can change that buffer while
+// this call waits.
+enum class IoOp : std::uint8_t {
+    NONE,
+    ACCEPT,
+    READ,
+    READ_BYTES,
+    READLINE,
+    READLINES,
+};
+
+struct ParkedIo {
+    IoOp op{IoOp::NONE};
+    // The Socket or Server the call waits on. GC-tracked through the task.
+    Obj* target{nullptr};
+    // The name of the call in a fault message. A string literal.
+    const char* method{""};
+    // read_bytes: the count asked for, and the bytes taken so far.
+    std::size_t want{0};
+    std::string buf;
+};
+
 // The object lives in the heap of its worker. A handle on another worker is
 // a pointer to this same object, held as a message: that worker reads only
 // `ended` and the heap id, and routes a send through the inbound queue of
@@ -467,6 +495,8 @@ struct ObjTask : public Obj {
     // The value of the parked call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
+    // The network call that the task waits in, while it is PARKED on one.
+    ParkedIo io;
     bool hasPendingFault{false};
     std::string faultKind;
     std::string faultMessage;
