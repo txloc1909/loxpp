@@ -63,7 +63,7 @@ const std::vector<SweepRoot>& sweepRoots() {
         {"test/compile-errors", 129},
         {"test/coroutine-probes", 11},
         {"test/print-lines", 1},
-        {"test/translation-probes", 296},
+        {"test/translation-probes", 333},
     };
     return roots;
 }
