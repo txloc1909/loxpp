@@ -558,7 +558,7 @@ jobs:
       # line), against the stdout the spec defines. A consumer that cannot pass
       # a probe yet lists it in an expected-failure file under
       # tools/spec-probe-xfail/ and passes --xfail (the differential steps read
-      # the native file as --oracle-xfail). native.txt, jvm.txt, and qbe.txt
+      # the native file as --oracle-xfail). native.txt and qbe.txt
       # list the probes of the rule that a call which waits for the network or
       # for time suspends only its task; the bootstrap interpreter uses
       # NOT-BINDING lines instead of a file.
@@ -1220,7 +1220,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --xfail tools/spec-probe-xfail/jvm.txt --oracle-xfail tools/spec-probe-xfail/native.txt"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --oracle-xfail tools/spec-probe-xfail/native.txt"
 
       # The spec probes of test/translation-probes/ (the files with a
       # STATUS line) on the JVM backend, against the stdout the spec
@@ -1231,7 +1231,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/ --xfail tools/spec-probe-xfail/jvm.txt"
+            bash -c "python3 tools/check_spec_probes.py tools/loxpp_jvm.sh test/translation-probes/"
 
       # The compile phase of the differential gate: each parser or resolver
       # error of test/compile-errors/ must be rejected: a non-zero exit status

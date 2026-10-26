@@ -50,7 +50,7 @@ ctest --test-dir build --output-on-failure -j$(nproc)
 # own runner line here rather than replacing this one (#855).
 python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh \\
   test/translation-probes/ test/translation-probes/jvm-only/ \\
-  --xfail tools/spec-probe-xfail/jvm.txt --oracle-xfail tools/spec-probe-xfail/native.txt`;
+  --oracle-xfail tools/spec-probe-xfail/native.txt`;
 
 /**
  * The steps of CI's `QBE toolchain` job, in the job's own order, with the
