@@ -120,6 +120,7 @@ TEST_F(ParkTest, PendingFaultReachesCatchInTheTask) {
               InterpretResult::OK);
     EXPECT_EQ(globalString(rig.vm(), "got"),
               "SocketClosedError:the wait failed");
+    EXPECT_FALSE(rig.vm().runtime().poller().hasWaits());
 }
 
 // The fault leaves the innermost coroutine and is caught in the task's own
@@ -212,6 +213,11 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
         Value text{static_cast<Obj*>(rt.memoryManager().makeString("pending"))};
         rt.completePark(task, text);
+        // Allocations before the task runs again collect under stress: the
+        // pending value must be reachable through the task alone.
+        for (int i = 0; i < 4; ++i) {
+            rt.memoryManager().makeString("noise");
+        }
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -226,6 +232,8 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
     )"),
               InterpretResult::OK);
     EXPECT_EQ(globalString(rig.vm(), "got"), "pending!");
+    // The end of the park cancelled the 30 second wait.
+    EXPECT_FALSE(rig.vm().runtime().poller().hasWaits());
 }
 
 // task.pending() reads the mailbox only: the pending result is not a
