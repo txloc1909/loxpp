@@ -74,6 +74,58 @@ TEST(NetProcessTest, SocketReadlineThenWriteInterleaves) {
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 
+// A readline() can read past its line. The bytes after the line belong to
+// the next read, whichever call it is.
+static void expectReadAfterReadline(const char* next, const char* expectation) {
+    VMTestHarness h;
+    std::string src = "var l = listen(\"127.0.0.1\", 0); "
+                      "var c = connect(\"127.0.0.1\", l.port()); "
+                      "c.write(\"one\\ntwo\\nthree\"); "
+                      "c.close_write(); "
+                      "var s = l.accept(); "
+                      "var first = s.readline(); "
+                      "var rest = " +
+                      std::string(next) +
+                      "; "
+                      "s.close(); c.close(); l.close(); "
+                      "(first == \"one\") and " +
+                      expectation + ";";
+    ASSERT_EQ(h.run(src.c_str()), InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForRead) {
+    expectReadAfterReadline("s.read()", "(rest == \"two\\nthree\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadBytes) {
+    expectReadAfterReadline("s.read_bytes(6)", "(rest == \"two\\nth\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadlines) {
+    expectReadAfterReadline("s.readlines()",
+                            "(len(rest) == 2) and (rest[0] == \"two\") and "
+                            "(rest[1] == \"three\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadline) {
+    expectReadAfterReadline("s.readline()", "(rest == \"two\")");
+}
+
+// A socket the runtime creates must not leak into a child process.
+TEST(NetProcessTest, SocketsAreNotInheritedByChildren) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "var r = run(\"/bin/sh\", [\"-c\", "
+                    "\"ls -l /proc/self/fd | grep -c socket:\"]); "
+                    "s.close(); c.close(); l.close(); "
+                    "r[\"stdout\"] == \"0\\n\";"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
 TEST(NetProcessTest, ServerPortIsEphemeralAndStable) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
