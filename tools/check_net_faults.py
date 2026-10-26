@@ -10,6 +10,12 @@ cannot be fatal by accident, and a catchable one cannot go back to fatal.
 Native (src/stdlib/net_api.cpp):
   - `nativeRuntimeError(` is a halting fault. Only argument checks use it.
   - `raiseNet(KIND, ...)` is a catchable fault of the given kind.
+  - `setFault(out, KIND, ...)` records a catchable fault in the outcome of a
+    read-side step. The caller raises it with `raiseNet(out.faultKind, ...)`
+    where the task runs, or `failPark(task, out.faultKind, ...)` where the task
+    was parked. Those two pass a kind through and are not sites.
+  - `failPark(task, KIND, ...)` with a constant kind ends a parked call with a
+    catchable fault of that kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
     Socket write path uses `writeFd` and `raiseNet`.
   - `FILE`, `fdopen`, `fread`, `fgetc`, `fgets`, `fwrite`, `fflush` and other
@@ -52,13 +58,17 @@ NATIVE_SITES = {
     ("socketWritelineNative", HALT): 1,
     ("connectNative", NETWORK): 2,
     ("listenNative", NETWORK): 2,
-    ("readRetry", NETWORK): 1,
+    ("fillInput", NETWORK): 1,
+    ("stepReadBytes", NETWORK): 1,
+    ("stepAccept", NETWORK): 1,
+    ("step", CLOSED): 2,
+    ("runIo", NETWORK): 1,
+    ("closeDescriptor", CLOSED): 1,
     ("checkSocketRead", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
     ("socketWriteNative", NETWORK): 1,
     ("socketWritelineNative", NETWORK): 1,
     ("serverAcceptNative", CLOSED): 1,
-    ("serverAcceptNative", NETWORK): 1,
 }
 
 SOCKET_SITES = {
@@ -103,11 +113,21 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                 problems.append(f"line {number}: {helper} is not a known fault helper")
         if re.search(r"\bnativeRuntimeError\(", line) and function != "raiseNet":
             sites[(function, HALT)] += 1
-        m = re.search(r"\braiseNet\((\w+)", line)
-        if m and not line.lstrip().startswith("static void raiseNet"):
-            kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(m.group(1))
+        m = re.search(
+            r"\b(?:raiseNet\((k\w+)|setFault\(out, (k\w+)|failPark\(task, (k\w+))",
+            line,
+        )
+        other = re.search(
+            r"\b(?:raiseNet\(|setFault\(out, |failPark\(task, )(?!k\w+|out\.faultKind)(\S+?)[,)]",
+            line,
+        )
+        if other and function not in ("raiseNet", "setFault"):
+            problems.append(f"line {number}: a fault kind that is not a constant: {other.group(1)}")
+        if m:
+            name = next(g for g in m.groups() if g)
+            kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(name)
             if kind is None:
-                problems.append(f"line {number}: raiseNet names an unknown kind {m.group(1)}")
+                problems.append(f"line {number}: a fault names an unknown kind {name}")
             else:
                 sites[(function, kind)] += 1
     return sites, problems

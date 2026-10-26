@@ -18,6 +18,7 @@
 #include <arpa/inet.h>
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <csignal>
 #include <cstring>
 #include <dirent.h>
@@ -357,7 +358,22 @@ class HostListener {
     ~HostListener() { close(m_fd); }
     HostListener(const HostListener&) = delete;
     HostListener& operator=(const HostListener&) = delete;
-    int accept() const { return ::accept(m_fd, nullptr, nullptr); }
+    // The next connection, or -1 after 10 seconds. A signal does not end the
+    // wait, and a program that never connects does not hang the test.
+    int accept() const {
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < end) {
+            struct pollfd pfd = {m_fd, POLLIN, 0};
+            if (poll(&pfd, 1, 100) > 0) {
+                int fd = ::accept(m_fd, nullptr, nullptr);
+                if (fd >= 0 || errno != EINTR) {
+                    return fd;
+                }
+            }
+        }
+        return -1;
+    }
     int port() const { return m_port; }
 
   private:
