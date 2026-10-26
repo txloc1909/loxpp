@@ -1,10 +1,13 @@
 #include "os_api.h"
 #include "stdlib_context.h"
+#include "../poller.h"
+#include "../runtime.h"
 #include "../worker.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
 #include "../value.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <climits>
 #include <cmath>
@@ -100,9 +103,20 @@ static Value sleepNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     double seconds = as<Number>(argv[0]);
-    if (seconds > 0) {
-        std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+    // Zero, a negative duration and NaN return at once with no suspension.
+    if (!(seconds > 0)) {
+        return from<Nil>(Nil{});
     }
+    // About a century: a longer wait overflows the clock's duration.
+    constexpr double kLongestSeconds = 3.0e9;
+    const auto length = std::chrono::duration_cast<Poller::Clock::duration>(
+        std::chrono::duration<double>(std::min(seconds, kLongestSeconds)));
+    const auto deadline = Poller::Clock::now() + length;
+    if (getActiveRuntime()->parkCurrentTask(ParkReason::TIMER, -1, deadline)) {
+        return from<Nil>(Nil{});
+    }
+    // The task cannot suspend here, so the worker waits in the kernel.
+    std::this_thread::sleep_until(deadline);
     return from<Nil>(Nil{});
 }
 

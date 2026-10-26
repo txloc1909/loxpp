@@ -421,6 +421,7 @@ void MemoryManager::traceObject(Obj* obj) {
             markValue(v);
         }
         markValue(task->startArg);
+        markValue(task->pendingValue);
         break;
     }
     case ObjType::INT:
