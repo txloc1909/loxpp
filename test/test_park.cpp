@@ -211,13 +211,13 @@ TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
 // only the task refers to.
 TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        Value text{static_cast<Obj*>(rt.memoryManager().makeString("pending"))};
+        // Only the parked set refers to the task now.
+        rt.memoryManager().collectGarbage();
+        Value text{static_cast<Obj*>(
+            rt.memoryManager().makeString("value from the host"))};
         rt.completePark(task, text);
-        // Allocations before the task runs again collect under stress: the
-        // pending value must be reachable through the task alone.
-        for (int i = 0; i < 4; ++i) {
-            rt.memoryManager().makeString("noise");
-        }
+        // Only the task refers to the string now.
+        rt.memoryManager().collectGarbage();
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -231,7 +231,7 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
         task.receive();
     )"),
               InterpretResult::OK);
-    EXPECT_EQ(globalString(rig.vm(), "got"), "pending!");
+    EXPECT_EQ(globalString(rig.vm(), "got"), "value from the host!");
     // The end of the park cancelled the 30 second wait.
     EXPECT_FALSE(rig.vm().runtime().poller().hasWaits());
 }
