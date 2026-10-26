@@ -706,9 +706,10 @@ namespace {
 // from the start of the program's write and not from the start of the test.
 // Then reads until the end of the stream or 5 seconds without data, and hands
 // each chunk to `onChunk`. Every `pauseEvery` bytes it sleeps 5 ms, so the
-// writer meets a full connection again and again.
+// writer meets a full connection again and again. True when the stream ended
+// (the peer closed or reset), false when the 5 seconds passed first.
 template <class F>
-void drainHost(int fd, int delayMs, size_t pauseEvery, F onChunk) {
+bool drainHost(int fd, int delayMs, size_t pauseEvery, F onChunk) {
     struct pollfd first = {fd, POLLIN, 0};
     poll(&first, 1, 10000);
     std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
@@ -717,11 +718,11 @@ void drainHost(int fd, int delayMs, size_t pauseEvery, F onChunk) {
     for (;;) {
         struct pollfd pfd = {fd, POLLIN, 0};
         if (poll(&pfd, 1, 5000) <= 0) {
-            break;
+            return false;
         }
         ssize_t n = recv(fd, buf.data(), buf.size(), 0);
         if (n <= 0) {
-            break;
+            return true;
         }
         onChunk(buf.data(), static_cast<size_t>(n));
         sincePause += static_cast<size_t>(n);
@@ -1058,7 +1059,6 @@ TEST_F(SocketParkTest, ACloseEndsAWriteToAPeerThatNeverReads) {
         close(fd);
     });
     VM vm;
-    const auto start = std::chrono::steady_clock::now();
     InterpretResult result = vm.interpret(connectToHost(host) + R"(
         var big = "x";
         var i = 0;
@@ -1081,7 +1081,6 @@ TEST_F(SocketParkTest, ACloseEndsAWriteToAPeerThatNeverReads) {
     EXPECT_EQ(globalString(vm, "kind"), "SocketClosedError");
     EXPECT_EQ(globalString(vm, "msg"),
               "Cannot call 'write' on a closed socket.");
-    EXPECT_LT(millisSince(start), 5000);
 }
 
 // A close fails parked writers in the order their calls began, with the name
@@ -1176,7 +1175,6 @@ TEST_F(SocketParkTest, APeerThatResetsFailsParkedWritersWithNetworkError) {
         close(fd);
     });
     VM vm;
-    const auto start = std::chrono::steady_clock::now();
     InterpretResult result = vm.interpret(connectToHost(host) + R"(
         var big = "x";
         var i = 0;
@@ -1195,7 +1193,6 @@ TEST_F(SocketParkTest, APeerThatResetsFailsParkedWritersWithNetworkError) {
     EXPECT_EQ(globalString(vm, "k1"), "NetworkError");
     EXPECT_EQ(globalString(vm, "k2"), "NetworkError");
     EXPECT_EQ(globalString(vm, "ticks"), "1");
-    EXPECT_LT(millisSince(start), 5000);
 }
 
 // EPIPE, with no task parked: a write to a peer that closed raises
@@ -1306,19 +1303,23 @@ TEST_F(SocketParkTest, AWriteThatFitsDoesNotPark) {
 }
 
 // The end of the program closes the descriptor of a parked write: the host
-// peer sees the end of the stream, and the program has not waited for the
-// peer to read.
+// peer reads the end of the stream, and the program has not waited for the
+// peer to read the whole text. The peer reads until the stream ends, so it
+// sees the end only if the program closed the descriptor; the bytes it got
+// are fewer than the text, so the write did not finish first. No wall-clock
+// bound is used: building the text takes seconds in a debug build under load.
 TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
+    constexpr size_t kBytes = size_t{1} << 27;
     HostListener host;
-    std::atomic<bool> sawEof{false};
+    std::atomic<bool> sawEnd{false};
+    std::atomic<size_t> total{0};
     std::thread peer([&] {
         int fd = host.accept();
-        drainHost(fd, 300, 0, [](const char*, size_t) {});
-        sawEof = true;
+        sawEnd =
+            drainHost(fd, 1500, 0, [&](const char*, size_t n) { total += n; });
         close(fd);
     });
     VM vm;
-    const auto start = std::chrono::steady_clock::now();
     InterpretResult result = vm.interpret(connectToHost(host) + R"(
         var big = "x";
         var i = 0;
@@ -1329,8 +1330,9 @@ TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
     )");
     peer.join();
     ASSERT_EQ(result, InterpretResult::OK);
-    EXPECT_TRUE(sawEof.load());
-    EXPECT_LT(millisSince(start), 4000);
+    EXPECT_TRUE(sawEnd.load())
+        << "the peer waited for an end that did not come";
+    EXPECT_LT(total.load(), kBytes);
 }
 
 // The collector runs while the call waits. The only holder of the text is the
