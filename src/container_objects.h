@@ -444,6 +444,31 @@ enum class ParkReason : std::uint8_t {
     TIMER,
 };
 
+// A network call that waits for its descriptor and goes on when the descriptor
+// is ready. The state of the call lives here and not on a C++ stack, because a
+// task that waits has no stack: the task owns the record while it is PARKED.
+enum class IoOp : std::uint8_t {
+    NONE,
+    ACCEPT,
+    READ,
+    READ_BYTES,
+    READLINE,
+    READLINES,
+};
+
+struct ParkedIo {
+    IoOp op{IoOp::NONE};
+    // The Socket or Server the call waits on. GC-tracked through the task.
+    Obj* target{nullptr};
+    // The name of the call in a fault message. A string literal.
+    const char* method{""};
+    // read_bytes: the count asked for, and the bytes taken so far.
+    std::size_t want{0};
+    std::string buf;
+    // readline: how much of the socket's input buffer holds no newline.
+    std::size_t scanned{0};
+};
+
 // The object lives in the heap of its worker. A handle on another worker is
 // a pointer to this same object, held as a message: that worker reads only
 // `ended` and the heap id, and routes a send through the inbound queue of
