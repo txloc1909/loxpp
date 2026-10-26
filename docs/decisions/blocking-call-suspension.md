@@ -211,11 +211,11 @@ QBE on `main` at d19037d, checked with a probe for each:
 | Context | The runtime calls Lox++ code for |
 |---|---|
 | `__str__` | `print`, `str()`, an element or key of a List or Map that is printed, a `__str__` inside a `__str__`, an uncaught throw of an instance that is not an `Error` |
-| a map key's `__hash__` and `__eq__` | `m[k]`, `m[k] = v`, a map literal, `k in m`, `Map.has`, `Map.del`, and a hash collision |
+| a map key's `__hash__` and `__eq__` | `m[k]`, `m[k] = v`, a Map literal, `k in m`, `Map.has`, `Map.del`, and a hash collision |
 | `reflect.callMethod` | the method, or a callable field |
 | a deferred call | every drain: at a normal return, after a caught throw, after a run-time fault, after an uncaught throw, at the end of a task function, at the end of a coroutine function |
-| a native entry | a task or coroutine whose entry is a native or a bound native (after #723) |
-| a nested coroutine | each coroutine the task resumes inside one of the contexts above |
+| a native entry | a task or coroutine whose entry is a native function or a bound native |
+| a nested coroutine | each coroutine that the task resumes inside one of the contexts above |
 
 The predicate is `taskCanSuspend()`. The set and the predicate must be equal.
 #723 is the one known difference today.

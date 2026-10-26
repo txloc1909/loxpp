@@ -10,7 +10,10 @@ The rules:
     `suspends`.
   - The decision's table of contexts where a task cannot suspend (first header
     cell `Context`) must list the same contexts as the table of that name in
-    spec/04-semantics.md.
+    spec/04-semantics.md, with the same text in the second column.
+  - Every COVERS line must be backed by the probe: the probe must name the
+    covered call or context in its code, outside comments (CODE_MARKERS and
+    CONTEXT_MARKERS). A label on a probe that does not use the call fails.
   - Every call of class `suspends` has a spec probe with the line
     `// COVERS: suspend-call <call>`, where <call> is the name that
     check_blocking_calls.py uses (for example `Socket.readline`).
@@ -28,6 +31,7 @@ Usage:
 """
 
 import argparse
+import re
 from pathlib import Path
 
 from check_blocking_calls import call_name
@@ -54,6 +58,30 @@ CONTEXT_SLUGS = {
 
 # The calls of class blocks that the decision requires a probe for.
 BLOCKS_PROBED = ["input", "run", "Process.readline"]
+
+# A regular expression that the code of a probe (comments removed) must match
+# for a COVERS line to count, by the last part of the call name.
+CODE_MARKERS = {
+    "sleep": r"\bsleep\(",
+    "connect": r"\bconnect\(",
+    "input": r"\binput\(",
+    "run": r"\brun\(",
+    "read": r"\.read\(",
+    "read_bytes": r"\.read_bytes\(",
+    "readline": r"\.readline\(",
+    "readlines": r"\.readlines\(",
+    "write": r"\.write\(",
+    "writeline": r"\.writeline\(",
+    "accept": r"\.accept\(",
+}
+CONTEXT_MARKERS = {
+    "str": r"__str__",
+    "map-key": r"__hash__",
+    "call-method": r"\bcallMethod\(",
+    "defer": r"\bdefer\b",
+    "native-entry": r"task\.spawn\(\s*\w+\.\w+\s*\)",
+    "nested-coroutine": r"coroutine\.create\(",
+}
 
 DECISION = REPO_ROOT / "docs" / "decisions" / "blocking-call-suspension.md"
 
@@ -112,6 +140,11 @@ def main() -> None:
     blocks = names([r for r in blocking_rows if r["Class"] == "blocks"], problems, "spec table")
     compare(decided, suspends, "the decision mechanism table", "the class-suspends rows of the spec", problems)
 
+    spec_text = {r["Context"]: r["The runtime calls Lox++ code for"] for r in spec_contexts}
+    for r in decision_contexts:
+        other = spec_text.get(r["Context"])
+        if other is not None and other != r["The runtime calls Lox++ code for"]:
+            problems.append(f"context {r['Context']!r}: the text differs between the decision and the spec")
     in_decision = [r["Context"] for r in decision_contexts]
     in_spec = [r["Context"] for r in spec_contexts]
     compare(in_decision, in_spec, "the decision contexts table", "the spec contexts table", problems)
@@ -134,6 +167,25 @@ def main() -> None:
             problems.append(f"BLOCKS_PROBED names {name!r}, which is not a class-blocks row of the spec")
         elif ("blocks-call", name) not in covers:
             problems.append(f"call {name!r} has no probe with '// COVERS: blocks-call {name}'")
+
+    for words, paths in covers.items():
+        if len(words) != 2 or words[0] not in ("suspend-call", "suspend-context", "blocks-call"):
+            continue
+        kind, key = words
+        if kind == "suspend-context":
+            pattern = CONTEXT_MARKERS.get(key)
+        else:
+            pattern = CODE_MARKERS.get(key.split(".")[-1])
+        if pattern is None:
+            problems.append(f"COVERS {kind} {key}: the script has no code marker for it")
+            continue
+        for path in paths:
+            code_text = "\n".join(
+                line for line in path.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            if not re.search(pattern, code_text):
+                problems.append(f"{path.name} has 'COVERS: {kind} {key}' but its code has no {pattern}")
 
     report(
         "check_blocking_decision_tables.py",
