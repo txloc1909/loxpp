@@ -11,6 +11,7 @@
 #include <cmath>
 #include <algorithm>
 #include <climits>
+#include <memory>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -99,6 +100,37 @@ static std::string hostPort(const std::string& host, int port) {
     return host + ":" + std::to_string(port);
 }
 
+static Value runIo(ParkedIo io);
+
+// The state of a connect() between its attempts. The descriptor of the attempt
+// in progress belongs to it: no Socket exists yet, so no close can reach it,
+// and the end of the task destroys the state.
+struct ConnectState {
+    std::string host;
+    int port{0};
+    std::vector<ConnectAddress> addrs;
+    std::size_t next{0};
+    int fd{-1};
+    int lastErrno{0};
+
+    ConnectState() = default;
+    ConnectState(const ConnectState&) = delete;
+    ConnectState& operator=(const ConnectState&) = delete;
+    ~ConnectState() {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+    }
+};
+
+static thread_local const ConnectTestHooks* s_connectHooks = nullptr;
+
+void setConnectTestHooks(const ConnectTestHooks* hooks) {
+    s_connectHooks = hooks;
+}
+
+// Resolves the name on the worker, and runs the connect from the first
+// address. The TCP connect is nonblocking: the call parks where it can.
 static Value connectNative(int /*argc*/, Value* argv) {
     std::string host;
     if (!asStringArg(argv[0], host)) {
@@ -125,39 +157,29 @@ static Value connectNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
 
-    int fd = -1;
-    int lastErrno = 0;
+    auto state = std::make_shared<ConnectState>();
+    state->host = host;
+    state->port = port;
     for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
-        fd =
-            socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
-        if (fd < 0) {
-            lastErrno = errno;
-            continue;
-        }
-        // The connect blocks; the socket turns nonblocking once it is open.
-        if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0 &&
-            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0) {
-            break;
-        }
-        lastErrno = errno;
-        ::close(fd);
-        fd = -1;
+        ConnectAddress a;
+        std::memset(&a, 0, sizeof(a));
+        a.family = p->ai_family;
+        a.socktype = p->ai_socktype;
+        a.protocol = p->ai_protocol;
+        a.len = p->ai_addrlen;
+        std::memcpy(&a.addr, p->ai_addr, p->ai_addrlen);
+        state->addrs.push_back(a);
     }
     freeaddrinfo(res);
-
-    if (fd < 0) {
-        std::string msg = "connect(): cannot connect to '" +
-                          hostPort(host, port) +
-                          "': " + std::strerror(lastErrno);
-        raiseNet(kNetworkError, msg);
-        return from<Nil>(Nil{});
+    if (s_connectHooks != nullptr && s_connectHooks->addresses) {
+        s_connectHooks->addresses(state->addrs);
     }
-    MemoryManager* mm = getActiveMM();
-    ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
-    mm->pushTempRoot(sock);
-    sock->fd = fd;
-    mm->popTempRoot();
-    return Value{static_cast<Obj*>(sock)};
+
+    ParkedIo io;
+    io.op = IoOp::CONNECT;
+    io.method = "connect";
+    io.connect = std::move(state);
+    return runIo(std::move(io));
 }
 
 static Value listenNative(int /*argc*/, Value* argv) {
@@ -466,7 +488,127 @@ static void stepAccept(ObjServer* srv, IoOutcome& out) {
     }
 }
 
+enum class Ended : unsigned char { No, Yes, Failed };
+
+// Whether the connect in progress on `fd` has ended, with success or with an
+// error. A zero timeout: the answer never waits. On loopback the handshake is
+// over before connect(2) returns, so the call then does not park. A failure of
+// poll(2) says nothing about the connect, so it is reported as Failed with
+// errno kept.
+static Ended attemptEnded(int fd) {
+    for (;;) {
+        int r;
+        if (s_connectHooks != nullptr && s_connectHooks->pollCall) {
+            r = s_connectHooks->pollCall(fd);
+        } else {
+            pollfd pfd = {fd, POLLOUT, 0};
+            r = ::poll(&pfd, 1, 0);
+        }
+        if (r > 0) {
+            return Ended::Yes;
+        }
+        if (r == 0) {
+            return Ended::No;
+        }
+        if (errno != EINTR) {
+            return Ended::Failed;
+        }
+    }
+}
+
+// Reads the result of the attempt in progress. True when it connected: the
+// descriptor moves to `out`. False when it failed: the error is recorded and
+// the descriptor is closed.
+static bool settleAttempt(ConnectState& c, IoOutcome& out) {
+    int err = 0;
+    socklen_t len = sizeof(err);
+    if (getsockopt(c.fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) {
+        err = errno;
+    }
+    if (err == 0) {
+        out.kind = IoOutcome::Kind::Done;
+        out.fd = c.fd;
+        c.fd = -1;
+        return true;
+    }
+    c.lastErrno = err;
+    ::close(c.fd);
+    c.fd = -1;
+    return false;
+}
+
+// One step of connect: finishes the attempt in progress if there is one, then
+// starts attempts in address order until one connects or waits. The attempt
+// that waits keeps its descriptor in the state. An attempt that ended is read
+// with SO_ERROR; connect(2) is never called twice on one descriptor.
+static void stepConnect(ConnectState& c, IoOutcome& out) {
+    if (c.fd >= 0) {
+        switch (attemptEnded(c.fd)) {
+        case Ended::No:
+            out.kind = IoOutcome::Kind::Wait;
+            return;
+        case Ended::Failed:
+            c.lastErrno = errno;
+            ::close(c.fd);
+            c.fd = -1;
+            break;
+        case Ended::Yes:
+            if (settleAttempt(c, out)) {
+                return;
+            }
+            break;
+        }
+    }
+    while (c.next < c.addrs.size()) {
+        const ConnectAddress& a = c.addrs[c.next++];
+        int fd = socket(a.family, a.socktype | SOCK_CLOEXEC | SOCK_NONBLOCK,
+                        a.protocol);
+        if (fd < 0) {
+            c.lastErrno = errno;
+            continue;
+        }
+        const auto* sa = reinterpret_cast<const sockaddr*>(&a.addr);
+        int r = s_connectHooks != nullptr && s_connectHooks->connectCall
+                    ? s_connectHooks->connectCall(fd, sa, a.len)
+                    : ::connect(fd, sa, a.len);
+        if (r == 0) {
+            out.kind = IoOutcome::Kind::Done;
+            out.fd = fd;
+            return;
+        }
+        // After EINTR the kernel goes on with the connect, so the call treats
+        // it like EINPROGRESS.
+        if (errno == EINPROGRESS || errno == EINTR) {
+            c.fd = fd;
+            switch (attemptEnded(fd)) {
+            case Ended::No:
+                out.kind = IoOutcome::Kind::Wait;
+                return;
+            case Ended::Failed:
+                c.lastErrno = errno;
+                ::close(fd);
+                c.fd = -1;
+                continue;
+            case Ended::Yes:
+                if (settleAttempt(c, out)) {
+                    return;
+                }
+                continue;
+            }
+        }
+        c.lastErrno = errno;
+        ::close(fd);
+    }
+    setFault(out, kNetworkError,
+             "connect(): cannot connect to '" + hostPort(c.host, c.port) +
+                 "': " + std::strerror(c.lastErrno));
+}
+
 static void step(ParkedIo& io, IoOutcome& out) {
+    if (io.op == IoOp::CONNECT) {
+        stepConnect(*io.connect, out);
+        return;
+    }
     if (io.op == IoOp::ACCEPT) {
         auto* srv = asObjServer(io.target);
         if (srv->fd < 0) {
@@ -495,12 +637,16 @@ static void step(ParkedIo& io, IoOutcome& out) {
         return;
     case IoOp::ACCEPT:
     case IoOp::WRITE:
+    case IoOp::CONNECT:
     case IoOp::NONE:
         return;
     }
 }
 
 static int descriptorOf(const ParkedIo& io) {
+    if (io.op == IoOp::CONNECT) {
+        return io.connect->fd;
+    }
     return io.op == IoOp::ACCEPT ? asObjServer(io.target)->fd
                                  : asObjSocket(io.target)->fd;
 }
@@ -508,7 +654,7 @@ static int descriptorOf(const ParkedIo& io) {
 // The value of a finished call.
 static Value finish(const ParkedIo& io, IoOutcome& out) {
     MemoryManager* mm = getActiveMM();
-    if (io.op == IoOp::ACCEPT) {
+    if (io.op == IoOp::ACCEPT || io.op == IoOp::CONNECT) {
         ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
         mm->pushTempRoot(sock);
         sock->fd = out.fd;
@@ -551,7 +697,7 @@ static bool waitFd(int fd, short events, std::string& err) {
     return true;
 }
 
-// Runs a read-side call to its end, or to the point where the task parks.
+// Runs a call to its end, or to the point where the task parks.
 static Value runIo(ParkedIo io) {
     Runtime* rt = getActiveRuntime();
     for (;;) {
@@ -570,12 +716,14 @@ static Value runIo(ParkedIo io) {
         // resumeParkedIo goes on. The record moves to the task, because this
         // frame is gone by then. A task that cannot suspend waits here.
         const int fd = descriptorOf(io);
-        if (rt->parkCurrentTask(ParkReason::FD_READ, fd)) {
+        const bool connecting = io.op == IoOp::CONNECT;
+        if (rt->parkCurrentTask(
+                connecting ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
             rt->currentTask()->io = std::move(io);
             return from<Nil>(Nil{});
         }
         std::string err;
-        if (!waitFd(descriptorOf(io), POLLIN, err)) {
+        if (!waitFd(fd, connecting ? POLLOUT : POLLIN, err)) {
             raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
             return from<Nil>(Nil{});
         }
@@ -842,6 +990,10 @@ static void closeDescriptor(int& fd, const char* noun) {
 }
 
 void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
+    if (task->io.op == IoOp::CONNECT) {
+        // The attempt has no Socket. The end of the task closes it.
+        return;
+    }
     int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
                                           : asObjSocket(task->io.target)->fd;
     if (task->io.op != IoOp::ACCEPT) {
