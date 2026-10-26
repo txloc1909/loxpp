@@ -11,6 +11,7 @@
 
 #include "memory_manager.h"
 #include "objects.h"
+#include "test_harness.h"
 #include "vm.h"
 
 #include <gtest/gtest.h>
@@ -241,6 +242,11 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
 // and it is still in the mailbox when the park ends.
 TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
+        // The send ran during the park. It left the task parked, with the
+        // message in its mailbox.
+        EXPECT_EQ(task->state, TaskState::PARKED);
+        EXPECT_EQ(task->mailbox.size(), 1u);
+        EXPECT_NE(task->parkReason, ParkReason::NONE);
         rt.completePark(task, from<Number>(42.0));
     });
     ASSERT_EQ(rig.vm().interpret(R"(
@@ -527,4 +533,84 @@ TEST_F(ParkTest, TheDeadlockReportDoesNotNameAParkedTask) {
               std::string::npos)
         << err;
     EXPECT_EQ(err.find("napper"), std::string::npos) << err;
+}
+
+// In a session the main task outlives a line that ended with a fault. If it
+// was parked then, its wait ends with the line: the next line reports a real
+// deadlock at once and does not wait for the old timer.
+TEST_F(ParkTest, ASessionMainTaskThatWasParkedLeavesNoWaitBehind) {
+    VMTestHarness h;
+    h.setSession(true);
+    ASSERT_EQ(h.run("fun boom() { sleep(0.1); var x = nil; x.foo(); }"),
+              InterpretResult::OK);
+    testing::internal::CaptureStderr();
+    ASSERT_EQ(h.run("task.spawn(boom); sleep(8);"),
+              InterpretResult::RUNTIME_ERROR);
+    testing::internal::GetCapturedStderr();
+    const auto start = PClock::now();
+    testing::internal::CaptureStderr();
+    InterpretResult result = h.run("task.receive();");
+    std::string err = testing::internal::GetCapturedStderr();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        PClock::now() - start)
+                        .count();
+    h.endSession();
+    EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("Deadlock"), std::string::npos) << err;
+    EXPECT_LT(ms, 3000);
+}
+
+// A sleep of zero, of a negative duration, and of a fraction of a nanosecond
+// that rounds to zero return at once: no other task runs, and no park makes
+// a poller.
+TEST_F(ParkTest, ASleepWithNoDurationDoesNotPark) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(R"(
+        var me = task.self();
+        var log = "";
+        fun a() {
+            sleep(0);
+            log = log + "a;";
+            sleep(-1);
+            log = log + "a;";
+            sleep(-0.5);
+            log = log + "a;";
+            task.send(me, 1);
+        }
+        fun b() { log = log + "b;"; task.send(me, 1); }
+        task.spawn(a);
+        task.spawn(b);
+        task.receive();
+        task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "log"), "a;a;a;b;");
+    EXPECT_FALSE(vm.runtime().hasPoller());
+}
+
+// A very long sleep waits and does not overflow the clock or end early. The
+// task would sleep for the rest of the clock's range: the main task ends
+// first, and the sleeper never woke.
+TEST_F(ParkTest, AVeryLongSleepDoesNotEndEarly) {
+    VM vm;
+    ASSERT_EQ(vm.interpret(R"(
+        var woke = 0;
+        fun forever(seconds) { sleep(seconds); woke = woke + 1; }
+        fun power(n) {
+            var x = 1;
+            for (var i = 0; i < n; i = i + 1) { x = x * 1000000; }
+            return x;
+        }
+        fun huge() { forever(power(5)); }
+        fun big() { forever(power(2) * 10000); }
+        fun nearLimit() { forever(9200000000); }
+        fun infinite() { forever(power(60)); }
+        task.spawn(huge);
+        task.spawn(big);
+        task.spawn(nearLimit);
+        task.spawn(infinite);
+        sleep(0.3);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "woke"), "0");
 }

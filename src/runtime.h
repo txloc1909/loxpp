@@ -1013,6 +1013,12 @@ class Runtime {
     // registers its wait. Called by resumeTask after the task's frames
     // unwound.
     void parkTask(ObjTask* task);
+    // Cancels the wait of a parked task and erases it from the parked set.
+    // No-op for a task that is not parked.
+    void releasePark(ObjTask* task);
+    // Looks at the poller without blocking, at a bounded rate, between two
+    // tasks of a busy worker.
+    void pollWhileBusy();
     // Moves a PARKED task to the back of the run queue.
     void unparkTask(ObjTask* task);
     // Handles the tokens that one wait of the poller reported: wakes the
@@ -1351,6 +1357,8 @@ class Runtime {
         std::string message;
     };
     ResumeFault m_resumeFault;
+    int m_switchesSincePoll{0};
+    Poller::Clock::time_point m_lastPoll{};
     // Tasks of this run that have not ended, the main task included.
     int m_liveTasks{0};
     std::uint64_t m_nextTaskSerial{0};

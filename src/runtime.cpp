@@ -1129,8 +1129,8 @@ void Runtime::parkTask(ObjTask* task) {
     m_parkedTasks.emplace(token, task);
 }
 
-void Runtime::unparkTask(ObjTask* task) {
-    if (task->state != TaskState::PARKED) {
+void Runtime::releasePark(ObjTask* task) {
+    if (task->parkReason == ParkReason::NONE) {
         return;
     }
     // A wait that the poller reported is gone already; cancel() is then a
@@ -1141,6 +1141,13 @@ void Runtime::unparkTask(ObjTask* task) {
     m_parkedTasks.erase(task->parkToken);
     task->parkReason = ParkReason::NONE;
     task->parkToken = 0;
+}
+
+void Runtime::unparkTask(ObjTask* task) {
+    if (task->state != TaskState::PARKED) {
+        return;
+    }
+    releasePark(task);
     task->state = TaskState::READY;
     m_runQueue.push_back(task);
 }
@@ -1161,6 +1168,30 @@ void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
     task->faultKind = kind;
     task->faultMessage = msg;
     unparkTask(task);
+}
+
+void Runtime::pollWhileBusy() {
+    // A task that is ready must not starve a wait that is over. A syscall per
+    // switch would tax every task switch while any wait exists, so the poll
+    // runs at most once per kPollInterval, and the clock is read only every
+    // kSwitchesPerClockRead switches.
+    constexpr int kSwitchesPerClockRead = 16;
+    constexpr auto kPollInterval = std::chrono::milliseconds(1);
+    if (!m_poller->hasWaits() ||
+        ++m_switchesSincePoll < kSwitchesPerClockRead) {
+        return;
+    }
+    m_switchesSincePoll = 0;
+    const auto now = Poller::Clock::now();
+    if (now - m_lastPoll < kPollInterval) {
+        return;
+    }
+    m_lastPoll = now;
+    std::vector<Poller::Token> ready;
+    m_poller->wait(ready, false);
+    if (!ready.empty()) {
+        onPollReady(ready);
+    }
 }
 
 void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
@@ -1223,14 +1254,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->startArg = Value{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
-    if (task->parkReason != ParkReason::NONE) {
-        if (m_poller != nullptr) {
-            m_poller->cancel(task->parkToken);
-        }
-        m_parkedTasks.erase(task->parkToken);
-        task->parkReason = ParkReason::NONE;
-        task->parkToken = 0;
-    }
+    releasePark(task);
     m_waitingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
@@ -1394,6 +1418,12 @@ void Runtime::endTasks() {
     for (ObjTask* task : left) {
         if (task != m_mainTask || !m_isMainWorker) {
             markTaskDead(task);
+        } else {
+            // The main task of a session survives the line, but its wait does
+            // not: nothing would end it once m_parkedTasks is cleared below.
+            releasePark(task);
+            task->pendingValue = Value{};
+            task->hasPendingFault = false;
         }
     }
     m_runQueue.clear();
@@ -1566,14 +1596,8 @@ InterpretResult Runtime::schedule() {
             return InterpretResult::OK;
         }
         drainInbox();
-        if (m_poller != nullptr && m_poller->hasWaits() &&
-            !m_runQueue.empty()) {
-            // A task that is ready must not starve a wait that is over.
-            std::vector<Poller::Token> ready;
-            m_poller->wait(ready, false);
-            if (!ready.empty()) {
-                onPollReady(ready);
-            }
+        if (m_poller != nullptr && !m_runQueue.empty()) {
+            pollWhileBusy();
         }
         if (m_runQueue.empty()) {
             switch (waitForWork()) {

@@ -107,11 +107,19 @@ static Value sleepNative(int /*argc*/, Value* argv) {
     if (!(seconds > 0)) {
         return from<Nil>(Nil{});
     }
-    // About a century: a longer wait overflows the clock's duration.
-    constexpr double kLongestSeconds = 3.0e9;
-    const auto length = std::chrono::duration_cast<Poller::Clock::duration>(
-        std::chrono::duration<double>(std::min(seconds, kLongestSeconds)));
-    const auto deadline = Poller::Clock::now() + length;
+    // The deadline is `seconds` from now, or the latest time the clock can
+    // represent when `seconds` reaches that limit (about 292 years): such a
+    // wait does not end, and the sum never overflows. The 1 second margin
+    // keeps the double conversion below the clock's range.
+    const auto now = Poller::Clock::now();
+    const double room =
+        std::chrono::duration<double>(Poller::Clock::time_point::max() - now)
+            .count();
+    const auto deadline =
+        seconds >= room - 1.0
+            ? Poller::Clock::time_point::max()
+            : now + std::chrono::duration_cast<Poller::Clock::duration>(
+                        std::chrono::duration<double>(seconds));
     if (getActiveRuntime()->parkCurrentTask(ParkReason::TIMER, -1, deadline)) {
         return from<Nil>(Nil{});
     }
