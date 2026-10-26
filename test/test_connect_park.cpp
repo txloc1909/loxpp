@@ -899,3 +899,68 @@ TEST_F(ConnectParkTest, AFailingPollIsAFaultAndAnInterruptedPollIsRetried) {
     }
     close(fd);
 }
+
+// A poll(2) failure ends the attempt, and the descriptor of the attempt is
+// closed: at once when connect(2) returns, and after a park when the wait
+// ends. The count of open descriptors is the same before and after.
+TEST_F(ConnectParkTest, AFailingPollClosesTheDescriptorOfTheAttempt) {
+    int port = 0;
+    int fd = hostListen(AF_INET, port);
+    ASSERT_GE(fd, 0);
+    const int before = openDescriptorCount();
+    {
+        ConnectTestHooks hooks;
+        hooks.pollCall = [](int) {
+            errno = ENOMEM;
+            return -1;
+        };
+        HookGuard guard(hooks);
+        VM vm;
+        ASSERT_EQ(vm.interpret("var kind = \"none\";"
+                               "try { connect(\"127.0.0.1\", " +
+                               std::to_string(port) +
+                               R"();
+                kind = "connected"; } catch (e) { kind = e.kind; }
+            )"),
+                  InterpretResult::OK);
+        EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
+    }
+    EXPECT_EQ(openDescriptorCount(), before);
+    close(fd);
+}
+
+TEST_F(ConnectParkTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
+    SlowListener host;
+    REQUIRE_SLOW(host);
+    host.drainAfter(200);
+    const int before = openDescriptorCount();
+    {
+        int polls = 0;
+        ConnectTestHooks hooks;
+        // The first poll finds the connect in progress and the task parks.
+        // The poll after the wake fails.
+        hooks.pollCall = [&](int s) {
+            if (polls++ == 0) {
+                pollfd pfd = {s, POLLOUT, 0};
+                return ::poll(&pfd, 1, 0);
+            }
+            errno = ENOMEM;
+            return -1;
+        };
+        HookGuard guard(hooks);
+        VM vm;
+        ASSERT_EQ(vm.interpret("var kind = \"none\";"
+                               "try { connect(\"127.0.0.1\", " +
+                               std::to_string(host.port()) +
+                               R"();
+                kind = "connected"; } catch (e) { kind = e.kind; }
+            )"),
+                  InterpretResult::OK);
+        EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
+        EXPECT_GE(polls, 2);
+    }
+    // The drainer closes the connections it took, so only the VM can leave a
+    // descriptor behind.
+    host.stop();
+    EXPECT_EQ(openDescriptorCount(), before);
+}
