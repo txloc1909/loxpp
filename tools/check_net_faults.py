@@ -96,7 +96,8 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     function = None
-    for number, line in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    for number, line in enumerate(lines, 1):
         if line and not line[0].isspace() and not line.startswith(("//", "}", "#")):
             m = NATIVE_FUNCTION.match(line)
             if m:
@@ -113,23 +114,34 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                 problems.append(f"line {number}: {helper} is not a known fault helper")
         if re.search(r"\bnativeRuntimeError\(", line) and function != "raiseNet":
             sites[(function, HALT)] += 1
-        m = re.search(
-            r"\b(?:raiseNet\((k\w+)|setFault\(out, (k\w+)|failPark\(task, (k\w+))",
-            line,
-        )
-        other = re.search(
-            r"\b(?:raiseNet\(|setFault\(out, |failPark\(task, )(?!k\w+|out\.faultKind)(\S+?)[,)]",
-            line,
-        )
-        if other and function not in ("raiseNet", "setFault"):
-            problems.append(f"line {number}: a fault kind that is not a constant: {other.group(1)}")
-        if m:
-            name = next(g for g in m.groups() if g)
-            kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(name)
-            if kind is None:
-                problems.append(f"line {number}: a fault names an unknown kind {name}")
-            else:
-                sites[(function, kind)] += 1
+        if function not in ("raiseNet", "setFault"):
+            # A formatter can split a call after its open parenthesis or after
+            # the first argument, so the kind is read from this line and the
+            # next one.
+            window = line
+            if line.rstrip().endswith(("(", ",")) and number < len(lines):
+                window += " " + lines[number].strip()
+            for head in re.finditer(r"\b(raiseNet|setFault|failPark)\(", line):
+                pattern = {
+                    "raiseNet": r"raiseNet\(\s*([\w.]+)",
+                    "setFault": r"setFault\(\s*out,\s*([\w.]+)",
+                    "failPark": r"failPark\(\s*task,\s*([\w.]+)",
+                }[head.group(1)]
+                arg = re.match(pattern, window[head.start():])
+                if arg is None:
+                    problems.append(f"line {number}: cannot read the kind of {head.group(1)}")
+                elif arg.group(1) == "out.faultKind":
+                    continue
+                elif not re.fullmatch(r"k\w+", arg.group(1)):
+                    problems.append(f"line {number}: a fault kind that is not a constant: {arg.group(1)}")
+                else:
+                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(arg.group(1))
+                    if kind is None:
+                        problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
+                    else:
+                        sites[(function, kind)] += 1
+        if function != "setFault" and re.search(r"\bfaultKind\s*=(?!=)", line):
+            problems.append(f"line {number}: faultKind is set outside setFault")
     return sites, problems
 
 
