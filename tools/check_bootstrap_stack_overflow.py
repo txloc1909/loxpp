@@ -35,12 +35,21 @@ that the example exited 0.
 
 Usage:
     tools/check_bootstrap_stack_overflow.py [<examples-dir>]
+    tools/check_bootstrap_stack_overflow.py --print-timeout
 
 <examples-dir> defaults to examples/. Exits 125 (ctest's configured
 SKIP_RETURN_CODE) without running anything when
-LOXPP_BOOTSTRAP_TRACE_ENABLED=1 is set -- see
+LOXPP_BOOTSTRAP_TRACE_ENABLED=1 is set, or when the build that
+bootstrap/lox_wrapper.sh runs was configured to trace -- see
 tools/run_bootstrap_error_kind_causes.py's docstring for why a debug-preset
 build cannot run this check.
+
+Every program this check runs gets program_timeout() seconds. That budget
+bounds a runaway, so it is sized for a slow-by-design build (sanitizer, or
+unoptimized) and not for the expected cost: the deepest probe here is a
+100000-iteration self tail call that already takes seconds in a release
+build, and a budget sized to a release build reports a slow host as a fault.
+LOXPP_BOOTSTRAP_PROGRAM_TIMEOUT overrides it; --print-timeout prints it.
 """
 
 import os
@@ -57,6 +66,72 @@ FATAL_FAST_PATH_PROBE = (
 )
 
 PROBE_DIR = REPO_ROOT / "test" / "translation-probes"
+
+# The build bootstrap/lox_wrapper.sh runs is always REPO_ROOT/build, so its
+# cache tells this check how slow that binary is meant to be.
+CACHE_FILE = REPO_ROOT / "build" / "CMakeCache.txt"
+
+PROGRAM_TIMEOUT_SECONDS = 60
+
+# A sanitizer or unoptimized build of the tree-walking bootstrap runs several
+# times slower than a release build (measured 69s against 9s for the deepest
+# probe on a 12-core host, issue #856), so the budget scales with it rather
+# than reporting the speed of the build as a fault in the bootstrap.
+SLOW_BUILD_TIMEOUT_FACTOR = 5
+
+OPTIMIZED_BUILD_TYPES = ("release", "relwithdebinfo", "minsizerel")
+
+
+def cache_value(name: str) -> str:
+    """The configured value of a CMake cache variable, or "" when unknown."""
+    try:
+        with open(CACHE_FILE, encoding="utf-8", errors="replace") as cache:
+            for line in cache:
+                if line.startswith(name + ":"):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def build_is_slow() -> bool:
+    """Whether this build is slow by design rather than by a fault in the code."""
+    if not CACHE_FILE.exists():
+        return False
+    flags = cache_value("CMAKE_CXX_FLAGS") + " " + cache_value(
+        "CMAKE_EXE_LINKER_FLAGS"
+    )
+    if "-fsanitize=" in flags:
+        return True
+    return cache_value("CMAKE_BUILD_TYPE").lower() not in OPTIMIZED_BUILD_TYPES
+
+
+def build_traces_execution() -> bool:
+    """Whether build/loxpp prints a trace instead of the plain lines this check reads."""
+    return any(
+        cache_value(name) == "ON"
+        for name in ("LOXPP_DEBUG_TRACE_EXECUTION", "LOXPP_DEBUG_PRINT_CODE")
+    )
+
+
+def program_timeout() -> int:
+    """The per-program limit in seconds, for every subprocess this check starts."""
+    override = os.environ.get("LOXPP_BOOTSTRAP_PROGRAM_TIMEOUT")
+    if override is not None:
+        try:
+            seconds = int(override)
+        except ValueError:
+            seconds = 0
+        if seconds <= 0:
+            raise SystemExit(
+                "LOXPP_BOOTSTRAP_PROGRAM_TIMEOUT must be a positive integer, "
+                f"got {override!r}"
+            )
+        return seconds
+    return PROGRAM_TIMEOUT_SECONDS * (
+        SLOW_BUILD_TIMEOUT_FACTOR if build_is_slow() else 1
+    )
+
 
 # A second StackOverflowError raised by a deferred call while the first one
 # unwinds is fatal, not delivered to the live catch (spec, "Runtime Errors").
@@ -529,7 +604,7 @@ def run(program: str, extra_env: dict | None = None) -> tuple[list[str], list[st
             capture_output=True,
             text=True,
             env=env,
-            timeout=60,
+            timeout=program_timeout(),
             check=False,
         )
         return result.stdout.splitlines(), result.stderr.splitlines(), result.returncode
@@ -580,7 +655,11 @@ def check_known_gaps() -> list[str]:
             path = f.name
         try:
             native = subprocess.run(
-                [str(native_bin), path], capture_output=True, text=True, timeout=60, check=False
+                [str(native_bin), path],
+                capture_output=True,
+                text=True,
+                timeout=program_timeout(),
+                check=False,
             )
         finally:
             os.unlink(path)
@@ -802,7 +881,7 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
                 text=True,
                 input=stdin_data,
                 env=dict(os.environ, LANGUAGE="LOXPP"),
-                timeout=60,
+                timeout=program_timeout(),
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -818,7 +897,7 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
                 text=True,
                 input=stdin_data,
                 env=env,
-                timeout=60,
+                timeout=program_timeout(),
                 check=False,
             )
         except subprocess.TimeoutExpired:
@@ -898,7 +977,11 @@ def check_state_after_examples(examples_dir: Path) -> list[str]:
 
 
 def main() -> int:
-    if os.environ.get("LOXPP_BOOTSTRAP_TRACE_ENABLED") == "1":
+    if "--print-timeout" in sys.argv[1:]:
+        print(program_timeout())
+        return 0
+
+    if os.environ.get("LOXPP_BOOTSTRAP_TRACE_ENABLED") == "1" or build_traces_execution():
         print(
             "SKIP: build/loxpp was built with LOXPP_DEBUG_TRACE_EXECUTION or "
             "LOXPP_DEBUG_PRINT_CODE on, so its stdout is a per-instruction trace, "
