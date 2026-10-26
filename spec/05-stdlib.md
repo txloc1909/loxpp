@@ -344,13 +344,15 @@ implementation may report whole seconds, milliseconds, or finer.
 
 ## `sleep(seconds) → Nil`
 
-Blocks the calling worker for at least `seconds` seconds. In a program
-with one worker, this suspends the program. `seconds` may be a fractional
-Number.
+Suspends the calling task for at least `seconds` seconds. Every other task
+of the worker keeps running (see [Blocking calls](#blocking-calls)). In a
+context where the task cannot suspend, the call blocks the worker for that
+time instead. `seconds` may be a fractional Number. A duration of zero or less
+returns at once, with no suspension.
 
 **Arity:** 1  
 **Returns:** Nil  
-**Blocks:** yes
+**Suspends:** yes
 
 ---
 
@@ -496,9 +498,14 @@ numeric address. `port` must be an integer Number from 1 through 65535. Any
 other argument is a runtime error. A failure to resolve the name or to connect,
 which includes a refused connection, raises a catchable `NetworkError`.
 
+The call suspends its task while it waits for the connection. When `host` is a
+host name, the worker blocks while the name resolves, and then the task
+suspends to wait for the connection. When `host` is a numeric address, no
+name resolves, so the call suspends for the whole wait.
+
 **Arity:** 2  
 **Returns:** Socket  
-**Blocks:** yes
+**Suspends:** yes
 
 ---
 
@@ -572,6 +579,13 @@ implementation; a portable program does not depend on it. A failed write does
 not change what a later read returns. A wrong argument type is a runtime error
 that halts the program.
 
+A call that reads or writes suspends its task while it waits (see [Blocking
+calls](#blocking-calls)). A task of the same worker can call `close()` on a
+Socket while another task waits in a call on it. The close wakes the waiting
+task, and its call raises a catchable `SocketClosedError`, as a call on a
+closed Socket does. The woken task joins the back of the run queue when
+`close()` is called.
+
 ### `s.read() -> String`
 
 Reads from the Socket until the peer closes its write direction, and returns
@@ -579,7 +593,7 @@ everything read as one String.
 
 **Arity:** 0  
 **Returns:** String  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.read_bytes(n) -> String`
 
@@ -590,7 +604,7 @@ do. `n` must be an integer in the range 0 to 2147483647.
 
 **Arity:** 1  
 **Returns:** String  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.readline() -> String | Nil`
 
@@ -600,7 +614,7 @@ line with no newline is returned as a line.
 
 **Arity:** 0  
 **Returns:** String on success, Nil at end of stream  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.readlines() -> List[String]`
 
@@ -609,7 +623,7 @@ List.
 
 **Arity:** 0  
 **Returns:** List of String  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.write(text) -> Nil`
 
@@ -617,7 +631,7 @@ Writes `text`. `text` must be a String.
 
 **Arity:** 1  
 **Returns:** Nil  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.writeline(text) -> Nil`
 
@@ -625,7 +639,7 @@ Writes `text` followed by one newline. `text` must be a String.
 
 **Arity:** 1  
 **Returns:** Nil  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.close_write() -> Nil`
 
@@ -653,11 +667,14 @@ A Server is returned by `listen`. `type(s)` on a Server returns `"Server"`.
 
 Waits for the next inbound connection, and returns it as a new Socket. Calling
 `accept()` on a closed Server raises a catchable `SocketClosedError`. A
-failure of the accept itself raises a catchable `NetworkError`.
+failure of the accept itself raises a catchable `NetworkError`. The call
+suspends its task while it waits. If a task of the same worker calls `close()`
+on the Server during the wait, the waiting call raises a catchable
+`SocketClosedError`.
 
 **Arity:** 0  
 **Returns:** Socket  
-**Blocks:** yes
+**Suspends:** yes
 
 ### `s.port() -> Number`
 
@@ -868,38 +885,52 @@ Returns the number of messages in the mailbox of the current task.
 ## Blocking calls
 
 A **blocking call** waits for another party outside the program: a user
-at standard input, the network, another process, or time. It blocks the worker that makes it, every
-task on that worker, and nothing else on an implementation that runs
-workers at the same time (see [§04-semantics, Suspend
-Points](04-semantics.md#suspend-points), and [Conformance](README.md#conformance),
-Scheduling). Each blocking call is a suspend
-point of the task that makes it. The section of each blocking call says
-`**Blocks:** yes`; the table below lists them all.
+at standard input, the network, another process, or time. Each blocking call
+is a suspend point of the task that makes it (see [§04-semantics, Suspend
+Points](04-semantics.md#suspend-points)). The calls have two classes, and the
+`Class` column of the table gives the class of each call.
 
-| Call | Waits for |
-|---|---|
-| `input()` | a line on standard input |
-| `sleep(seconds)` | time |
-| `connect(host, port)` | the connection |
-| `run(program, args)` | the child to exit |
-| `Socket.read()` | the peer to close |
-| `Socket.read_bytes(n)` | the bytes, or the peer to close |
-| `Socket.readline()` | a line, or the peer to close |
-| `Socket.readlines()` | the peer to close |
-| `Socket.write(text)` | room in the connection |
-| `Socket.writeline(text)` | room in the connection |
-| `Server.accept()` | an inbound connection |
-| `Process.read()` | the child to close its standard output |
-| `Process.read_bytes(n)` | the bytes, or the end of the stream |
-| `Process.readline()` | a line, or the end of the stream |
-| `Process.readlines()` | the end of the stream |
-| `Process.read_err()` | the child to close its standard error |
-| `Process.err_read_bytes(n)` | the bytes, or the end of the stream |
-| `Process.err_readline()` | a line, or the end of the stream |
-| `Process.err_readlines()` | the end of the stream |
-| `Process.write(text)` | room in the pipe |
-| `Process.writeline(text)` | room in the pipe |
-| `Process.wait()` | the child to exit |
+- A call of class **suspends** waits for the network or for time. It suspends
+  only its task: every other task of the worker keeps running while the wait
+  lasts. The section of the call says `**Suspends:** yes`.
+- A call of class **blocks** waits for standard input or for another process.
+  It blocks the worker that makes it, every task on that worker, and nothing
+  else on an implementation that runs workers at the same time (see
+  [Conformance](README.md#conformance), Scheduling). The section of the call
+  says `**Blocks:** yes`.
+
+A call of class suspends blocks the worker, and does not suspend, in two
+cases. First, the task cannot suspend where the call is made: see
+[§04-semantics, Suspend Points](04-semantics.md#contexts-where-a-task-cannot-suspend).
+The call then waits as a call of class blocks does, and it raises no fault.
+Second, `connect` blocks the worker while it resolves a host name.
+
+The table lists all the blocking calls.
+
+| Call | Class | Waits for |
+|---|---|---|
+| `input()` | blocks | a line on standard input |
+| `sleep(seconds)` | suspends | time |
+| `connect(host, port)` | suspends | the connection |
+| `run(program, args)` | blocks | the child to exit |
+| `Socket.read()` | suspends | the peer to close |
+| `Socket.read_bytes(n)` | suspends | the bytes, or the peer to close |
+| `Socket.readline()` | suspends | a line, or the peer to close |
+| `Socket.readlines()` | suspends | the peer to close |
+| `Socket.write(text)` | suspends | room in the connection |
+| `Socket.writeline(text)` | suspends | room in the connection |
+| `Server.accept()` | suspends | an inbound connection |
+| `Process.read()` | blocks | the child to close its standard output |
+| `Process.read_bytes(n)` | blocks | the bytes, or the end of the stream |
+| `Process.readline()` | blocks | a line, or the end of the stream |
+| `Process.readlines()` | blocks | the end of the stream |
+| `Process.read_err()` | blocks | the child to close its standard error |
+| `Process.err_read_bytes(n)` | blocks | the bytes, or the end of the stream |
+| `Process.err_readline()` | blocks | a line, or the end of the stream |
+| `Process.err_readlines()` | blocks | the end of the stream |
+| `Process.write(text)` | blocks | room in the pipe |
+| `Process.writeline(text)` | blocks | room in the pipe |
+| `Process.wait()` | blocks | the child to exit |
 
 Every other call in this chapter is not a blocking call and is not a
 suspend point, even when it takes time. This includes every File call, also

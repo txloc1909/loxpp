@@ -1,0 +1,35 @@
+// A call that waits for the network or for time suspends only its task, so
+// the other tasks of its worker run during the wait (spec/04-semantics.md,
+// Suspend Points). Here the task
+// `reader` waits in readlines() on a Socket whose peer has sent nothing yet. The
+// task `ticker` of the same worker runs, and then sends the data. An
+// implementation that blocks the worker in readlines() never runs `ticker`, and
+// hits the timeout.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// COVERS: suspend-call Socket.readlines in reader
+// CHECK: ticker ran
+// CHECK: reader got: 2 hello
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun reader() {
+    var got = conn.readlines(); print "reader got: " + len(got) + " " + got[0] + got[1];
+    task.send(me, "done");
+}
+fun ticker() {
+    print "ticker ran";
+    peer.writeline("he"); peer.writeline("llo");
+    peer.close();
+    task.send(me, "done");
+}
+task.spawn(reader);
+task.spawn(ticker);
+task.receive();
+task.receive();

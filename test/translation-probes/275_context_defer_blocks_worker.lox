@@ -1,0 +1,26 @@
+// A call that waits for the network or for time blocks the worker, and does not
+// raise, where the task cannot suspend (spec/04-semantics.md, Contexts where a
+// task cannot suspend). Here the call is a sleep() inside a deferred call. The `worker` task prints its lines
+// before `ticker` of the same worker runs, because nothing lets `ticker` run
+// during the call.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-context defer
+// CHECK: slow
+// CHECK: worker done
+// CHECK: ticker ran
+fun slow() {
+    defer sleep(0.1);
+    print "slow";
+}
+var me = task.self();
+fun worker() {
+    slow();
+    print "worker done";
+    task.send(me, "done");
+}
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(worker);
+task.spawn(ticker);
+task.receive();
+task.receive();

@@ -1,0 +1,22 @@
+// A call that waits for the network or for time suspends only its task, so
+// the other tasks of its worker run during the wait (spec/04-semantics.md,
+// Suspend Points). Here the task
+// `sleeper` waits in sleep(), and the task `ticker` of the same worker runs
+// before the sleep ends.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// COVERS: suspend-call sleep in sleeper
+// CHECK: ticker ran
+// CHECK: sleeper woke
+var me = task.self();
+fun sleeper() { sleep(0.3); print "sleeper woke"; task.send(me, "done"); }
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(sleeper);
+task.spawn(ticker);
+task.receive();
+task.receive();

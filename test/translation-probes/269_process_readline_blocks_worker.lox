@@ -1,0 +1,21 @@
+// A call of class blocks stays a call that blocks its worker: Process.readline()
+// does not let another task of the worker run while it waits for the child
+// (spec/05-stdlib.md, Blocking calls). The child writes after half a second, so
+// `reader` returns from readline() before `ticker` of the same worker runs.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: blocks-call Process.readline in reader
+// CHECK: reader got: hi
+// CHECK: ticker ran
+var me = task.self();
+fun reader() {
+    var p = spawn("sh", ["-c", "sleep 0.5; echo hi"]);
+    print "reader got: " + p.readline();
+    p.wait();
+    task.send(me, "done");
+}
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(reader);
+task.spawn(ticker);
+task.receive();
+task.receive();

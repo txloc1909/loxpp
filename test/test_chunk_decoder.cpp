@@ -325,8 +325,8 @@ TEST(ChunkDecoderTest, MatchesOracleOnTranslationProbes) {
 // static-error probe that native does not reject yet goes on
 // tools/spec-probe-xfail/native.txt, and then the check turns round: native
 // must still compile it, so that the node that makes native reject it deletes
-// the line, as check_spec_probes.py asks for a listed probe that passes. No
-// such file exists today, so every static-error probe must be rejected.
+// the line, as check_spec_probes.py asks for a listed probe that passes. A
+// static-error probe that is not on the list must be rejected.
 TEST(ChunkDecoderTest, StaticErrorProbesDoNotCompile) {
     const std::set<std::string> notYet = loxpp_test::specProbeXfail("native");
     int checked = 0;

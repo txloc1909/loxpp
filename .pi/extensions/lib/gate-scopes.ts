@@ -49,7 +49,8 @@ ctest --test-dir build --output-on-failure -j$(nproc)
 # probes" step is the reference. A node on another managed backend adds its
 # own runner line here rather than replacing this one (#855).
 python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh \\
-  test/translation-probes/ test/translation-probes/jvm-only/`;
+  test/translation-probes/ test/translation-probes/jvm-only/ \\
+  --xfail tools/spec-probe-xfail/jvm.txt --oracle-xfail tools/spec-probe-xfail/native.txt`;
 
 /**
  * The steps of CI's `QBE toolchain` job, in the job's own order, with the
@@ -92,7 +93,7 @@ export const QBE_GATE_STEPS: readonly { name: string; script: string }[] = [
   },
   {
     name: "Check spec probes - QBE",
-    script: `python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/`,
+    script: `python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/spec-probe-xfail/qbe.txt`,
   },
   {
     name: "QBE differential suite - compile errors",

@@ -787,6 +787,12 @@ before that step exits the loop without an error. Assigning a value to a key
 that already exists changes nothing structural and is permitted, as is
 deleting a key that is not present.
 
+A task can suspend inside the body of a `for`-in statement (see [Suspend
+Points](#suspend-points)). Another task of the worker then runs, and it can
+change the iterated Map. The next iterator step of the suspended task is then a
+runtime error that halts the program, as above. So a `for`-in over a Map that
+another task can change must not contain a call that can suspend.
+
 **`break`** and **`continue`** work as described below.
 
 ### `break` Statement
@@ -1554,6 +1560,12 @@ be callable; any other value is a runtime error. The call does not run `fn`.
 `"suspended"`, `"running"`, `"normal"`, or `"dead"`. See §03-types for what
 each state means.
 
+A coroutine whose function waits in a call of class suspends (see [Suspend
+Points](#suspend-points)) keeps the status `"running"` for the whole wait,
+also while other tasks run. So `co.status()` from another task returns
+`"running"`, and a resume of `co` from another task is a
+`RunningCoroutineError`.
+
 ### Abandoned coroutines
 
 A coroutine that is never resumed to completion when the program ends is
@@ -1753,15 +1765,67 @@ The blocking-call rows are exactly the calls in the [Blocking
 calls](05-stdlib.md#blocking-calls) table of §05-stdlib. A send is never a
 suspend point, and a spawn is never one.
 
-**Blocking calls.** A blocking call blocks the worker that makes it: no task
-on that worker runs until the call returns. Tasks on other workers keep
-running, on an implementation that runs workers at the same time (see
-[Conformance](README.md#conformance), Scheduling). A blocking call is in the table so that a later version can let
-other tasks of the worker run while the call waits, with no change to the
-rule above.
+**Blocking calls.** A blocking call has one of two classes, which the
+`Class` column of the [Blocking calls](05-stdlib.md#blocking-calls) table
+gives.
+
+- A call of class **suspends** waits for the network or for time: `sleep`,
+  `connect`, and the Socket and Server calls. It suspends its task until the
+  wait ends. The task leaves the run queue, and every other task of the worker
+  runs while the wait lasts. Only the task is suspended.
+- A call of class **blocks** waits for standard input or for another process:
+  `input()`, `run`, and the Process calls. It blocks the worker that makes it:
+  no task on that worker runs until the call returns. Tasks on other workers
+  keep running, on an implementation that runs workers at the same time (see
+  [Conformance](README.md#conformance), Scheduling).
+
+A call of class suspends blocks the worker in two cases: where the task cannot
+suspend (see [Contexts where a task cannot
+suspend](#contexts-where-a-task-cannot-suspend)), and during the name
+resolution of `connect`. Then the call waits as a call of class blocks does.
+
+A call of class suspends waits only when the wait is not over at the call. A
+`read` of a Socket that holds bytes returns at once, and a `sleep` of zero
+seconds returns at once. Whether the wait is over at the call can depend on
+the network, so a portable program does not depend on it.
+
+A task that waits in a call of class suspends keeps all its call frames in
+place, which includes the frames of a coroutine that the task resumed, and no
+deferred call runs. A coroutine that holds such a call keeps the status
+`"running"`, so a resume of it from another task is a `RunningCoroutineError`,
+as for a suspended receive. When the wait ends, the call returns the value it
+would have returned from a blocking call, or raises the fault it would have
+raised. A fault of the wait is raised in the waiting task when it runs again.
 
 A task that computes without reaching a suspend point keeps every other task
 of its worker from running. A program gives such a task a worker of its own.
+
+### Contexts where a task cannot suspend
+
+The runtime calls some Lox++ code and needs its result before it continues. A
+task cannot suspend inside such a call. A call of class suspends in one of
+these contexts blocks the worker, as a call of class blocks does. It raises no
+fault, and the result does not depend on the state of the network.
+
+| Context | The runtime calls Lox++ code for |
+|---|---|
+| `__str__` | `print`, `str()`, an element or key of a List or Map that is printed, a `__str__` inside a `__str__`, an uncaught throw of an instance that is not an `Error` |
+| a map key's `__hash__` and `__eq__` | `m[k]`, `m[k] = v`, a Map literal, `k in m`, `Map.has`, `Map.del`, and a hash collision |
+| `reflect.callMethod` | the method, or a callable field |
+| a deferred call | every drain: at a normal return, after a caught throw, after a run-time fault, after an uncaught throw, at the end of a task function, at the end of a coroutine function |
+| a native entry | a task or coroutine whose entry is a native function or a bound native |
+| a nested coroutine | each coroutine that the task resumes inside one of the contexts above |
+
+A task can suspend at the top level, in a function, in a task, in `init`, in
+every operator method and its reflected form, in `__lt__`, `__gt__`,
+`__contains__`, `__call__`, `__index_get__`, `__index_set__`, `__len__`,
+`__iter__`, and `__slice__`, in `==` and in `match` patterns, and in a
+coroutine that the task resumes outside the contexts above.
+
+`task.receive()` on an empty mailbox raises `YieldAcrossNativeError` in the
+same contexts (see [`task.receive`](#taskreceive)). The two rules differ
+because a receive has no way to continue without a message, and a call of
+class suspends has a way: it waits in place.
 
 ### Scheduling
 
@@ -1773,12 +1837,22 @@ first in, first out, and it has no priorities.
    main task follows the same rule.
 3. A task that suspends in `task.receive()` leaves the run queue. When a
    message arrives in its mailbox, it joins the back of the run queue.
-4. When the running task suspends or ends, the task at the head of the run
+4. A task that suspends in a call that waits for the network or for time
+   leaves the run queue. When its wait ends, it joins the back of the run
+   queue.
+5. When the running task suspends or ends, the task at the head of the run
    queue runs next.
 
-The order in which the tasks of one worker run is therefore defined. The
-order of steps on different workers is not, except where messages order
-them.
+When several waits have ended by the time the worker has no task that is
+ready to run, the tasks join the run queue in this order: first the tasks
+whose wait is for a connection, a Socket, or a Server and has ended, in the
+order in which their calls began to wait, then the tasks whose sleep has
+expired, in the order of their deadlines.
+
+The order in which the tasks of one worker run is therefore defined, with one
+limit: an event outside the program decides when a wait ends, and so which
+tasks are in the run queue when a task suspends. The order of steps on
+different workers is not defined either, except where messages order them.
 
 ### Ending
 
@@ -1792,6 +1866,10 @@ coroutine](#abandoned-coroutines) is: its pending deferred calls do not
 run. In a session the end of a line is not the end of the program, and the
 main task does not end with it: see [A Session](#a-session).
 
+When the program ends, a task that waits in a call of class suspends is
+abandoned like any other task. The runtime closes the Sockets and Servers that
+such a task waits on, because no deferred call will.
+
 A call of `exit(code)` in any task ends the program at once, with that exit
 code. A throw that no `try` statement in its task catches is uncaught: it
 ends the program as an uncaught runtime error does ([`throw`
@@ -1804,10 +1882,13 @@ different workers print never mix inside one line.
 ### Deadlock
 
 When the main task waits in `task.receive()`, no task on any worker is
-running or ready to run, no task is in a blocking call, and no message is on
-its way to a task, the program can never progress. It then ends with
+running or ready to run, no task waits in a blocking call, and no message is
+on its way to a task, the program can never progress. A task that waits in a
+call of class suspends is a task that can continue: its event can arrive, so
+it prevents a deadlock. It then ends with
 `DeadlockError`. It is a halting fault (see [Halting
-Faults](#halting-faults)). The report can list the tasks that wait.
+Faults](#halting-faults)). The report can list the tasks that wait in `task.receive()`. It does not list
+a task that waits in a blocking call.
 
 ### Worker and Task Faults
 

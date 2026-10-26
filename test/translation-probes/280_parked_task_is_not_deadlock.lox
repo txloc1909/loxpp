@@ -1,0 +1,28 @@
+// A task that waits in a call of class suspends can continue, so it prevents a
+// deadlock (spec/04-semantics.md, Deadlock). In the first part the main task
+// waits in task.receive() while the only other task sleeps. In the second part
+// the main task waits while `waiter` waits for a line on a Socket and `feeder`
+// sleeps, then sends it: no task is running or ready to run, and no program
+// ends with DeadlockError.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: napper woke
+// CHECK: waiter got: data
+var me = task.self();
+fun napper() { sleep(0.2); task.send(me, "napper woke"); }
+task.spawn(napper);
+print task.receive();
+
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+fun waiter() { task.send(me, "waiter got: " + conn.readline()); }
+fun feeder() { sleep(0.2); peer.writeline("data"); }
+task.spawn(waiter);
+task.spawn(feeder);
+print task.receive();

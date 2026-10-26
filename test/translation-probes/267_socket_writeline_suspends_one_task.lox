@@ -1,0 +1,48 @@
+// A call that waits for the network or for time suspends only its task, so
+// the other tasks of its worker run during the wait (spec/04-semantics.md,
+// Suspend Points). Here the task
+// `writer` calls writeline() with a string larger than the buffers of a connection,
+// while nothing reads the peer. The call has to wait for room. The task
+// `ticker` of the same worker runs during the wait, and then the main task reads
+// the whole string. An implementation that blocks the worker in writeline() never
+// runs `ticker`, and hits the timeout. The probe assumes that the buffers of a
+// connection on the local host hold less than 32 MB together; if they hold more,
+// the call does not wait and the probe does not show the property.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// COVERS: suspend-call Socket.writeline in writer
+// CHECK: ticker ran
+// CHECK: read all: true
+// CHECK: writer done
+var srv = listen("127.0.0.1", 0);
+var out = connect("127.0.0.1", srv.port());
+var inp = srv.accept();
+var me = task.self();
+var big = "x";
+for (var i = 0; i < 25; i = i + 1) big = big + big;
+var want = len(big) + 1;
+fun writer() {
+    out.writeline(big);
+    out.close();
+    task.send(me, "writer done");
+}
+fun ticker() {
+    print "ticker ran";
+    task.send(me, "ticked");
+}
+task.spawn(writer);
+task.spawn(ticker);
+task.receive();
+var total = 0;
+while (total < want) {
+    var chunk = inp.read_bytes(1048576);
+    if (chunk == "") break;
+    total = total + len(chunk);
+}
+print "read all: " + (total == want);
+print task.receive();

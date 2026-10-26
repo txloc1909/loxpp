@@ -1,0 +1,30 @@
+// A call that waits for the network or for time blocks the worker, and does not
+// raise, where the task cannot suspend (spec/04-semantics.md, Contexts where a
+// task cannot suspend). Here the call is readline() as the entry of a task: the
+// entry is a bound native. A peer on another worker writes one second after it
+// connects, so the entry task holds its worker for that time. `ticker` of the
+// same worker runs after it, so the time it sees since the start of the program
+// is at least half a second.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-context native-entry
+// CHECK: true
+var start = time();
+var srv = listen("127.0.0.1", 0);
+var me = task.self();
+fun peer(main) {
+    var port = task.receive();
+    var c = connect("127.0.0.1", port);
+    task.send(main, "connected");
+    sleep(1);
+    c.writeline("late");
+    c.close();
+}
+var helper = task.spawn_worker(peer, me);
+task.send(helper, srv.port());
+task.receive();
+var conn = srv.accept();
+fun ticker() { print time() - start >= 0.5; task.send(me, "done"); }
+task.spawn(conn.readline);
+task.spawn(ticker);
+task.receive();

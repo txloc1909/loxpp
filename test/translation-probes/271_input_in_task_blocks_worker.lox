@@ -1,0 +1,17 @@
+// input() stays a call that blocks its worker (spec/05-stdlib.md, Blocking
+// calls). Standard input holds a line when the program starts, so the call does
+// not wait here, and the probe cannot show a wait. It checks that the call
+// returns its line in a task that shares its worker with another task, and that
+// the other task runs after it.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: blocks-call input in reader
+// CHECK: input: line one
+// CHECK: ticker ran
+var me = task.self();
+fun reader() { print "input: " + input(); task.send(me, "done"); }
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(reader);
+task.spawn(ticker);
+task.receive();
+task.receive();

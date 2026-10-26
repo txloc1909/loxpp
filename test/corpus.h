@@ -53,10 +53,9 @@ listLoxFiles(const std::filesystem::path& dir) {
 // tools/check_spec_probes.py reads with --xfail. Blank lines and lines that
 // start with '#' are comments.
 //
-// Every consumer passes every probe today, so no such file exists: an absent
-// file is an empty set, not an error, and the gate then grades every probe. A
-// name that is not a probe file stays an error, so a mistyped entry cannot turn
-// a sweep that skips these names into one that skips fewer.
+// An absent file is an empty set, not an error, and the gate then grades every
+// probe. A name that is not a probe file stays an error, so a mistyped entry
+// cannot turn a sweep that skips these names into one that skips fewer.
 inline std::set<std::string> specProbeXfail(const std::string& consumer) {
     const std::filesystem::path path =
         projectRoot() / "tools" / "spec-probe-xfail" / (consumer + ".txt");

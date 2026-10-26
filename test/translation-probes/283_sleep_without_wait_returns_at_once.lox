@@ -1,0 +1,22 @@
+// A sleep of zero seconds, and a sleep of a negative duration, return at once with
+// no suspension: no other task of the worker runs before the call returns
+// (spec/05-stdlib.md, `sleep`). `sleeper` calls both before `ticker` of the same
+// worker runs.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: slept zero
+// CHECK: slept negative
+// CHECK: ticker ran
+var me = task.self();
+fun sleeper() {
+    sleep(0);
+    print "slept zero";
+    sleep(-1);
+    print "slept negative";
+    task.send(me, "done");
+}
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(sleeper);
+task.spawn(ticker);
+task.receive();
+task.receive();

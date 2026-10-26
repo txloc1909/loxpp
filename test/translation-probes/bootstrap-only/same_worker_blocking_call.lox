@@ -1,0 +1,16 @@
+// The bootstrap interpreter runs every worker on one host thread, so a
+// blocking call blocks every task (spec/README.md, Conformance: scheduling is
+// implementation-defined). So the probes of tasks that share a worker with a
+// call that waits for the network or for time do not bind the bootstrap, and
+// this probe checks the bootstrap's own choice in their place: a task that
+// sleeps keeps the other task of its worker from running until the sleep ends.
+// STATUS: ok
+// CHECK: sleeper woke
+// CHECK: ticker ran
+var me = task.self();
+fun sleeper() { sleep(0.3); print "sleeper woke"; task.send(me, "done"); }
+fun ticker() { print "ticker ran"; task.send(me, "done"); }
+task.spawn(sleeper);
+task.spawn(ticker);
+task.receive();
+task.receive();
