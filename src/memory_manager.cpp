@@ -374,9 +374,14 @@ void MemoryManager::traceObject(Obj* obj) {
         }
         break;
     }
-    case ObjType::SOCKET:
-        markObject(static_cast<ObjSocket*>(obj)->klass);
+    case ObjType::SOCKET: {
+        auto* sock = static_cast<ObjSocket*>(obj);
+        markObject(sock->klass);
+        for (ObjTask* writer : sock->writers) {
+            markObject(writer);
+        }
         break;
+    }
     case ObjType::SERVER:
         markObject(static_cast<ObjServer*>(obj)->klass);
         break;
@@ -424,6 +429,9 @@ void MemoryManager::traceObject(Obj* obj) {
         markValue(task->pendingValue);
         if (task->io.target != nullptr) {
             markObject(task->io.target);
+        }
+        if (task->io.text != nullptr) {
+            markObject(task->io.text);
         }
         break;
     }

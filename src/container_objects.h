@@ -88,10 +88,18 @@ inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 // The Socket owns `fd`; close() or the destructor closes it. Do not rely on
 // the destructor to close sockets; like ObjFile, GC timing is
 // non-deterministic. Call close() explicitly, or use `defer s.close()`.
+struct ObjTask;
+
 struct ObjSocket : public Obj {
     ObjClass* klass; // shared Socket class; GC-tracked
     int fd{-1};      // raw descriptor; -1 when closed
     bool writeClosed{false};
+    // The tasks parked in write() or writeline() on this socket, in the order
+    // their calls began. Only the first one sends, so the bytes of one call
+    // are never split by the bytes of another. An entry can be stale (its task
+    // no longer waits here); the owner of the queue checks before it uses one.
+    // GC-tracked, so a stale entry never dangles.
+    std::deque<ObjTask*> writers;
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
     std::string inbuf;
@@ -459,6 +467,7 @@ enum class IoOp : std::uint8_t {
     READ_BYTES,
     READLINE,
     READLINES,
+    WRITE,
 };
 
 struct ParkedIo {
@@ -470,6 +479,14 @@ struct ParkedIo {
     // read_bytes: the count asked for, and the bytes taken so far.
     std::size_t want{0};
     std::string buf;
+    // write and writeline: the program's String (GC-tracked through the task,
+    // never copied), whether a newline follows it, and how many of its bytes,
+    // newline included, the descriptor has taken. Only the socket's writer
+    // queue moves the offset, and the String is immutable, so the offset stays
+    // valid while the call waits.
+    Obj* text{nullptr};
+    bool newline{false};
+    std::size_t offset{0};
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

@@ -6,10 +6,8 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
-#include <poll.h>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
 #include <unistd.h>
 
 // Ignores SIGPIPE for its lifetime. A peer that stopped reading makes write(2)
@@ -68,50 +66,6 @@ inline bool writeStream(FILE* handle, const char* method, std::string_view text,
         // catches the fault can read the peer's last bytes next, and a read
         // that sees the old flag would raise a fault the network did not.
         std::clearerr(handle);
-        return false;
-    }
-    return true;
-}
-
-// Writes every byte of `text` to a socket, retrying on EINTR and on a short
-// write, then writes the newline if asked. MSG_NOSIGNAL makes a closed peer
-// fail with EPIPE without a SIGPIPE, so the process-wide disposition is not
-// touched and two threads cannot race on it. A descriptor has no error flag,
-// so a failed write leaves nothing behind for the next read to see. Returns
-// false and sets `message` when a write fails.
-inline bool writeFd(int fd, const char* method, std::string_view text,
-                    bool newline, std::string& message) {
-    auto writeAll = [fd](const char* data, size_t size) -> int {
-        while (size > 0) {
-            ssize_t n = ::send(fd, data, size, MSG_NOSIGNAL);
-            if (n < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // The descriptor is nonblocking and the connection is
-                    // full. A write blocks its worker, so wait in the kernel.
-                    struct pollfd pfd = {fd, POLLOUT, 0};
-                    while (::poll(&pfd, 1, -1) < 0) {
-                        if (errno != EINTR) {
-                            return errno;
-                        }
-                    }
-                    continue;
-                }
-                return errno;
-            }
-            data += n;
-            size -= static_cast<size_t>(n);
-        }
-        return 0;
-    };
-    int err = writeAll(text.data(), text.size());
-    if (err == 0 && newline) {
-        err = writeAll("\n", 1);
-    }
-    if (err != 0) {
-        message = std::string(method) + "(): " + std::strerror(err);
         return false;
     }
     return true;

@@ -13,6 +13,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -20,6 +21,7 @@
 #include <string>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <vector>
 
@@ -492,6 +494,7 @@ static void step(ParkedIo& io, IoOutcome& out) {
         stepReadline(s, io, out);
         return;
     case IoOp::ACCEPT:
+    case IoOp::WRITE:
     case IoOp::NONE:
         return;
     }
@@ -535,10 +538,10 @@ static Value finish(const ParkedIo& io, IoOutcome& out) {
     return Value{static_cast<Obj*>(list)};
 }
 
-// Waits in the kernel until `fd` can be read. The worker does not run another
-// task meanwhile. False, with `err` set, when poll(2) itself fails.
-static bool waitReadable(int fd, std::string& err) {
-    struct pollfd pfd = {fd, POLLIN, 0};
+// Waits in the kernel until `fd` is ready for `events`. The worker does not run
+// another task meanwhile. False, with `err` set, when poll(2) itself fails.
+static bool waitFd(int fd, short events, std::string& err) {
+    struct pollfd pfd = {fd, events, 0};
     while (::poll(&pfd, 1, -1) < 0) {
         if (errno != EINTR) {
             err = std::strerror(errno);
@@ -572,15 +575,25 @@ static Value runIo(ParkedIo io) {
             return from<Nil>(Nil{});
         }
         std::string err;
-        if (!waitReadable(descriptorOf(io), err)) {
+        if (!waitFd(descriptorOf(io), POLLIN, err)) {
             raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
             return from<Nil>(Nil{});
         }
     }
 }
 
+static void pumpWriters(ObjSocket* s);
+
 void resumeParkedIo(Runtime& rt, ObjTask* task) {
     ParkedIo& io = task->io;
+    if (io.op == IoOp::WRITE) {
+        // The pump finishes this call too when its turn and the room allow.
+        pumpWriters(asObjSocket(io.target));
+        if (task->state == TaskState::PARKED) {
+            rt.rearmPark(task, descriptorOf(io));
+        }
+        return;
+    }
     IoOutcome out;
     step(io, out);
     switch (out.kind) {
@@ -649,49 +662,164 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
     return runIo(std::move(io));
 }
 
-static Value socketWriteNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketWrite(args, "write");
+// Sends the bytes of a write call that the descriptor has not taken yet: the
+// rest of the String and then the newline, in one system call. MSG_NOSIGNAL
+// makes a peer that stopped reading fail with EPIPE and no signal. A
+// descriptor has no error flag, so a failed write leaves nothing that a later
+// read could see.
+static void stepWrite(int fd, ParkedIo& io, IoOutcome& out) {
+    auto* str = asObjString(io.text);
+    const std::string_view text(str->chars.data(), str->chars.size());
+    const size_t total = text.size() + (io.newline ? 1 : 0);
+    while (io.offset < total) {
+        struct iovec iov[2];
+        int count = 0;
+        if (io.offset < text.size()) {
+            iov[count].iov_base = const_cast<char*>(text.data() + io.offset);
+            iov[count].iov_len = text.size() - io.offset;
+            ++count;
+        }
+        if (io.newline) {
+            static char newline = '\n';
+            iov[count].iov_base = &newline;
+            iov[count].iov_len = 1;
+            ++count;
+        }
+        struct msghdr msg;
+        std::memset(&msg, 0, sizeof(msg));
+        msg.msg_iov = iov;
+        msg.msg_iovlen = static_cast<size_t>(count);
+        ssize_t n = ::sendmsg(fd, &msg, MSG_NOSIGNAL);
+        if (n >= 0) {
+            io.offset += static_cast<size_t>(n);
+            continue;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            out.kind = IoOutcome::Kind::Wait;
+            return;
+        }
+        setFault(out, kNetworkError,
+                 std::string(io.method) + "(): " + std::strerror(errno));
+        return;
+    }
+    out.kind = IoOutcome::Kind::Done;
+}
+
+// A queue entry is live when its task still waits in a write on this socket.
+static bool liveWriter(const ObjTask* task, const ObjSocket* s) {
+    return task->state == TaskState::PARKED && task->io.op == IoOp::WRITE &&
+           task->io.target == s;
+}
+
+// Sends for the parked writers in the order their calls began, and ends the
+// calls that finish. It stops at the first writer that must wait for room, so
+// a later writer never sends before an earlier one is done. Any task may call
+// it: the one that was woken, or one that blocks its worker and cannot wait
+// for the queue to move on its own.
+static void pumpWriters(ObjSocket* s) {
+    Runtime* rt = getActiveRuntime();
+    while (!s->writers.empty()) {
+        ObjTask* task = s->writers.front();
+        if (!liveWriter(task, s)) {
+            s->writers.pop_front();
+            continue;
+        }
+        IoOutcome out;
+        stepWrite(s->fd, task->io, out);
+        if (out.kind == IoOutcome::Kind::Wait) {
+            return;
+        }
+        s->writers.pop_front();
+        if (out.kind == IoOutcome::Kind::Fault) {
+            rt->failPark(task, out.faultKind, out.faultMessage.c_str());
+        } else {
+            rt->completePark(task, from<Nil>(Nil{}));
+        }
+    }
+}
+
+// Runs a write call to its end, or to the point where the task parks. A call
+// that finds a writer ahead of it waits behind that writer, also when the
+// descriptor has room.
+static Value runWrite(ObjSocket* s, ParkedIo io) {
+    Runtime* rt = getActiveRuntime();
+    if (asObjString(io.text)->chars.empty() && !io.newline) {
+        return from<Nil>(Nil{});
+    }
+    for (;;) {
+        pumpWriters(s);
+        if (s->writers.empty()) {
+            IoOutcome out;
+            stepWrite(s->fd, io, out);
+            if (out.kind == IoOutcome::Kind::Done) {
+                return from<Nil>(Nil{});
+            }
+            if (out.kind == IoOutcome::Kind::Fault) {
+                raiseNet(out.faultKind, out.faultMessage);
+                return from<Nil>(Nil{});
+            }
+        }
+        if (rt->parkCurrentTask(ParkReason::FD_WRITE, s->fd)) {
+            ObjTask* task = rt->currentTask();
+            task->io = std::move(io);
+            s->writers.push_back(task);
+            return from<Nil>(Nil{});
+        }
+        std::string err;
+        if (!waitFd(s->fd, POLLOUT, err)) {
+            raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
+            return from<Nil>(Nil{});
+        }
+    }
+}
+
+static Value socketWriteCall(Value* args, const char* method, bool newline) {
+    ObjSocket* s = checkSocketWrite(args, method);
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
     if (!isString(args[0])) {
-        nativeRuntimeError("'write' argument must be a string.");
+        std::string msg =
+            std::string("'") + method + "' argument must be a string.";
+        nativeRuntimeError(msg.c_str());
         return from<Nil>(Nil{});
     }
-    auto* str = asObjString(as<Obj*>(args[0]));
-    std::string message;
-    if (!writeFd(s->fd, "write",
-                 std::string_view(str->chars.data(), str->chars.size()), false,
-                 message)) {
-        raiseNet(kNetworkError, message);
-    }
-    return from<Nil>(Nil{});
+    ParkedIo io;
+    io.op = IoOp::WRITE;
+    io.target = s;
+    io.method = method;
+    io.text = as<Obj*>(args[0]);
+    io.newline = newline;
+    return runWrite(s, std::move(io));
+}
+
+static Value socketWriteNative(int /*argc*/, Value* args) {
+    return socketWriteCall(args, "write", false);
 }
 
 static Value socketWritelineNative(int /*argc*/, Value* args) {
-    ObjSocket* s = checkSocketWrite(args, "writeline");
-    if (s == nullptr) {
-        return from<Nil>(Nil{});
-    }
-    if (!isString(args[0])) {
-        nativeRuntimeError("'writeline' argument must be a string.");
-        return from<Nil>(Nil{});
-    }
-    auto* str = asObjString(as<Obj*>(args[0]));
-    std::string message;
-    if (!writeFd(s->fd, "writeline",
-                 std::string_view(str->chars.data(), str->chars.size()), true,
-                 message)) {
-        raiseNet(kNetworkError, message);
-    }
-    return from<Nil>(Nil{});
+    return socketWriteCall(args, "writeline", true);
 }
 
 static Value socketCloseWriteNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0 && !s->writeClosed) {
-        shutdown(s->fd, SHUT_WR);
+        // A write that waits cannot finish after this, so it fails now, in the
+        // order the calls began, as a write after close_write() does.
+        Runtime* rt = getActiveRuntime();
+        std::deque<ObjTask*> pending;
+        pending.swap(s->writers);
         s->writeClosed = true;
+        for (ObjTask* task : pending) {
+            if (liveWriter(task, s)) {
+                rt->failPark(task, kSocketClosedError,
+                             "Cannot write to a socket after close_write().");
+            }
+        }
+        shutdown(s->fd, SHUT_WR);
     }
     return from<Nil>(Nil{});
 }
@@ -716,6 +844,9 @@ static void closeDescriptor(int& fd, const char* noun) {
 void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
     int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
                                           : asObjSocket(task->io.target)->fd;
+    if (task->io.op != IoOp::ACCEPT) {
+        asObjSocket(task->io.target)->writers.clear();
+    }
     if (fd < 0) {
         return;
     }
@@ -728,6 +859,7 @@ void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
+        s->writers.clear();
         closeDescriptor(s->fd, "socket");
     }
     return from<Nil>(Nil{});

@@ -17,7 +17,7 @@ Native (src/stdlib/net_api.cpp):
   - `failPark(task, KIND, ...)` with a constant kind ends a parked call with a
     catchable fault of that kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
-    Socket write path uses `writeFd` and `raiseNet`.
+    Socket write path uses `stepWrite` and `raiseNet`.
   - `FILE`, `fdopen`, `fread`, `fgetc`, `fgets`, `fwrite`, `fflush` and other
     stdio calls, and `writeStream(`, must not appear:
     the Socket and Server natives use raw descriptors.
@@ -54,8 +54,7 @@ NATIVE_SITES = {
     ("asStringArg", HALT): 1,
     ("asPort", HALT): 2,
     ("asByteCount", HALT): 2,
-    ("socketWriteNative", HALT): 1,
-    ("socketWritelineNative", HALT): 1,
+    ("socketWriteCall", HALT): 1,
     ("connectNative", NETWORK): 2,
     ("listenNative", NETWORK): 2,
     ("fillInput", NETWORK): 1,
@@ -66,8 +65,9 @@ NATIVE_SITES = {
     ("closeDescriptor", CLOSED): 1,
     ("checkSocketRead", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
-    ("socketWriteNative", NETWORK): 1,
-    ("socketWritelineNative", NETWORK): 1,
+    ("stepWrite", NETWORK): 1,
+    ("runWrite", NETWORK): 1,
+    ("socketCloseWriteNative", CLOSED): 1,
     ("serverAcceptNative", CLOSED): 1,
 }
 
