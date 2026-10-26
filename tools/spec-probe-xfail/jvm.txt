@@ -1,5 +1,4 @@
-# Spec probes that the JVM backend does not pass yet (tools/check_spec_probes.py --xfail).
-# Node issues of mission #711 remove the lines; the gate turns green with the last node.
+# Spec probes that the JVM backend does not pass: file name, then the reason.
 260_sleep_suspends_one_task.lox sleep() blocks the worker, so ticker runs after the sleep
 261_accept_suspends_one_task.lox accept() blocks the worker, so ticker never runs and the probe times out
 262_socket_read_suspends_one_task.lox read() blocks the worker, so ticker never runs and the probe times out
