@@ -558,10 +558,8 @@ jobs:
       # line), against the stdout the spec defines. A consumer that cannot pass
       # a probe yet lists it in an expected-failure file under
       # tools/spec-probe-xfail/ and passes --xfail (the differential steps read
-      # the native file as --oracle-xfail). native.txt and qbe.txt
-      # list the probes of the rule that a call which waits for the network or
-      # for time suspends only its task; the bootstrap interpreter uses
-      # NOT-BINDING lines instead of a file.
+      # the native file as --oracle-xfail). No consumer has a file now; the
+      # bootstrap interpreter uses NOT-BINDING lines instead of a file.
       # Release only: the debug preset's instruction trace floods stdout (see
       # AGENTS.md).
       - name: Check spec probes - native
@@ -571,7 +569,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/spec-probe-xfail/native.txt"
+            bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/"
 
       - name: Check spec probes - bootstrap interpreter
         if: matrix.preset == 'release'
@@ -1220,7 +1218,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --oracle-xfail tools/spec-probe-xfail/native.txt"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
 
       # The spec probes of test/translation-probes/ (the files with a
       # STATUS line) on the JVM backend, against the stdout the spec
@@ -1488,7 +1486,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-qbe:latest \
-            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/spec-probe-xfail/qbe.txt"
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/"
 
       # The compile phase of the differential gate: each parser or resolver
       # error of test/compile-errors/ must be rejected: a non-zero exit status

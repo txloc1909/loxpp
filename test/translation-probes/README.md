@@ -392,7 +392,7 @@ probes (`--only-spec-probes`), and separate CI steps name `32_string_nul`,
 QBE bootstrap wrappers (issue #654).
 
 A consumer that does not pass a probe yet lists it in
-`tools/spec-probe-xfail/<consumer>.txt` (`native`, `jvm`, `bootstrap`, `qbe`),
+`tools/spec-probe-xfail/<consumer>.txt` (for example `native` or `qbe`),
 and its gate passes that file with `--xfail`: a listed probe must fail, and a
 listed probe that passes fails the gate until its line is deleted. A differential
 step also passes native's file as `--oracle-xfail`, so a backend that passes a
@@ -405,13 +405,12 @@ tests, and `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The
 C++ tests that compile every probe (`test/corpus.h`) leave out the probes in
 `native.txt`.
 
-`native.txt` and `qbe.txt` exist and list the probes `260` to `267`,
-`278` to `282`, `284`, and `285`: the probes of the rule that a call which waits for the
-network or for time suspends only its task (`docs/decisions/blocking-call-suspension.md`),
-which these consumers do not pass yet. The JVM backend passes them all and has no file. The bootstrap interpreter has no file: those
-probes carry a `NOT-BINDING` line that names `bootstrap-only/same_worker_blocking_call`.
-An absent file is an empty list, so a consumer with no gap needs no file, and a
-node that finds a gap creates the file it needs.
+No consumer has a list file now. The probes `260` to `267`, `278` to `282`, `284`, and `285` are the
+probes of the rule that a call which waits for the network or for time suspends only its task
+(`docs/decisions/blocking-call-suspension.md`), and the native VM, the JVM backend, and the QBE backend pass them all. The bootstrap interpreter
+has no file: those probes carry a `NOT-BINDING` line that names `bootstrap-only/same_worker_blocking_call`.
+An absent file is an empty list, so a consumer with no gap needs no
+file, and a node that finds a gap creates the file it needs.
 
 The probes `260` to `285` are the spec probes of that rule. Each carries
 `// COVERS: suspend-call <call> in <function>`, `// COVERS: suspend-context <slug>`, or
