@@ -31,6 +31,9 @@ public final class TaskTest {
         checkReceiveInNativeCoroutineEntryRaises();
         checkReceiveInNativeCoroutineEntryWithMessage();
         checkReceiveUnderANativeResumeEntryRaises();
+        checkSleepParksOnlyTheTask();
+        checkSleepUnderACallbackBlocksTheWorker();
+        checkCloseWakesAParkedAccept();
         checkSpawnWorkerEntry();
         checkWorker();
 
@@ -163,6 +166,49 @@ public final class TaskTest {
               "a receive that must suspend under a callback raises");
         checkEquals("Cannot receive across a native callback.", messageOf(err),
                     "the receive message differs from the yield message");
+    }
+
+    private static void sleepSeconds(double seconds) {
+        ((LoxCallable)globals.get("sleep")).call(new Object[] {seconds});
+    }
+
+    private static void checkSleepParksOnlyTheTask() {
+        boolean[] ticked = {false};
+        task("spawn", fn("ticker", () -> ticked[0] = true));
+        long start = System.nanoTime();
+        sleepSeconds(0.1);
+        check(System.nanoTime() - start >= 90_000_000L,
+              "sleep waits for its duration");
+        check(ticked[0], "a task of the worker runs while another sleeps");
+    }
+
+    private static void checkSleepUnderACallbackBlocksTheWorker() {
+        boolean[] ticked = {false};
+        task("spawn", fn("ticker", () -> ticked[0] = true));
+        LoxOps.enterCallback();
+        try {
+            sleepSeconds(0.05);
+        } finally {
+            LoxOps.exitCallback();
+        }
+        check(!ticked[0], "sleep under a callback blocks the worker");
+        sleepSeconds(0.05);
+        check(ticked[0], "the task runs once the sleep may suspend");
+    }
+
+    private static void checkCloseWakesAParkedAccept() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        String[] kind = {null};
+        task("spawn", fn("acceptor", () -> {
+            LoxError err = raised(() -> server.accept());
+            kind[0] = err == null ? "none" : kindOf(err);
+        }));
+        sleepSeconds(0.05);
+        check(kind[0] == null, "accept parks while no connection arrives");
+        server.close();
+        sleepSeconds(0.05);
+        checkEquals("SocketClosedError", kind[0],
+                    "a close raises the closed fault in the parked accept");
     }
 
     private static void checkEachTaskHasItsOwnCounters() {
