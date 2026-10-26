@@ -128,6 +128,13 @@ them:
 5. **Scheduling**: whether workers run at the same time, and whether a
    blocking call blocks only its own worker or every worker. A program whose
    progress needs two workers to run at the same time is not portable.
+   An implementation that blocks every worker in a blocking call also blocks
+   the other tasks of the calling worker. The rule that a call of class
+   suspends lets the other tasks of its worker run (see [§04-semantics,
+   Suspend Points](04-semantics.md#suspend-points)) does not bind such an
+   implementation. It binds every other implementation. A program whose
+   progress needs a task to run while another task of its worker waits in a
+   call of class suspends is not portable.
 6. **Speed**.
 7. **Connection loss on read**: whether a read on a Socket whose connection
    the peer reset ends with a `NetworkError` or as an end of stream.
@@ -137,8 +144,9 @@ separate rule.
 
 A program is **portable** when it does not catch a halting fault, does not
 depend on the text of a message, stays within the limits of each
-implementation, does not need two workers to run at the same time, and does
-not depend on connection loss on read. Every
+implementation, does not need two workers to run at the same time, does not
+need a task to run while another task of its worker waits in a call of class
+suspends, and does not depend on connection loss on read. Every
 conforming implementation gives a portable program the same output and the
 same exit status.
 

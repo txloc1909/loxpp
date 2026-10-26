@@ -241,6 +241,11 @@ states this exception on `connect`.
 
 ### Resume and repeated suspension
 
+A call of the first class waits only when its wait is not over at the call.
+A `read` of a Socket that already holds bytes returns at once, and so does a
+`sleep` of zero seconds. The spec states this; a portable program does not
+depend on whether the wait is over at the call.
+
 A resumed call returns the value it would have returned from a blocking call.
 One call may suspend more than once: `read_bytes(n)` may park on every chunk;
 `write` may park until the last byte is accepted. The pending call keeps its

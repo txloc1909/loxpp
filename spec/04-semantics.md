@@ -1843,10 +1843,10 @@ first in, first out, and it has no priorities.
 5. When the running task suspends or ends, the task at the head of the run
    queue runs next.
 
-When several waits end at the same time, the tasks join the run queue in this
-order: first the tasks whose descriptors are ready, in the order in which
-their calls began to wait, then the tasks whose timers have expired, in the
-order of their deadlines.
+When several waits have ended by the time the worker has no task that is
+ready to run, the tasks join the run queue in this order: first the tasks
+whose Sockets or Servers are ready, in the order in which their calls began to
+wait, then the tasks whose sleep has expired, in the order of their deadlines.
 
 The order in which the tasks of one worker run is therefore defined, with one
 limit: an event outside the program decides when a wait ends, and so which
