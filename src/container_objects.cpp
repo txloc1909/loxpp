@@ -10,11 +10,7 @@
 // Process for deterministic cleanup. A child still running when its process
 // object is collected is not killed; it is reaped only if already exited.
 ObjSocket::~ObjSocket() {
-    if (handle != nullptr) {
-        std::fclose(handle); // closes fd too
-        handle = nullptr;
-        fd = -1;
-    } else if (fd >= 0) {
+    if (fd >= 0) {
         ::close(fd);
         fd = -1;
     }

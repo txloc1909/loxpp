@@ -13,7 +13,15 @@
 #include "test_harness.h"
 #include <gtest/gtest.h>
 
+#include "container_objects.h"
+
+#include <arpa/inet.h>
+#include <cstring>
+#include <netinet/in.h>
 #include <string>
+#include <sys/socket.h>
+#include <thread>
+#include <unistd.h>
 
 // ---------------------------------------------------------------------------
 // type() of the new values
@@ -70,6 +78,206 @@ TEST(NetProcessTest, SocketReadlineThenWriteInterleaves) {
                     "c.close(); "
                     "l.close(); "
                     "(got == \"ping\") and (back == \"ok\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// A readline() can read past its line. The bytes after the line belong to
+// the next read, whichever call it is.
+static void expectReadAfterReadline(const char* next, const char* expectation) {
+    VMTestHarness h;
+    std::string src = "var l = listen(\"127.0.0.1\", 0); "
+                      "var c = connect(\"127.0.0.1\", l.port()); "
+                      "c.write(\"one\\ntwo\\nthree\"); "
+                      "c.close_write(); "
+                      "var s = l.accept(); "
+                      "var first = s.readline(); "
+                      "var rest = " +
+                      std::string(next) +
+                      "; "
+                      "s.close(); c.close(); l.close(); "
+                      "(first == \"one\") and " +
+                      expectation + ";";
+    ASSERT_EQ(h.run(src.c_str()), InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForRead) {
+    expectReadAfterReadline("s.read()", "(rest == \"two\\nthree\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadBytes) {
+    expectReadAfterReadline("s.read_bytes(6)", "(rest == \"two\\nth\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadlines) {
+    expectReadAfterReadline("s.readlines()",
+                            "(len(rest) == 2) and (rest[0] == \"two\") and "
+                            "(rest[1] == \"three\")");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadline) {
+    expectReadAfterReadline("s.readline()", "(rest == \"two\")");
+}
+
+// Lox++ has no string repeat operator.
+#define kLoxRep                                                                \
+    "fun rep(t, n) { var r = \"\"; var i = 0; "                                \
+    "while (i < n) { r = r + t; i = i + 1; } return r; } "
+
+// After a read returns, the socket keeps only the unread tail. A line much
+// longer than one read chunk must not leave its capacity behind. The writes
+// stay at 100000 bytes so they fit in the loopback buffers without a reader.
+TEST(NetProcessTest, LongLineDoesNotLeaveCapacityInTheInputBuffer) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(kLoxRep "var l = listen(\"127.0.0.1\", 0); "
+                            "var c = connect(\"127.0.0.1\", l.port()); "
+                            "var s = l.accept(); "
+                            "var big = rep(\"0123456789\", 10000); "
+                            "c.write(big + \"\\nsmall\\n\"); "
+                            "var first = s.readline(); "
+                            "c.close(); l.close(); "
+                            "s;"),
+              InterpretResult::OK);
+    Value v = h.lastResult();
+    ASSERT_TRUE(isSocket(v));
+    ObjSocket* sock = asObjSocket(as<Obj*>(v));
+    EXPECT_LE(sock->inbuf.capacity(), 2u * 4096u);
+    EXPECT_LE(sock->inbuf.size(), 4096u);
+}
+
+// A line longer than one chunk, a line split over chunks, and read_bytes over
+// chunk boundaries return the same bytes as one big read would.
+TEST(NetProcessTest, ReadsAcrossChunkBoundaries) {
+    VMTestHarness h;
+    ASSERT_EQ(
+        h.run(kLoxRep
+              "var l = listen(\"127.0.0.1\", 0); "
+              "var c = connect(\"127.0.0.1\", l.port()); "
+              "var s = l.accept(); "
+              "var a = rep(\"a\", 10000); var b = rep(\"b\", 9000); "
+              "c.write(a + \"\\n\" + b + \"\\n\" + rep(\"xyz\", 3000)); "
+              "c.close_write(); "
+              "var r1 = s.readline(); "
+              "var r2 = s.read_bytes(4500); "
+              "var r3 = s.read_bytes(4501); "
+              "var r4 = s.read_bytes(5); "
+              "var r5 = s.read(); "
+              "s.close(); c.close(); l.close(); "
+              "(r1 == a) and (r2 == rep(\"b\", 4500)) and "
+              "(r3 == rep(\"b\", 4500) + \"\\n\") and (r4 == \"xyzxy\") and "
+              "(len(r5) == 8995);"),
+        InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// A peer that writes in small pieces: each read of the reader returns a part
+// of a line. The peer sleeps between pieces so the pieces arrive in separate
+// reads; the reader blocks on read(2), so the sleep only shapes the arrival
+// and never decides the result.
+TEST(NetProcessTest, ReadsFromAPeerThatWritesInPieces) {
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    ASSERT_GE(lfd, 0);
+    sockaddr_in addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(lfd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    ASSERT_EQ(listen(lfd, 1), 0);
+    socklen_t len = sizeof(addr);
+    ASSERT_EQ(getsockname(lfd, reinterpret_cast<sockaddr*>(&addr), &len), 0);
+    int port = ntohs(addr.sin_port);
+
+    std::thread peer([lfd] {
+        int fd = accept(lfd, nullptr, nullptr);
+        const char* pieces[] = {"he", "llo\nwor", "ld", "\nrest", "-of-it"};
+        for (const char* piece : pieces) {
+            (void)!write(fd, piece, std::strlen(piece));
+            usleep(20000);
+        }
+        close(fd);
+    });
+    VMTestHarness h;
+    std::string src = "var c = connect(\"127.0.0.1\", " + std::to_string(port) +
+                      "); "
+                      "var a = c.readline(); var b = c.readline(); "
+                      "var d = c.read_bytes(4); var e = c.read(); "
+                      "c.close(); "
+                      "(a == \"hello\") and (b == \"world\") and "
+                      "(d == \"rest\") and (e == \"-of-it\");";
+    InterpretResult r = h.run(src.c_str());
+    peer.join();
+    close(lfd);
+    ASSERT_EQ(r, InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// The last line of a stream has no newline. readline returns it, then nil.
+TEST(NetProcessTest, ReadlineReturnsTheUnterminatedLastLine) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "c.write(\"first\\nlast\"); "
+                    "c.close_write(); "
+                    "var a = s.readline(); var b = s.readline(); "
+                    "var d = s.readline(); "
+                    "s.close(); c.close(); l.close(); "
+                    "(a == \"first\") and (b == \"last\") and (d == nil);"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// The kernel can reset a connection after bytes arrived. The bytes that were
+// read before the fault stay available to the next read.
+TEST(NetProcessTest, BytesBeforeAResetStayForTheNextRead) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "s.write(\"line1\\nline2\\npart\"); "
+                    "c.write(\"unread\"); "
+                    "sleep(0.2); "
+                    "s.close(); "
+                    "var a = c.readline(); var b = c.readline(); "
+                    "var k = \"\"; "
+                    "try { c.readline(); } catch (e) { k = e.kind; } "
+                    "var d = c.readline(); "
+                    "c.close(); l.close(); "
+                    "(a == \"line1\") and (b == \"line2\") and "
+                    "(k == \"NetworkError\") and (d == \"part\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, ReadBytesKeepsItsBytesWhenTheReadFaults) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "s.write(\"abc\"); "
+                    "c.write(\"unread\"); "
+                    "sleep(0.2); "
+                    "s.close(); "
+                    "var k = \"\"; "
+                    "try { c.read_bytes(100); } catch (e) { k = e.kind; } "
+                    "var d = c.read_bytes(100); "
+                    "c.close(); l.close(); "
+                    "(k == \"NetworkError\") and (d == \"abc\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// A socket the runtime creates must not leak into a child process.
+TEST(NetProcessTest, SocketsAreNotInheritedByChildren) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "var r = run(\"/bin/sh\", [\"-c\", "
+                    "\"ls -l /proc/self/fd | grep -c socket:\"]); "
+                    "s.close(); c.close(); l.close(); "
+                    "r[\"stdout\"] == \"0\\n\";"),
               InterpretResult::OK);
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
