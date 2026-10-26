@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <ctime>
 #include <dirent.h>
 #include <fcntl.h>
@@ -196,11 +197,15 @@ void onSignal(int) {}
 // A signal that interrupts epoll_wait does not end the wait or move the
 // deadline.
 TEST(PollerTest, InterruptedWaitContinuesToTheDeadline) {
-    struct sigaction sa{};
+    // memset, not `{}`: clang-format versions differ on the spacing of an
+    // empty braced init for a multi-word struct type.
+    struct sigaction sa;
+    std::memset(&sa, 0, sizeof(sa));
     sa.sa_handler = onSignal;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0; // no SA_RESTART: epoll_wait fails with EINTR
-    struct sigaction old{};
+    struct sigaction old;
+    std::memset(&old, 0, sizeof(old));
     ASSERT_EQ(::sigaction(SIGUSR2, &sa, &old), 0);
     Poller poller;
     const auto start = Clock::now();
