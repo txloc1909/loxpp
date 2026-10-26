@@ -1,31 +1,39 @@
 package lox;
 
-import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
+import java.nio.channels.UnresolvedAddressException;
 
 /**
- * Mirrors src/stdlib/net_api.cpp's ObjSocket over a {@link Socket}. Text
- * crosses this boundary as {@link LoxRuntime#CHARSET}, the same byte-boundary
- * rule {@link LoxFile} follows.
+ * Mirrors src/stdlib/net_api.cpp's ObjSocket over a nonblocking {@link
+ * SocketChannel}. A call that finds nothing to read, no room to write, or no
+ * finished connection parks its task, and the other tasks of its worker run
+ * ({@link LoxWorker#waitChannel}). Text crosses this boundary as {@link
+ * LoxRuntime#CHARSET}, the same byte-boundary rule {@link LoxFile} follows.
  */
 public final class LoxSocket {
-    private Socket socket; // null once closed
-    private final InputStream in;
-    private final OutputStream out;
+    private static final int CHUNK = 8192;
+
+    private SocketChannel channel; // null once closed
+    // The bytes read from the channel and not yet returned: buf[pos, lim).
+    private final byte[] buf = new byte[CHUNK];
+    private final ByteBuffer window = ByteBuffer.wrap(buf);
+    private int pos;
+    private int lim;
+    private boolean eof;
     private boolean writeClosed;
 
-    public LoxSocket(Socket socket) throws IOException {
-        this.socket = socket;
-        this.in = new BufferedInputStream(socket.getInputStream());
-        this.out = socket.getOutputStream();
+    LoxSocket(SocketChannel channel) {
+        this.channel = channel;
     }
 
     private void checkOpen(String method) {
-        if (socket == null) {
+        if (channel == null) {
             throw LoxOps.makeError("SocketClosedError",
                                    "Cannot call '" + method + "' on a closed socket.");
         }
@@ -39,33 +47,64 @@ public final class LoxSocket {
         }
     }
 
-    public Object read() {
-        checkOpen("read");
-        try {
-            ByteArrayOutputStream buf = new ByteArrayOutputStream();
-            byte[] chunk = new byte[4096];
+    /**
+     * Refills the empty buffer. False at the end of the stream. A task that
+     * finds no bytes waits here; a close during the wait raises in checkOpen.
+     */
+    private boolean fill(String method) {
+        if (eof) {
+            return false;
+        }
+        for (;;) {
+            checkOpen(method);
+            window.clear();
             int n;
-            while ((n = in.read(chunk)) != -1) {
-                buf.write(chunk, 0, n);
+            try {
+                n = channel.read(window);
+            } catch (IOException e) {
+                throw LoxOps.makeError("NetworkError",
+                                       method + "(): " + e.getMessage());
             }
-            return new String(buf.toByteArray(), LoxRuntime.CHARSET);
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError", "read(): " + e.getMessage());
+            if (n > 0) {
+                pos = 0;
+                lim = n;
+                return true;
+            }
+            if (n < 0) {
+                eof = true;
+                return false;
+            }
+            LoxWorker.waitChannel(channel, SelectionKey.OP_READ);
         }
     }
 
+    public Object read() {
+        checkOpen("read");
+        ByteArrayOutputStream all = new ByteArrayOutputStream();
+        do {
+            all.write(buf, pos, lim - pos);
+            pos = lim;
+        } while (fill("read"));
+        return new String(all.toByteArray(), LoxRuntime.CHARSET);
+    }
+
     /**
-     * Up to {@code n} bytes. Blocks until {@code n} bytes have arrived or the
+     * Up to {@code n} bytes. Waits until {@code n} bytes have arrived or the
      * peer closes, then returns what was read; "" at EOF, matching native's
      * readStreamBytes.
      */
     public Object readBytes(int n) {
         checkOpen("read_bytes");
-        try {
-            return readBytesRaw(in, n);
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError", "read_bytes(): " + e.getMessage());
+        ByteArrayOutputStream got = new ByteArrayOutputStream();
+        while (got.size() < n) {
+            if (pos == lim && !fill("read_bytes")) {
+                break;
+            }
+            int take = Math.min(lim - pos, n - got.size());
+            got.write(buf, pos, take);
+            pos += take;
         }
+        return new String(got.toByteArray(), LoxRuntime.CHARSET);
     }
 
     /**
@@ -108,21 +147,23 @@ public final class LoxSocket {
     /** One line, newline stripped; null at EOF. A partial trailing line still counts. */
     public Object readline() {
         checkOpen("readline");
-        try {
-            StringBuilder line = new StringBuilder();
-            boolean sawByte = false;
-            int b;
-            while ((b = in.read()) != -1) {
-                sawByte = true;
-                if (b == '\n') {
-                    break;
-                }
-                line.append((char)(b & 0xFF));
+        ByteArrayOutputStream line = new ByteArrayOutputStream();
+        boolean sawByte = false;
+        while (pos < lim || fill("readline")) {
+            int end = pos;
+            while (end < lim && buf[end] != '\n') {
+                end++;
             }
-            return sawByte ? line.toString() : null;
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError", "readline(): " + e.getMessage());
+            line.write(buf, pos, end - pos);
+            sawByte = true;
+            if (end < lim) {
+                pos = end + 1;
+                break;
+            }
+            pos = lim;
         }
+        return sawByte ? new String(line.toByteArray(), LoxRuntime.CHARSET)
+                       : null;
     }
 
     public Object readlines() {
@@ -136,17 +177,28 @@ public final class LoxSocket {
     }
 
     public void write(String s) {
-        checkWritable("write");
-        try {
-            out.write(s.getBytes(LoxRuntime.CHARSET));
-            out.flush();
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError", "write(): " + e.getMessage());
-        }
+        writeBytes(s, "write");
     }
 
     public void writeline(String s) {
-        write(s + "\n");
+        writeBytes(s + "\n", "writeline");
+    }
+
+    private void writeBytes(String s, String method) {
+        checkWritable(method);
+        ByteBuffer data = ByteBuffer.wrap(s.getBytes(LoxRuntime.CHARSET));
+        while (data.hasRemaining()) {
+            try {
+                if (channel.write(data) > 0) {
+                    continue;
+                }
+            } catch (IOException e) {
+                throw LoxOps.makeError("NetworkError",
+                                       method + "(): " + e.getMessage());
+            }
+            LoxWorker.waitChannel(channel, SelectionKey.OP_WRITE);
+            checkWritable(method);
+        }
     }
 
     /**
@@ -170,11 +222,11 @@ public final class LoxSocket {
      * call, and a call on an already closed socket, do nothing.
      */
     public void closeWrite() {
-        if (socket == null || writeClosed) {
+        if (channel == null || writeClosed) {
             return;
         }
         try {
-            socket.shutdownOutput();
+            channel.shutdownOutput();
         } catch (IOException ignored) {
             // Best effort, matching shutdown's own idempotence.
         }
@@ -182,23 +234,48 @@ public final class LoxSocket {
     }
 
     public void close() {
-        if (socket != null) {
+        if (channel != null) {
+            LoxWorker.wakeChannel(channel);
             try {
-                socket.close();
+                channel.close();
             } catch (IOException ignored) {
                 // Matches ObjSocket: close is best-effort, never raises.
             }
-            socket = null;
+            channel = null;
         }
     }
 
     public static LoxSocket connect(String host, int port) {
+        SocketChannel channel = null;
         try {
-            return new LoxSocket(new Socket(host, port));
-        } catch (IOException e) {
+            // A host name resolves here and blocks the worker; a numeric
+            // address does not (spec/05-stdlib.md, connect). An unresolved
+            // name makes channel.connect raise UnresolvedAddressException.
+            InetSocketAddress address = new InetSocketAddress(host, port);
+            channel = SocketChannel.open();
+            channel.configureBlocking(false);
+            if (!channel.connect(address)) {
+                while (!channel.finishConnect()) {
+                    LoxWorker.waitChannel(channel, SelectionKey.OP_CONNECT);
+                }
+            }
+            LoxSocket made = new LoxSocket(channel);
+            channel = null; // the Socket owns the channel now
+            return made;
+        } catch (IOException | UnresolvedAddressException e) {
             throw LoxOps.makeError("NetworkError",
                                    "connect(): cannot connect to '" + host + ":" +
-                                       port + "': " + e.getMessage());
+                                       port + "': " +
+                                       (e.getMessage() != null ? e.getMessage()
+                                                               : "unknown host"));
+        } finally {
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (IOException ignored) {
+                    // The connect fault is the one to report.
+                }
+            }
         }
     }
 

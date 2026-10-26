@@ -456,11 +456,8 @@ public final class LoxRuntime {
                            }
                            double seconds = (Double)args[0];
                            if (seconds > 0) {
-                               try {
-                                   Thread.sleep((long)(seconds * 1000.0));
-                               } catch (InterruptedException e) {
-                                   Thread.currentThread().interrupt();
-                               }
+                               LoxWorker.sleepNanos(
+                                   (long)Math.min(seconds * 1e9, 1e18));
                            }
                            return null;
                        }));

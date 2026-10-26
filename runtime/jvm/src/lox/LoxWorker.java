@@ -1,6 +1,12 @@
 package lox;
 
+import java.io.IOException;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectableChannel;
+import java.nio.channels.Selector;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -20,6 +26,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * not stop the ready task of another worker. Only one task of a worker
  * runs at a time: a task that suspends gives control to the head of the
  * run queue directly ({@link #switchTo}), and no scheduler thread exists.
+ *
+ * <p><b>Parking.</b> A call that waits for the network or for time suspends
+ * its task in the {@link LoxPoller} of the worker, and the other tasks run
+ * (spec/04-semantics.md, Suspend Points). The thread that finds the run
+ * queue empty polls for the end of a wait; no scheduler thread exists. A
+ * call that has a native callback on its chain cannot suspend, so it waits
+ * in place and blocks the worker.
  *
  * <p><b>Lock.</b> {@link #LOCK} guards the run queues, the task states, the
  * mailboxes, and the idle counts of every worker. One lock keeps the
@@ -98,6 +111,10 @@ final class LoxWorker {
     private final Condition work = LOCK.newCondition();
     private boolean idle;
     private int liveTasks = 1;
+    // Null until the first park. `inPoll` is true while a thread of this
+    // worker sleeps in poller.select() with LOCK released.
+    private LoxPoller poller;
+    private boolean inPoll;
 
     // The task that runs now. Written under LOCK by the task that gives
     // control, before its thread wakes this one.
@@ -275,6 +292,9 @@ final class LoxWorker {
     private void makeReady(LoxTask task) {
         task.state = LoxTask.State.READY;
         runQueue.addLast(task);
+        if (inPoll) {
+            poller.wake();
+        }
         if (idle) {
             // In the same step as the append, so that the deadlock check
             // never counts a worker idle that has a task to run.
@@ -327,9 +347,35 @@ final class LoxWorker {
         switchTo(takeNext());
     }
 
-    // Caller holds LOCK. Waits while the run queue is empty.
+    // Caller holds LOCK. Waits while the run queue is empty. A task whose
+    // wait is over joins the back of the run queue before the next task is
+    // taken, so a ready task cannot starve it.
     private LoxTask takeNext() {
-        while (runQueue.isEmpty()) {
+        for (;;) {
+            if (poller != null && poller.hasWaits()) {
+                poller.selectNow();
+                ArrayList<LoxTask> woken = new ArrayList<>();
+                poller.drainReady(woken);
+                for (LoxTask t : woken) {
+                    makeReady(t);
+                }
+            }
+            if (!runQueue.isEmpty()) {
+                return runQueue.pollFirst();
+            }
+            if (poller != null && poller.hasWaits()) {
+                // A worker with a wait registered can still make progress,
+                // so it is not idle for the deadlock count.
+                inPoll = true;
+                LOCK.unlock();
+                try {
+                    poller.select();
+                } finally {
+                    LOCK.lock();
+                    inPoll = false;
+                }
+                continue;
+            }
             if (!idle) {
                 idle = true;
                 idleWorkers++;
@@ -337,7 +383,102 @@ final class LoxWorker {
             checkDeadlock();
             work.awaitUninterruptibly();
         }
-        return runQueue.pollFirst();
+    }
+
+    // ------------------------------------------------------------------
+    // Calls that wait for a channel or for time
+    // ------------------------------------------------------------------
+
+    /**
+     * Returns when {@code channel} may be ready for {@code interest} (a
+     * {@link java.nio.channels.SelectionKey} operation), or when it closed.
+     * The caller tries its operation again, and checks that it is open. The
+     * task parks if it can suspend; otherwise the worker waits in place.
+     */
+    static void waitChannel(SelectableChannel channel, int interest) {
+        if (LoxOps.callbackDepthOfChain() == 0) {
+            current().parkOnChannel(channel, interest);
+            return;
+        }
+        try (Selector own = Selector.open()) {
+            channel.register(own, interest);
+            own.select();
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot wait for a channel", e);
+        }
+    }
+
+    /** sleep: the task waits for {@code nanos} and others of its worker run. */
+    static void sleepNanos(long nanos) {
+        // Capped so that the deadline cannot overflow nanoTime's range.
+        long span = Math.min(nanos, 1L << 60);
+        if (LoxOps.callbackDepthOfChain() == 0) {
+            current().parkUntil(System.nanoTime() + span);
+            return;
+        }
+        long end = System.nanoTime() + span;
+        for (long left = span; left > 0; left = end - System.nanoTime()) {
+            try {
+                TimeUnit.NANOSECONDS.sleep(left);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    /**
+     * A close wakes every task parked on {@code channel}, in the order of
+     * their calls. Each joins the back of the run queue now. Call it before
+     * the channel closes.
+     */
+    static void wakeChannel(SelectableChannel channel) {
+        LoxWorker worker = current();
+        LOCK.lock();
+        try {
+            if (worker.poller == null) {
+                return;
+            }
+            ArrayList<LoxTask> woken = new ArrayList<>();
+            worker.poller.cancelChannel(channel, woken);
+            for (LoxTask t : woken) {
+                worker.makeReady(t);
+            }
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    private void parkOnChannel(SelectableChannel channel, int interest) {
+        LoxTask self = current;
+        LOCK.lock();
+        try {
+            ensurePoller().addFd(self, channel, interest);
+            suspend(self, LoxTask.State.PARKED);
+        } catch (ClosedChannelException e) {
+            // The channel closed before the wait began; the caller sees it.
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    private void parkUntil(long deadline) {
+        LoxTask self = current;
+        LOCK.lock();
+        try {
+            ensurePoller().addTimer(self, deadline);
+            suspend(self, LoxTask.State.PARKED);
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    // Caller holds LOCK.
+    private LoxPoller ensurePoller() {
+        if (poller == null) {
+            poller = new LoxPoller();
+        }
+        return poller;
     }
 
     // Caller holds LOCK, and stops running Lox code after this call. Hands

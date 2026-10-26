@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Fourteen cases, each on an explicit program list, so no corpus is walked:
+Fifteen cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -27,6 +27,9 @@ Fourteen cases, each on an explicit program list, so no corpus is walked:
      reasons, so neither list's reason is dropped;
   9. a probe on both lists that times out names the side that did not finish,
      with that side's reason only, and claims nothing about the other side;
+  9b. a probe on native's list alone, where native never finishes and the
+     consumer passes it, reports AHEAD with exit 0; one the consumer fails
+     does not;
   10. a probe on both lists whose consumer fails while native passes reports
      the consumer reason and says native's entry is answered, never that
      native regressed;
@@ -502,6 +505,42 @@ def main() -> int:
             "native times out",
             "native regressed" in out and "consumer is behind" not in out,
             f"claimed a reason for the side that finished: {out.strip()!r}",
+        )
+
+        # Case 9b: native never finishes on a probe its own list names, and the
+        # other runner passes it. Native hangs where it fails, so the run still
+        # grades the other runner and reports AHEAD, with exit 0. Without this
+        # branch the run claimed nothing and the gate had no state for a
+        # consumer that is ahead of a native that blocks.
+        oracle_only = work / "oracle_only.txt"
+        oracle_only.write_text(f"{both_probe.name}  native blocks the worker\n")
+        code, out, err = run(
+            str(slow_stub),
+            [both_probe],
+            [("--oracle-xfail", oracle_only)],
+            runner=str(stub),
+            timeout=1,
+        )
+        expects(
+            failures,
+            "native times out, consumer passes",
+            "AHEAD" in out and "native blocks the worker" in out and code == 0,
+            f"did not report AHEAD with exit 0: exit {code}, stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        code, out, err = run(
+            str(slow_stub),
+            [both_probe],
+            [("--oracle-xfail", oracle_only)],
+            runner=str(failing_stub),
+            timeout=1,
+        )
+        expects(
+            failures,
+            "native times out, consumer fails",
+            "AHEAD" not in out and "native did not finish" in out,
+            f"claimed AHEAD for a probe the consumer fails: exit {code}, "
+            f"stdout {out.strip()!r}",
         )
 
         if not traced:
