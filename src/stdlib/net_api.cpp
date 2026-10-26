@@ -414,15 +414,20 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
 }
 
 static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+    // The scan restarts at the front of the buffer in each step. Another task
+    // that waits on the same socket can take bytes from the front while this
+    // call is parked, so an offset kept across the park could point past
+    // bytes that nobody scanned. Inside one step nothing else runs.
+    size_t scanned = 0;
     for (;;) {
-        size_t nl = s->inbuf.find('\n', io.scanned);
+        size_t nl = s->inbuf.find('\n', scanned);
         if (nl != std::string::npos) {
             std::string line = takeInput(s, nl);
             s->inbuf.erase(0, 1); // the newline
             setDone(out, std::move(line));
             return;
         }
-        io.scanned = s->inbuf.size();
+        scanned = s->inbuf.size();
         switch (fillInput(s, io.method, out)) {
         case Fill::Data:
             break;
