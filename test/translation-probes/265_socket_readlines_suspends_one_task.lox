@@ -12,7 +12,7 @@
 // STATUS: ok
 // TIMEOUT: 10
 // NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
-// COVERS: suspend-call Socket.readlines
+// COVERS: suspend-call Socket.readlines in reader
 // CHECK: ticker ran
 // CHECK: reader got: 2 hello
 var srv = listen("127.0.0.1", 0);

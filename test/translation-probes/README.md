@@ -414,9 +414,9 @@ An absent file is an empty list, so a consumer with no gap needs no file, and a
 node that finds a gap creates the file it needs.
 
 The probes `260` to `285` are the spec probes of that rule. Each carries
-`// COVERS: suspend-call <call>`, `// COVERS: suspend-context <slug>`, or
-`// COVERS: blocks-call <call>` lines, which `tools/check_blocking_decision_tables.py`
-reads: every call of class `suspends`, every context where a task cannot suspend,
+`// COVERS: suspend-call <call> in <function>`, `// COVERS: suspend-context <slug>`, or
+`// COVERS: blocks-call <call> in <function>` lines, which `tools/check_blocking_decision_tables.py`
+reads: every call of class `suspends` (the call must sit in the named function of the probe), every context where a task cannot suspend,
 and the calls `input`, `run`, and `Process.readline` of class `blocks` must have
 a probe. The `Server.accept` and `Socket` probes need a peer, so they take a port
 from `listen("127.0.0.1", 0)` and a `TIMEOUT`.

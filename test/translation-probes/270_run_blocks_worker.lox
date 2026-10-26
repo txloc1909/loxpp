@@ -4,7 +4,7 @@
 // run() before `ticker` of the same worker runs.
 // STATUS: ok
 // TIMEOUT: 10
-// COVERS: blocks-call run
+// COVERS: blocks-call run in runner
 // CHECK: run status: 0
 // CHECK: ticker ran
 var me = task.self();

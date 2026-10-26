@@ -5,7 +5,7 @@
 // the other task runs after it.
 // STATUS: ok
 // TIMEOUT: 10
-// COVERS: blocks-call input
+// COVERS: blocks-call input in reader
 // CHECK: input: line one
 // CHECK: ticker ran
 var me = task.self();

@@ -6,7 +6,7 @@
 // finish, whichever way they are scheduled (spec/05-stdlib.md, connect).
 // STATUS: ok
 // TIMEOUT: 10
-// COVERS: suspend-call connect
+// COVERS: suspend-call connect in client
 // CHECK: both finished
 var srv = listen("127.0.0.1", 0);
 var me = task.self();

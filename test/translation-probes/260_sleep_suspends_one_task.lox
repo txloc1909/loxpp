@@ -10,7 +10,7 @@
 // STATUS: ok
 // TIMEOUT: 10
 // NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
-// COVERS: suspend-call sleep
+// COVERS: suspend-call sleep in sleeper
 // CHECK: ticker ran
 // CHECK: sleeper woke
 var me = task.self();

@@ -13,7 +13,10 @@ The rules:
     spec/04-semantics.md, with the same text in the second column.
   - Every COVERS line must be backed by the probe: the probe must name the
     covered call or context in its code, outside comments (CODE_MARKERS and
-    CONTEXT_MARKERS). A label on a probe that does not use the call fails.
+    CONTEXT_MARKERS). A COVERS line for a call ends with `in <function>`, and
+    the call must sit in the body of that function of the probe, so a call
+    that the probe uses only to set up does not count. A label on a probe that
+    does not use the call fails.
   - Every call of class `suspends` has a spec probe with the line
     `// COVERS: suspend-call <call>`, where <call> is the name that
     check_blocking_calls.py uses (for example `Socket.readline`).
@@ -84,6 +87,22 @@ CONTEXT_MARKERS = {
 }
 
 DECISION = REPO_ROOT / "docs" / "decisions" / "blocking-call-suspension.md"
+
+
+def function_body(code_text: str, name: str) -> str | None:
+    """Returns the body of `fun <name>(...) { ... }` in `code_text`, or None."""
+    m = re.search(r"\bfun\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{", code_text)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while i < len(code_text) and depth:
+        depth += {"{": 1, "}": -1}.get(code_text[i], 0)
+        i += 1
+    return code_text[m.end() : i]
+
+
+def has_call_cover(covers: dict, kind: str, name: str) -> bool:
+    return any(words[:2] == (kind, name) for words in covers)
 
 
 def names(rows: list[dict[str, str]], problems: list[str], where: str) -> list[str]:
@@ -160,18 +179,27 @@ def main() -> None:
             problems.append(f"CONTEXT_SLUGS names {context!r}, which the spec table does not list")
 
     for name in suspends:
-        if ("suspend-call", name) not in covers:
-            problems.append(f"call {name!r} has no probe with '// COVERS: suspend-call {name}'")
+        if not has_call_cover(covers, "suspend-call", name):
+            problems.append(f"call {name!r} has no probe with '// COVERS: suspend-call {name} in <function>'")
     for name in BLOCKS_PROBED:
         if name not in blocks:
             problems.append(f"BLOCKS_PROBED names {name!r}, which is not a class-blocks row of the spec")
-        elif ("blocks-call", name) not in covers:
-            problems.append(f"call {name!r} has no probe with '// COVERS: blocks-call {name}'")
+        elif not has_call_cover(covers, "blocks-call", name):
+            problems.append(f"call {name!r} has no probe with '// COVERS: blocks-call {name} in <function>'")
 
     for words, paths in covers.items():
-        if len(words) != 2 or words[0] not in ("suspend-call", "suspend-context", "blocks-call"):
+        if words[0] not in ("suspend-call", "suspend-context", "blocks-call"):
             continue
-        kind, key = words
+        kind, key = words[0], words[1]
+        function = None
+        if kind != "suspend-context":
+            if len(words) != 4 or words[2] != "in":
+                problems.append(f"COVERS {' '.join(words)}: a call needs 'in <function>' at the end")
+                continue
+            function = words[3]
+        elif len(words) != 2:
+            problems.append(f"COVERS {' '.join(words)}: a context takes no more words")
+            continue
         if kind == "suspend-context":
             pattern = CONTEXT_MARKERS.get(key)
         else:
@@ -184,8 +212,14 @@ def main() -> None:
                 line for line in path.read_text(encoding="utf-8").splitlines()
                 if not line.lstrip().startswith("//")
             )
+            if function is not None:
+                code_text = function_body(code_text, function)
+                if code_text is None:
+                    problems.append(f"{path.name}: COVERS {kind} {key} names function {function!r}, which the probe lacks")
+                    continue
             if not re.search(pattern, code_text):
-                problems.append(f"{path.name} has 'COVERS: {kind} {key}' but its code has no {pattern}")
+                where = f"function {function!r}" if function else "its code"
+                problems.append(f"{path.name} has 'COVERS: {kind} {key}' but {where} has no {pattern}")
 
     report(
         "check_blocking_decision_tables.py",

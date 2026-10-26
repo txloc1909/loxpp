@@ -11,7 +11,7 @@
 // STATUS: ok
 // TIMEOUT: 10
 // NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
-// COVERS: suspend-call Server.accept
+// COVERS: suspend-call Server.accept in acceptor
 // CHECK: ticker ran
 // CHECK: accepted
 var srv = listen("127.0.0.1", 0);

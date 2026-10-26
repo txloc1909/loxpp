@@ -15,7 +15,7 @@
 // STATUS: ok
 // TIMEOUT: 10
 // NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
-// COVERS: suspend-call Socket.writeline
+// COVERS: suspend-call Socket.writeline in writer
 // CHECK: ticker ran
 // CHECK: read all: true
 // CHECK: writer done

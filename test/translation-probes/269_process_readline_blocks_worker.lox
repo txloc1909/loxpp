@@ -4,7 +4,7 @@
 // `reader` returns from readline() before `ticker` of the same worker runs.
 // STATUS: ok
 // TIMEOUT: 10
-// COVERS: blocks-call Process.readline
+// COVERS: blocks-call Process.readline in reader
 // CHECK: reader got: hi
 // CHECK: ticker ran
 var me = task.self();
