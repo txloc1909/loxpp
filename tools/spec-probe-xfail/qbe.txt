@@ -1,3 +1,1 @@
 # Spec probes that the QBE backend does not pass: file name, then the reason.
-266_socket_write_suspends_one_task.lox write() blocks the worker when the connection is full, so ticker never runs and the probe times out
-267_socket_writeline_suspends_one_task.lox writeline() blocks the worker when the connection is full, so ticker never runs and the probe times out
