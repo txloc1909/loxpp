@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Checks the Blocking calls table in spec/05-stdlib.md.
 
-Each stdlib section whose call blocks its worker carries the line
-`**Blocks:** yes`. The table must list exactly the calls of those sections,
-one row per call. A row removed from the table fails, and so does a marker
-with no row.
+Each stdlib section of a blocking call carries one marker line. A call of
+class `suspends` (it suspends its task) carries `**Suspends:** yes`; a call of
+class `blocks` (it blocks its worker) carries `**Blocks:** yes`. The table must
+list exactly the calls of those sections, one row per call, and the `Class`
+cell of each row must agree with the marker of its section. A row removed from
+the table fails, and so does a marker with no row, a row with no marker, a
+marker that disagrees with the class, and a section with both markers.
 
 A method heading such as `s.read() -> String` under "## Socket methods" names
 the call `Socket.read`; a heading that names several calls marks every one
@@ -38,9 +41,14 @@ def call_name(text: str, receiver: str | None) -> str | None:
     return f"{prefix}.{name}"
 
 
-def marked_calls(text: str) -> list[str]:
-    """Returns every call whose section carries the Blocks marker."""
-    marked: list[str] = []
+MARKERS = {"Blocks": "blocks", "Suspends": "suspends"}
+MARKER_LINE = re.compile(r"^\*\*(Blocks|Suspends):\*\* yes\s*$")
+
+
+def marked_calls(text: str) -> dict[str, list[str]]:
+    """Returns each call whose section carries a marker, mapped to the classes
+    its markers name (a well-formed section names exactly one)."""
+    marked: dict[str, list[str]] = {}
     receiver: str | None = None
     current: list[str] = []
     for line in text.splitlines():
@@ -56,10 +64,12 @@ def marked_calls(text: str) -> list[str]:
                 if name:
                     current.append(name)
             continue
-        if re.match(r"^\*\*Blocks:\*\* yes\s*$", line):
+        m = MARKER_LINE.match(line)
+        if m:
             if not current:
-                raise SpecError(f"a Blocks marker sits under a heading that names no call: {line!r}")
-            marked.extend(current)
+                raise SpecError(f"a marker sits under a heading that names no call: {line!r}")
+            for name in current:
+                marked.setdefault(name, []).append(MARKERS[m.group(1)])
     return marked
 
 
@@ -77,7 +87,7 @@ def main() -> None:
         report("check_blocking_calls.py", [f"cannot read the spec: {exc}"], "")
         return
 
-    listed: list[str] = []
+    listed: dict[str, str] = {}
     for row in rows:
         try:
             name = call_name(code(row["Call"]), None)
@@ -89,19 +99,28 @@ def main() -> None:
             continue
         if name in listed:
             problems.append(f"call {name!r} has more than one row")
-        listed.append(name)
+        cls = row["Class"]
+        if cls not in MARKERS.values():
+            problems.append(f"row {name!r}: Class must be 'suspends' or 'blocks', not {cls!r}")
+        listed[name] = cls
 
-    for name in marked:
+    for name, classes in marked.items():
         if name not in listed:
-            problems.append(f"the section of {name!r} says it blocks, but the table has no row for it")
-    for name in listed:
+            problems.append(f"the section of {name!r} has a marker, but the table has no row for it")
+        if len(classes) > 1:
+            problems.append(f"the section of {name!r} has more than one marker")
+    for name, cls in listed.items():
         if name not in marked:
-            problems.append(f"the table lists {name!r}, but its section has no '**Blocks:** yes' line")
+            problems.append(f"the table lists {name!r}, but its section has no marker line")
+        elif marked[name] != [cls]:
+            problems.append(
+                f"the table gives {name!r} the class {cls!r}, but its section marker says {marked[name]}"
+            )
 
     report(
         "check_blocking_calls.py",
         problems,
-        f"{len(listed)} blocking calls; the table matches the section markers",
+        f"{len(listed)} blocking calls; the class column matches the section markers",
     )
 
 
