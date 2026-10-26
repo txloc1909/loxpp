@@ -32,6 +32,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <set>
 #include <string>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -46,17 +47,39 @@ std::string globalString(const VM& vm, const std::string& name) {
     return v.has_value() ? stringify(*v) : "<undefined>";
 }
 
-int openDescriptorCount() {
-    int count = 0;
+// The open descriptors of this process, each as "number:target". A socket has
+// its inode in the target, so a descriptor that closed and a new one with the
+// same number are different entries. The directory handle of the scan is left
+// out. Other threads of the process (the host side of a test) own descriptors
+// too, so a test compares sets and asks for no new entry, not for an equal
+// count: a descriptor that another thread closed meanwhile is no leak.
+std::set<std::string> openDescriptors() {
+    std::set<std::string> out;
     DIR* dir = opendir("/proc/self/fd");
     if (dir == nullptr) {
-        return -1;
+        return out;
     }
-    while (readdir(dir) != nullptr) {
-        ++count;
+    const int self = dirfd(dir);
+    while (dirent* ent = readdir(dir)) {
+        const int fd = atoi(ent->d_name);
+        if (ent->d_name[0] == '.' || fd == self) {
+            continue;
+        }
+        char target[256];
+        const std::string link = std::string("/proc/self/fd/") + ent->d_name;
+        ssize_t n = readlink(link.c_str(), target, sizeof(target) - 1);
+        out.insert(std::string(ent->d_name) + ":" +
+                   std::string(target, n > 0 ? static_cast<size_t>(n) : 0));
     }
     closedir(dir);
-    return count;
+    return out;
+}
+
+void expectNoNewDescriptors(const std::set<std::string>& before) {
+    for (const std::string& entry : openDescriptors()) {
+        EXPECT_TRUE(before.count(entry) != 0)
+            << "a descriptor stays open: " << entry;
+    }
 }
 
 // A listener on 127.0.0.1 whose accept queue is full. A connect to it stays
@@ -119,6 +142,27 @@ class SlowListener {
             m_fd = -1;
         });
     }
+    // Starts the drain (or the close) `ms` after the first connect(2) of the
+    // program returns EINPROGRESS, not from the time of the call. A timer from
+    // the start of the test is too early when the VM starts slowly, and the
+    // connect would then finish at once. Sets hooks.connectCall.
+    void armOnConnect(ConnectTestHooks& hooks, int ms, bool close) {
+        hooks.connectCall = [this, ms, close,
+                             armed = false](int fd, const sockaddr* sa,
+                                            socklen_t len) mutable {
+            int r = ::connect(fd, sa, len);
+            if (r < 0 && errno == EINPROGRESS && !armed) {
+                armed = true;
+                if (close) {
+                    closeAfter(ms);
+                } else {
+                    drainAfter(ms);
+                }
+                errno = EINPROGRESS;
+            }
+            return r;
+        };
+    }
     void stop() {
         m_stop = true;
         if (m_drainer.joinable()) {
@@ -159,6 +203,20 @@ class SlowListener {
     std::thread m_drainer;
 };
 
+// Applies hooks to connect() of this thread for the life of the object.
+class HookGuard {
+  public:
+    explicit HookGuard(const ConnectTestHooks& hooks) : m_hooks(hooks) {
+        setConnectTestHooks(&m_hooks);
+    }
+    ~HookGuard() { setConnectTestHooks(nullptr); }
+    HookGuard(const HookGuard&) = delete;
+    HookGuard& operator=(const HookGuard&) = delete;
+
+  private:
+    ConnectTestHooks m_hooks;
+};
+
 } // namespace
 
 #define REQUIRE_SLOW(listener)                                                 \
@@ -178,7 +236,9 @@ class ConnectParkTest : public ::testing::Test {};
 TEST_F(ConnectParkTest, ASlowConnectSuspendsOnlyTheCallingTask) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(200);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 200, false);
+    HookGuard armGuard(armHooks);
     VM vm;
     ASSERT_EQ(vm.interpret("var log = \"\";"
                            "fun ticker() { log = log + \"T\"; }"
@@ -213,7 +273,9 @@ static void expectSocketFlags(int port) {
 TEST_F(ConnectParkTest, AParkedConnectGivesANonblockingCloseOnExecSocket) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(100);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 100, false);
+    HookGuard armGuard(armHooks);
     expectSocketFlags(host.port());
 }
 
@@ -263,7 +325,9 @@ TEST_F(ConnectParkTest, AConnectThatFinishesAtOnceDoesNotPark) {
 TEST_F(ConnectParkTest, ManyTasksConnectAtOnce) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(200);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 200, false);
+    HookGuard armGuard(armHooks);
     VM vm;
     ASSERT_EQ(vm.interpret("var log = \"\"; var me = task.self();"
                            "fun a() { var c = connect(\"127.0.0.1\", " +
@@ -291,8 +355,10 @@ TEST_F(ConnectParkTest, ManyTasksConnectAtOnce) {
 TEST_F(ConnectParkTest, ARefusalAfterTheWaitIsANetworkError) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.closeAfter(200);
-    const int before = openDescriptorCount();
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 200, true);
+    HookGuard armGuard(armHooks);
+    const auto before = openDescriptors();
     {
         VM vm;
         ASSERT_EQ(vm.interpret("var kind = \"none\"; var msg = \"\";"
@@ -316,7 +382,7 @@ TEST_F(ConnectParkTest, ARefusalAfterTheWaitIsANetworkError) {
     }
     host.stop();
     // The fillers and the listener are the host's; the VM left none behind.
-    EXPECT_EQ(openDescriptorCount(), before - 1) << "the listener closed";
+    expectNoNewDescriptors(before);
 }
 
 // A refusal that arrives at once, with no wait, is the same error.
@@ -416,7 +482,7 @@ void expectFallback(int family) {
     if (fd < 0) {
         GTEST_SKIP() << "no loopback address of this family";
     }
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     {
         VM vm;
         ASSERT_EQ(vm.interpret("var log = \"\";"
@@ -431,7 +497,7 @@ void expectFallback(int family) {
                   InterpretResult::OK);
         EXPECT_EQ(globalString(vm, "kind"), "Socket");
     }
-    EXPECT_EQ(openDescriptorCount(), before) << "an attempt left a descriptor";
+    expectNoNewDescriptors(before);
     close(fd);
 }
 
@@ -474,7 +540,7 @@ TEST_F(ConnectParkTest, EveryAddressFailingLeavesNoDescriptor) {
         ASSERT_GE(fd, 0);
         close(fd);
     }
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     {
         VM vm;
         ASSERT_EQ(vm.interpret("var kind = \"none\";"
@@ -486,7 +552,7 @@ TEST_F(ConnectParkTest, EveryAddressFailingLeavesNoDescriptor) {
                   InterpretResult::OK);
         EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
     }
-    EXPECT_EQ(openDescriptorCount(), before);
+    expectNoNewDescriptors(before);
 }
 
 // The program ends while a task waits in connect. The descriptor of the
@@ -497,7 +563,7 @@ TEST_F(ConnectParkTest, TheEndOfTheProgramClosesTheAttemptOfAParkedConnect) {
     VM vm;
     // The first program makes the poller, so its descriptors are in the count.
     ASSERT_EQ(vm.interpret("sleep(0.001);"), InterpretResult::OK);
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     ASSERT_EQ(vm.interpret("fun waiter() { connect(\"127.0.0.1\", " +
                            std::to_string(host.port()) +
                            R"(); }
@@ -505,8 +571,7 @@ TEST_F(ConnectParkTest, TheEndOfTheProgramClosesTheAttemptOfAParkedConnect) {
         var y = yield nil;
     )"),
               InterpretResult::OK);
-    EXPECT_EQ(openDescriptorCount(), before)
-        << "the attempt stays open after the run";
+    expectNoNewDescriptors(before);
 }
 
 // A collection runs while the connect waits: the ticker allocates hard. The
@@ -514,7 +579,9 @@ TEST_F(ConnectParkTest, TheEndOfTheProgramClosesTheAttemptOfAParkedConnect) {
 TEST_F(ConnectParkTest, ACollectionDuringTheWaitLosesNothing) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(300);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 300, false);
+    HookGuard armGuard(armHooks);
     VM vm;
     ASSERT_EQ(
         vm.interpret("var junk = 0;"
@@ -541,7 +608,9 @@ namespace {
 void expectConnectBlocks(const std::string& context) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(150);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 150, false);
+    HookGuard armGuard(armHooks);
     VM vm;
     InterpretResult result = vm.interpret("var log = \"\"; var got = \"none\";"
                                           "var port = " +
@@ -616,7 +685,9 @@ TEST_F(ConnectParkTest, AConnectInANestedCoroutineBlocksTheWorker) {
 TEST_F(ConnectParkTest, ABlockedConnectThatIsRefusedRaises) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.closeAfter(150);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 150, true);
+    HookGuard armGuard(armHooks);
     VM vm;
     ASSERT_EQ(vm.interpret("var kind = \"none\";"
                            "class A { __str__() {"
@@ -687,7 +758,9 @@ class SignalStorm {
 TEST_F(ConnectParkTest, ABlockingConnectSurvivesSignals) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(150);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 150, false);
+    HookGuard armGuard(armHooks);
     SignalStorm storm;
     VM vm;
     ASSERT_EQ(vm.interpret("var got = \"none\";"
@@ -705,7 +778,9 @@ TEST_F(ConnectParkTest, ABlockingConnectSurvivesSignals) {
 TEST_F(ConnectParkTest, AParkedConnectSurvivesSignals) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(150);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 150, false);
+    HookGuard armGuard(armHooks);
     SignalStorm storm;
     VM vm;
     ASSERT_EQ(vm.interpret("var log = \"\";"
@@ -723,20 +798,6 @@ TEST_F(ConnectParkTest, AParkedConnectSurvivesSignals) {
 }
 
 namespace {
-
-// Applies hooks to connect() of this thread for the life of the object.
-class HookGuard {
-  public:
-    explicit HookGuard(const ConnectTestHooks& hooks) : m_hooks(hooks) {
-        setConnectTestHooks(&m_hooks);
-    }
-    ~HookGuard() { setConnectTestHooks(nullptr); }
-    HookGuard(const HookGuard&) = delete;
-    HookGuard& operator=(const HookGuard&) = delete;
-
-  private:
-    ConnectTestHooks m_hooks;
-};
 
 ConnectAddress loopbackAddress(int port) {
     ConnectAddress a;
@@ -790,7 +851,7 @@ TEST_F(ConnectParkTest, AnImmediateErrorMovesToTheNextAddress) {
         list.push_back(loopbackAddress(port));
     };
     HookGuard guard(hooks);
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     {
         VM vm;
         ASSERT_EQ(vm.interpret("var c = connect(\"127.0.0.1\", " +
@@ -802,7 +863,7 @@ TEST_F(ConnectParkTest, AnImmediateErrorMovesToTheNextAddress) {
                   InterpretResult::OK);
         EXPECT_EQ(globalString(vm, "kind"), "Socket");
     }
-    EXPECT_EQ(openDescriptorCount(), before);
+    expectNoNewDescriptors(before);
     close(fd);
 }
 
@@ -811,11 +872,11 @@ TEST_F(ConnectParkTest, AnImmediateErrorMovesToTheNextAddress) {
 TEST_F(ConnectParkTest, AFailureAfterTheWaitMovesToTheNextAddress) {
     SlowListener slow;
     REQUIRE_SLOW(slow);
-    slow.closeAfter(200);
     int goodPort = 0;
     int fd = hostListen(AF_INET, goodPort);
     ASSERT_GE(fd, 0);
     ConnectTestHooks hooks;
+    slow.armOnConnect(hooks, 200, true);
     const int slowPort = slow.port();
     hooks.addresses = [&](std::vector<ConnectAddress>& list) {
         list.clear();
@@ -902,12 +963,12 @@ TEST_F(ConnectParkTest, AFailingPollIsAFaultAndAnInterruptedPollIsRetried) {
 
 // A poll(2) failure ends the attempt, and the descriptor of the attempt is
 // closed: at once when connect(2) returns, and after a park when the wait
-// ends. The count of open descriptors is the same before and after.
+// ends. No descriptor is open afterwards that was not open before.
 TEST_F(ConnectParkTest, AFailingPollClosesTheDescriptorOfTheAttempt) {
     int port = 0;
     int fd = hostListen(AF_INET, port);
     ASSERT_GE(fd, 0);
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     {
         ConnectTestHooks hooks;
         hooks.pollCall = [](int) {
@@ -925,18 +986,18 @@ TEST_F(ConnectParkTest, AFailingPollClosesTheDescriptorOfTheAttempt) {
                   InterpretResult::OK);
         EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
     }
-    EXPECT_EQ(openDescriptorCount(), before);
+    expectNoNewDescriptors(before);
     close(fd);
 }
 
 TEST_F(ConnectParkTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
     SlowListener host;
     REQUIRE_SLOW(host);
-    host.drainAfter(200);
-    const int before = openDescriptorCount();
+    const auto before = openDescriptors();
     {
         int polls = 0;
         ConnectTestHooks hooks;
+        host.armOnConnect(hooks, 200, false);
         // The first poll finds the connect in progress and the task parks.
         // The poll after the wake fails.
         hooks.pollCall = [&](int s) {
@@ -962,5 +1023,5 @@ TEST_F(ConnectParkTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
     // The drainer closes the connections it took, so only the VM can leave a
     // descriptor behind.
     host.stop();
-    EXPECT_EQ(openDescriptorCount(), before);
+    expectNoNewDescriptors(before);
 }
