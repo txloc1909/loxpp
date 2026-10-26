@@ -335,6 +335,51 @@ TEST_F(SocketParkTest, ALongLineThatWaitedLeavesNoCapacityBehind) {
     EXPECT_LE(sock->inbuf.size(), 4096u);
 }
 
+// Two readers wait on one socket and a partial line is already in the buffer.
+// The first takes the line when its end arrives; the second must then find the
+// next newline in the bytes that are in the buffer now, and not wait for more
+// data because an offset from before the park points past it.
+TEST_F(SocketParkTest, ASecondReaderScansTheBufferAsItIsNow) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var l1 = "none"; var l2 = "none"; var l2Early = "none";
+        fun r1() { l1 = conn.readline(); task.send(me, 1); }
+        fun r2() { l2 = conn.readline(); task.send(me, 1); }
+        peer.write("xxxxx");
+        task.spawn(r1);
+        task.spawn(r2);
+        sleep(0.1);
+        peer.write("\nyy\nzz");
+        sleep(0.2);
+        l2Early = l2;
+        peer.write("\n");
+        task.receive(); task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "l1"), "xxxxx");
+    EXPECT_EQ(globalString(vm, "l2Early"), "yy");
+    EXPECT_EQ(globalString(vm, "l2"), "yy");
+}
+
+// A close fails the parked calls in the order in which they began to wait,
+// and the failed tasks join the run queue in that order.
+TEST_F(SocketParkTest, ACloseFailsParkedCallsInTheOrderTheyBeganToWait) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var log = "";
+        fun a() { try { conn.readline(); } catch (e) { log = log + "a"; } task.send(me, 1); }
+        fun b() { try { conn.read_bytes(2); } catch (e) { log = log + "b"; } task.send(me, 1); }
+        fun c() { try { conn.read(); } catch (e) { log = log + "c"; } task.send(me, 1); }
+        fun d() { try { conn.readlines(); } catch (e) { log = log + "d"; } task.send(me, 1); }
+        task.spawn(a); task.spawn(b); task.spawn(c); task.spawn(d);
+        var y = yield nil;
+        conn.close();
+        task.receive(); task.receive(); task.receive(); task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "log"), "abcd");
+}
+
 namespace {
 
 // A listener on the host side of the process, for a test that needs a peer
@@ -481,4 +526,163 @@ TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedCall) {
     ASSERT_EQ(result, InterpretResult::OK);
     EXPECT_EQ(seen.load(), 0) << "the peer did not see the end of the stream";
     EXPECT_LT(ms, 3000);
+}
+
+// A free port number: listen on port 0, read the number, close.
+static int freePort() {
+    HostListener probe;
+    return probe.port();
+}
+
+// The read calls in every context where a task cannot suspend block the
+// worker and do not raise: the ticker, a task of the same worker, runs after
+// the read, and the read returns the bytes. The host writes the line after
+// 150 ms.
+static void expectReadBlocks(const std::string& context) {
+    HostListener host;
+    std::thread peer([&] {
+        int fd = host.accept();
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        send(fd, "ctx\n", 4, MSG_NOSIGNAL);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        close(fd);
+    });
+    VM vm;
+    InterpretResult result = vm.interpret("var c = connect(\"127.0.0.1\", " +
+                                          std::to_string(host.port()) +
+                                          R"();
+        var log = ""; var got = "none";
+        fun ticker() { log = log + "T"; }
+        task.spawn(ticker);
+    )" + context +
+                                          R"(
+        var y = yield nil;
+    )");
+    peer.join();
+    ASSERT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "got"), "ctx");
+    EXPECT_EQ(globalString(vm, "log"), "RT");
+}
+
+TEST_F(SocketParkTest, AReadInStrBlocksTheWorker) {
+    expectReadBlocks(R"(
+        class A { __str__() { got = c.readline(); log = log + "R"; return "a"; } }
+        var s = str(A());
+    )");
+}
+
+TEST_F(SocketParkTest, AReadInAMapKeyHashBlocksTheWorker) {
+    expectReadBlocks(R"(
+        class K {
+            __hash__() { got = c.readline(); log = log + "R"; return 1; }
+            __eq__(o) { return true; }
+        }
+        var m = {};
+        m[K()] = 1;
+    )");
+}
+
+TEST_F(SocketParkTest, AReadInCallMethodBlocksTheWorker) {
+    expectReadBlocks(R"(
+        class M { run() { got = c.read_bytes(3); log = log + "R"; return 1; } }
+        var r = callMethod(M(), "run");
+    )");
+}
+
+TEST_F(SocketParkTest, AReadInADeferredCallBlocksTheWorker) {
+    expectReadBlocks(R"(
+        fun rd() { got = c.readline(); log = log + "R"; }
+        fun f() { defer rd(); }
+        f();
+    )");
+}
+
+TEST_F(SocketParkTest, AReadInANestedCoroutineBlocksTheWorker) {
+    expectReadBlocks(R"(
+        fun inner() { got = c.readline(); log = log + "R"; return 1; }
+        var co = coroutine.create(inner);
+        class S { __str__() { co.resume(); return "s"; } }
+        var s = str(S());
+    )");
+}
+
+// accept in a nested coroutine blocks the worker until a host client
+// connects, and does not raise.
+TEST_F(SocketParkTest, AnAcceptInANestedCoroutineBlocksTheWorker) {
+    const int port = freePort();
+    std::thread client([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        for (int i = 0; i < 50; ++i) {
+            int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+            struct sockaddr_in addr;
+            memset(&addr, 0, sizeof(addr));
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(static_cast<uint16_t>(port));
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) ==
+                0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                close(fd);
+                return;
+            }
+            close(fd);
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    });
+    VM vm;
+    InterpretResult result =
+        vm.interpret("var srv = listen(\"127.0.0.1\", " + std::to_string(port) +
+                     R"();
+        var log = ""; var got = "none";
+        fun ticker() { log = log + "T"; }
+        task.spawn(ticker);
+        fun inner() { got = type(srv.accept()); log = log + "R"; return 1; }
+        var co = coroutine.create(inner);
+        class S { __str__() { co.resume(); return "s"; } }
+        var s = str(S());
+        var y = yield nil;
+    )");
+    client.join();
+    ASSERT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "got"), "Socket");
+    EXPECT_EQ(globalString(vm, "log"), "RT");
+}
+
+// A write of 16 MiB to a reader that starts late fills the connection. The
+// write waits for room in the kernel and ends when the reader has drained
+// everything.
+TEST_F(SocketParkTest, ALargeWriteWaitsForRoomAndSendsEveryByte) {
+    HostListener host;
+    std::atomic<size_t> total{0};
+    std::thread peer([&] {
+        int fd = host.accept();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::string buf(65536, '\0');
+        for (;;) {
+            ssize_t n = recv(fd, buf.data(), buf.size(), 0);
+            if (n <= 0) {
+                break;
+            }
+            total += static_cast<size_t>(n);
+        }
+        close(fd);
+    });
+    VM vm;
+    const auto start = std::chrono::steady_clock::now();
+    InterpretResult result = vm.interpret("var c = connect(\"127.0.0.1\", " +
+                                          std::to_string(host.port()) +
+                                          R"();
+        var big = "x";
+        var i = 0;
+        while (i < 24) { big = big + big; i = i + 1; }
+        c.write(big);
+        c.close();
+    )");
+    peer.join();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+    ASSERT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(total.load(), size_t{1} << 24);
+    EXPECT_LT(ms, 20000);
 }
