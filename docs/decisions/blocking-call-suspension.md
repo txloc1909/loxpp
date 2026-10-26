@@ -1,7 +1,7 @@
 # Network calls and `sleep` suspend only their own task
 
-**Status:** accepted. The owner approved it in #711 (2026-10-26). Node issues
-open against this decision.
+**Status:** accepted. The owner approved it in #711 (2026-10-26). Mission #711
+shipped it on 2026-10-26 (see "Shipped").
 **Tracking:** #711. The DAG and the node body drafts are there.
 
 ## Owner decisions
@@ -538,6 +538,95 @@ blocks its worker.
 4. **`fork()` in `run()`.** Every new descriptor is `CLOEXEC`.
 5. **JVM scheduler.** The handoff model is the blocker, not the socket call.
    The JVM node adds park and resume without a change to the FIFO order.
+
+## Shipped
+
+Mission #711 ran this decision as a DAG of nodes, one pull request per node.
+All nodes merged on 2026-10-26. The retrospective is
+`docs/records/blocking-call-suspension-retro.md`.
+
+The two prerequisites merged before the mission started: #726 (PR #906, the
+socket faults are catchable) and #723 (PR #728, a task whose entry is a native
+does not suspend through it).
+
+| Node | Issue | Pull request | What shipped |
+|---|---|---|---|
+| N1 | #909 | #920 | The spec rules, the class column in the Blocking calls table, the probes 260 to 285, the check scripts for the two tables, the expected-failure lists, and the Conformance rule for an implementation that does not run workers at the same time |
+| N2 | #910 | #921 | The per-worker poller (`src/poller.*`): created at the first park, a timer heap, a wake descriptor, and the idle accounting that keeps a worker with a registered wait out of the deadlock count |
+| N3 | #911 | #922 | Park and resume of a native call, the blocking path for a context where the task cannot suspend, and `sleep` as the first call that suspends |
+| N4 | #912 | #926 | Raw descriptors for Socket and Server, the per-socket input buffer, and `send` with `MSG_NOSIGNAL` |
+| N10 | #916 | #927 | Park and resume in the JVM scheduler (`LoxPoller`), with the FIFO order of the handoff scheduler kept |
+| N5 | #913 | #928 | `accept`, `read`, `read_bytes`, `readline` and `readlines` suspend only their task; a close wakes a parked call with the closed-socket fault |
+| N6 | #914 | #933 | `write`, `writeline` and `close_write` suspend only their task, with one queue of parked writers for each Socket |
+| N7 | #915 | #929 | `connect` waits for the TCP handshake on a parked task; the worker still blocks during name resolution |
+| N11 | #917 | #936 | The bootstrap keeps its one-thread form (18 `NOT-BINDING` lines and the bootstrap-only probes); the empty expected-failure files and every argument that named them are deleted |
+| N12 | #918 | this change | The "Shipped" section, the retrospective, and one issue for each follow-up |
+
+N8 and N9 left the DAG by owner decision F1. The follow-ups below carry them.
+
+The nine calls of the first class suspend only their task on the native VM,
+the JVM backend and the QBE backend. The shared probes 260 to 268 hold
+this, and `tools/check_blocking_decision_tables.py` checks that each of the
+nine calls has a probe. On the day of the last merge (`e07095c`), the spec-probe
+gate shows 215 pass and 0 fail on native, JVM and QBE, with no expected-failure
+file. The bootstrap shows 197 pass, 18 exempt and 0 fail; its four
+bootstrap-only probes pass. The 18 exempt probes depend on whether a task of
+the same worker runs during a wait, and `spec/README.md`, Conformance, makes
+that implementation-defined for an implementation that does not run workers at
+the same time.
+
+### Bug classes that the reviews named
+
+Rule 4 of "Plans for a language change" in `AGENTS.md` says to write a named
+bug class into the decision at once. The mission did not do this: the
+decision file changed only in #908 and #920. This table records the classes
+now. Each is a constraint on the follow-ups below. The "Layer" column names
+the shared layer where the class belongs.
+
+| Class | Found in | Layer | Constraint |
+|---|---|---|---|
+| State of a parked call points into shared mutable state | #928: a saved scan offset of `readline` pointed past bytes that another task had taken | The park record (`ParkedIo`) | A parked call keeps only values it owns. It reads shared state again at each resume. Check every field of the record, not only the one found |
+| A teardown path misses one owner of a wait | #922: `endTasks` left the wait of the main task of a session | The writers of the parked set (`parkTask`, `releasePark`, `endTasks`) | Every path that ends or keeps a task releases its wait by the same function. Audit every writer of the parked set |
+| A buffer keeps memory after a call | #926: a socket kept the capacity of a 100 MB line | The per-socket input buffer | A call moves the data out and does not copy it. The memory manager does not count a `std::string` member, so a test must read the capacity |
+| A re-armed wait gets a new place in the order | #933, #928: `rearmPark` gives a new token | The poller registry | Open: #950 |
+| A gate site runs the probe directory without the lists | #920: the S8 script and two lines of the gate scope in `.pi` ran the probe directory without the lists that CI used | The gate scripts | Each site that runs the probe directory under a consumer passes the same lists as CI. The review of #920 holds an audit of 17 sites. #954 is open for a new list file |
+| A check or a test measures more than it names | #929 and #933: a count of the descriptors of the process, and wall-clock bounds, failed on a loaded debug runner | The test suite | A test does not count a process-wide resource while another thread runs, and does not bound a time. See #934 (fixed) and #935 (open) |
+| A mutation that no test catches | #927, #933: the wake of a polling worker, `liveWriter`, the EOF check of `close_write` | The unit tests of the poller and the park code | #948, #951 and #956 are open |
+
+## Follow-ups
+
+Each follow-up is one GitHub issue. A proposal comes first for each design
+issue, as `AGENTS.md` says.
+
+| Issue | Subject | Origin |
+|---|---|---|
+| #937 | Socket timeouts, with the two-minute `connect` to a dead host | Non-goal |
+| #938 | `Socket.read_some` | Non-goal |
+| #939 | Sendable sockets | Non-goal |
+| #940 | UDP sockets | Non-goal |
+| #941 | Unix-domain sockets | Non-goal |
+| #631 | Suspending FFI calls (the FFI design holds this) | Non-goal |
+| #942 | Fair mode | Rejected alternative |
+| #943 | A catchable fault for a Map that changes size during `for`-in | Owner decision, constraint C1 |
+| #944 | `input()` suspends only its task | Owner decision F1 (N8) |
+| #945 | Process calls and `run()` suspend only their task | Owner decision F1 (N8, N9) |
+| #946 | A resolver thread for `connect` | Owner decision F3 |
+| #919, #930 | `tools/check_net_faults.py` misses a fatal exit and counts a commented-out fault | Reviews of #906 and #929 |
+| #923, #924, #925 | Cost of the task switch, the poll bound of a sleeper, a test that hangs | Review of #922 |
+| #931 | The JVM `connect` tries only the first address | Review of #929 |
+| #932 | Must writes of two tasks to one Socket keep their bytes together | Review of #933 |
+| #935 | A timing test of `test_worker` fails under load | Review of #929 |
+| #947 | Peak memory of `readlines` on one very long line | Review of #926 |
+| #948 | JVM `LoxPoller`: two mutations that no check catches | Review of #927 |
+| #949 | JVM: a Socket never closed keeps its selector key | Review of #927 |
+| #950 | A re-armed wait gets a new token | Review of #933 |
+| #951 | An EOF check of `close_write` that cannot fail | Review of #933 |
+| #952 | A resumed `readline` scans from the front | Review of #928 |
+| #953 | 12 of 18 bootstrap-exempt probes also pass | Review of #936 |
+| #954 | A new expected-failure file is not gated | Review of #936 |
+| #955 | `seesQuietWindow` is copied | Review of #929 |
+| #956 | `liveWriter` has no test that can fail | Review of #933 |
+| #957 | Probes 268 and 271 cannot fail on the property they name | Review of #920 |
 
 ## References
 
