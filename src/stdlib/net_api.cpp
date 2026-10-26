@@ -21,6 +21,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 // Module-local class pointers, used to stamp new instances and register the
 // method tables Runtime::opGetProperty/opInvoke dispatch to.
@@ -690,11 +691,39 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
     return from<Nil>(Nil{});
 }
 
+// Closes a descriptor that tasks of this worker may wait on. The waits end
+// before the descriptor does: epoll keeps its reference to the open file after
+// close(2), and the next socket can get the same number. Each parked call
+// fails with the fault of a call on a closed socket, in the order the calls
+// began to wait.
+static void closeDescriptor(int& fd, const char* noun) {
+    Runtime* rt = getActiveRuntime();
+    std::vector<ObjTask*> waiting;
+    rt->cancelFdWaits(fd, waiting);
+    ::close(fd);
+    fd = -1;
+    for (ObjTask* task : waiting) {
+        rt->failPark(task, kSocketClosedError,
+                     closedMessage(task->io.method, noun).c_str());
+    }
+}
+
+void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
+    int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
+                                          : asObjSocket(task->io.target)->fd;
+    if (fd < 0) {
+        return;
+    }
+    std::vector<ObjTask*> waiting;
+    rt.cancelFdWaits(fd, waiting);
+    ::close(fd);
+    fd = -1;
+}
+
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        ::close(s->fd);
-        s->fd = -1;
+        closeDescriptor(s->fd, "socket");
     }
     return from<Nil>(Nil{});
 }
@@ -720,8 +749,7 @@ static Value serverPortNative(int /*argc*/, Value* args) {
 static Value serverCloseNative(int /*argc*/, Value* args) {
     ObjServer* s = asObjServer(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        ::close(s->fd);
-        s->fd = -1;
+        closeDescriptor(s->fd, "server");
     }
     return from<Nil>(Nil{});
 }

@@ -18,3 +18,6 @@ struct ObjTask;
 // call. Goes on with the call: the task completes with the call's value, fails
 // with its fault, or waits again.
 void resumeParkedIo(Runtime& rt, ObjTask* task);
+
+// Closes the descriptor that a PARKED task waits on, at the end of the run.
+void closeParkedDescriptor(Runtime& rt, ObjTask* task);

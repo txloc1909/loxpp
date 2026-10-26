@@ -444,6 +444,9 @@ class Runtime {
     // its call state; a refused registration fails the call with a
     // NetworkError.
     void rearmPark(ObjTask* task, int fd);
+    // Removes every wait on `fd` before the caller closes it, and appends the
+    // tasks that were parked on it in the order their calls began to wait.
+    // They stay PARKED: the caller ends each wait with failPark.
     void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.

@@ -1175,6 +1175,20 @@ void Runtime::rearmPark(ObjTask* task, int fd) {
     m_parkedTasks.emplace(token, task);
 }
 
+void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
+    if (m_poller == nullptr) {
+        return;
+    }
+    std::vector<Poller::Token> cancelled;
+    m_poller->cancelFd(fd, cancelled);
+    for (Poller::Token token : cancelled) {
+        auto found = m_parkedTasks.find(token);
+        if (found != m_parkedTasks.end()) {
+            tasks.push_back(found->second);
+        }
+    }
+}
+
 void Runtime::unparkTask(ObjTask* task) {
     if (task->state != TaskState::PARKED) {
         return;
@@ -1453,6 +1467,10 @@ void Runtime::endTasks() {
     left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
     for (const auto& parked : m_parkedTasks) {
         left.push_back(parked.second);
+        // No deferred call will close the descriptor of a parked call.
+        if (parked.second->io.op != IoOp::NONE) {
+            closeParkedDescriptor(*this, parked.second);
+        }
     }
     for (ObjTask* task : left) {
         if (task != m_mainTask || !m_isMainWorker) {
