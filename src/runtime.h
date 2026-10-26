@@ -438,6 +438,13 @@ class Runtime {
     // runs again. Both cancel the wait if it is still registered.
     void completePark(ObjTask* task, Value value);
     void failPark(ObjTask* task, const char* kind, const char* msg);
+    // Waits again for the descriptor of a PARKED task whose wait was reported
+    // but whose call is not done (the data was taken by another task, or only
+    // part of the call is done). The task keeps its place as a parked task and
+    // its call state; a refused registration fails the call with a
+    // NetworkError.
+    void rearmPark(ObjTask* task, int fd);
+    void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.
     void defineNative(const char* name, NativeFn fn, int arity);

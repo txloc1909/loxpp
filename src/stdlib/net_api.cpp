@@ -544,6 +544,7 @@ static bool waitReadable(int fd, std::string& err) {
 
 // Runs a read-side call to its end, or to the point where the task parks.
 static Value runIo(ParkedIo io) {
+    Runtime* rt = getActiveRuntime();
     for (;;) {
         IoOutcome out;
         step(io, out);
@@ -556,11 +557,36 @@ static Value runIo(ParkedIo io) {
         case IoOutcome::Kind::Wait:
             break;
         }
+        // The task leaves the run queue; the poller reports the descriptor and
+        // resumeParkedIo goes on. The record moves to the task, because this
+        // frame is gone by then. A task that cannot suspend waits here.
+        const int fd = descriptorOf(io);
+        if (rt->parkCurrentTask(ParkReason::FD_READ, fd)) {
+            rt->currentTask()->io = std::move(io);
+            return from<Nil>(Nil{});
+        }
         std::string err;
         if (!waitReadable(descriptorOf(io), err)) {
             raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
             return from<Nil>(Nil{});
         }
+    }
+}
+
+void resumeParkedIo(Runtime& rt, ObjTask* task) {
+    ParkedIo& io = task->io;
+    IoOutcome out;
+    step(io, out);
+    switch (out.kind) {
+    case IoOutcome::Kind::Done:
+        rt.completePark(task, finish(io, out));
+        return;
+    case IoOutcome::Kind::Fault:
+        rt.failPark(task, out.faultKind, out.faultMessage.c_str());
+        return;
+    case IoOutcome::Kind::Wait:
+        rt.rearmPark(task, descriptorOf(io));
+        return;
     }
 }
 

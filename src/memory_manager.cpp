@@ -422,6 +422,9 @@ void MemoryManager::traceObject(Obj* obj) {
         }
         markValue(task->startArg);
         markValue(task->pendingValue);
+        if (task->io.target != nullptr) {
+            markObject(task->io.target);
+        }
         break;
     }
     case ObjType::INT:

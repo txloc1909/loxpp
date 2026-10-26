@@ -492,6 +492,8 @@ struct ObjTask : public Obj {
     // The value of the parked call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
+    // The network call that the task waits in, while it is PARKED on one.
+    ParkedIo io;
     bool hasPendingFault{false};
     std::string faultKind;
     std::string faultMessage;
