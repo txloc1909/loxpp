@@ -75,7 +75,7 @@ program reports one of three outcomes:
 --oracle-xfail <file> is native's own expected-failure list, in the
 same form, with the same rule: a name that is not a spec probe of this run is
 an error (exit 2). A listed spec probe that the other runner passes and native
-does not reports one more outcome:
+does not, or does not finish, reports one more outcome:
   AHEAD        the other runner passes the probe before native does. Not a
                divergence: native's own gate shows its gap. A listed probe
                that native passes, or that the other runner fails, is
@@ -594,6 +594,29 @@ def main() -> None:
                 timeout_side = "the other runner"
                 timeout_reason = xfail.get(lox_file.name)
                 other_out, other_err, other_status = "", "", None
+
+        if timeout_side == "native" and lox_file.name in oracle_xfail:
+            # A native that hangs is a native that fails: its list says so. The
+            # other runner still grades the probe, so a probe it passes reports
+            # AHEAD as it does for a native that finishes and fails.
+            probe = parse_probe_or_exit(lox_file)
+            try:
+                other_out, other_err, other_status = run_program(
+                    [args.other_runner, str(lox_file)], input_file, args.timeout
+                )
+            except RunTimeout:
+                other_status = None
+            if (
+                probe is not None
+                and other_status is not None
+                and passes(probe, other_out, other_status)
+            ):
+                print(
+                    f"AHEAD       {lox_file}  (native: {oracle_xfail[lox_file.name]}; "
+                    f"it did not finish in {args.timeout:.0f}s)"
+                )
+                ahead += 1
+                continue
 
         if timeout_side is not None:
             # Nothing was graded: one side produced no output, so neither list
