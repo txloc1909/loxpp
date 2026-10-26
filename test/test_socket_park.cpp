@@ -858,6 +858,44 @@ TEST_F(SocketParkTest, TwoParkedWritersDoNotInterleaveAndKeepCallOrder) {
     EXPECT_EQ(seen.find_first_not_of('b', kHalf), std::string::npos);
 }
 
+// The second call begins while the first still waits, and the connection has
+// room at that moment because the peer reads in bursts. The second call must
+// still wait for the first: the peer sees all of the first text, then all of
+// the second.
+TEST_F(SocketParkTest, ALateWriterWaitsBehindAParkedWriterEvenWhenThereIsRoom) {
+    constexpr size_t kFirst = size_t{1} << 23;
+    constexpr size_t kSecond = size_t{1} << 20;
+    HostListener host;
+    std::string seen;
+    seen.reserve(kFirst + kSecond);
+    std::thread peer([&] {
+        int fd = host.accept();
+        drainHost(fd, 100, 64 * 1024,
+                  [&](const char* p, size_t n) { seen.append(p, n); });
+        close(fd);
+    });
+    VM vm;
+    InterpretResult result = vm.interpret(connectToHost(host) + R"(
+        var a = "a"; var b = "b";
+        var i = 0;
+        while (i < 23) { a = a + a; i = i + 1; }
+        i = 0;
+        while (i < 20) { b = b + b; i = i + 1; }
+        var me = task.self();
+        fun wa() { c.write(a); task.send(me, 1); }
+        fun wb() { sleep(0.2); c.write(b); task.send(me, 1); }
+        task.spawn(wa);
+        task.spawn(wb);
+        task.receive(); task.receive();
+        c.close();
+    )");
+    peer.join();
+    ASSERT_EQ(result, InterpretResult::OK);
+    ASSERT_EQ(seen.size(), kFirst + kSecond);
+    EXPECT_EQ(seen.find_first_not_of('a'), kFirst);
+    EXPECT_EQ(seen.find_first_not_of('b', kFirst), std::string::npos);
+}
+
 // A writer in a context where the task cannot suspend blocks its worker. It
 // must not send its bytes into the middle of a parked write: it first sends
 // the rest of the call that is ahead of it. After that, no byte of one text
@@ -1224,6 +1262,35 @@ TEST_F(SocketParkTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
     EXPECT_EQ(globalString(vm, "got"), "\nab");
     EXPECT_EQ(globalString(vm, "kind"), "SocketClosedError");
     EXPECT_FALSE(vm.runtime().hasPoller());
+}
+
+// A zero-length write returns at once, also when a writer is parked ahead of
+// it on a full connection: it has no bytes to order.
+TEST_F(SocketParkTest, AZeroLengthWriteDoesNotWaitBehindAParkedWriter) {
+    HostListener host;
+    std::thread peer([&] {
+        int fd = host.accept();
+        drainHost(fd, 300, 0, [](const char*, size_t) {});
+        close(fd);
+    });
+    VM vm;
+    InterpretResult result = vm.interpret(connectToHost(host) + R"(
+        var big = "x";
+        var i = 0;
+        while (i < 26) { big = big + big; i = i + 1; }
+        var me = task.self();
+        var log = "";
+        fun writer() { c.write(big); log = log + "W"; task.send(me, 1); }
+        task.spawn(writer);
+        var y = yield nil;
+        c.write("");
+        log = log + "Z";
+        task.receive();
+        c.close();
+    )");
+    peer.join();
+    ASSERT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "log"), "ZW");
 }
 
 // A write that is not full does not park and builds no poller.
