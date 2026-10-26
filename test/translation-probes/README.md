@@ -405,10 +405,10 @@ tests, and `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The
 C++ tests that compile every probe (`test/corpus.h`) leave out the probes in
 `native.txt`.
 
-`native.txt`, `jvm.txt`, and `qbe.txt` exist and list the probes `260` to `267`,
+`native.txt` and `qbe.txt` exist and list the probes `260` to `267`,
 `278` to `282`, `284`, and `285`: the probes of the rule that a call which waits for the
 network or for time suspends only its task (`docs/decisions/blocking-call-suspension.md`),
-which no consumer passes yet. The bootstrap interpreter has no file: those
+which these consumers do not pass yet. The JVM backend passes them all and has no file. The bootstrap interpreter has no file: those
 probes carry a `NOT-BINDING` line that names `bootstrap-only/same_worker_blocking_call`.
 An absent file is an empty list, so a consumer with no gap needs no file, and a
 node that finds a gap creates the file it needs.

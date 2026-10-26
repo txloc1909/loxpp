@@ -67,10 +67,8 @@ SOCKET_SITES = {
     ("readBytesFrom", HALT): 1,
     ("checkOpen", CLOSED): 1,
     ("checkWritable", CLOSED): 1,
-    ("read", NETWORK): 1,
-    ("readBytes", NETWORK): 1,
-    ("readline", NETWORK): 1,
-    ("write", NETWORK): 1,
+    ("fill", NETWORK): 1,
+    ("writeBytes", NETWORK): 1,
     ("connect", NETWORK): 1,
 }
 

@@ -2,40 +2,69 @@ package lox;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
+import java.net.StandardSocketOptions;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 
-/** Mirrors src/stdlib/net_api.cpp's ObjServer over a {@link ServerSocket}. */
+/**
+ * Mirrors src/stdlib/net_api.cpp's ObjServer over a {@link
+ * ServerSocketChannel}. The channel is nonblocking, so a task that finds no
+ * connection parks and the other tasks of its worker run ({@link
+ * LoxWorker#waitChannel}).
+ */
 public final class LoxServer {
-    private ServerSocket server; // null once closed
+    private ServerSocketChannel server; // null once closed
     private final int boundPort;
 
-    public LoxServer(ServerSocket server) {
+    private LoxServer(ServerSocketChannel server, int boundPort) {
         this.server = server;
-        this.boundPort = server.getLocalPort();
+        this.boundPort = boundPort;
     }
 
     public static LoxServer listen(String host, int port) {
+        ServerSocketChannel server = null;
         try {
-            ServerSocket server = new ServerSocket();
-            server.setReuseAddress(true);
+            server = ServerSocketChannel.open();
+            server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
             server.bind(new InetSocketAddress(host, port));
-            return new LoxServer(server);
+            server.configureBlocking(false);
+            LoxServer made = new LoxServer(
+                server, ((InetSocketAddress)server.getLocalAddress()).getPort());
+            server = null; // the Server owns the channel now
+            return made;
         } catch (IOException e) {
             throw LoxOps.makeError("NetworkError",
                                    "listen(): cannot listen on '" + host + ":" +
                                        port + "': " + e.getMessage());
+        } finally {
+            if (server != null) {
+                try {
+                    server.close();
+                } catch (IOException ignored) {
+                    // The listen fault is the one to report.
+                }
+            }
         }
     }
 
     public Object accept() {
-        if (server == null) {
-            throw LoxOps.makeError("SocketClosedError",
-                                   "Cannot call 'accept' on a closed server.");
-        }
-        try {
-            return new LoxSocket(server.accept());
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError", "accept(): " + e.getMessage());
+        for (;;) {
+            if (server == null) {
+                throw LoxOps.makeError("SocketClosedError",
+                    "Cannot call 'accept' on a closed server.");
+            }
+            try {
+                SocketChannel peer = server.accept();
+                if (peer != null) {
+                    peer.configureBlocking(false);
+                    return new LoxSocket(peer);
+                }
+            } catch (IOException e) {
+                throw LoxOps.makeError("NetworkError",
+                                       "accept(): " + e.getMessage());
+            }
+            LoxWorker.waitChannel(server, SelectionKey.OP_ACCEPT);
         }
     }
 
@@ -45,6 +74,7 @@ public final class LoxServer {
 
     public void close() {
         if (server != null) {
+            LoxWorker.wakeChannel(server);
             try {
                 server.close();
             } catch (IOException ignored) {
