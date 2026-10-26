@@ -1,9 +1,8 @@
 # Network calls and `sleep` suspend only their own task
 
-**Status:** proposal. Waits for the owner's approval. On acceptance it moves to
-`docs/decisions/` and names its tracking issue.
-**Tracking (draft):** #711. The DAG and the node body drafts are there. Node
-issues open only after acceptance.
+**Status:** accepted. The owner approved it in #711 (2026-10-26). Node issues
+open against this decision.
+**Tracking:** #711. The DAG and the node body drafts are there.
 
 ## Owner decisions
 
@@ -344,11 +343,15 @@ constraints on every node, and the spec states C1, C6 and C7.
 - **C7. Deadlock count.** A parked task is a task that can continue (see
   "Liveness and deadlock").
 
-**Atomicity.** Today the spec says that no task of the worker runs until a
-blocking call returns. A program can use this to make a critical section
-atomic across a network call. After this change it cannot, and the language
-gives no way to keep the old behavior for one call. The spec reservation
-permits the change. A program that needs a critical section across a wait puts
+**Atomicity.** The code between two suspend points is atomic on its worker.
+This does not change. The spec never promised that a blocking call keeps the
+other tasks off its worker: the table lists each blocking call as a suspend
+point, and the spec reserves the change in these words: "a later version can
+let other tasks of the worker run while the call waits". The rule that
+scheduling is implementation-defined (`spec/README.md`, Conformance) already
+means a portable program cannot depend on it. A program that kept shared state
+consistent across a network call by this effect will see other tasks run
+during the wait. A program that needs a critical section across a wait puts
 the shared state in one task, which the other tasks reach with messages.
 
 ## What each consumer owes
