@@ -12,3 +12,5 @@
 280_parked_task_is_not_deadlock.lox readline() blocks the worker, so the feeder never runs and the probe times out
 281_close_while_parked_raises.lox readline() blocks the worker, so the closer never runs and the probe times out
 282_for_in_map_changed_while_parked_is_fatal.lox sleep() blocks the worker, so the adder runs after the loop ends and the program does not halt
+284_coroutine_with_parked_call_stays_running.lox readline() blocks the worker, so checker never runs and the probe times out
+285_no_deferred_call_runs_while_parked.lox readline() blocks the worker, so checker never runs and the probe times out

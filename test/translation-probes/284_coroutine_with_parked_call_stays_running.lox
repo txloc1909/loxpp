@@ -1,0 +1,37 @@
+// A coroutine whose function waits in a call of class suspends keeps the status
+// "running" during the wait, and a resume of it from another task raises a
+// catchable RunningCoroutineError (spec/04-semantics.md, `co.status`). `runner`
+// resumes the coroutine, which waits in readline(). `checker` of the same worker
+// reads the status, tries to resume, and then sends the line.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: running
+// CHECK: RunningCoroutineError
+// CHECK: runner done
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun body() { return conn.readline(); }
+var co = coroutine.create(body);
+fun runner() {
+    co.resume();
+    print "runner done";
+    task.send(me, "done");
+}
+fun checker() {
+    print co.status();
+    try { co.resume(); print "no fault"; }
+    catch (e) { print e.kind; }
+    peer.writeline("line");
+    task.send(me, "done");
+}
+task.spawn(runner);
+task.spawn(checker);
+task.receive();
+task.receive();

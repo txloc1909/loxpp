@@ -5,7 +5,9 @@
 // while nothing reads the peer. The call has to wait for room. The task
 // `ticker` of the same worker runs during the wait, and then the main task reads
 // the whole string. An implementation that blocks the worker in writeline() never
-// runs `ticker`, and hits the timeout.
+// runs `ticker`, and hits the timeout. The probe assumes that the buffers of a
+// connection on the local host hold less than 32 MB together; if they hold more,
+// the call does not wait and the probe does not show the property.
 // The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
 // one host thread, so a blocking call blocks every task (spec/README.md,
 // Conformance: scheduling is implementation-defined). The probe on the

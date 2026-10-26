@@ -1,0 +1,35 @@
+// No deferred call of a task runs while the task waits in a call of class
+// suspends (spec/04-semantics.md, Suspend Points). `worker` defers a call and
+// then waits in readline(). `checker` of the same worker prints, then sends the
+// line. The deferred call runs only when `worker` returns, after the line.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined). The probe on the
+// NOT-BINDING line checks the bootstrap's own choice in its place.
+// STATUS: ok
+// TIMEOUT: 10
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: before
+// CHECK: checker ran
+// CHECK: got line
+// CHECK: deferred ran
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun note() { print "deferred ran"; }
+fun worker() {
+    defer note();
+    print "before";
+    print "got " + conn.readline();
+}
+fun finish() { worker(); task.send(me, "done"); }
+fun checker() {
+    print "checker ran";
+    peer.writeline("line");
+    task.send(me, "done");
+}
+task.spawn(finish);
+task.spawn(checker);
+task.receive();
+task.receive();
