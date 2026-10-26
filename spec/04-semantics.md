@@ -1944,6 +1944,8 @@ whose text is implementation-defined.
 | `resume` on a running coroutine (self-resume) | `fun f() { co.resume(); } var co = coroutine.create(f); co.resume();` | `"RunningCoroutineError"` |
 | `yield` across a native callback | `class S { __str__() { yield 1; return "x"; } } fun f() { print S(); } var co = coroutine.create(f); co.resume();` | `"YieldAcrossNativeError"` |
 | `yield` in a deferred call | `fun note() { var v = yield 1; } fun g() { defer note(); } g();` | `"YieldAcrossNativeError"` |
+| A Socket call on a closed Socket, a write after `close_write()`, or `accept()` on a closed Server | `var l = listen("127.0.0.1", 0); l.close(); l.accept();` | `"SocketClosedError"` |
+| A failure of the network in `connect`, `listen`, `accept`, or a Socket read or write | `var l = listen("127.0.0.1", 0); var p = l.port(); l.close(); connect("127.0.0.1", p);` | `"NetworkError"` |
 
 **The two map-key rows above cover an index read or write, a map literal,
 and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
@@ -1966,7 +1968,7 @@ run before the program ends is implementation-defined, as for every halt.
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
 | A native function is called with an argument count other than its arity | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
-| A stdlib native function reports its own error while running | `open("/no/such/path", "r");` |
+| A stdlib native function reports its own error while running, except the faults of the two Socket rows of the [Runtime Errors](#runtime-errors) table | `open("/no/such/path", "r");` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) |
 | Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` |

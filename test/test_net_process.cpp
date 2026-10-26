@@ -7,6 +7,8 @@
 //   4. run   — captures status, stdout, and stderr together.
 //   5. wait()/kill() and pid() — a child is reaped with a real status.
 //   6. Fatal errors — bad arguments and failed launches halt the program.
+//   7. Socket and Server faults — a closed socket, a refused connection, a
+//      failed write or read are catchable errors.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
@@ -158,13 +160,16 @@ TEST(NetProcessTest, SocketReadBytesBadCountFatal) {
               InterpretResult::RUNTIME_ERROR);
 }
 
-TEST(NetProcessTest, SocketReadBytesOnClosedFatal) {
+TEST(NetProcessTest, SocketReadBytesOnClosedIsCatchable) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
                     "var c = connect(\"127.0.0.1\", l.port()); "
                     "c.close(); "
-                    "c.read_bytes(1);"),
-              InterpretResult::RUNTIME_ERROR);
+                    "var k = \"\"; "
+                    "try { c.read_bytes(1); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "SocketClosedError");
 }
 
 TEST(NetProcessTest, ProcessReadBytes) {
@@ -192,26 +197,71 @@ TEST(NetProcessTest, ProcessErrReadBytes) {
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 
-TEST(NetProcessTest, WriteAfterCloseWriteFatal) {
+TEST(NetProcessTest, WriteAfterCloseWriteIsCatchable) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
                     "var c = connect(\"127.0.0.1\", l.port()); "
                     "c.close_write(); "
-                    "c.write(\"x\");"),
-              InterpretResult::RUNTIME_ERROR);
+                    "var k = \"\"; "
+                    "try { c.write(\"x\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "SocketClosedError");
 }
 
-TEST(NetProcessTest, WriteToClosedPeerFatalNotSignal) {
-    // Two writes after the peer closes: the second must fail with a runtime
-    // error. Before the SIGPIPE fix the VM died with signal 13 (exit 141).
+TEST(NetProcessTest, WriteToClosedPeerIsCatchableNotSignal) {
+    // Writes after the peer closes: one of them must fail with a catchable
+    // NetworkError. Before the SIGPIPE fix the VM died with signal 13
+    // (exit 141).
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
                     "var c = connect(\"127.0.0.1\", l.port()); "
                     "var s = l.accept(); "
                     "s.close(); "
-                    "c.write(\"x\"); "
-                    "c.write(\"y\");"),
-              InterpretResult::RUNTIME_ERROR);
+                    "var k = \"\"; "
+                    "var i = 0; "
+                    "while (i < 1000 and k == \"\") { "
+                    "try { c.write(\"x\"); } catch (e) { k = e.kind; } "
+                    "i = i + 1; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "NetworkError");
+}
+
+TEST(NetProcessTest, ReadAfterAFailedWriteReturnsThePeersBytes) {
+    // The failed write must not leave a stream error that a later read
+    // reports as its own fault.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "s.write(\"bye\"); "
+                    "s.close(); "
+                    "var k = \"\"; "
+                    "var i = 0; "
+                    "while (i < 1000 and k == \"\") { "
+                    "try { c.write(\"xxxxxxxx\"); } catch (e) { k = e.kind; } "
+                    "i = i + 1; } "
+                    "k + \" \" + c.read_bytes(3);"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "NetworkError bye");
+}
+
+TEST(NetProcessTest, ReadAfterResetIsCatchableNotEndOfStream) {
+    // The peer closes with unread bytes in its receive buffer, so the kernel
+    // sends a reset. The read must not look like an end of stream.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "c.write(\"unread\"); "
+                    "sleep(0.2); "
+                    "s.close(); "
+                    "var k = \"\"; "
+                    "try { c.read(); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "NetworkError");
 }
 
 TEST(NetProcessTest, CloseWriteIsIdempotentAndSafeAfterClose) {
@@ -240,21 +290,28 @@ TEST(NetProcessTest, WriteToExitedChildFatalNotSignal) {
               InterpretResult::RUNTIME_ERROR);
 }
 
-TEST(NetProcessTest, AcceptOnClosedServerFatal) {
+TEST(NetProcessTest, AcceptOnClosedServerIsCatchable) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
                     "l.close(); "
-                    "l.accept();"),
-              InterpretResult::RUNTIME_ERROR);
+                    "var k = \"\"; "
+                    "try { l.accept(); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "SocketClosedError");
 }
 
-TEST(NetProcessTest, ConnectRefusedFatal) {
+TEST(NetProcessTest, ConnectRefusedIsCatchable) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
                     "var port = l.port(); "
                     "l.close(); "
-                    "connect(\"127.0.0.1\", port);"),
-              InterpretResult::RUNTIME_ERROR);
+                    "var k = \"\"; "
+                    "try { connect(\"127.0.0.1\", port); } "
+                    "catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "NetworkError");
 }
 
 TEST(NetProcessTest, InvalidPortFatal) {

@@ -134,6 +134,13 @@ PROBES = [
      'class C { init() { this.f = type; } } try { callMethod(C(), "f"); } catch (e) { print e.kind; }',
      FATAL, "ReflectionNativeArityError",
      '"Expected " + str(callee.arity()) + " arguments but got " +\n                         str(len(forwarded)) + "."'),
+    ("connect to a port nothing listens on",
+     'var l = listen("127.0.0.1", 0); var p = l.port(); l.close(); '
+     'try { connect("127.0.0.1", p); } catch (e) { print e.kind; }',
+     CATCHABLE, "NetworkError", "e.message"),
+    ("accept on a closed server",
+     'var l = listen("127.0.0.1", 0); l.close(); try { l.accept(); } catch (e) { print e.kind; }',
+     CATCHABLE, "SocketClosedError", "e.message"),
     ("send of a value that is not a message", "try { task.send(task.self(), []); } catch (e) { print e.kind; }",
      CATCHABLE, "SendError", '"Value of type " + reflectTypeName(msg) + " is not a message."'),
     ("spawn_worker with a message that is not one",

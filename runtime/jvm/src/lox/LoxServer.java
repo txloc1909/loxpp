@@ -21,19 +21,21 @@ public final class LoxServer {
             server.bind(new InetSocketAddress(host, port));
             return new LoxServer(server);
         } catch (IOException e) {
-            throw new LoxError("listen(): cannot listen on '" + host + ":" +
-                               port + "': " + e.getMessage());
+            throw LoxOps.makeError("NetworkError",
+                                   "listen(): cannot listen on '" + host + ":" +
+                                       port + "': " + e.getMessage());
         }
     }
 
     public Object accept() {
         if (server == null) {
-            throw new LoxError("Cannot call 'accept' on a closed server.");
+            throw LoxOps.makeError("SocketClosedError",
+                                   "Cannot call 'accept' on a closed server.");
         }
         try {
             return new LoxSocket(server.accept());
         } catch (IOException e) {
-            throw new LoxError("accept(): " + e.getMessage());
+            throw LoxOps.makeError("NetworkError", "accept(): " + e.getMessage());
         }
     }
 

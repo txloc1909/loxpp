@@ -1,0 +1,25 @@
+// STATUS: ok
+// CHECK: write NetworkError
+// CHECK: read bye
+// A failed write does not change what a later read returns (spec/05-stdlib.md,
+// Socket). The peer sends "bye" and closes. The loop writes until the write
+// fails, because the first writes can succeed. Then the program reads the
+// bytes that the peer sent before it closed.
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", l.port());
+var s = l.accept();
+s.write("bye");
+s.close();
+var chunk = "x";
+var i = 0;
+while (i < 12) { chunk = chunk + chunk; i = i + 1; }
+var kind = "none";
+i = 0;
+while (i < 1000 and kind == "none") {
+    try { c.write(chunk); } catch (e) { kind = e.kind; }
+    i = i + 1;
+}
+print "write " + kind;
+print "read " + c.read_bytes(3);
+c.close();
+l.close();

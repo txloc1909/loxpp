@@ -1,0 +1,14 @@
+// STATUS: ok
+// CHECK: NetworkError
+// CHECK: after
+// A listen on a port that a Server already holds is a catchable NetworkError
+// (spec/05-stdlib.md, listen).
+var a = listen("127.0.0.1", 0);
+try {
+    listen("127.0.0.1", a.port());
+    print "listening";
+} catch (e) {
+    print e.kind;
+}
+a.close();
+print "after";

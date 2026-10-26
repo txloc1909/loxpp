@@ -1,0 +1,24 @@
+// STATUS: ok
+// CHECK: NetworkError
+// CHECK: after
+// A write to a peer that has closed fails once the kernel reports the
+// closed connection. The first writes can succeed, so the loop writes until
+// the fault. The fault is a catchable NetworkError, and the program is not
+// ended by a signal (spec/05-stdlib.md, Socket).
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", l.port());
+var s = l.accept();
+s.close();
+var chunk = "x";
+var i = 0;
+while (i < 12) { chunk = chunk + chunk; i = i + 1; }
+var kind = "none";
+i = 0;
+while (i < 1000 and kind == "none") {
+    try { c.write(chunk); } catch (e) { kind = e.kind; }
+    i = i + 1;
+}
+print kind;
+c.close();
+l.close();
+print "after";

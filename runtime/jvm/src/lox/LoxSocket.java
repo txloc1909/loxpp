@@ -26,14 +26,16 @@ public final class LoxSocket {
 
     private void checkOpen(String method) {
         if (socket == null) {
-            throw new LoxError("Cannot call '" + method + "' on a closed socket.");
+            throw LoxOps.makeError("SocketClosedError",
+                                   "Cannot call '" + method + "' on a closed socket.");
         }
     }
 
     private void checkWritable(String method) {
         checkOpen(method);
         if (writeClosed) {
-            throw new LoxError("Cannot write to a socket after close_write().");
+            throw LoxOps.makeError("SocketClosedError",
+                                   "Cannot write to a socket after close_write().");
         }
     }
 
@@ -48,7 +50,7 @@ public final class LoxSocket {
             }
             return new String(buf.toByteArray(), LoxRuntime.CHARSET);
         } catch (IOException e) {
-            throw new LoxError("read(): " + e.getMessage());
+            throw LoxOps.makeError("NetworkError", "read(): " + e.getMessage());
         }
     }
 
@@ -59,7 +61,11 @@ public final class LoxSocket {
      */
     public Object readBytes(int n) {
         checkOpen("read_bytes");
-        return readBytesFrom(in, n, "read_bytes");
+        try {
+            return readBytesRaw(in, n);
+        } catch (IOException e) {
+            throw LoxOps.makeError("NetworkError", "read_bytes(): " + e.getMessage());
+        }
     }
 
     /**
@@ -69,20 +75,24 @@ public final class LoxSocket {
      */
     static Object readBytesFrom(InputStream in, int n, String method) {
         try {
-            ByteArrayOutputStream buf = new ByteArrayOutputStream();
-            byte[] chunk = new byte[4096];
-            while (buf.size() < n) {
-                int want = Math.min(chunk.length, n - buf.size());
-                int got = in.read(chunk, 0, want);
-                if (got == -1) {
-                    break;
-                }
-                buf.write(chunk, 0, got);
-            }
-            return new String(buf.toByteArray(), LoxRuntime.CHARSET);
+            return readBytesRaw(in, n);
         } catch (IOException e) {
             throw new LoxError(method + "(): " + e.getMessage());
         }
+    }
+
+    private static Object readBytesRaw(InputStream in, int n) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        while (buf.size() < n) {
+            int want = Math.min(chunk.length, n - buf.size());
+            int got = in.read(chunk, 0, want);
+            if (got == -1) {
+                break;
+            }
+            buf.write(chunk, 0, got);
+        }
+        return new String(buf.toByteArray(), LoxRuntime.CHARSET);
     }
 
     /**
@@ -111,7 +121,7 @@ public final class LoxSocket {
             }
             return sawByte ? line.toString() : null;
         } catch (IOException e) {
-            throw new LoxError("readline(): " + e.getMessage());
+            throw LoxOps.makeError("NetworkError", "readline(): " + e.getMessage());
         }
     }
 
@@ -131,7 +141,7 @@ public final class LoxSocket {
             out.write(s.getBytes(LoxRuntime.CHARSET));
             out.flush();
         } catch (IOException e) {
-            throw new LoxError("write(): " + e.getMessage());
+            throw LoxOps.makeError("NetworkError", "write(): " + e.getMessage());
         }
     }
 
@@ -142,7 +152,7 @@ public final class LoxSocket {
     /**
      * The INVOKE and bound-native entry points. The stream state is checked
      * before the argument type, matching native's checkSocketWrite-then-type
-     * order, so a non-String write to a closed socket reports the same fatal
+     * order, so a non-String write to a closed socket reports the same
      * error on every backend.
      */
     public void writeArg(Object arg) {
@@ -186,8 +196,9 @@ public final class LoxSocket {
         try {
             return new LoxSocket(new Socket(host, port));
         } catch (IOException e) {
-            throw new LoxError("connect(): cannot connect to '" + host + ":" +
-                               port + "': " + e.getMessage());
+            throw LoxOps.makeError("NetworkError",
+                                   "connect(): cannot connect to '" + host + ":" +
+                                       port + "': " + e.getMessage());
         }
     }
 
