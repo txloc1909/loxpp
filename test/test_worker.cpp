@@ -629,13 +629,24 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
     EXPECT_EQ(globalString(vm, "ok"), std::to_string(count));
 }
 
-// A send is constant time: sending a message 10 times larger costs the
-// same. Deep copy on send would cost 10 times more.
+MemoryManager* g_countedHeap = nullptr;
+
+Value heapBytesNative(int /*argc*/, Value* /*argv*/) {
+    return from<Number>(static_cast<Number>(g_countedHeap->bytesAllocated));
+}
+
+// A send hands over the message without copying it. A copy per send would
+// allocate in proportion to the message size, so the allocation of the
+// sending heap over many sends must stay below the size of one copy of the
+// smaller message. The test counts allocated bytes and never reads a clock,
+// so the load of the host cannot change the result.
 TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
     if (stressGC()) {
-        GTEST_SKIP() << "timing under GC stress measures the collector";
+        GTEST_SKIP() << "GC stress collects at every allocation";
     }
     VM vm;
+    g_countedHeap = &vm.runtime().memoryManager();
+    vm.runtime().defineNative("heap_bytes", heapBytesNative, 0);
     ASSERT_EQ(vm.interpret(R"(
         enum List { Empty Cons(head, tail) }
         fun build(n) {
@@ -648,26 +659,31 @@ TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
             while (task.receive() != "stop") n = n + 1;
             task.send(main, n);
         }
-        fun perSend(msg, count) {
+        fun bytesPerSend(msg, count) {
             var w = task.spawn_worker(sink, task.self());
-            var t0 = clock();
+            var before = heap_bytes();
             for (var i = 0; i < count; i = i + 1) task.send(w, msg);
-            var t1 = clock();
+            var after = heap_bytes();
             task.send(w, "stop");
             task.receive();
-            return (t1 - t0) / count;
+            return (after - before) / count;
         }
-        var count = 20000;
-        var small = perSend(build(100), count);
-        var large = perSend(build(1000), count);
-        var ratio = large / small;
+        var count = 300;
+        var small = bytesPerSend(build(100), count);
+        var large = bytesPerSend(build(1000), count);
     )"),
               InterpretResult::OK);
-    auto ratio = vm.getGlobal("ratio");
-    ASSERT_TRUE(ratio.has_value() && is<Number>(*ratio));
-    EXPECT_LT(as<Number>(*ratio), 3.0)
-        << "small " << globalString(vm, "small") << " s, large "
-        << globalString(vm, "large") << " s per send";
+    g_countedHeap = nullptr;
+
+    // A copy of the smaller message is 100 objects, thousands of bytes. The
+    // allowance of 100 bytes per send is far below that. A collection only
+    // lowers the count, so it cannot break the bound.
+    for (const char* name : {"small", "large"}) {
+        auto v = vm.getGlobal(name);
+        ASSERT_TRUE(v.has_value() && is<Number>(*v)) << name;
+        EXPECT_LT(as<Number>(*v), 100.0)
+            << name << " allocated " << as<Number>(*v) << " bytes per send";
+    }
 }
 
 // A worker's uncaught fault ends the program with status 70 after the
