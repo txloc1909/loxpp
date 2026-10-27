@@ -3,11 +3,11 @@ package lox;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.nio.channels.UnresolvedAddressException;
 
 /**
  * Mirrors src/stdlib/net_api.cpp's ObjSocket over a nonblocking {@link
@@ -245,38 +245,53 @@ public final class LoxSocket {
         }
     }
 
+    /** Resolves a host name to its addresses; replaced only by tests. */
+    interface Resolver {
+        InetAddress[] resolve(String host) throws IOException;
+    }
+
+    static volatile Resolver resolver = InetAddress::getAllByName;
+
     public static LoxSocket connect(String host, int port) {
-        SocketChannel channel = null;
+        // Every resolved address is tried in order, as native does: the first
+        // one can be unusable (an IPv6 address on a host with IPv6 off) while a
+        // later one works. The last failure is the one reported.
+        String failure = "unknown host";
         try {
             // A host name resolves here and blocks the worker; a numeric
-            // address does not (spec/05-stdlib.md, connect). An unresolved
-            // name makes channel.connect raise UnresolvedAddressException.
-            InetSocketAddress address = new InetSocketAddress(host, port);
-            channel = SocketChannel.open();
-            channel.configureBlocking(false);
-            if (!channel.connect(address)) {
-                while (!channel.finishConnect()) {
-                    LoxWorker.waitChannel(channel, SelectionKey.OP_CONNECT);
-                }
-            }
-            LoxSocket made = new LoxSocket(channel);
-            channel = null; // the Socket owns the channel now
-            return made;
-        } catch (IOException | UnresolvedAddressException e) {
-            throw LoxOps.makeError("NetworkError",
-                                   "connect(): cannot connect to '" + host + ":" +
-                                       port + "': " +
-                                       (e.getMessage() != null ? e.getMessage()
-                                                               : "unknown host"));
-        } finally {
-            if (channel != null) {
+            // address does not (spec/05-stdlib.md, connect).
+            for (InetAddress ip : resolver.resolve(host)) {
+                SocketChannel channel = null;
                 try {
-                    channel.close();
-                } catch (IOException ignored) {
-                    // The connect fault is the one to report.
+                    channel = SocketChannel.open();
+                    channel.configureBlocking(false);
+                    InetSocketAddress address = new InetSocketAddress(ip, port);
+                    if (!channel.connect(address)) {
+                        while (!channel.finishConnect()) {
+                            LoxWorker.waitChannel(channel, SelectionKey.OP_CONNECT);
+                        }
+                    }
+                    LoxSocket made = new LoxSocket(channel);
+                    channel = null; // the Socket owns the channel now
+                    return made;
+                } catch (IOException e) {
+                    failure = e.getMessage() != null ? e.getMessage() : failure;
+                } finally {
+                    if (channel != null) {
+                        try {
+                            channel.close();
+                        } catch (IOException ignored) {
+                            // The connect fault is the one to report.
+                        }
+                    }
                 }
             }
+        } catch (IOException e) {
+            failure = e.getMessage() != null ? e.getMessage() : failure;
         }
+        throw LoxOps.makeError("NetworkError",
+                               "connect(): cannot connect to '" + host + ":" +
+                                   port + "': " + failure);
     }
 
     /**

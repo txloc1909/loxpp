@@ -65,6 +65,31 @@ public final class SocketTest {
         }
         checkEquals(1, launchError[0], "connect() to a refused port is fatal");
 
+        // A name with a bad first address connects through a later one, and
+        // when every address fails the call raises one fault.
+        LoxServer second = LoxServer.listen("127.0.0.1", 0);
+        int secondPort = (int)second.port();
+        java.net.InetAddress noListener = java.net.InetAddress.getByName("127.0.0.2");
+        java.net.InetAddress listening = java.net.InetAddress.getByName("127.0.0.1");
+        LoxSocket.Resolver saved = LoxSocket.resolver;
+        try {
+            LoxSocket.resolver = h -> new java.net.InetAddress[] {noListener, listening};
+            LoxSocket viaSecond = LoxSocket.connect("multi.test", secondPort);
+            viaSecond.writeline("hi");
+            viaSecond.closeWrite();
+            LoxSocket gotten = (LoxSocket)second.accept();
+            checkEquals("hi\n", gotten.read(), "connect() falls through to the second address");
+            gotten.close();
+            viaSecond.close();
+
+            LoxSocket.resolver = h -> new java.net.InetAddress[] {noListener, noListener};
+            checkThrows(() -> LoxSocket.connect("multi.test", secondPort), LoxError.class,
+                        "connect() raises when every address fails");
+        } finally {
+            LoxSocket.resolver = saved;
+            second.close();
+        }
+
         // close_write() is a no-op after close(), matching spec/05-stdlib.md.
         LoxServer cs = LoxServer.listen("127.0.0.1", 0);
         LoxSocket cc = LoxSocket.connect("127.0.0.1", (int)cs.port());
