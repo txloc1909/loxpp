@@ -629,13 +629,26 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
     EXPECT_EQ(globalString(vm, "ok"), std::to_string(count));
 }
 
-// A send is constant time: sending a message 10 times larger costs the
-// same. Deep copy on send would cost 10 times more.
-TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
+// The bytes allocated on the heap of a task. The caller reads a worker's heap
+// only while that worker waits in receive, after a reply it sent: the reply
+// orders the worker's allocations before the read.
+Value heapBytesNative(int /*argc*/, Value* argv) {
+    ObjTask* t = asObjTask(as<Obj*>(argv[0]));
+    MemoryManager* heap = heapById(t->heapId);
+    return from<Number>(static_cast<Number>(heap->bytesAllocated));
+}
+
+// A send hands over the message without copying it. A copy would allocate in
+// proportion to the message size, on the sending heap or, at the drain, on
+// the receiving heap. The test counts the bytes allocated on both heaps over
+// many sends and never reads a clock, so the load of the host cannot change
+// the result. It does not see a copy into memory that no heap tracks.
+TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
     if (stressGC()) {
-        GTEST_SKIP() << "timing under GC stress measures the collector";
+        GTEST_SKIP() << "GC stress collects at every allocation";
     }
     VM vm;
+    vm.runtime().defineNative("heap_bytes", heapBytesNative, 1);
     ASSERT_EQ(vm.interpret(R"(
         enum List { Empty Cons(head, tail) }
         fun build(n) {
@@ -644,30 +657,46 @@ TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
             return l;
         }
         fun sink(main) {
-            var n = 0;
-            while (task.receive() != "stop") n = n + 1;
-            task.send(main, n);
+            while (true) {
+                var m = task.receive();
+                while (m != "mark") m = task.receive();
+                task.send(main, "marked");
+            }
         }
-        fun perSend(msg, count) {
+        fun bytesPerSend(msg, count) {
             var w = task.spawn_worker(sink, task.self());
-            var t0 = clock();
-            for (var i = 0; i < count; i = i + 1) task.send(w, msg);
-            var t1 = clock();
-            task.send(w, "stop");
+            task.send(w, "mark");
             task.receive();
-            return (t1 - t0) / count;
+            var sentBefore = heap_bytes(task.self());
+            var receivedBefore = heap_bytes(w);
+            for (var i = 0; i < count; i = i + 1) task.send(w, msg);
+            var sentAfter = heap_bytes(task.self());
+            task.send(w, "mark");
+            task.receive();
+            var receivedAfter = heap_bytes(w);
+            return [(sentAfter - sentBefore) / count,
+                    (receivedAfter - receivedBefore) / count];
         }
-        var count = 20000;
-        var small = perSend(build(100), count);
-        var large = perSend(build(1000), count);
-        var ratio = large / small;
+        var count = 300;
+        var small = bytesPerSend(build(100), count);
+        var large = bytesPerSend(build(1000), count);
+        var sentSmall = small[0];
+        var receivedSmall = small[1];
+        var sentLarge = large[0];
+        var receivedLarge = large[1];
     )"),
               InterpretResult::OK);
-    auto ratio = vm.getGlobal("ratio");
-    ASSERT_TRUE(ratio.has_value() && is<Number>(*ratio));
-    EXPECT_LT(as<Number>(*ratio), 3.0)
-        << "small " << globalString(vm, "small") << " s, large "
-        << globalString(vm, "large") << " s per send";
+
+    // A copy of the smaller message is 100 objects, thousands of bytes. The
+    // allowance of 100 bytes per send is far below that. A collection only
+    // lowers the count, so it cannot break the bound.
+    for (const char* name :
+         {"sentSmall", "sentLarge", "receivedSmall", "receivedLarge"}) {
+        auto v = vm.getGlobal(name);
+        ASSERT_TRUE(v.has_value() && is<Number>(*v)) << name;
+        EXPECT_LT(as<Number>(*v), 100.0)
+            << name << " allocated " << as<Number>(*v) << " bytes per send";
+    }
 }
 
 // A worker's uncaught fault ends the program with status 70 after the
