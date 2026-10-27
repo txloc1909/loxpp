@@ -51,7 +51,8 @@ needs.
 
 A fault in one connection (for example a client that resets the connection)
 ends only that task. The task closes its socket on every path, with `defer`.
-The catch clause prints the fault message on the server's output. The server has no limit on the number of tasks. File reads and gzip do not
+The catch clause prints the fault message on the server's output. The server has no limit on the number of tasks.
+When `accept()` faults (for example, no descriptors are free), `main()` waits 20 ms and tries again, so the server keeps running. File reads and gzip do not
 suspend: while one task does that work, the other tasks wait.
 
 ## One VM change this example depends on

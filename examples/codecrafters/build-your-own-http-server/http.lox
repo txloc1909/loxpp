@@ -499,8 +499,13 @@ fun main() {
     var directory = directoryFromArgs();
     var server = listen("0.0.0.0", portFromEnv());
     while (true) {
-        var conn = server.accept();
-        spawnServe(conn, directory);
+        try {
+            var conn = server.accept();
+            spawnServe(conn, directory);
+        } catch (e) {
+            // Out of descriptors, for example. Wait for open connections to close.
+            sleep(0.02);
+        }
     }
 }
 

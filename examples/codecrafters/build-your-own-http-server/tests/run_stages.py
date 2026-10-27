@@ -411,6 +411,37 @@ def main():
     finally:
         stop(proc)
 
+    # local: when accept() runs out of descriptors the server waits and keeps
+    # running. This server gets a small descriptor limit of its own.
+    def limit_descriptors():
+        resource.setrlimit(resource.RLIMIT_NOFILE, (40, 40))
+
+    fd_port = free_port()
+    fd_proc, fd_log, fd_up = start_server(prog, directory, fd_port, limit_descriptors)
+    stalled = []
+    try:
+        if not fd_up:
+            check("local: server with few descriptors starts", False, open(fd_log).read())
+        else:
+            for _ in range(60):
+                stalled.append(socket.create_connection(("127.0.0.1", fd_port), timeout=5))
+            time.sleep(0.5)
+            check("local: server is alive when descriptors run out", fd_proc.poll() is None)
+            for s in stalled:
+                s.close()
+            stalled = []
+            try:
+                got = request(fd_port, b"GET /echo/ok HTTP/1.1\r\n\r\n")
+                check("local: server serves a client after descriptors are free", got[2] == b"ok", repr(got))
+            except OSError as exc:
+                check("local: server serves a client after descriptors are free", False, repr(exc))
+    except OSError as exc:
+        check("local: descriptor exhaustion does not stop the server", False, repr(exc))
+    finally:
+        for s in stalled:
+            s.close()
+        stop(fd_proc)
+
     # local: a fault in a connection is printed on the server's output. The
     # output is a terminal, as when a person runs the server: the VM buffers
     # stdout when it is a file or a pipe, and a killed server would lose it.
