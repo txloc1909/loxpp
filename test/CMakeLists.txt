@@ -458,10 +458,20 @@ set(LOXPP_GTEST_TARGETS
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)
 endif()
+# A park test that fails by sleeping for ever never returns. A ctest TIMEOUT
+# ends it. The limit is far above the run time of any park test on a loaded
+# host, so only a hang reaches it.
+set(LOXPP_HANG_GUARDED_TARGETS test_park test_park_gc)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
+    set(props "")
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
-        gtest_discover_tests(${t} TEST_PREFIX "${t}."
-            PROPERTIES ENVIRONMENT "LOXPP_STRESS_GC=1")
+        list(APPEND props ENVIRONMENT "LOXPP_STRESS_GC=1")
+    endif()
+    if(t IN_LIST LOXPP_HANG_GUARDED_TARGETS)
+        list(APPEND props TIMEOUT 30)
+    endif()
+    if(props)
+        gtest_discover_tests(${t} TEST_PREFIX "${t}." PROPERTIES ${props})
     else()
         gtest_discover_tests(${t} TEST_PREFIX "${t}.")
     endif()
