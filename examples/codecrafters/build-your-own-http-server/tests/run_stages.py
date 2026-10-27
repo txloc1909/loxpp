@@ -13,6 +13,9 @@
 
 import gzip
 import os
+import pty
+import resource
+import select
 import socket
 import struct
 import subprocess
@@ -45,11 +48,15 @@ def free_port():
     return port
 
 
-def start_server(prog, directory, port):
+def start_server(prog, directory, port, preexec_fn=None, out=None):
     env = dict(os.environ, LOXPP_HTTP_PORT=str(port))
     log = tempfile.NamedTemporaryFile(prefix="loxpp-http-", suffix=".log", delete=False)
     proc = subprocess.Popen(
-        [prog, "--directory", directory], env=env, stdout=log, stderr=subprocess.STDOUT
+        [prog, "--directory", directory],
+        env=env,
+        stdout=out if out is not None else log,
+        stderr=subprocess.STDOUT,
+        preexec_fn=preexec_fn,
     )
     deadline = time.time() + 5
     while time.time() < deadline:
@@ -102,6 +109,14 @@ def request(port, raw, half_close=False, keep=None):
     if keep is None:
         sock.close()
     return result
+
+
+def stop(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 def main():
@@ -394,11 +409,34 @@ def main():
         except OSError as exc:
             check("local: clients that misbehave do not stop the server", False, repr(exc))
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        stop(proc)
+
+    # local: a fault in a connection is printed on the server's output. The
+    # output is a terminal, as when a person runs the server: the VM buffers
+    # stdout when it is a file or a pipe, and a killed server would lose it.
+    master, slave = pty.openpty()
+    pty_port = free_port()
+    pty_proc, pty_log, pty_up = start_server(prog, directory, pty_port, out=slave)
+    try:
+        if not pty_up:
+            check("local: server with terminal output starts", False)
+        else:
+            with open(os.path.join(directory, "big"), "wb") as f:
+                f.write(b"x" * (8 * 1024 * 1024))
+            s = socket.create_connection(("127.0.0.1", pty_port), timeout=5)
+            s.sendall(b"GET /files/big HTTP/1.1\r\n\r\n")
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            s.close()
+            seen = b""
+            deadline = time.time() + 5
+            while time.time() < deadline and b"connection fault" not in seen:
+                if select.select([master], [], [], 0.1)[0]:
+                    seen += os.read(master, 4096)
+            check("local: a connection fault is printed", b"connection fault" in seen, repr(seen))
+    finally:
+        stop(pty_proc)
+        os.close(master)
+        os.close(slave)
 
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 1 if FAIL else 0

@@ -427,14 +427,19 @@ fun handleConnection(sock, directory) {
 
 // One task runs this per connection. A fault in the connection (a reset, or a
 // write to a peer that stopped reading) ends only this connection. The catch
-// block does nothing, because any write to the socket there could fault again
-// and end the task before the deferred close runs. close() does nothing on a
+// block prints the message to the server's output, not to the socket: a write
+// to the socket there could fault again. An uncaught fault in a task ends the
+// whole program, so the print has its own try. close() does nothing on a
 // Socket that is already closed, so the deferred call is safe after any fault.
 fun serve(conn, directory) {
     defer conn.close();
     try {
         handleConnection(conn, directory);
     } catch (e) {
+        try {
+            print "connection fault: " + e.message;
+        } catch (ignored) {
+        }
     }
 }
 
