@@ -99,25 +99,23 @@ is installed and is only reached on the interpreter.
 and `spawn`/`run` (child processes with pipes, a `Process` value) in
 `src/stdlib/process_api.cpp`. The JVM runtime mirrors them (`LoxSocket`,
 `LoxServer`, `LoxProcess`) and the self-hosted bootstrap interpreter delegates
-to the host. All I/O blocks the VM, exactly like `sleep`, because item 5's
-coroutines do not exist yet. The *unbounded* surface of the tail — crypto,
+to the host. The nine socket and `sleep` calls suspend only the calling task
+(#711). Other I/O, such as `input` and the `Process` calls, still blocks its
+worker. The *unbounded* surface of the tail — crypto,
 databases, compression — remains the standing argument for item 6.
 
-One residual gap surfaced while building the CodeCrafters HTTP server example
-(`examples/codecrafters/build-your-own-http-server`), so item 2 is *not* fully
-closed:
-
-- **No concurrency.** One `accept`/`readline` blocks the VM, so simultaneous
-  keep-alive connections cannot be served without item 5. Tracking: #519.
+The CodeCrafters HTTP server example
+(`examples/codecrafters/build-your-own-http-server`) showed one residual gap:
+simultaneous keep-alive connections. The example now serves each connection on
+its own task (#519), so item 2 has no open gap.
 
 The former bounded-read gap was closed by `read_bytes(n)` (#518), which blocks
 until `n` bytes arrive or the peer closes and is exposed on `Socket` and
 `Process` (stdout and stderr) on all three backends. A `Content-Length` body is
 now one call, so `base-08` is reachable.
 
-The HTTP server reaches 13 of the 14 public stages in pure Lox++; concurrency is
-the one it cannot. The example also depends on one correctness fix to the
-`socket` streams merged in #516: `readline()` followed by `write()` failed with
+The HTTP server reaches all 14 public stages in pure Lox++. The example also
+depends on one correctness fix to the `socket` streams merged in #516: `readline()` followed by `write()` failed with
 `ESPIPE` because stdio's `r+` update mode wants a seek on the input→output
 transition. Opening socket streams unbuffered removes the seek and restores the
 bidirectional byte stream `spec/05-stdlib.md` already specifies.
