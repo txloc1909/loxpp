@@ -629,24 +629,26 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
     EXPECT_EQ(globalString(vm, "ok"), std::to_string(count));
 }
 
-MemoryManager* g_countedHeap = nullptr;
-
-Value heapBytesNative(int /*argc*/, Value* /*argv*/) {
-    return from<Number>(static_cast<Number>(g_countedHeap->bytesAllocated));
+// The bytes allocated on the heap of a task. The caller reads a worker's heap
+// only while that worker waits in receive, after a reply it sent: the reply
+// orders the worker's allocations before the read.
+Value heapBytesNative(int /*argc*/, Value* argv) {
+    ObjTask* t = asObjTask(as<Obj*>(argv[0]));
+    MemoryManager* heap = heapById(t->heapId);
+    return from<Number>(static_cast<Number>(heap->bytesAllocated));
 }
 
-// A send hands over the message without copying it. A copy per send would
-// allocate in proportion to the message size, so the allocation of the
-// sending heap over many sends must stay below the size of one copy of the
-// smaller message. The test counts allocated bytes and never reads a clock,
-// so the load of the host cannot change the result.
-TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
+// A send hands over the message without copying it. A copy would allocate in
+// proportion to the message size, on the sending heap or, at the drain, on
+// the receiving heap. The test counts the bytes allocated on both heaps over
+// many sends and never reads a clock, so the load of the host cannot change
+// the result. It does not see a copy into memory that no heap tracks.
+TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
     if (stressGC()) {
         GTEST_SKIP() << "GC stress collects at every allocation";
     }
     VM vm;
-    g_countedHeap = &vm.runtime().memoryManager();
-    vm.runtime().defineNative("heap_bytes", heapBytesNative, 0);
+    vm.runtime().defineNative("heap_bytes", heapBytesNative, 1);
     ASSERT_EQ(vm.interpret(R"(
         enum List { Empty Cons(head, tail) }
         fun build(n) {
@@ -655,30 +657,41 @@ TEST_F(WorkerTest, SendCostDoesNotDependOnTheMessageSize) {
             return l;
         }
         fun sink(main) {
-            var n = 0;
-            while (task.receive() != "stop") n = n + 1;
-            task.send(main, n);
+            while (true) {
+                var m = task.receive();
+                while (m != "mark") m = task.receive();
+                task.send(main, "marked");
+            }
         }
         fun bytesPerSend(msg, count) {
             var w = task.spawn_worker(sink, task.self());
-            var before = heap_bytes();
-            for (var i = 0; i < count; i = i + 1) task.send(w, msg);
-            var after = heap_bytes();
-            task.send(w, "stop");
+            task.send(w, "mark");
             task.receive();
-            return (after - before) / count;
+            var sentBefore = heap_bytes(task.self());
+            var receivedBefore = heap_bytes(w);
+            for (var i = 0; i < count; i = i + 1) task.send(w, msg);
+            var sentAfter = heap_bytes(task.self());
+            task.send(w, "mark");
+            task.receive();
+            var receivedAfter = heap_bytes(w);
+            return [(sentAfter - sentBefore) / count,
+                    (receivedAfter - receivedBefore) / count];
         }
         var count = 300;
         var small = bytesPerSend(build(100), count);
         var large = bytesPerSend(build(1000), count);
+        var sentSmall = small[0];
+        var receivedSmall = small[1];
+        var sentLarge = large[0];
+        var receivedLarge = large[1];
     )"),
               InterpretResult::OK);
-    g_countedHeap = nullptr;
 
     // A copy of the smaller message is 100 objects, thousands of bytes. The
     // allowance of 100 bytes per send is far below that. A collection only
     // lowers the count, so it cannot break the bound.
-    for (const char* name : {"small", "large"}) {
+    for (const char* name :
+         {"sentSmall", "sentLarge", "receivedSmall", "receivedLarge"}) {
         auto v = vm.getGlobal(name);
         ASSERT_TRUE(v.has_value() && is<Number>(*v)) << name;
         EXPECT_LT(as<Number>(*v), 100.0)
