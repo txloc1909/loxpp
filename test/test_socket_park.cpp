@@ -1128,8 +1128,12 @@ TEST_F(SocketParkTest, CloseWriteFailsAParkedWriter) {
     std::atomic<bool> sawEof{false};
     std::thread peer([&] {
         int fd = host.accept();
-        drainHost(fd, 400, 0, [&](const char*, size_t n) { total += n; });
-        sawEof = true;
+        sawEof =
+            drainHost(fd, 400, 0, [&](const char*, size_t n) { total += n; });
+        // The client keeps the socket open until it reads this verdict, so
+        // the end of the stream can only come from close_write().
+        const char* verdict = sawEof ? "eof\n" : "no-eof\n";
+        send(fd, verdict, strlen(verdict), MSG_NOSIGNAL);
         close(fd);
     });
     VM vm;
@@ -1150,10 +1154,12 @@ TEST_F(SocketParkTest, CloseWriteFailsAParkedWriter) {
         task.receive();
         var again = "none";
         try { c.write("more"); } catch (e) { again = e.kind; }
+        var verdict = c.readline();
         c.close();
     )");
     peer.join();
     ASSERT_EQ(result, InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "verdict").rfind("eof", 0), 0u);
     EXPECT_EQ(globalString(vm, "kind"), "SocketClosedError");
     EXPECT_EQ(globalString(vm, "msg"),
               "Cannot write to a socket after close_write().");
