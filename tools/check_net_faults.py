@@ -23,6 +23,11 @@ Native (src/stdlib/net_api.cpp):
     the Socket and Server natives use raw descriptors.
   - `raiseFromNative(` outside `raiseNet`, and any other `native...Error(`
     helper, are not in the table, so they fail.
+  - A fatal exit fails: `abort(`, `runtimeError(`, `exit(` and its kin, a C++
+    `throw`, and `std::terminate`. A Socket or Server fault is a catchable one
+    from the list above or an argument check by `nativeRuntimeError(`, which
+    the table counts. No other halting form has a row, so a halt in a socket
+    function that is not an argument check cannot pass.
   - A fault kind assigned in two lines (`out.faultKind` then `= "X"`) is
     still `faultKind =` outside `setFault`, so it fails.
   - Comments are blanked before anything is counted, so a site inside a
@@ -33,9 +38,15 @@ JVM (runtime/jvm/src/lox/LoxSocket.java and LoxServer.java):
     `readBytesFrom`, which Process shares.
   - `makeError("KIND"` is a catchable fault of the given kind.
   - Any other `throw` fails, so a fault cannot use another exception.
+  - `LoxRuntime.fatal`, `System.exit` and `Runtime.getRuntime().halt` fail.
+    No table row lists them.
+
+`--self-test` edits the real sources in memory, one defect at a time, and
+fails unless each defect changes the result. It proves the rules above can fail.
 
 Usage:
     tools/check_net_faults.py [--native PATH] [--socket PATH] [--server PATH]
+    tools/check_net_faults.py --self-test
 """
 
 import argparse
@@ -97,6 +108,16 @@ NATIVE_FUNCTION = re.compile(r"^(?:static |inline )?[\w:<>*& ]+?[ *&](\w+)\([^;]
 JAVA_METHOD = re.compile(r"^    (?:public |private )?(?:static )?(?:final )?[\w<>\[\]]+ (\w+)\(.*\{\s*$")
 
 
+# A fatal exit that the table has no row for. Every one fails, with no
+# allowed site: a Socket or Server fault is either catchable (raiseNet,
+# setFault, failPark, makeError) or an argument check (nativeRuntimeError,
+# new LoxError), and those two are counted by the table.
+FATAL_NATIVE = re.compile(
+    r"(?<![\w.])(abort|runtimeError|exit|_exit|_Exit|quick_exit|terminate|throw)\b"
+)
+FATAL_JAVA = re.compile(r"\b(LoxRuntime\.fatal|System\.exit|Runtime\.getRuntime\(\)\.halt)\b")
+
+
 def strip_comments(text: str) -> str:
     """Blanks `//` and `/* */` comments, keeping string and char literals.
 
@@ -140,6 +161,9 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
             if m:
                 function = m.group(1)
         function_at[number] = function
+        fatal = FATAL_NATIVE.search(line)
+        if fatal:
+            problems.append(f"line {number}: {fatal.group(1)} is a fatal exit outside the table")
         if "writeStreamOrError(" in line:
             problems.append(f"line {number}: writeStreamOrError is a halting write")
         stdio = re.search(r"\b(FILE|fdopen|fread|fgetc|fgets|fscanf|getline|getchar|fwrite|fputs|fputc|fflush|fclose|writeStream)\b", line)
@@ -199,6 +223,9 @@ def java_sites(text: str) -> tuple[Counter, list[str]]:
             method = m.group(1)
         # A statement can wrap, so read the line and the next one.
         window = line + (lines[number] if number < len(lines) else "")
+        fatal = FATAL_JAVA.search(line)
+        if fatal:
+            problems.append(f"line {number}: {fatal.group(1)} is a fatal exit outside the table")
         if re.search(r"\bthrow\b", line) and not re.search(
             r"\bthrow (new LoxError\(|LoxOps\.makeError\()", line
         ):
@@ -225,12 +252,50 @@ def compare(label: str, found: Counter, expected: dict) -> list[str]:
     return problems
 
 
+def self_test(native: str, socket: str) -> int:
+    """Each defect below must change the result of the parser it targets."""
+    def inject(text: str, anchor: str, extra: str, before: bool = False) -> str:
+        assert text.count(anchor) >= 1, anchor
+        return text.replace(anchor, extra + anchor if before else anchor + extra, 1)
+
+    def sites_and_table(parse, text: str, table: dict) -> list[str]:
+        found, extra = parse(text)
+        return extra + compare("t", found, table)
+
+    read_fn = "static Value socketReadlineNative(int /*argc*/, Value* args) {\n"
+    java_fn = "    private void checkOpen("
+    cases = [
+        ("native: a fault site in a // comment is not counted", native_sites, NATIVE_SITES, inject(native, read_fn, '    // setFault(out, kNetworkError, "x");\n    /* raiseNet(kNetworkError, "y"); */\n'),
+         False),
+        ("native: a // inside a string is not a comment", native_sites, NATIVE_SITES, inject(native, read_fn, '    const char* u = "http://x"; raiseNet(kNetworkError, u);\n'), True),
+        ("native: a commented-out live site is a missing site", native_sites, NATIVE_SITES, native.replace("raiseNet(kNetworkError", "// raiseNet(kNetworkError", 1), True),
+        ("native: faultKind assigned over two lines", native_sites, NATIVE_SITES, inject(native, read_fn, '    out.faultKind\n\n        = "BogusKind";\n'), True),
+        ("native: abort()", native_sites, NATIVE_SITES, inject(native, read_fn, "    abort();\n"), True),
+        ("native: runtimeError(", native_sites, NATIVE_SITES, inject(native, read_fn, '    runtimeError("x");\n'), True),
+        ("native: throw", native_sites, NATIVE_SITES, inject(native, read_fn, "    throw 1;\n"), True),
+        ("native: exit()", native_sites, NATIVE_SITES, inject(native, read_fn, "    exit(1);\n"), True),
+        ("java: LoxRuntime.fatal", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static void f() { LoxRuntime.fatal("x"); }\n', True), True),
+        ("java: System.exit", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System.exit(1); }\n", True), True),
+        ("java: a makeError in a comment is not counted", java_sites, SOCKET_SITES, inject(socket, java_fn, '    // throw LoxOps.makeError("NetworkError", "x");\n', True), False),
+    ]
+    failed = False
+    for name, parse, table, mutated, must_fail in cases:
+        after = sites_and_table(parse, mutated, table)
+        ok = bool(after) if must_fail else not after
+        print(f"{'ok  ' if ok else 'FAIL'} {name}")
+        failed |= not ok
+    return 1 if failed else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--native", type=Path, default=NATIVE)
     parser.add_argument("--socket", type=Path, default=SOCKET)
     parser.add_argument("--server", type=Path, default=SERVER)
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+    if args.self_test:
+        return self_test(NATIVE.read_text(encoding="utf-8"), SOCKET.read_text(encoding="utf-8"))
 
     problems: list[str] = []
     for label, path, parse, expected in (

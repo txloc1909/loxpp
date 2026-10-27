@@ -80,7 +80,9 @@ jobs:
       # one is a catchable fault of a named kind or an argument fault that
       # halts the program. Pure Python, so it needs no build.
       - name: Check Socket fault sites
-        run: tools/check_net_faults.py
+        run: |
+          tools/check_net_faults.py
+          tools/check_net_faults.py --self-test
 
       # The countable sets of the Int kind in spec/: the operand-kind table,
       # the precedence table, the operator protocol table, the static errors
