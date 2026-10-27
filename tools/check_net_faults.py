@@ -23,6 +23,8 @@ Native (src/stdlib/net_api.cpp):
     the Socket and Server natives use raw descriptors.
   - `raiseFromNative(` outside `raiseNet`, and any other `native...Error(`
     helper, are not in the table, so they fail.
+  - A fault kind assigned in two lines (`out.faultKind` then `= "X"`) is
+    still `faultKind =` outside `setFault`, so it fails.
   - Comments are blanked before anything is counted, so a site inside a
     comment does not count.
 
@@ -130,12 +132,14 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     function = None
+    function_at: dict[int, str | None] = {}
     lines = strip_comments(text).splitlines()
     for number, line in enumerate(lines, 1):
         if line and not line[0].isspace() and not line.startswith(("}", "#")):
             m = NATIVE_FUNCTION.match(line)
             if m:
                 function = m.group(1)
+        function_at[number] = function
         if "writeStreamOrError(" in line:
             problems.append(f"line {number}: writeStreamOrError is a halting write")
         stdio = re.search(r"\b(FILE|fdopen|fread|fgetc|fgets|fscanf|getline|getchar|fwrite|fputs|fputc|fflush|fclose|writeStream)\b", line)
@@ -174,7 +178,12 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                         problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
                     else:
                         sites[(function, kind)] += 1
-        if function != "setFault" and re.search(r"\bfaultKind\s*=(?!=)", line):
+    # A formatter can put `=` on the line after `faultKind`, so the text is
+    # scanned whole.
+    code = "\n".join(lines)
+    for m in re.finditer(r"\bfaultKind\s*=(?!=)", code):
+        number = code.count("\n", 0, m.start()) + 1
+        if function_at[number] != "setFault":
             problems.append(f"line {number}: faultKind is set outside setFault")
     return sites, problems
 
