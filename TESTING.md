@@ -88,6 +88,31 @@ TEST_F(ParserBytecodeTest, Arithmetic_Addition) {
 
 For more details, see the comments in the test harness and example test files.
 
+## Tests That Run Threads or Tasks
+
+A test of concurrent code runs on a machine that other work also uses. Debug
+and sanitizer builds are slower still, and `ctest -j` runs many tests at the
+same time. These rules keep such a test from failing for a reason that is not
+a defect.
+
+- **Do not assert an upper bound on the time of work that the test does not
+  control.** A fast run on your machine says nothing about a loaded runner.
+  Check the property itself. For example, check that a descriptor is closed,
+  not that it closed within four seconds. A bound that only catches a hang
+  is allowed, if it is far above any loaded time.
+- **Do not count a resource that the whole process shares while another
+  thread runs.** Descriptors, threads, and memory all change when a helper
+  thread starts, accepts a connection, or stops. Compare sets of entries, not
+  counts, and stop the helper threads before the final check.
+- **Do not measure a fixed window of CPU time.** Sample short windows until
+  one is quiet, then check that window.
+- **Run every test binary under `timeout`.** A test that hangs must end the
+  run. Give each container a unique `--name`, and stop only a container that
+  you started, by that name.
+- **Prove that the test can fail.** Break the code that the test covers, watch
+  the test fail, and put the code back. Run the new test many times, also
+  with `taskset -c 0` and under CPU load, before you trust it.
+
 ## VS Code Extension
 
 Run these commands from the checkout root inside the `dev-editors` container.
