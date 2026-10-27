@@ -228,18 +228,20 @@ only in #908 and #920. They were written into "Shipped" at close.
 in. This change proposes the rules below in its pull request and does not edit
 `AGENTS.md`. Each has evidence in this file.
 
-1. **A test does not bound a time and does not count a resource that the
-   whole process shares while another thread runs.** Compare sets of
-   descriptors, not counts. Wait for a quiet window, not a fixed window.
-   Evidence: #929 round 3, the red debug job of `main` at `dbb6ea9` (two
-   tests), #934, #935. At least four different tests broke on a loaded runner.
+1. **A test does not assert an upper bound on the time of work that the test
+   does not control. A test does not count a resource that the whole process
+   shares while another thread runs.** A bound that catches a hang is not
+   covered (#925 asks for one). Compare sets of descriptors, not counts. Wait
+   for a quiet window, not a fixed window. Evidence: #929 round 3, the red
+   debug job of `main` at `dbb6ea9` (two tests), #934, #935. At least four
+   different tests broke on a loaded runner.
 2. **A record that outlives a suspension holds only values it owns. It reads
    shared state again at each resume.** Evidence: #928 (a confirmed defect).
    #950 is the same class and is not confirmed. The rule rests on one defect
    and one suspicion, so it is the weakest of the three.
-3. **Each agent names its container and runs tests under `timeout`.** Evidence:
-   the hung containers of #928 and the "free port" risk. `AGENTS.md` already
-   says to stop only your own process, and a unique name makes that possible.
+3. **Each agent runs tests under `timeout`.** Evidence: the hung containers of
+   #928 and the "free port" risk in the same review. The task loop of
+   `AGENTS.md` already names the container, so only `timeout` is new.
 
 I do not propose a rule for approvals while a job is pending (no defect came
 from it) or for the shared scratch directory (no pull request evidence).
