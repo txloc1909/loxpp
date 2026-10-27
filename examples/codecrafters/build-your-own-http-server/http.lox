@@ -425,6 +425,27 @@ fun handleConnection(sock, directory) {
     }
 }
 
+// One task runs this per connection. A fault in the connection (a reset, or a
+// write to a peer that stopped reading) ends only this connection. The catch
+// block does nothing, because any write to the socket there could fault again
+// and end the task before the deferred close runs. close() does nothing on a
+// Socket that is already closed, so the deferred call is safe after any fault.
+fun serve(conn, directory) {
+    defer conn.close();
+    try {
+        handleConnection(conn, directory);
+    } catch (e) {
+    }
+}
+
+// task.spawn passes no arguments, so the closure holds conn and directory.
+fun spawnServe(conn, directory) {
+    fun run() {
+        serve(conn, directory);
+    }
+    task.spawn(run);
+}
+
 fun directoryFromArgs() {
     var a = args();
     var i = 0;
@@ -474,8 +495,7 @@ fun main() {
     var server = listen("0.0.0.0", portFromEnv());
     while (true) {
         var conn = server.accept();
-        handleConnection(conn, directory);
-        conn.close();
+        spawnServe(conn, directory);
     }
 }
 

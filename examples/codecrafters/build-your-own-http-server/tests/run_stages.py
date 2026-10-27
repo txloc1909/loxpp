@@ -6,15 +6,15 @@
 # are marked "local:". It drives the real challenge entrypoint, your_http.sh,
 # over raw TCP so it can also decode the gzip body with Python's gzip module.
 #
-# The suite covers the thirteen stages pure Lox++ can reach. persistent-02
-# (concurrent keep-alive) is unreachable without concurrency; see ../README.md
-# and ../tests/gaps.sh.
+# The suite covers all fourteen stages, plus local cases for clients that
+# misbehave while other connections stay open.
 #
 # Usage: tests/run_stages.py [your_http.sh]
 
 import gzip
 import os
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -321,6 +321,78 @@ def main():
             headers.get("connection") == "close" and closed,
             repr(headers),
         )
+
+        # persistent-02: two keep-alive connections are open at the same time.
+        a = socket.create_connection(("127.0.0.1", port), timeout=5)
+        a.settimeout(5)
+        a.sendall(b"GET /echo/mango HTTP/1.1\r\n\r\n")
+        first = parse_response(a)
+        b = socket.create_connection(("127.0.0.1", port), timeout=5)
+        b.settimeout(5)
+        b.sendall(b"GET /echo/papaya HTTP/1.1\r\n\r\n")
+        try:
+            second = parse_response(b)
+        except OSError as exc:
+            second = (None, {}, repr(exc).encode())
+        check(
+            "persistent-02 second connection served while first is open",
+            first[2] == b"mango" and second[2] == b"papaya",
+            "%r %r" % (first[2], second[2]),
+        )
+        try:
+            a.sendall(b"GET /echo/guava HTTP/1.1\r\n\r\n")
+            third = parse_response(a)
+            b.sendall(b"GET /echo/lychee HTTP/1.1\r\n\r\n")
+            fourth = parse_response(b)
+        except OSError as exc:
+            third = fourth = (None, {}, repr(exc).encode())
+        check(
+            "persistent-02 both connections keep serving requests",
+            third[2] == b"guava" and fourth[2] == b"lychee",
+            "%r %r" % (third[2], fourth[2]),
+        )
+        a.close()
+        b.close()
+
+        # local: a client that stops half way through a request, or that resets
+        # its connection, must not stop the server for other clients.
+        def served():
+            try:
+                got = request(port, b"GET /echo/ok HTTP/1.1\r\n\r\n")
+            except OSError as exc:
+                return False, repr(exc)
+            return got[2] == b"ok", repr(got)
+
+        try:
+            stalled = []
+            for partial in (b"GET /echo/stall HTTP/1.1\r\nHost: ", b"GE", b"POST /files/x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc"):
+                s = socket.create_connection(("127.0.0.1", port), timeout=5)
+                s.sendall(partial)
+                stalled.append(s)
+            ok, detail = served()
+            check("local: stalled half requests do not block other clients", ok, detail)
+            for s in stalled:
+                s.close()
+
+            big = os.path.join(directory, "big")
+            with open(big, "wb") as f:
+                f.write(b"x" * (8 * 1024 * 1024))
+            for name, raw in (
+                ("reset after half a request", b"GET /echo/res"),
+                ("reset before reading a large response", b"GET /files/big HTTP/1.1\r\n\r\n"),
+                ("reset on a body that stopped", b"POST /files/y HTTP/1.1\r\nContent-Length: 50\r\n\r\nab"),
+            ):
+                for _ in range(3):
+                    s = socket.create_connection(("127.0.0.1", port), timeout=5)
+                    s.sendall(raw)
+                    # SO_LINGER with a zero timeout makes close() send a reset.
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                    s.close()
+                ok, detail = served()
+                check("local: %s does not stop the server" % name, ok, detail)
+                check("local: server process is alive after %s" % name, proc.poll() is None)
+        except OSError as exc:
+            check("local: clients that misbehave do not stop the server", False, repr(exc))
     finally:
         proc.terminate()
         try:

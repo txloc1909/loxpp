@@ -19,7 +19,6 @@ bit patterns, built with `<<`, `>>`, `>>>`, `&` and `^` over the 32-bit range.
 | `your_http.sh` | Challenge entrypoint: resolves `loxpp`, passes `--directory` through |
 | `tests/run_stages.py` | Transcribed stage cases and `local:` regression cases (raw TCP, decodes gzip with Python) |
 | `tests/diff_http.py` | Differential vs Python `http.client` + `gzip` + `zlib` |
-| `tests/gaps.sh` | Evidence for the one unreachable stage (not run in CI) |
 
 ## Stage coverage
 
@@ -37,20 +36,23 @@ bit patterns, built with `<<`, `>>`, `>>>`, `&` and `^` over the 32-bit range.
 | compression-02 multiple schemes | pass |
 | compression-03 `gzip` | pass |
 | persistent-01 keep-alive | pass |
-| persistent-02 concurrent keep-alive | **blocked** — no concurrency |
+| persistent-02 concurrent keep-alive | pass |
 | persistent-03 `Connection: close` | pass |
 
-Thirteen of fourteen. The one that fails is a genuine capability gap, not a
-library: it needs a primitive the language cannot compose from what it already
-exposes. `tests/gaps.sh` reproduces it.
+All fourteen pass.
 
-### Gap — persistent-02: no concurrency
+### Concurrent connections
 
-Two keep-alive connections open at once need threads or an event loop. One
-`accept()`/`readline()` blocks the whole VM, so while connection A is open,
-connection B is never accepted. A serial server passes `base-06` and
-`persistent-01` because those clients close after reading their response, but
-`persistent-02` holds both connections open simultaneously.
+`main()` accepts a connection and starts one task for it with `task.spawn`.
+A call that waits on the network (`accept`, `readline`, `read_bytes`, `write`)
+suspends only its own task, so the other tasks of the worker keep running. Two
+keep-alive connections can be open at once, which is what `persistent-02`
+needs.
+
+A fault in one connection (for example a client that resets the connection)
+ends only that task. The task closes its socket on every path, with `defer`.
+The server has no limit on the number of tasks. File reads and gzip do not
+suspend: while one task does that work, the other tasks wait.
 
 ## One VM change this example depends on
 
@@ -94,7 +96,6 @@ literal codes (bytes 144-255). The server starts when the flag is absent.
 curl -v http://localhost:4221/echo/hello
 python3 examples/codecrafters/build-your-own-http-server/tests/run_stages.py
 python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
-./examples/codecrafters/build-your-own-http-server/tests/gaps.sh
 ```
 
 The server binds `0.0.0.0:4221`; set `LOXPP_HTTP_PORT` to use another port.

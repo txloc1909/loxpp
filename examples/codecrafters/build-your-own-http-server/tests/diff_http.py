@@ -183,6 +183,24 @@ def main():
             probe_ok,
         )
 
+        # Two keep-alive connections are open at once and their requests
+        # interleave. The first stays open from the cases above.
+        other = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        pairs_ok = True
+        try:
+            for s in strings[:10]:
+                for c, tag in ((conn, "a"), (other, "b"), (conn, "c"), (other, "d")):
+                    c.request("GET", "/echo/%s%s" % (tag, s))
+                    body = c.getresponse().read()
+                    if body != (tag + s).encode():
+                        pairs_ok = False
+                        print("    %r: got %r" % (tag + s, body))
+        except OSError as exc:
+            pairs_ok = False
+            print("    %r" % (exc,))
+        other.close()
+        check("two simultaneous keep-alive connections", pairs_ok)
+
         conn.close()
     finally:
         proc.terminate()
