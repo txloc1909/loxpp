@@ -23,6 +23,8 @@ Native (src/stdlib/net_api.cpp):
     the Socket and Server natives use raw descriptors.
   - `raiseFromNative(` outside `raiseNet`, and any other `native...Error(`
     helper, are not in the table, so they fail.
+  - Comments are blanked before anything is counted, so a site inside a
+    comment does not count.
 
 JVM (runtime/jvm/src/lox/LoxSocket.java and LoxServer.java):
   - `new LoxError(` is a halting fault. Only argument checks use it, and
@@ -93,13 +95,44 @@ NATIVE_FUNCTION = re.compile(r"^(?:static |inline )?[\w:<>*& ]+?[ *&](\w+)\([^;]
 JAVA_METHOD = re.compile(r"^    (?:public |private )?(?:static )?(?:final )?[\w<>\[\]]+ (\w+)\(.*\{\s*$")
 
 
+def strip_comments(text: str) -> str:
+    """Blanks `//` and `/* */` comments, keeping string and char literals.
+
+    Each newline survives, so a line number in the result is a line number in
+    the source. A comment is not code: a fault site inside one must not count.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        pair = text[i : i + 2]
+        if pair == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+        elif pair == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append(re.sub(r"[^\n]", " ", text[i:end]))
+            i = end
+        elif c == '"' or (c == "'" and not (i and text[i - 1].isalnum())):
+            j = i + 1
+            while j < n and text[j] != c and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i : j + 1])
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def native_sites(text: str) -> tuple[Counter, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     function = None
-    lines = text.splitlines()
+    lines = strip_comments(text).splitlines()
     for number, line in enumerate(lines, 1):
-        if line and not line[0].isspace() and not line.startswith(("//", "}", "#")):
+        if line and not line[0].isspace() and not line.startswith(("}", "#")):
             m = NATIVE_FUNCTION.match(line)
             if m:
                 function = m.group(1)
@@ -150,7 +183,7 @@ def java_sites(text: str) -> tuple[Counter, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     method = None
-    lines = text.splitlines()
+    lines = strip_comments(text).splitlines()
     for number, line in enumerate(lines, 1):
         m = JAVA_METHOD.match(line)
         if m:
