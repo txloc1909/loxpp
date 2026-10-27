@@ -1,9 +1,7 @@
 # Blocking-call suspension mission (mission #711) — retrospective
 
 **Status:** frozen at mission close, 2026-10-27. The decision is
-`docs/decisions/blocking-call-suspension.md`. Every statement here comes from a
-command, a pull request comment, or a CI run named in this file. This record
-is history. It does not bind later work.
+`docs/decisions/blocking-call-suspension.md`. Every statement here comes from a command, a pull request comment, or a CI run named in this file, except where a sentence says it has no such evidence. The sections "Rules this retrospective proposes" and "Lessons" are the reading of the author. This record is history. It does not bind later work.
 
 ## Purpose
 
@@ -34,7 +32,7 @@ by owner decision F1. All nine pull requests of the code nodes merged on
 
 The prerequisites #726 (PR #906) and #723 (PR #728) merged before the
 mission. The merge order is not the DAG order: N10 (wave 5) merged before N5
-and N6 (waves 3 and 4), and  N6 merged before N7.
+and N6 (waves 3 and 4), and N6 merged before N7.
 
 ## Review rounds
 
@@ -52,9 +50,7 @@ A round is one reviewer comment with a verdict.
 | #929 (N7) | 4 | 2 | The next-address fallback had no test (1). A racy descriptor count in a new test (1) |
 | #936 (N11) | 1 | 0 | None. Three non-blocking findings |
 
-Six of nine pull requests needed a change after the first review. Nine
-blocking findings in total. Every one came with a program, a test run, or a
-mutation that the reviewer ran. The reviewers wrote down what they ran, and
+Six of nine pull requests needed a change after the first review. Nine blocking findings in total. Seven of the nine came with a program, a test run, or a mutation that the reviewer ran. The other two were the Conformance text of #920. The reviewers wrote down what they ran, and
 most reviews list the gates they ran themselves on the exact tip.
 
 ## What went well
@@ -80,8 +76,7 @@ most reviews list the gates they ran themselves on the exact tip.
    write. It is now a unit test, `ASecondReaderScansTheBufferAsItIsNow`. The
    implementer put the old code back and watched it fail.
 5. **The JVM backend used the same probes.** #927 passed 215 probes with no
-   expected-failure file. The reviewer ran the six contexts where a task
-   cannot suspend with four calls each (20 cases) and found the JVM output
+   expected-failure file. The reviewer ran five contexts where a task cannot suspend (`__str__`, a map-key `__hash__`, `callMethod`, a deferred call and a nested coroutine) with four calls each (20 cases) and found the JVM output
    equal to native in all of them.
 6. **The reviewers found defects in `main` that the mission only exposed.**
    The reviewer of #926 showed that `SigpipeIgnored` leaks "SIGPIPE ignored"
@@ -96,31 +91,23 @@ most reviews list the gates they ran themselves on the exact tip.
 The first text of `spec/README.md`, Conformance, in #920 contradicted the
 suspension rule of `spec/04-semantics.md` (blocking finding 2, round 1). The
 second text said a portable program "does not need a task to run while another
-task of its worker waits". "Need" means progress. Probes 260, 279 and 282 do
-not need it for progress, yet they print a different order on the bootstrap.
+task of its worker waits". "Need" means progress. Probes 260, 279 and 282 do not need it for progress, yet on the bootstrap 260 and 279 print a different order and 282 ends normally instead of halting.
 The text was also circular: the exemption hung on the behavior it excused
 (blocking finding, round 2). Any implementation, native included, could have
 cited it. The third text hangs the exemption on a property of the
 implementation: it "does not run workers at the same time". It also defines a
 portable program by what its output depends on, not by what it needs.
 
-The cause is the shape that the Int mission named in its constraint 5: one
-rule stated in several places gives a new pair of statements to check at each
-round. Here the rule was an exemption, and its trigger was the effect it
-excused. A trigger must be a property that the excused implementation has and
-the others do not.
+Here the trigger of the exemption was the effect it excused.
 
-### The bootstrap gate failed in CI after a native-only local run
+### The bootstrap gate failed in CI
 
 The first tip of #922 failed the CI step "Check spec probes - bootstrap
 interpreter". The reviewer reproduced it: 191 pass and 6 fail (probes 272 to
 277), against 197 pass on `main`. The cause was not in the native code. The
 bootstrap runs its interpreted tasks as host tasks, and its `sleep` called the
-host `sleep`, which now parks. The implementer's reply says "It was not
-undefined behavior" and "The native probes pass in a clean build", so the
-first suspect was native. The fix was a bootstrap change: it sleeps inside a
-`__str__` call, where the host cannot suspend. A change to a native call that
-the bootstrap's host runtime also calls is a change to the bootstrap. The native probes did not predict this failure, and the implementer found it from the red CI step.
+host `sleep`, which now parks. The implementer's reply says "It was not undefined behavior" and "The native probes pass in a clean build". The fix was a bootstrap change: it sleeps inside a
+`__str__` call, where the host cannot suspend. The implementer reported the failure from the red CI step.
 
 ### State outlived a suspension and pointed at changed data
 
@@ -140,7 +127,7 @@ the bootstrap's host runtime also calls is a change to the bootstrap. The native
 - **#933 and #928, `rearmPark`.** A re-armed wait gets a new token, and the
   poller reports ready waits by token. Tasks may then run in an order other
   than "the order in which their calls began to wait". Nobody built a failing
-  program. It is open as #950.
+  program. It is open at close as #950.
 
 ### Memory was higher than the decision allowed
 
@@ -167,12 +154,10 @@ the buffer into the line. The peak of `readlines` is still 291 MB (#947).
   `main` red. In CI run 40367947452, `test_socket_park` and
   `test_socket_park_gc`, test `TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite`,
   failed at 4.52 s and 4.79 s against a 4000 ms bound. The test builds a
-  128 MB string by doubling, and that alone takes 4 s in a sanitizer build.
+  128 MB string by doubling, and the reviewer says that alone can take 4 s or more in the debug build on a loaded machine.
   The reviewer of #929 had reproduced it on `main` in 4 of 4 `ctest -j12`
   runs. Two CPU-tick tests (`AParkedSleepDoesNotSpin`,
-  `ABlockingSleepDoesNotSpin`) failed in 2 of 4 runs. They are #934, fixed in
-  #929. A third, older test, `SendCostDoesNotDependOnTheMessageSize`, still
-  fails under 8 busy loops (#935).
+  `ABlockingSleepDoesNotSpin`) failed in 2 of 4 runs. They are #934, which #929 fixed. A third, older test, `SendCostDoesNotDependOnTheMessageSize`, still fails under 8 busy loops (#935). The debug job of `main` was green again at `657b5e1` and `e07095c` (`gh run list`), after #929 replaced the 4000 ms bound with a check of the property.
 - **The tests of #933** did not catch six of twelve mutations: the EOF check of `close_write` (#951), `liveWriter` (#956), the EINTR retry, `writers.clear()`, and two that the reviewer judged equivalent.
   **The tests of #927** did not catch two mutations of `LoxPoller` (#948).
 
@@ -199,15 +184,12 @@ list needs the flag too (#954).
    commit of the second round of #922 holds the code of three review items
    (the implementer said so and did not rewrite pushed history). Squash merges
    hide this. The rule is in `AGENTS.md`, "Conventions".
-4. **Hung processes in containers.** The implementer of #928 stopped two
-   containers that had been left behind by exact name (`keen_jennings` and
+4. **Hung processes in containers.** The implementer of #928 stopped two hung containers by exact name (`keen_jennings` and
    `loxpp-feat-read-side-park-1479374`), and then gave each container a
    unique `--name` and ran every test under `timeout`. The review of #928 also names a test risk of the same kind: a "free port" that a stranger takes before `listen` leaves the VM in `accept` until the ctest limit.
    `AGENTS.md` already says to stop only a process that you started.
 5. **Git does not work in a container with a linked worktree** (#871, open).
-   The worktree `.git` file names a host path. The pre-commit hook is off in
-   the container, and the harness gates that need git do not run there. This
-   node hit it again: `cmake` printed "Failed to set core.hooksPath" and `fatal:
+   The worktree `.git` file names a host path. The title of the issue says the pre-commit hook is off and the backend gate cannot pass there. The container build log of this node shows it again: `cmake` printed "Failed to set core.hooksPath" and `fatal:
    not a git repository` in the container build log.
 6. **Shared scratch directories.** The task of this node reports that parallel
    agents collided in a shared scratch directory. No pull request comment
@@ -216,14 +198,12 @@ list needs the flag too (#954).
 7. **Approvals while a job was pending.** The approvals of #922, #927 and #936
    were posted while the "QBE toolchain" job still ran. Each reviewer said so
    in the comment, and the reviewer of #936 ran the QBE gates himself and told
-   the merger to check the job. No defect came from it in this mission. The
-   playbook has no rule for it.
+   the merger to check the job. The threads report no later failure of that job. The playbook has no rule for it.
 8. **Checks that a label could fool.** The reviewer of #920 found
    that a `COVERS` label was a label: moving `COVERS: suspend-call connect` to
    probe 83 passed the check. The check now needs the call to sit in the named
    function (`in <function>`). The reviewer of #929 found the same kind of
-   gap again in `check_net_faults.py` (a commented-out fault, #930; a fault
-   kind on a split line, fixed in #928).
+   gap again in `check_net_faults.py` (a commented-out fault, #930). The review of #926 found that `fgets(..., stdin)` passed; the script now fails on it. The approving review of #928 found that a split assignment (`out.faultKind` on one line and `= "X"` on the next) still passes. That case is open as #959.
 
 ## The bug classes
 
@@ -237,10 +217,10 @@ only in #908 and #920. They were written into "Shipped" at close.
 | State of a parked call points into shared mutable state | #928 | The park record (`ParkedIo`) | Decision, "Shipped", bug classes |
 | A teardown path misses one owner of a wait | #922 | The writers of the parked set | Decision, "Shipped", bug classes |
 | A buffer keeps memory after a call | #926 | The per-socket input buffer | Decision, "Shipped", bug classes |
-| A re-armed wait gets a new place in the order | #933 | The poller registry | Decision, "Shipped"; open as #950 |
-| A gate site runs the probe directory without the lists | #920, #936 | The gate scripts | Decision, "Shipped"; open as #954 |
-| A test measures more than it names | #929, #933 | The test suite | Decision, "Shipped"; #935 open |
-| A mutation that no test catches | #927, #933 | The unit tests of the poller and the park code | Decision, "Shipped"; #948, #951, #956 open |
+| A re-armed wait gets a new place in the order | #933 | The poller registry | Decision, "Shipped"; open at close as #950 |
+| A gate site runs the probe directory without the lists | #920, #936 | The gate scripts | Decision, "Shipped"; open at close as #954 |
+| A test measures more than it names | #929, #933 | The test suite | Decision, "Shipped"; #935 open at close |
+| A mutation that no test catches | #927, #933 | The unit tests of the poller and the park code | Decision, "Shipped"; #948, #951, #956 open at close |
 
 ## Rules this retrospective proposes
 
@@ -292,6 +272,9 @@ Every follow-up is one issue. The decision lists them in "Shipped". New issues a
 | #955 (new) | `seesQuietWindow` is copied |
 | #956 (new) | `liveWriter` has no test that can fail |
 | #957 (new) | Probes 268 and 271 cannot fail on the property they name |
+| #959 (new) | `check_net_faults.py` misses a fault kind set by an assignment split over two lines |
+| #960 (new) | No test fails when `inbox.polling` is not reset after the wait |
+| #961 (new) | `ObjSocket` allocates a `std::deque` for each Socket |
 | #919, #923, #924, #925, #930, #931, #932, #935 | Filed during the mission |
 
 The 2.5% slower ping-pong of the #928 review is a comment on #923. No second
@@ -315,5 +298,4 @@ issue exists for it.
   the wake paths of `LoxPoller` stay unproven for lack of one.
 - **Run the debug job with load before you merge a timing test.** `dbb6ea9`
   turned `main` red because a bound of 4000 ms did not hold in the debug job.
-- **Say in the plan which nodes touch the same file.** #929 and #933 had six
-  conflict hunks, and the reviewer saw them before the author did.
+- **Say in the plan which nodes touch the same file.** #929 and #933 had six conflict hunks, and the reviewer named the conflict in round 1 of #929.

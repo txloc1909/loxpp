@@ -542,7 +542,7 @@ blocks its worker.
 ## Shipped
 
 Mission #711 ran this decision as a DAG of nodes, one pull request per node.
-All nodes merged on 2026-10-26. The retrospective is
+All code nodes merged on 2026-10-26. The retrospective is
 `docs/records/blocking-call-suspension-retro.md`.
 
 The two prerequisites merged before the mission started: #726 (PR #906, the
@@ -575,6 +575,11 @@ the same worker runs during a wait, and `spec/README.md`, Conformance, makes
 that implementation-defined for an implementation that does not run workers at
 the same time.
 
+The differential gate also compares compile-time behavior. This mission adds
+no construct and no compile-time rejection, so no compile-phase check applies.
+The compile-error sweeps stayed unchanged: the review of #936 shows 129 matched
+on the JVM, QBE and bootstrap consumers.
+
 ### Bug classes that the reviews named
 
 Rule 4 of "Plans for a language change" in `AGENTS.md` says to write a named
@@ -588,10 +593,10 @@ the shared layer where the class belongs.
 | State of a parked call points into shared mutable state | #928: a saved scan offset of `readline` pointed past bytes that another task had taken | The park record (`ParkedIo`) | A parked call keeps only values it owns. It reads shared state again at each resume. Check every field of the record, not only the one found |
 | A teardown path misses one owner of a wait | #922: `endTasks` left the wait of the main task of a session | The writers of the parked set (`parkTask`, `releasePark`, `endTasks`) | Every path that ends or keeps a task releases its wait by the same function. Audit every writer of the parked set |
 | A buffer keeps memory after a call | #926: a socket kept the capacity of a 100 MB line | The per-socket input buffer | A call moves the data out and does not copy it. The memory manager does not count a `std::string` member, so a test must read the capacity |
-| A re-armed wait gets a new place in the order | #933, #928: `rearmPark` gives a new token | The poller registry | Open: #950 |
-| A gate site runs the probe directory without the lists | #920: the S8 script and two lines of the gate scope in `.pi` ran the probe directory without the lists that CI used | The gate scripts | Each site that runs the probe directory under a consumer passes the same lists as CI. The review of #920 holds an audit of 17 sites. #954 is open for a new list file |
-| A check or a test measures more than it names | #929 and #933: a count of the descriptors of the process, and wall-clock bounds, failed on a loaded debug runner | The test suite | A test does not count a process-wide resource while another thread runs, and does not bound a time. See #934 (fixed) and #935 (open) |
-| A mutation that no test catches | #927, #933: the wake of a polling worker, `liveWriter`, the EOF check of `close_write` | The unit tests of the poller and the park code | #948, #951 and #956 are open |
+| A re-armed wait gets a new place in the order | #933, #928: `rearmPark` gives a new token | The poller registry | #950 (open at close) |
+| A gate site runs the probe directory without the lists | #920: the S8 script and two lines of the gate scope in `.pi` ran the probe directory without the lists that CI used | The gate scripts | Each site that runs the probe directory under a consumer passes the same lists as CI. The review of #920 holds an audit of 17 sites. #954 (open at close) covers a new list file |
+| A check or a test measures more than it names | #929 and #933: a count of the descriptors of the process, and wall-clock bounds, failed on a loaded debug runner | The test suite | A test does not count a process-wide resource while another thread runs, and does not bound a time. See #934 and #935 (#935 open at close) |
+| A mutation that no test catches | #927, #933: the wake of a polling worker, `liveWriter`, the EOF check of `close_write` | The unit tests of the poller and the park code | #948, #951 and #956 (open at close) |
 
 ## Follow-ups
 
@@ -627,6 +632,9 @@ issue, as `AGENTS.md` says.
 | #955 | `seesQuietWindow` is copied | Review of #929 |
 | #956 | `liveWriter` has no test that can fail | Review of #933 |
 | #957 | Probes 268 and 271 cannot fail on the property they name | Review of #920 |
+| #959 | `check_net_faults.py` misses a fault kind set by an assignment split over two lines | Review of #928 |
+| #960 | No test fails when `inbox.polling` is not reset after the wait | Review of #921 |
+| #961 | `ObjSocket` allocates a `std::deque` for each Socket | Review of #933 |
 
 ## References
 
