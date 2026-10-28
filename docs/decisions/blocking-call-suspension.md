@@ -365,7 +365,7 @@ the shared state in one task, which the other tasks reach with messages.
 |---|---|---|
 | Native VM | The whole model: poller, park and resume, readiness registry, socket transport, liveness, teardown, the contexts rule. | The reference implementation. |
 | JVM | Oracle parity: a task that waits in a call of the first class lets the other tasks of its worker run, in the same order. | The handoff in `runtime/jvm/src/lox/LoxWorker.java` stops the worker; it needs a park and resume path in the scheduler. |
-| Bootstrap interpreter | Its one-thread form: a blocking call blocks every worker. It cannot pass the same-worker probes, and they do not bind it, because scheduling is implementation-defined. | `spec/README.md`, Conformance; a bootstrap-only probe checks its choice. |
+| Bootstrap interpreter | Its one-thread form: `sleep` blocks every worker. The `sleep` probes (260, 279, 282) do not bind it, because scheduling is implementation-defined; a bootstrap-only probe checks its choice. Probe 285 is exempt because of a bootstrap defect (#984). Probes 95 and 96 are exempt because CPU-bound work blocks all workers, so they time out. The other same-worker probes bind it. | `spec/README.md`, Conformance; `test/translation-probes/bootstrap-only/`. |
 | QBE | Runs the same probes. It links the native runtime. Check the coroutine mode and its C frames; #723 also covers a native-entry defect on QBE. | `src/backend/qbe_emitter.cpp`. |
 | Spec | The two-class rule, the markers, the tables, the contexts rule, the Scheduling rule, the `connect` exception, C1, the probes. | `spec/04-semantics.md`, `spec/05-stdlib.md`. |
 | LSP docs | The text of the nine calls says "suspends the task until". No signature changes. | `src/lsp/stdlib_docs.cpp`. |
