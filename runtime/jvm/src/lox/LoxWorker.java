@@ -288,6 +288,38 @@ final class LoxWorker {
     // Scheduling (spec/04-semantics.md, Scheduling)
     // ------------------------------------------------------------------
 
+    /** True while a thread of this worker sleeps in the poller. */
+    boolean isPolling() {
+        LOCK.lock();
+        try {
+            return inPoll;
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    /** {@link LoxPoller#selectReturns} of this worker; 0 before its first park. */
+    long selectReturns() {
+        LOCK.lock();
+        try {
+            return poller == null ? 0 : poller.selectReturns();
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    /** Ends a sleep in the poller without making any task ready. */
+    void wakePoller() {
+        LOCK.lock();
+        try {
+            if (poller != null) {
+                poller.wake();
+            }
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
     // Caller holds LOCK.
     private void makeReady(LoxTask task) {
         task.state = LoxTask.State.READY;

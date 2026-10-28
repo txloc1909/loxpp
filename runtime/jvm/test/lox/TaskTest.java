@@ -5,6 +5,8 @@ import static lox.TestSupport.checkEquals;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Direct tests for workers, tasks, and messages (spec/04-semantics.md,
@@ -34,6 +36,8 @@ public final class TaskTest {
         checkSleepParksOnlyTheTask();
         checkSleepUnderACallbackBlocksTheWorker();
         checkCloseWakesAParkedAccept();
+        checkSendWakesAPollingWorker();
+        checkReadyChannelNobodyWaitsOnDoesNotSpin();
         checkSpawnWorkerEntry();
         checkWorker();
 
@@ -209,6 +213,171 @@ public final class TaskTest {
         sleepSeconds(0.05);
         checkEquals("SocketClosedError", kind[0],
                     "a close raises the closed fault in the parked accept");
+    }
+
+    // The state of the worker that a probe task watches, set before it starts.
+    private static volatile LoxWorker watched;
+    private static volatile boolean sawPollingWorker;
+    private static volatile boolean spun;
+    private static volatile boolean spinCheck;
+
+    // Bounds that only catch a hang; far above any loaded time.
+    private static final long HANG_SECONDS = 60;
+    // A worker that sleeps returns from select a few times at most. One that
+    // spins on a ready channel passes this at once.
+    private static final long SPIN_RETURNS = 50;
+    // Waiting this long for a spin cannot fail a correct run: it only gives a
+    // broken run time to show the spin.
+    private static final long SPIN_WAIT_MILLIS = 1000;
+
+    private static boolean awaitPolling(LoxWorker w) {
+        long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(HANG_SECONDS);
+        while (!w.isPolling()) {
+            if (System.nanoTime() - end > 0) {
+                return false;
+            }
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // A function of a top-level fun declaration that runs on a second worker.
+    // It waits until the watched worker sleeps in its poller, then sends the
+    // start message (the main task) a message. With spinCheck set it first
+    // checks that the watched worker does not spin.
+    public static final class Prober extends LoxClosure {
+        public Prober(Object[][] upvalues) { super("prober", 1, upvalues, true); }
+
+        @Override
+        protected Object invoke(Object self, Object[] a) {
+            sawPollingWorker = awaitPolling(watched);
+            if (spinCheck) {
+                long base = watched.selectReturns();
+                long end = System.nanoTime() +
+                           TimeUnit.MILLISECONDS.toNanos(SPIN_WAIT_MILLIS);
+                while (watched.selectReturns() - base <= SPIN_RETURNS &&
+                       System.nanoTime() - end < 0) {
+                    try {
+                        Thread.sleep(1);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                spun = watched.selectReturns() - base > SPIN_RETURNS;
+            }
+            LoxInstance module = (LoxInstance)LoxRuntime.current().get("task");
+            ((LoxCallable)module.fields.get("send"))
+                .call(new Object[] {a[0], "wake"});
+            return null;
+        }
+    }
+
+    // Catches a hang only. If the main task still waits after HANG_SECONDS,
+    // it wakes the poller so that the task sees the message already in its
+    // mailbox, and disarm() then reports the failure. A scheduler that lost a
+    // wake cannot run the later cases, so disarm() ends the suite then.
+    private static final class Watchdog {
+        private final CountDownLatch done = new CountDownLatch(1);
+        private volatile boolean fired;
+
+        Watchdog(LoxWorker worker) {
+            Thread t = new Thread(() -> {
+                try {
+                    if (!done.await(HANG_SECONDS, TimeUnit.SECONDS)) {
+                        fired = true;
+                        worker.wakePoller();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "task-test-watchdog");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        void disarm(String description) {
+            done.countDown();
+            check(!fired, description);
+            if (fired) {
+                System.exit(TestSupport.finish("TaskTest"));
+            }
+        }
+    }
+
+    private static LoxSocket[] connectedPair(LoxServer server) {
+        LoxSocket client = LoxSocket.connect("127.0.0.1", (int)server.port());
+        return new LoxSocket[] {client, (LoxSocket)server.accept()};
+    }
+
+    // Parks a task of the main worker in readline on a socket that gets no
+    // data, so the worker's poller has a wait and no timer.
+    private static LoxSocket[] parkReader(LoxServer server) {
+        LoxSocket[] pair = connectedPair(server);
+        task("spawn", fn("reader", () -> {
+            raised(() -> pair[1].readline());
+        }));
+        LoxOps.yield(null);
+        return pair;
+    }
+
+    // A send from another worker to a task of a worker that sleeps in its
+    // poller must end that sleep (spec/04-semantics.md, task.send).
+    private static void checkSendWakesAPollingWorker() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] idle = parkReader(server);
+        watched = LoxWorker.current();
+        spinCheck = false;
+        sawPollingWorker = false;
+        Watchdog dog = new Watchdog(watched);
+        LoxRuntime.declarations = () -> {};
+        task("spawn_worker", new Prober(NO_UPVALUES), task("self"));
+        Object got = task("receive");
+        dog.disarm("a send from another worker ends the sleep of a polling worker");
+        checkEquals("wake", got, "the message from the other worker arrives");
+        check(sawPollingWorker, "the main worker slept in its poller");
+        closeAndReap(idle);
+        server.close();
+    }
+
+    // A channel that is ready and that no task waits on must not keep the
+    // poller from sleeping: the interest of a drained key is reset.
+    private static void checkReadyChannelNobodyWaitsOnDoesNotSpin() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] idle = parkReader(server);
+        LoxSocket[] ended = parkReader(server);
+        // The peer of the second pair reads end of stream, which stays ready
+        // after its reader returned.
+        ended[0].closeWrite();
+        watched = LoxWorker.current();
+        spinCheck = true;
+        spun = false;
+        sawPollingWorker = false;
+        Watchdog dog = new Watchdog(watched);
+        LoxRuntime.declarations = () -> {};
+        task("spawn_worker", new Prober(NO_UPVALUES), task("self"));
+        Object got = task("receive");
+        dog.disarm("a send from another worker ends the sleep of a polling worker");
+        spinCheck = false;
+        checkEquals("wake", got, "the message from the other worker arrives");
+        check(sawPollingWorker, "the main worker slept in its poller");
+        check(!spun,
+              "a ready channel that no task waits on does not wake the poller");
+        closeAndReap(idle);
+        closeAndReap(ended);
+        server.close();
+    }
+
+    private static void closeAndReap(LoxSocket[] pair) {
+        pair[1].close();
+        pair[0].close();
+        // The reader task of the closed socket raises and ends.
+        LoxOps.yield(null);
     }
 
     private static void checkEachTaskHasItsOwnCounters() {
