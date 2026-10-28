@@ -4,6 +4,12 @@
 // so no portable order of the two tasks exists, and the probe does not check one.
 // It checks what binds: the task that connects and the task that accepts both
 // finish, whichever way they are scheduled (spec/05-stdlib.md, connect).
+// This probe does not show that connect() suspends its task: it passes the same
+// when connect() blocks the worker. Only native holds that property, in the unit
+// test ConnectParkTest.ASlowConnectSuspendsOnlyTheCallingTask
+// (test/test_connect_park.cpp), where a listener with a full accept queue keeps
+// the connection in progress. The JVM, QBE and bootstrap backends have no test
+// of it.
 // STATUS: ok
 // TIMEOUT: 10
 // COVERS: suspend-call connect in client
