@@ -4,13 +4,8 @@
 // the main task waits while `waiter` waits for a line on a Socket and `feeder`
 // sleeps, then sends it: no task is running or ready to run, and no program
 // ends with DeadlockError.
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined). The probe on the
-// NOT-BINDING line checks the bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 10
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: napper woke
 // CHECK: waiter got: data
 var me = task.self();

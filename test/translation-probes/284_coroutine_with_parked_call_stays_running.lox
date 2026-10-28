@@ -3,13 +3,8 @@
 // catchable RunningCoroutineError (spec/04-semantics.md, `co.status`). `runner`
 // resumes the coroutine, which waits in readline(). `checker` of the same worker
 // reads the status, tries to resume, and then sends the line.
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined). The probe on the
-// NOT-BINDING line checks the bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 10
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: running
 // CHECK: RunningCoroutineError
 // CHECK: runner done
