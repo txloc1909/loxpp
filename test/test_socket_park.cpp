@@ -10,6 +10,7 @@
 // reader park again. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
 
 #include "container_objects.h"
+#include "poller.h"
 #include "test_harness.h"
 #include "vm.h"
 
@@ -25,6 +26,7 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <string>
+#include <sys/wait.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <thread>
@@ -1443,4 +1445,104 @@ TEST_F(SocketParkTest, AWriteToASlowReaderDoesNotCopyTheText) {
     EXPECT_EQ(total.load(), 3 * kBytes);
     ASSERT_GT(base, size_t{0});
     EXPECT_LT(peak.load() - base, kBytes / 2);
+}
+
+// ---------------------------------------------------------------------------
+// A write whose wait cannot be registered.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Runs in a forked child, because a defect here is a crash that would end the
+// test runner. Returns the exit code: 0 when the program behaved.
+//
+// The write fills the send buffer and parks. The hook makes the registration
+// of that one park fail, so the task is READY with the error and its entry is
+// still in the writer queue of the socket. The second write calls the pump
+// first. The pump must drop the stale entry, not step it: the park reset the
+// call's state, so a step reads a null String.
+int writeWithFailedRegistration() {
+    alarm(60);
+    HostListener host;
+    std::atomic<bool> tailLast{false};
+    std::thread peer([&] {
+        int fd = host.accept();
+        std::string last;
+        drainHost(fd, 300, 0, [&](const char* p, size_t n) {
+            last.append(p, n);
+            if (last.size() > 4) {
+                last.erase(0, last.size() - 4);
+            }
+        });
+        tailLast = last == "tail";
+        close(fd);
+    });
+    VM vm;
+    int code = 0;
+    if (vm.interpret(connectToHost(host)) != InterpretResult::OK) {
+        code = 10;
+    } else if (auto c = vm.getGlobal("c");
+               !c.has_value() || asObjSocket(as<Obj*>(*c))->fd < 0) {
+        code = 11;
+    } else {
+        const int fd = asObjSocket(as<Obj*>(*c))->fd;
+        bool failed = false;
+        EpollCtlFailHook hook = [&](int target) {
+            if (target != fd || failed) {
+                return 0;
+            }
+            failed = true;
+            return ENOSPC;
+        };
+        setEpollCtlFailHook(&hook);
+        const InterpretResult result = vm.interpret(R"(
+            var big = "x";
+            var i = 0;
+            while (i < 24) { big = big + big; i = i + 1; }
+            var kind = "none";
+            var msg = "";
+            try { c.write(big); kind = "wrote"; }
+            catch (e) { kind = e.kind; msg = e.message; }
+            c.write("tail");
+            c.close();
+        )");
+        setEpollCtlFailHook(nullptr);
+        auto kind = vm.getGlobal("kind");
+        auto msg = vm.getGlobal("msg");
+        if (result != InterpretResult::OK) {
+            code = 12;
+        } else if (!failed) {
+            code = 13;
+        } else if (!kind.has_value() || stringify(*kind) != "NetworkError") {
+            code = 14;
+        } else if (!msg.has_value() || stringify(*msg).find(std::strerror(
+                                           ENOSPC)) == std::string::npos) {
+            code = 15;
+        }
+    }
+    peer.join();
+    if (code == 0 && !tailLast.load()) {
+        code = 16;
+    }
+    return code;
+}
+
+} // namespace
+
+// A park that fails to register leaves its entry in the writer queue. The
+// next write on the socket skips the entry, finishes, and the stream ends with
+// the bytes of that write.
+TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoLiveWriter) {
+    fflush(nullptr);
+    const pid_t pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        _exit(writeWithFailedRegistration());
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_TRUE(WIFEXITED(status))
+        << "the program ended on signal "
+        << (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+    EXPECT_EQ(WEXITSTATUS(status), 0) << "failed check " << WEXITSTATUS(status);
 }

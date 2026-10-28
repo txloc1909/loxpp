@@ -11,12 +11,21 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <unordered_map>
 #include <vector>
 
 struct epoll_event;
+
+// Replaces the result of the epoll_ctl call that waitFd() makes to add or
+// change a watched descriptor, so a test can reach the failures that the
+// kernel gives only when it is out of watches. The function receives the
+// descriptor and returns 0 for the real call, or an errno value for a call
+// that fails with it. The hook of the calling thread applies; null clears it.
+using EpollCtlFailHook = std::function<int(int fd)>;
+void setEpollCtlFailHook(const EpollCtlFailHook* hook);
 
 class Poller {
   public:
