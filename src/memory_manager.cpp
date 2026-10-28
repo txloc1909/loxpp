@@ -377,9 +377,7 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::SOCKET: {
         auto* sock = static_cast<ObjSocket*>(obj);
         markObject(sock->klass);
-        for (ObjTask* writer : sock->writers) {
-            markObject(writer);
-        }
+        sock->forEachWriter([this](ObjTask* writer) { markObject(writer); });
         break;
     }
     case ObjType::SERVER:
