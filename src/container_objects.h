@@ -98,14 +98,43 @@ struct ObjSocket : public Obj {
     // their calls began. Only the first one sends, so the bytes of one call
     // are never split by the bytes of another. An entry can be stale (its task
     // no longer waits here); the owner of the queue checks before it uses one.
-    // GC-tracked, so a stale entry never dangles.
-    std::deque<ObjTask*> writers;
+    // GC-tracked, so a stale entry never dangles. The queue is allocated at
+    // the first park: a deque costs about 600 bytes, and most sockets never
+    // wait to write. Access it only through the members below.
+    std::unique_ptr<std::deque<ObjTask*>> writers;
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
     std::string inbuf;
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;
+
+    bool hasWriters() const { return writers && !writers->empty(); }
+    bool hasWriterQueue() const { return writers != nullptr; }
+    ObjTask* frontWriter() const { return writers->front(); }
+    void popWriter() { writers->pop_front(); }
+    void pushWriter(ObjTask* task) {
+        if (!writers) {
+            writers = std::make_unique<std::deque<ObjTask*>>();
+        }
+        writers->push_back(task);
+    }
+    void clearWriters() { writers.reset(); }
+    std::deque<ObjTask*> takeWriters() {
+        std::deque<ObjTask*> out;
+        if (writers) {
+            out.swap(*writers);
+        }
+        return out;
+    }
+    template <typename F>
+    void forEachWriter(F&& f) const {
+        if (writers) {
+            for (ObjTask* t : *writers) {
+                f(t);
+            }
+        }
+    }
 };
 
 inline bool isObjSocket(Obj* o) { return isObjType(o, ObjType::SOCKET); }

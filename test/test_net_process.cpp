@@ -148,6 +148,28 @@ TEST(NetProcessTest, LongLineDoesNotLeaveCapacityInTheInputBuffer) {
     EXPECT_LE(sock->inbuf.size(), 4096u);
 }
 
+// A deque costs about 600 bytes. A Socket that never parks in a write must
+// not own one, also after it reads, writes with room, and closes.
+TEST(NetProcessTest, SocketThatNeverParksAWriteHasNoWriterQueue) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "var s = l.accept(); "
+                    "c.write(\"hi\\n\"); "
+                    "var line = s.readline(); "
+                    "l.close(); "
+                    "[c, s];"),
+              InterpretResult::OK);
+    Value v = h.lastResult();
+    ASSERT_TRUE(isList(v));
+    auto* list = asObjList(as<Obj*>(v));
+    ASSERT_EQ(list->elements.size(), 2u);
+    for (const Value& item : list->elements) {
+        ASSERT_TRUE(isSocket(item));
+        EXPECT_FALSE(asObjSocket(as<Obj*>(item))->hasWriterQueue());
+    }
+}
+
 // A line longer than one chunk, a line split over chunks, and read_bytes over
 // chunk boundaries return the same bytes as one big read would.
 TEST(NetProcessTest, ReadsAcrossChunkBoundaries) {

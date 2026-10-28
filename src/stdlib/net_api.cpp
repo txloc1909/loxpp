@@ -872,10 +872,10 @@ static bool liveWriter(const ObjTask* task, const ObjSocket* s) {
 // for the queue to move on its own.
 static void pumpWriters(ObjSocket* s) {
     Runtime* rt = getActiveRuntime();
-    while (!s->writers.empty()) {
-        ObjTask* task = s->writers.front();
+    while (s->hasWriters()) {
+        ObjTask* task = s->frontWriter();
         if (!liveWriter(task, s)) {
-            s->writers.pop_front();
+            s->popWriter();
             continue;
         }
         IoOutcome out;
@@ -883,7 +883,7 @@ static void pumpWriters(ObjSocket* s) {
         if (out.kind == IoOutcome::Kind::Wait) {
             return;
         }
-        s->writers.pop_front();
+        s->popWriter();
         if (out.kind == IoOutcome::Kind::Fault) {
             rt->failPark(task, out.faultKind, out.faultMessage.c_str());
         } else {
@@ -902,7 +902,7 @@ static Value runWrite(ObjSocket* s, ParkedIo io) {
     }
     for (;;) {
         pumpWriters(s);
-        if (s->writers.empty()) {
+        if (!s->hasWriters()) {
             IoOutcome out;
             stepWrite(s->fd, io, out);
             if (out.kind == IoOutcome::Kind::Done) {
@@ -916,7 +916,7 @@ static Value runWrite(ObjSocket* s, ParkedIo io) {
         if (rt->parkCurrentTask(ParkReason::FD_WRITE, s->fd)) {
             ObjTask* task = rt->currentTask();
             task->io = std::move(io);
-            s->writers.push_back(task);
+            s->pushWriter(task);
             return from<Nil>(Nil{});
         }
         std::string err;
@@ -961,8 +961,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
         // A write that waits cannot finish after this, so it fails now, in the
         // order the calls began, as a write after close_write() does.
         Runtime* rt = getActiveRuntime();
-        std::deque<ObjTask*> pending;
-        pending.swap(s->writers);
+        std::deque<ObjTask*> pending = s->takeWriters();
         s->writeClosed = true;
         for (ObjTask* task : pending) {
             if (liveWriter(task, s)) {
@@ -1000,7 +999,7 @@ void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
     int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
                                           : asObjSocket(task->io.target)->fd;
     if (task->io.op != IoOp::ACCEPT) {
-        asObjSocket(task->io.target)->writers.clear();
+        asObjSocket(task->io.target)->clearWriters();
     }
     if (fd < 0) {
         return;
@@ -1014,7 +1013,7 @@ void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        s->writers.clear();
+        s->clearWriters();
         closeDescriptor(s->fd, "socket");
     }
     return from<Nil>(Nil{});
