@@ -410,7 +410,12 @@ probes of the rule that a call which waits for the network or for time suspends 
 (`docs/decisions/blocking-call-suspension.md`), and the native VM, the JVM backend, and the QBE backend pass them all. The bootstrap interpreter
 has no file: those probes carry a `NOT-BINDING` line that names `bootstrap-only/same_worker_blocking_call`.
 An absent file is an empty list, so a consumer with no gap needs no
-file, and a node that finds a gap creates the file it needs.
+file, and a node that finds a gap creates the file it needs. The spec-probe
+steps of `.github/workflows/ci.yml` for native, JVM, and QBE already pass
+`--xfail tools/spec-probe-xfail/<consumer>.txt`, so a new file is gated with no
+second edit there. A new list file for a consumer other than these three needs
+two edits: pass `--xfail` in that consumer's CI step, and make the same change in its scope in
+`.pi/extensions/lib/gate-scopes.ts`, which copies the CI command text.
 
 The probes `260` to `285` are the spec probes of that rule. Each carries
 `// COVERS: suspend-call <call> in <function>`, `// COVERS: suspend-context <slug>`, or

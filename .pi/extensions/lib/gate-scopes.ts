@@ -92,7 +92,7 @@ export const QBE_GATE_STEPS: readonly { name: string; script: string }[] = [
   },
   {
     name: "Check spec probes - QBE",
-    script: `python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/`,
+    script: `python3 tools/check_spec_probes.py tools/loxpp_qbe.sh test/translation-probes/ --xfail tools/spec-probe-xfail/qbe.txt`,
   },
   {
     name: "QBE differential suite - compile errors",
