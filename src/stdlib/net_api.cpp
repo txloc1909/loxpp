@@ -674,7 +674,10 @@ static Value finish(const ParkedIo& io, IoOutcome& out) {
     while (start < data.size()) {
         size_t nl = data.find('\n', start);
         size_t end = nl == std::string::npos ? data.size() : nl;
-        ObjString* str = mm->makeString(data.substr(start, end - start));
+        // A view, not a substr: a substr would hold a second copy of the line
+        // while makeString copies it into the object.
+        ObjString* str =
+            mm->makeString(std::string_view(data).substr(start, end - start));
         mm->pushTempRoot(str);
         list->elements.emplace_back(static_cast<Obj*>(str));
         mm->popTempRoot();
