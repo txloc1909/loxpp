@@ -644,7 +644,7 @@ size_t peakBytesOfLongLineRead(const char* call) {
         return 0;
     }
     int status = 0;
-    struct rusage ru{};
+    struct rusage ru = {};
     if (wait4(pid, &status, 0, &ru) != pid || !WIFEXITED(status) ||
         WEXITSTATUS(status) != 0) {
         return 0;
