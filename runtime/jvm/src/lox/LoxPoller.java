@@ -40,6 +40,8 @@ final class LoxPoller {
     }
 
     private final Selector selector;
+    // Written by the worker's own thread and read by tests on any thread.
+    private volatile long selectReturns;
     private long nextSeq = 1;
     // In registration order.
     private final ArrayList<Wait> fdWaits = new ArrayList<>();
@@ -119,7 +121,14 @@ final class LoxPoller {
         } catch (IOException e) {
             throw new IllegalStateException("select failed", e);
         }
+        selectReturns++;
     }
+
+    /**
+     * How many times {@link #select} slept and returned. A test reads it to
+     * tell a worker that sleeps from one that spins on a ready channel.
+     */
+    long selectReturns() { return selectReturns; }
 
     void wake() { selector.wakeup(); }
 
