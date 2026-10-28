@@ -52,6 +52,12 @@ Poller::~Poller() {
     ::close(m_epoll);
 }
 
+static thread_local const EpollCtlFailHook* s_epollCtlFailHook = nullptr;
+
+void setEpollCtlFailHook(const EpollCtlFailHook* hook) {
+    s_epollCtlFailHook = hook;
+}
+
 Poller::Token Poller::waitFd(int fd, Interest interest) {
     FdEntry& entry = m_fds[fd];
     const bool fresh = entry.waits.empty();
@@ -62,8 +68,12 @@ Poller::Token Poller::waitFd(int fd, Interest interest) {
         ev.events = mask;
         ev.data.fd = fd;
         const int op = fresh ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
-        if (::epoll_ctl(m_epoll, op, fd, &ev) != 0) {
-            const int saved = errno;
+        // Only a call that changes the watch set reaches this check, so the
+        // load sits beside a system call and costs nothing measurable.
+        const int injected =
+            s_epollCtlFailHook != nullptr ? (*s_epollCtlFailHook)(fd) : 0;
+        if (injected != 0 || ::epoll_ctl(m_epoll, op, fd, &ev) != 0) {
+            const int saved = injected != 0 ? injected : errno;
             if (fresh) {
                 m_fds.erase(fd);
             }
