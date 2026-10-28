@@ -3,13 +3,8 @@
 // in the waiting task (spec/05-stdlib.md, Socket and Server). `closer` closes the
 // Socket first and the Server second, so the readers wake in that order
 // (spec/04-semantics.md, Scheduling).
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined). The probe on the
-// NOT-BINDING line checks the bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 10
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: closing
 // CHECK: reader: SocketClosedError
 // CHECK: acceptor: SocketClosedError
