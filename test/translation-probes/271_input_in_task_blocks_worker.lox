@@ -3,6 +3,10 @@
 // not wait here, and the probe cannot show a wait. It checks that the call
 // returns its line in a task that shares its worker with another task, and that
 // the other task runs after it.
+// This probe does not show that input() blocks the worker: it passes the same
+// when input() suspends its task while standard input has no line. No test of
+// any backend holds that property: native has no unit test for input() in a
+// task, and the JVM, QBE and bootstrap backends have none.
 // STATUS: ok
 // TIMEOUT: 10
 // COVERS: blocks-call input in reader
