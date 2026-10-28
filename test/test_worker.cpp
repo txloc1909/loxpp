@@ -471,6 +471,35 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     EXPECT_EQ(globalString(vm, "got"), "7");
 }
 
+// A send must write the wakeup descriptor only while the worker sleeps in its
+// poller. Once wait() returned, `polling` is false again, so a send does not
+// leave a pending wake for the next wait() to read.
+TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
+    VM vm;
+    int fired = 0;
+    Runtime& rt = vm.runtime();
+    rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(50));
+    rt.setPollHandler([&](const std::vector<Poller::Token>&) {
+        ++fired;
+        Inbox& inbox = rt.memoryManager().inbox();
+        {
+            std::lock_guard<std::mutex> lock(inbox.mutex);
+            EXPECT_FALSE(inbox.polling);
+        }
+        auto me = vm.getGlobal("me");
+        ASSERT_TRUE(me.has_value());
+        ASSERT_TRUE(
+            postEnvelope(inbox, Envelope{static_cast<ObjTask*>(as<Obj*>(*me)),
+                                         Value{Number{1}}}));
+    });
+    ASSERT_EQ(vm.interpret(R"(
+        var me = task.self();
+        var got = task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(fired, 1);
+}
+
 // The runtime clears the pointers that senders use before the poller is
 // destroyed, and the inbox outlives the runtime while a message is held.
 TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
