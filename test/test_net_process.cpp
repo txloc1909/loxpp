@@ -19,7 +19,9 @@
 #include <cstring>
 #include <netinet/in.h>
 #include <string>
+#include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 
@@ -606,4 +608,61 @@ TEST(NetProcessTest, NonListArgsFatal) {
               InterpretResult::RUNTIME_ERROR);
     EXPECT_EQ(h.run("run(\"/bin/echo\", [1, 2]);"),
               InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// Peak memory of a read that returns a very long line
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr size_t kLongLine = 64u * 1024 * 1024;
+
+// Runs one call on a socket whose peer sends `kLongLine` bytes with no newline
+// and then closes. The program runs in a forked child, so the peak resident
+// size of the child belongs to this call only. Returns that peak in bytes, or
+// 0 when the child failed.
+size_t peakBytesOfLongLineRead(const char* call) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        VMTestHarness h;
+        std::string src =
+            "var srv = listen(\"127.0.0.1\", 0); "
+            "var peer = connect(\"127.0.0.1\", srv.port()); "
+            "var conn = srv.accept(); "
+            "fun feed() { var c = \"x\"; "
+            "for (var i = 0; i < 20; i = i + 1) { c = c + c; } "
+            "for (var n = 0; n < " +
+            std::to_string(kLongLine) +
+            "; n = n + len(c)) { peer.write(c); } peer.close(); } "
+            "task.spawn(feed); "
+            "var r = conn." +
+            call + "();";
+        _exit(h.run(src) == InterpretResult::OK ? 0 : 1);
+    }
+    if (pid < 0) {
+        return 0;
+    }
+    int status = 0;
+    struct rusage ru{};
+    if (wait4(pid, &status, 0, &ru) != pid || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0) {
+        return 0;
+    }
+    return static_cast<size_t>(ru.ru_maxrss) * 1024;
+}
+
+} // namespace
+
+// readlines() of one long line may not hold more than readline() of it. Both
+// hold the line twice at the peak: the input buffer and the String object. A
+// third copy of the line adds one line length to the peak, which is more than
+// the slack. The slack covers allocator rounding and the runtime's own pages.
+TEST(NetProcessTest, ReadlinesOfOneLongLineHoldsNoExtraCopy) {
+    const size_t one = peakBytesOfLongLineRead("readline");
+    const size_t many = peakBytesOfLongLineRead("readlines");
+    ASSERT_GT(one, kLongLine);
+    ASSERT_GT(many, kLongLine);
+    EXPECT_LT(many, one + kLongLine / 2)
+        << "readline peak " << one << ", readlines peak " << many;
 }
