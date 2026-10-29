@@ -28,12 +28,17 @@ run, and reported as SKIP with its reason.
 exist, or is empty — is an error (exit 2), not a silent zero-file pass:
 Path.glob raises nothing on a missing directory, so a typo'd path would
 otherwise report "0 passed, 0 failed, 0 skipped" and exit 0.
+
+A <loxpp-binary> that does not exist or cannot run is also an error (exit 2): it
+is a mistake in the setup, not a failed example.
 """
 
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 
 def parse_exclude_file(path: Path) -> dict[str, str]:
@@ -69,14 +74,17 @@ def run_example(loxpp: str, lox_file: Path, input_file: Path) -> tuple[int, list
     # those raw bytes there too. Such output is not always valid UTF-8. CHECK
     # text is ASCII, so decode invalid bytes as replacements and keep going;
     # without this, one non-UTF-8 byte in trace output aborts the whole run.
-    result = subprocess.run(
-        [loxpp, str(lox_file)],
-        input=stdin_data,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        errors="replace",
-    )
+    try:
+        result = subprocess.run(
+            [loxpp, str(lox_file)],
+            input=stdin_data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            errors="replace",
+        )
+    except OSError as exc:
+        refuse_unrunnable(loxpp, exc)
     return result.returncode, result.stdout.splitlines()
 
 
@@ -112,6 +120,7 @@ def main() -> None:
         sys.exit(2)
 
     loxpp, examples_dir = args[0], Path(args[1])
+    require_runner(loxpp)
     excluded: dict[str, str] = {}
     for exclude_path in exclude_paths:
         excluded.update(parse_exclude_file(exclude_path))

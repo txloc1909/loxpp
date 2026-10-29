@@ -413,6 +413,14 @@ if(LOXPP_PYTHON3)
     # 125 there, after the other twelve cases pass, so the trace preset reports a
     # skip instead of a false red.
     set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
+
+    # Issue #907: a tool that spawns a runner from its command line refuses a
+    # runner that does not exist or cannot start with exit 2, not with a
+    # traceback or with the code for a failed case. The checker runs each tool
+    # with a stub runner, so it needs no built binary.
+    add_test(NAME RunnerPrecondition
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_runner_precondition.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC

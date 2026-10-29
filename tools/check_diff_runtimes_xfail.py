@@ -85,7 +85,7 @@ DIFF_RUNTIMES = REPO_ROOT / "tools" / "diff_runtimes.py"
 # not depend on how the file was started.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from diff_runtimes import refuse_unrunnable, require_runner
+from runner_precondition import refuse_unrunnable, require_runner
 
 # A spec probe of test/translation-probes/ that runs in milliseconds. Case 4
 # asserts only that the check let the run through, so whether this probe passes

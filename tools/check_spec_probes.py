@@ -81,6 +81,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from runner_precondition import refuse_unrunnable, require_runner
+
 STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
 STDERR_RE = re.compile(r"^\s*//\s*STDERR:\s?(.*)$")
@@ -224,6 +226,8 @@ def run(runner: str, probe: SpecProbe, timeout: float) -> tuple[str, str, int] |
         )
     except subprocess.TimeoutExpired:
         return None
+    except OSError as exc:
+        refuse_unrunnable(runner, exc)
     return result.stdout, result.stderr, result.returncode
 
 
@@ -236,6 +240,8 @@ def main() -> None:
     parser.add_argument("--consumer", default=None,
                         help="the consumer the runner is, for NOT-BINDING lines")
     args = parser.parse_args()
+
+    require_runner(args.runner)
 
     if not args.dir.is_dir():
         print(f"error: not a directory: {args.dir}", file=sys.stderr)

@@ -30,7 +30,8 @@ Usage:
 
 <runner> is bootstrap/lox_wrapper.sh, tools/loxpp_jvm_bootstrap.sh,
 tools/loxpp_qbe_bootstrap.sh, or an equivalent runner. Run from the
-repository root. Exits 0 when every case passes, 1 otherwise.
+repository root. Exits 0 when every case passes, 1 otherwise, and 2 when a
+<runner> does not exist or cannot run.
 """
 
 import argparse
@@ -43,6 +44,8 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 
 @dataclass(frozen=True)
@@ -81,18 +84,21 @@ def run_case(runner: str, case: Case, timeout: float) -> tuple[bool, str]:
         writer = None
         started = time.monotonic()
         try:
-            proc = subprocess.Popen(
-                [runner, str(program)],
-                stdin=read_fd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=dict(os.environ, LANGUAGE="LOXPP"),
-                # A wrapper that hangs has a live child tree (the feeder, the
-                # interpreter, sed). It goes in its own process group so the
-                # timeout path can kill the whole tree, not only the wrapper.
-                start_new_session=True,
-            )
+            try:
+                proc = subprocess.Popen(
+                    [runner, str(program)],
+                    stdin=read_fd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=dict(os.environ, LANGUAGE="LOXPP"),
+                    # A wrapper that hangs has a live child tree (the feeder, the
+                    # interpreter, sed). It goes in its own process group so the
+                    # timeout path can kill the whole tree, not only the wrapper.
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                refuse_unrunnable(runner, exc)
             os.close(read_fd)
             read_fd = -1
 
@@ -153,12 +159,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    for runner in args.runners:
+        require_runner(runner)
+
     failures = 0
     for runner in args.runners:
-        if not Path(runner).is_file():
-            print(f"FAIL {runner}: not a file", file=sys.stderr)
-            failures += 1
-            continue
         for case in CASES:
             passed, detail = run_case(runner, case, args.timeout)
             if passed:

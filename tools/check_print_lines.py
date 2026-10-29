@@ -26,6 +26,9 @@ Usage:
 <runner> is build/loxpp, bootstrap/lox_wrapper.sh (with LANGUAGE=LOXPP),
 tools/loxpp_jvm.sh, tools/loxpp_qbe.sh, or an equivalent command that takes
 the program path as its one argument.
+
+Exit status: 0 when the check passes, 1 when it fails, 2 when <runner> does not
+exist or cannot run.
 """
 
 import argparse
@@ -33,6 +36,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROGRAM = REPO_ROOT / "test" / "print-lines" / "two_workers.lox"
@@ -73,6 +78,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=300.0)
     args = parser.parse_args()
 
+    require_runner(args.runner)
+
     try:
         result = subprocess.run(
             [args.runner, str(args.program)],
@@ -85,6 +92,8 @@ def main() -> int:
     except subprocess.TimeoutExpired:
         print(f"FAIL  {args.program}: no end in {args.timeout:.0f}s")
         return 1
+    except OSError as exc:
+        refuse_unrunnable(args.runner, exc)
 
     problems = check(result.stdout)
     if result.returncode != 0:

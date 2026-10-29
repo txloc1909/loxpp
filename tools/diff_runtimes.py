@@ -163,6 +163,7 @@ import sys
 from pathlib import Path
 
 from check_spec_probes import parse_probe, parse_xfail_file, passes
+from runner_precondition import refuse_unrunnable, require_runner
 
 # native's own stringifyObj (src/object.cpp) recurses once per level of
 # list/map nesting with no depth guard, so a host whose ambient soft stack
@@ -329,39 +330,6 @@ def run_program(
     except OSError as exc:
         refuse_unrunnable(cmd[0], exc)
     return result.stdout, result.stderr, result.returncode
-
-
-def refuse_unrunnable(path: str, exc: OSError) -> None:
-    """Stops with exit 2 for a runner that exec cannot start.
-
-    require_runner cannot see this shape: the file exists, it is a file, and it
-    is executable, but the kernel still refuses to start it. A wrapper whose
-    shebang names a missing interpreter is the common case. That is a
-    precondition like a missing path, so it must not read as a comparison that
-    failed.
-    """
-    print(f"error: {path} cannot run: {exc}", file=sys.stderr)
-    sys.exit(2)
-
-
-def require_runner(path: str) -> None:
-    """Stops with exit 2 unless path names an executable file.
-
-    Both runners come from the command line, so a typo is a precondition of the
-    run, not a comparison that failed: it must fail here, before the first
-    program runs, and not as a traceback from inside subprocess or as a
-    divergence of the whole walk.
-    """
-    runner = Path(path)
-    if not runner.exists():
-        print(f"error: {path} does not exist", file=sys.stderr)
-        sys.exit(2)
-    if not runner.is_file():
-        print(f"error: {path} is not a file", file=sys.stderr)
-        sys.exit(2)
-    if not os.access(runner, os.X_OK):
-        print(f"error: {path} is not executable", file=sys.stderr)
-        sys.exit(2)
 
 
 def collect_programs(paths: list[str]) -> list[Path]:

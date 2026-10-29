@@ -14,11 +14,13 @@ every instruction to stdout, and the deadlock report goes to stderr.
 Usage: tools/check_repl_session.py <loxpp binary>
 
 Exit status: 0 when every session passes, 1 when one fails, 2 on a usage or
-timeout error.
+timeout error, or when the binary does not exist or cannot run.
 """
 
 import subprocess
 import sys
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 # A timeout that a session of this size never reaches on a slow host, but that
 # catches a hang: a session that the runtime does not end at the last line
@@ -84,13 +86,16 @@ SESSIONS = [
 
 
 def run_session(binary, lines):
-    return subprocess.run(
-        [binary],
-        input="".join(line + "\n" for line in lines),
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT_SECONDS,
-    )
+    try:
+        return subprocess.run(
+            [binary],
+            input="".join(line + "\n" for line in lines),
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except OSError as exc:
+        refuse_unrunnable(binary, exc)
 
 
 def check(name, lines, expected, binary):
@@ -127,6 +132,7 @@ def main():
         print("usage: check_repl_session.py <loxpp binary>", file=sys.stderr)
         return 2
     binary = sys.argv[1]
+    require_runner(binary)
     ok = True
     for name, lines, expected in SESSIONS:
         ok = check(name, lines, expected, binary) and ok
