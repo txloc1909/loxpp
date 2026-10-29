@@ -1218,18 +1218,19 @@ void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
 }
 
 void Runtime::pollWhileBusy() {
-    // A task that is ready must not starve a wait that is over. A syscall per
-    // switch would tax every task switch while any wait exists, so the poll
-    // runs at most once per kPollInterval, and the clock is read only every
-    // kSwitchesPerClockRead switches.
-    constexpr int kSwitchesPerClockRead = 16;
+    // A task that is ready must not starve a wait that is over, and a task
+    // runs from one suspend point to the next with no preemption, so a slice
+    // has no length bound. A count of switches would not bound the delay
+    // either: N switches can hold N slices of any length. The bound is by time:
+    // a wait that is over is seen at the first switch after kPollInterval
+    // from the previous poll, so the delay is at most kPollInterval plus the
+    // slice that is running when the interval ends. A clock read costs less
+    // than a syscall, and the poll syscall runs at most once per interval.
     constexpr auto kPollInterval = std::chrono::milliseconds(1);
-    if (!m_poller->hasWaits() ||
-        ++m_switchesSincePoll < kSwitchesPerClockRead) {
+    if (!m_poller->hasWaits()) {
         return;
     }
-    m_switchesSincePoll = 0;
-    const auto now = Poller::Clock::now();
+    const auto now = m_schedulerClock();
     if (now - m_lastPoll < kPollInterval) {
         return;
     }

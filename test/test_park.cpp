@@ -35,6 +35,7 @@ using PClock = Poller::Clock;
 
 ObjTask* g_parked = nullptr;
 int g_parkFd = -1;
+int g_writeFd = -1;
 
 // park_far(): parks for 30 seconds. Returns -1 where the task cannot suspend,
 // after it recorded the task.
@@ -64,6 +65,55 @@ std::string globalString(const VM& vm, const std::string& name) {
         return "<undefined>";
     }
     return stringify(*v);
+}
+
+// A clock that the test moves: each read adds g_fakeStep, so the number of
+// task switches in one poll interval is known.
+PClock::time_point g_fakeNow;
+PClock::duration g_fakeStep;
+PClock::time_point fakeClock() {
+    g_fakeNow += g_fakeStep;
+    return g_fakeNow;
+}
+
+// write_fd(): makes g_parkFd readable.
+Value writeFdNative(int /*argc*/, Value* /*argv*/) {
+    ssize_t n = ::write(g_writeFd, "x", 1);
+    (void)n;
+    return from<Nil>(Nil{});
+}
+
+// Runs a program in which the descriptor of a parked task becomes readable
+// while another task yields in a loop. Returns the number of loop passes
+// between the write and the resume of the parked task.
+double switchesUntilResume(PClock::duration step) {
+    int fds[2];
+    EXPECT_EQ(::pipe2(fds, O_CLOEXEC | O_NONBLOCK), 0);
+    g_parkFd = fds[0];
+    g_writeFd = fds[1];
+    g_fakeNow = PClock::time_point(std::chrono::hours(1));
+    g_fakeStep = step;
+    VM vm;
+    vm.runtime().defineNative("park_fd", parkFdNative, 0);
+    vm.runtime().defineNative("write_fd", writeFdNative, 0);
+    vm.runtime().setSchedulerClock(&fakeClock);
+    InterpretResult result = vm.interpret(R"(
+        var passes = 0;
+        var at = -1;
+        var me = task.self();
+        fun t() { park_fd(); at = passes; task.send(me, 1); }
+        fun spinner() {
+            write_fd();
+            while (at < 0 and passes < 1000) { passes = passes + 1; yield; }
+        }
+        task.spawn(t);
+        task.spawn(spinner);
+        task.receive();
+    )");
+    EXPECT_EQ(result, InterpretResult::OK);
+    ::close(fds[0]);
+    ::close(fds[1]);
+    return std::stod(globalString(vm, "at"));
 }
 
 // A VM whose `park_far` parks, and whose host timer calls `act` 80 ms after
@@ -381,6 +431,20 @@ TEST_F(ParkTest, ADescriptorWaitEndsWhenTheDescriptorIsReadable) {
                   PClock::now() - start)
                   .count(),
               140);
+}
+
+// The delay between the end of a wait and the resume of its task is counted in
+// task switches, which the fake clock fixes: a wait that is over is seen at
+// the first switch after the poll interval (1 ms) has passed, and the task
+// then runs after the one task ahead of it. With a clock that adds 1 ms per
+// read, every switch polls.
+TEST_F(ParkTest, AWaitThatIsOverIsSeenAtTheNextSwitchWhenAnIntervalPassed) {
+    EXPECT_LE(switchesUntilResume(std::chrono::milliseconds(1)), 2);
+}
+
+// A clock that adds 250 us per read lets four switches pass between two polls.
+TEST_F(ParkTest, AWaitThatIsOverIsSeenWithinOneIntervalOfSwitches) {
+    EXPECT_LE(switchesUntilResume(std::chrono::microseconds(250)), 2 + 4);
 }
 
 // epoll refuses a regular file. Such a descriptor is always ready, so the

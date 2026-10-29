@@ -403,6 +403,21 @@ and `SOCK_CLOEXEC` keep the descriptors out of a child that `run()` forks.
 
 A worker that never parks never creates a poller.
 
+### Delay between the end of a wait and its resume
+
+A task runs from one suspend point to the next with no preemption, so a
+slice has no length bound, and a count of task switches does not bound the
+delay. The bound is by time. While a worker has a wait registered, the native
+scheduler reads the clock at every task switch and polls when at least 1 ms
+has passed since its last poll. A wait that ends is therefore seen at the
+first task switch after the 1 ms interval, which is at most 1 ms plus the
+length of the slice that runs when the interval ends. The task then joins the
+back of the run queue (Ordering), so it also waits for the slices of the tasks
+ahead of it. The clock read adds about 8 ns to a task switch of 170 ns.
+
+The JVM backend calls `selectNow` at every task switch while a wait is
+registered, so it sees an ended wait at the first switch after the wait ends.
+
 ### Readiness registry
 
 A descriptor maps to its wait records: the task, the interest (read or
