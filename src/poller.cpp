@@ -58,7 +58,7 @@ void setEpollCtlFailHook(const EpollCtlFailHook* hook) {
     s_epollCtlFailHook = hook;
 }
 
-Poller::Token Poller::waitFd(int fd, Interest interest) {
+Poller::Token Poller::waitFd(int fd, Interest interest, Token again) {
     FdEntry& entry = m_fds[fd];
     const bool fresh = entry.waits.empty();
     const std::uint32_t oldMask = entry.mask;
@@ -82,8 +82,13 @@ Poller::Token Poller::waitFd(int fd, Interest interest) {
         }
     }
     entry.mask = mask;
-    const Token token = m_nextToken++;
-    entry.waits.push_back({token, interest});
+    const Token token = again != 0 ? again : m_nextToken++;
+    // Tokens grow with the first wait of a call, so this keeps registration
+    // order for a call that waits again.
+    entry.waits.insert(
+        std::upper_bound(entry.waits.begin(), entry.waits.end(), token,
+                         [](Token t, const FdWait& w) { return t < w.token; }),
+        {token, interest});
     m_tokenFd.emplace(token, fd);
     return token;
 }

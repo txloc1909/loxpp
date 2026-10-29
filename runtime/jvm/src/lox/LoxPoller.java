@@ -61,7 +61,12 @@ final class LoxPoller {
 
     boolean hasWaits() { return !fdWaits.isEmpty() || !timers.isEmpty(); }
 
-    void addFd(LoxTask task, SelectableChannel channel, int interest)
+    /**
+     * Registers a wait and returns its number. A call that waits again passes
+     * the number of its first wait as {@code seq}, so its wait keeps its place
+     * among the waits that began after it; 0 starts a new call.
+     */
+    long addFd(LoxTask task, SelectableChannel channel, int interest, long seq)
         throws ClosedChannelException {
         SelectionKey key = channel.keyFor(selector);
         if (key != null && !key.isValid()) {
@@ -75,7 +80,15 @@ final class LoxPoller {
         } else {
             key.interestOps(key.interestOps() | interest);
         }
-        fdWaits.add(new Wait(nextSeq++, task, channel, interest, 0));
+        if (seq == 0) {
+            seq = nextSeq++;
+        }
+        int at = fdWaits.size();
+        while (at > 0 && fdWaits.get(at - 1).seq > seq) {
+            at--;
+        }
+        fdWaits.add(at, new Wait(seq, task, channel, interest, 0));
+        return seq;
     }
 
     void addTimer(LoxTask task, long deadlineNanos) {

@@ -450,6 +450,18 @@ final class LoxWorker {
         }
     }
 
+    /**
+     * The running task starts a call that can wait for a channel. All waits
+     * of one call share one place in the order of the waits of the worker, so
+     * every such call starts here.
+     */
+    static void beginWaitingCall() {
+        LoxTask task = current().current;
+        if (task != null) {
+            task.waitSeq = 0;
+        }
+    }
+
     /** sleep: the task waits for {@code nanos} and others of its worker run. */
     static void sleepNanos(long nanos) {
         // Capped so that the deadline cannot overflow nanoTime's range.
@@ -495,7 +507,8 @@ final class LoxWorker {
         LoxTask self = current;
         LOCK.lock();
         try {
-            ensurePoller().addFd(self, channel, interest);
+            self.waitSeq = ensurePoller().addFd(self, channel, interest,
+                                                self.waitSeq);
             suspend(self, LoxTask.State.PARKED);
         } catch (ClosedChannelException e) {
             // The channel closed before the wait began; the caller sees it.

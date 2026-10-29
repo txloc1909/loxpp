@@ -141,6 +141,36 @@ TEST(PollerTest,
     EXPECT_EQ(ready, (std::vector<Poller::Token>{tb, ta, early, late}));
 }
 
+// A call that waits again takes the token of its first wait, so it keeps its
+// place among the waits that began after it.
+TEST(PollerTest, AWaitThatTakesAnOldTokenKeepsItsPlace) {
+    Poller poller;
+    Pipe a;
+    Pipe b;
+    const auto ta = poller.waitFd(a.rd, Poller::Interest::Read);
+    const auto tb = poller.waitFd(b.rd, Poller::Interest::Read);
+    a.put();
+    std::vector<Poller::Token> ready;
+    poller.wait(ready);
+    ASSERT_EQ(ready, (std::vector<Poller::Token>{ta}));
+    ASSERT_EQ(poller.waitFd(a.rd, Poller::Interest::Read, ta), ta);
+    b.put();
+    poller.wait(ready);
+    EXPECT_EQ(ready, (std::vector<Poller::Token>{ta, tb}));
+}
+
+TEST(PollerTest, AWaitThatTakesAnOldTokenKeepsItsPlaceOnOneDescriptor) {
+    Poller poller;
+    Pipe p;
+    const auto first = poller.waitFd(p.wr, Poller::Interest::Write);
+    const auto second = poller.waitFd(p.wr, Poller::Interest::Write);
+    ASSERT_TRUE(poller.cancel(first));
+    ASSERT_EQ(poller.waitFd(p.wr, Poller::Interest::Write, first), first);
+    std::vector<Poller::Token> cancelled;
+    poller.cancelFd(p.wr, cancelled);
+    EXPECT_EQ(cancelled, (std::vector<Poller::Token>{first, second}));
+}
+
 TEST(PollerTest, WriteInterestAndReadInterestOnOneDescriptor) {
     Poller poller;
     Pipe p;

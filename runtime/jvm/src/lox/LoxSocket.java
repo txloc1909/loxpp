@@ -80,6 +80,7 @@ public final class LoxSocket {
 
     public Object read() {
         checkOpen("read");
+        LoxWorker.beginWaitingCall();
         ByteArrayOutputStream all = new ByteArrayOutputStream();
         do {
             all.write(buf, pos, lim - pos);
@@ -95,6 +96,7 @@ public final class LoxSocket {
      */
     public Object readBytes(int n) {
         checkOpen("read_bytes");
+        LoxWorker.beginWaitingCall();
         ByteArrayOutputStream got = new ByteArrayOutputStream();
         while (got.size() < n) {
             if (pos == lim && !fill("read_bytes")) {
@@ -147,6 +149,11 @@ public final class LoxSocket {
     /** One line, newline stripped; null at EOF. A partial trailing line still counts. */
     public Object readline() {
         checkOpen("readline");
+        LoxWorker.beginWaitingCall();
+        return readLineOfCall();
+    }
+
+    private Object readLineOfCall() {
         ByteArrayOutputStream line = new ByteArrayOutputStream();
         boolean sawByte = false;
         while (pos < lim || fill("readline")) {
@@ -168,9 +175,10 @@ public final class LoxSocket {
 
     public Object readlines() {
         checkOpen("readlines");
+        LoxWorker.beginWaitingCall();
         LoxList list = new LoxList();
         Object line;
-        while ((line = readline()) != null) {
+        while ((line = readLineOfCall()) != null) {
             list.elements.add(line);
         }
         return list;
@@ -186,6 +194,7 @@ public final class LoxSocket {
 
     private void writeBytes(String s, String method) {
         checkWritable(method);
+        LoxWorker.beginWaitingCall();
         ByteBuffer data = ByteBuffer.wrap(s.getBytes(LoxRuntime.CHARSET));
         while (data.hasRemaining()) {
             try {
@@ -257,6 +266,7 @@ public final class LoxSocket {
         // one can be unusable (an IPv6 address on a host with IPv6 off) while a
         // later one works. The last failure is the one reported.
         String failure = "unknown host";
+        LoxWorker.beginWaitingCall();
         try {
             // A host name resolves here and blocks the worker; a numeric
             // address does not (spec/05-stdlib.md, connect).

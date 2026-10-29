@@ -403,6 +403,32 @@ TEST_F(SocketParkTest, ACloseFailsParkedCallsInTheOrderTheyBeganToWait) {
     EXPECT_EQ(globalString(vm, "log"), "abcd");
 }
 
+// A call that waits again after a partial chunk began to wait at its first
+// wait. When its Socket and the Socket of a later call become ready in one
+// poll, the earlier call continues first. A new place at each wait would put
+// it behind the later call.
+TEST_F(SocketParkTest, ARearmedCallContinuesBeforeALaterCall) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var other_out = connect("127.0.0.1", srv.port());
+        var other_in = srv.accept();
+        var log = "";
+        fun a() { conn.readline(); log = log + "a"; task.send(me, 1); }
+        fun b() { other_in.readline(); log = log + "b"; task.send(me, 1); }
+        fun driver() {
+            peer.write("x");
+            sleep(0.05);
+            peer.writeline("y");
+            other_out.writeline("z");
+            task.send(me, 1);
+        }
+        task.spawn(a); task.spawn(b); task.spawn(driver);
+        task.receive(); task.receive(); task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "log"), "ab");
+}
+
 namespace {
 
 // A listener on the host side of the process, for a test that needs a peer
