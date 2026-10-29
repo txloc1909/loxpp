@@ -48,8 +48,9 @@ pass yet: the file name, then a reason. Blank lines and lines that start with
 '#' are comments. The lists are files under tools/spec-probe-xfail/, one for each
 consumer, each passed with --xfail. The bootstrap interpreter
 has no list: it uses NOT-BINDING lines. A consumer that has no gap needs no
-file, and a node that finds a gap creates one. A path that does not exist is no gap: it is reported as
-a NOTE and grades every probe. Outcomes:
+file, and a node that finds a gap creates one. A file that does not exist in an existing directory is
+no gap: it is reported as a NOTE and grades every probe. A path whose directory does not exist is a
+misnamed path and an error (exit code 2). Outcomes:
 
   PASS   not on the list, and the probe passes.
   FAIL   not on the list, and the probe fails. Exit code 1.
@@ -190,6 +191,11 @@ def parse_xfail_file(path: Path) -> dict[str, str]:
     in either order. A list that exists is read strictly: an entry that names no
     probe of the run is still a failure.
     """
+    if not path.parent.is_dir():
+        # A missing list in a directory that exists is no gap, but a missing
+        # directory is a misnamed path, and a NOTE would let it grade nothing.
+        print(f"error: {path} cannot be a list: {path.parent} is not a directory", file=sys.stderr)
+        sys.exit(2)
     if not path.exists():
         print(f"NOTE: {path} does not exist, so no probe is expected to fail")
         return {}
