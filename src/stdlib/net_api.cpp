@@ -360,11 +360,19 @@ static Fill appendRead(int fd, std::string& buf, size_t want,
 // Move the first `n` bytes of the input buffer out as a result, and keep the
 // tail. The prefix is moved, not copied, so a long line exists once.
 static std::string takeInput(ObjSocket* s, size_t n) {
+    s->noNewlineLen = s->noNewlineLen > n ? s->noNewlineLen - n : 0;
     std::string tail(s->inbuf, n);
     std::string out = std::move(s->inbuf);
     out.resize(n);
     s->inbuf = std::move(tail);
     return out;
+}
+
+// Drop the first byte of the input buffer, which is the newline that ended a
+// line.
+static void dropFirstInput(ObjSocket* s) {
+    s->inbuf.erase(0, 1);
+    s->noNewlineLen = s->noNewlineLen > 0 ? s->noNewlineLen - 1 : 0;
 }
 
 // Append one read chunk to the input buffer.
@@ -430,6 +438,7 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
             // Keep what arrived, so a later read does not lose it.
             io.buf.append(s->inbuf);
             s->inbuf = std::move(io.buf);
+            s->noNewlineLen = 0;
             setFault(out, kNetworkError, std::move(out.faultMessage));
             return;
         }
@@ -438,20 +447,21 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
 }
 
 static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
-    // The scan restarts at the front of the buffer in each step. Another task
-    // that waits on the same socket can take bytes from the front while this
-    // call is parked, so an offset kept across the park could point past
-    // bytes that nobody scanned. Inside one step nothing else runs.
-    size_t scanned = 0;
+    // The scan resumes at `noNewlineLen`, not at the front: a line that
+    // arrives in small pieces would otherwise be scanned again in full at
+    // each wake-up, and the total cost would grow with the square of the line
+    // length. Another task that waits on the same socket can take bytes from
+    // the front while this call is parked, which is why the offset lives in
+    // the socket and every removal lowers it.
     for (;;) {
-        size_t nl = s->inbuf.find('\n', scanned);
+        size_t nl = s->inbuf.find('\n', s->noNewlineLen);
         if (nl != std::string::npos) {
             std::string line = takeInput(s, nl);
-            s->inbuf.erase(0, 1); // the newline
+            dropFirstInput(s);
             setDone(out, std::move(line));
             return;
         }
-        scanned = s->inbuf.size();
+        s->noNewlineLen = s->inbuf.size();
         switch (fillInput(s, io.method, out)) {
         case Fill::Data:
             break;
