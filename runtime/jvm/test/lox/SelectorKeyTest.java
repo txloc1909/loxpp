@@ -36,6 +36,9 @@ public final class SelectorKeyTest {
 
         checkDroppedSocketsKeepNoKey();
         checkSocketParksAgainAfterItsKeyWentAway();
+        checkSocketParksAgainWhileAnotherSocketWaits();
+        checkAcceptLoopWhileAnotherSocketWaits();
+        checkReadWakeKeepsTheWriteWait();
 
         finished.countDown();
         System.exit(TestSupport.finish("SelectorKeyTest"));
@@ -115,6 +118,111 @@ public final class SelectorKeyTest {
         checkEquals("line2", got[2], "the third park reads its line");
         checkEquals(0, LoxWorker.current().selectorKeyCount(),
                     "no key stays after the last park");
+        pair[0].close();
+        pair[1].close();
+        server.close();
+    }
+
+    // Parks a reader on a second Socket that gets no data until the caller
+    // closes it, so the poller always holds one wait.
+    private static LoxSocket[] parkBystander(LoxServer server) {
+        LoxSocket[] pair = connectedPair(server);
+        task("spawn", fn("bystander", () -> {
+            try {
+                pair[1].readline();
+            } catch (LoxError e) {
+                // The close at the end of the test ends the wait.
+            }
+        }));
+        LoxOps.yield(null);
+        return pair;
+    }
+
+    // The main task waits for a message, so no task runs between the wake of
+    // the reader and its next park. The key of the first Socket is cancelled
+    // while the bystander still waits, so no select flushes it before then.
+    private static void checkSocketParksAgainWhileAnotherSocketWaits() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] bystander = parkBystander(server);
+        LoxSocket[] pair = connectedPair(server);
+        Object me = task("self");
+        String[] got = new String[3];
+        task("spawn", fn("reader", () -> {
+            for (int i = 0; i < got.length; i++) {
+                got[i] = (String)pair[1].readline();
+                task("send", me, "read");
+            }
+        }));
+        for (int i = 0; i < got.length; i++) {
+            LoxOps.yield(null); // the reader parks
+            pair[0].writeline("line" + i);
+            task("receive");
+            checkEquals("line" + i, got[i],
+                        "park " + i + " reads its line while a bystander waits");
+        }
+        checkEquals(1, LoxWorker.current().selectorKeyCount(),
+                    "only the bystander keeps a key");
+        bystander[0].close();
+        bystander[1].close();
+        LoxOps.yield(null);
+        pair[0].close();
+        pair[1].close();
+        server.close();
+    }
+
+    // The accept loop parks on the same Server again and again.
+    private static void checkAcceptLoopWhileAnotherSocketWaits() {
+        LoxServer bystanderServer = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] bystander = parkBystander(bystanderServer);
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        Object me = task("self");
+        int[] accepted = {0};
+        task("spawn", fn("acceptor", () -> {
+            for (int i = 0; i < SOCKETS; i++) {
+                ((LoxSocket)server.accept()).close();
+                accepted[0]++;
+                task("send", me, "accepted");
+            }
+        }));
+        for (int i = 0; i < SOCKETS; i++) {
+            LoxOps.yield(null); // the acceptor parks
+            LoxSocket.connect("127.0.0.1", (int)server.port()).close();
+            task("receive");
+        }
+        checkEquals(SOCKETS, accepted[0], "the accept loop takes every connection");
+        checkEquals(1, LoxWorker.current().selectorKeyCount(),
+                    "only the bystander keeps a key after the accept loop");
+        bystander[0].close();
+        bystander[1].close();
+        LoxOps.yield(null);
+        server.close();
+        bystanderServer.close();
+    }
+
+    // A read and a write wait on one Socket. The read wakes first and must
+    // leave the write wait registered.
+    private static void checkReadWakeKeepsTheWriteWait() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] pair = connectedPair(server);
+        Object me = task("self");
+        int size = 32 << 20; // more than the socket buffers hold
+        String big = "x".repeat(size);
+        task("spawn", fn("reader", () -> {
+            pair[1].readline();
+            task("send", me, "read");
+        }));
+        task("spawn", fn("writer", () -> {
+            pair[1].write(big);
+            task("send", me, "wrote");
+        }));
+        LoxOps.yield(null); // the reader parks
+        LoxOps.yield(null); // the writer fills the send buffer and parks
+        pair[0].writeline("go");
+        task("receive");
+        Object bytes = pair[0].readBytes(size);
+        task("receive");
+        checkEquals(size, ((String)bytes).length(),
+                    "the parked write finishes once the peer reads");
         pair[0].close();
         pair[1].close();
         server.close();
