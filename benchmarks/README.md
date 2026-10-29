@@ -21,6 +21,7 @@ benchmarks/
   programs/prof/   one-batch, no-warm-up variants for the profiler build
   latency/         GC pause benchmarks, run by `run.py --latency`
   run.py           run programs/ on each backend, emit the comparison table
+  expected.py      the pinned checksum of every program, with its source
   gc_compare.py    native and JVM GC reports in one format (see "Where the GC
                    time goes")
   profile.py       run programs/prof/ on the LOXPP_PROFILE build, collect
@@ -65,6 +66,17 @@ python3 benchmarks/profile.py --json benchmarks/results/profile.json
 (program, backend) pair, launches it `--procs` times, keeps the fastest launch,
 and reports the median of its measured batches plus a spread figure
 `(max-min)/median` as a noise indicator.
+
+## Pinned checksums
+
+`expected.py` holds the checksum every program must print, and where the
+value came from. `run.py` compares each backend with it, so a value that is
+wrong on every backend fails the run with exit 1. A program with no entry, a
+missing runner, or an unknown `--only` name stops the run with exit 2 before
+the first launch. A new program in `generate.py`'s `CONFIG` needs an entry
+taken from a known answer, not from what a backend prints.
+`tools/check_benchmark_expected.py` (ctest `BenchmarkExpectedChecksum`) checks
+these rules with stub backends.
 
 ## Prerequisites (dev-managed container)
 

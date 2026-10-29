@@ -12,9 +12,11 @@ CPU, and reports:
   overhead_s  wall_s minus the program's own total measured+warmup time:
               parse + JVM assemble + runtime startup + JIT warm-up
 
-Checksums from all backends that produced one must agree, or the row is
-flagged MISMATCH. A row with fewer than two successful backends has nothing
-to compare and is flagged "n/a", not "ok".
+Every backend's checksum is compared with the value pinned in expected.py,
+so a result that is wrong on every backend fails too. A mismatch, a backend
+that cannot run, or a program with no pinned value ends the run with a
+non-zero exit code. A program with no pinned value is refused before the
+first launch.
 
 Usage:
   python3 benchmarks/run.py                      # all programs, all backends
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import statistics
@@ -42,6 +45,11 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent
+sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(HERE))
+
+from expected import EXPECTED, FLOAT_REL_TOL, LATENCY_EXPECTED  # noqa: E402
+from runner_precondition import require_runner  # noqa: E402
 PROGRAMS = HERE / "programs"
 LATENCY = HERE / "latency"
 
@@ -61,6 +69,14 @@ BACKENDS = {
     "qbe": lambda prog: [str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
     "qbe-base": lambda prog: ["env", "QBE_NO_PROMOTE=1",
                               str(ROOT / "tools" / "loxpp_qbe.sh"), prog],
+}
+
+# The file each backend starts, checked before the first launch.
+RUNNER = {
+    "native": ROOT / "build" / "loxpp",
+    "jvm": ROOT / "tools" / "loxpp_jvm.sh",
+    "qbe": ROOT / "tools" / "loxpp_qbe.sh",
+    "qbe-base": ROOT / "tools" / "loxpp_qbe.sh",
 }
 
 # clock() is process CPU time on native and QBE, wall-clock on jvm
@@ -86,6 +102,44 @@ def parse_harness(stdout: str):
     return warm, meas, checksum
 
 
+def checksum_matches(table, name: str, got) -> bool:
+    value, as_float, _kind, _source = table[name]
+    if got is None:
+        return False
+    if as_float:
+        try:
+            return math.isclose(float(got), float(value),
+                                rel_tol=FLOAT_REL_TOL)
+        except ValueError:
+            return False
+    return got == value
+
+
+def preflight(table, names, backends, label: str) -> None:
+    """Refuses, with exit 2 and before any launch, a run that cannot gate."""
+    missing = [n for n in names if n not in table]
+    if missing:
+        print(f"error: no pinned checksum for {label} {missing}; add each to "
+              f"benchmarks/expected.py with its source", file=sys.stderr)
+        sys.exit(2)
+    if not names:
+        print(f"error: no {label} to run", file=sys.stderr)
+        sys.exit(2)
+    for b in backends:
+        require_runner(str(RUNNER[b]))
+
+
+def select(found, only):
+    if only:
+        unknown = sorted(set(only) - set(found))
+        if unknown:
+            print(f"error: --only names no program: {unknown}",
+                  file=sys.stderr)
+            sys.exit(2)
+        return [n for n in found if n in only]
+    return found
+
+
 def one_launch(cmd: list[str], timeout: int):
     t0 = time.monotonic()
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -98,6 +152,7 @@ def run_pair(name: str, backend: str, procs: int, timeout: int):
     cmd = PIN + BACKENDS[backend](prog)
     launches = []
     errors = []
+    wrong = []
     for _ in range(procs):
         try:
             rc, out, serr, wall = one_launch(cmd, timeout)
@@ -120,6 +175,8 @@ def run_pair(name: str, backend: str, procs: int, timeout: int):
         trimmed = meas[len(meas) // 3:] or meas
         launches.append({"wall": wall, "meas": meas, "trim": trimmed,
                          "checksum": checksum})
+        if not checksum_matches(EXPECTED, name, checksum):
+            wrong.append(checksum)
     if not launches:
         return {"backend": backend, "ok": False,
                 "error": "; ".join(errors) or "no successful launches"}
@@ -142,6 +199,7 @@ def run_pair(name: str, backend: str, procs: int, timeout: int):
         "all_median_us": [round(statistics.median(L["trim"]), 1) for L in launches],
         "batches_us": [round(x, 1) for x in best["meas"]],
     }
+    result["wrong_checksums"] = wrong
     if errors:
         result["launch_failures"] = errors
     return result
@@ -149,7 +207,7 @@ def run_pair(name: str, backend: str, procs: int, timeout: int):
 
 def run_latency_pair(name: str, backend: str, procs: int, timeout: int):
     cmd = PIN + BACKENDS[backend](str(LATENCY / f"{name}.lox"))
-    launches, errors = [], []
+    launches, errors, wrong = [], [], []
     for _ in range(procs):
         try:
             rc, out, serr, _wall = one_launch(cmd, timeout)
@@ -172,6 +230,8 @@ def run_latency_pair(name: str, backend: str, procs: int, timeout: int):
                          "p99_us": float(m.group(4)),
                          "max_us": float(m.group(5)),
                          "checksum": m.group(6)})
+        if not checksum_matches(LATENCY_EXPECTED, name, m.group(6)):
+            wrong.append(m.group(6))
     if not launches:
         return {"backend": backend, "ok": False,
                 "error": "; ".join(errors) or "no successful launches"}
@@ -186,17 +246,46 @@ def run_latency_pair(name: str, backend: str, procs: int, timeout: int):
               "checksum": launches[0]["checksum"],
               "p50_us": med("p50_us"), "p99_us": med("p99_us"),
               "max_us": med("max_us"),
-              "all_max_us": [L["max_us"] for L in launches]}
+              "all_max_us": [L["max_us"] for L in launches],
+              "wrong_checksums": wrong}
     if errors:
         result["launch_failures"] = errors
     return result
 
 
+def verdict(table, name, entry, backends) -> bool:
+    """Prints each failure of one program and returns whether it passed.
+
+    A backend that did not run is a failure: a gate that passes with no
+    backend run has checked nothing.
+    """
+    ok = True
+    want = table[name][0]
+    for b in backends:
+        r = entry["backends"][b]
+        if not r["ok"]:
+            print(f"  !! {name} [{b}]: did not run: {r['error']}")
+            ok = False
+            continue
+        if r["wrong_checksums"]:
+            print(f"  !! {name} [{b}]: checksum {r['wrong_checksums']} "
+                  f"differs from the pinned value {want!r}")
+            ok = False
+    entry["checksum_match"] = ok
+    entry["expected"] = want
+    return ok
+
+
+def finish(failed: list[str]) -> None:
+    if failed:
+        print(f"\nFAILED: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
+
+
 def latency_main(args) -> None:
-    names = sorted(p.stem for p in LATENCY.glob("*.lox"))
-    if args.only:
-        names = [n for n in names if n in args.only]
-    rows = []
+    names = select(sorted(p.stem for p in LATENCY.glob("*.lox")), args.only)
+    preflight(LATENCY_EXPECTED, names, args.backends, "latency programs")
+    rows, failed = [], []
     for name in names:
         entry = {"program": name, "backends": {}}
         for backend in args.backends:
@@ -204,18 +293,15 @@ def latency_main(args) -> None:
             r = run_latency_pair(name, backend, args.procs, args.timeout)
             entry["backends"][backend] = r
             print("done" if r["ok"] else f"FAIL: {r['error']}")
-        sums = {b: r["checksum"] for b, r in entry["backends"].items()
-                if r["ok"]}
-        entry["checksum_match"] = None if len(sums) < 2 \
-            else len(set(sums.values())) == 1
-        if entry["checksum_match"] is False:
-            print(f"  !! {name}: checksum MISMATCH {sums}")
+        if not verdict(LATENCY_EXPECTED, name, entry, args.backends):
+            failed.append(name)
         rows.append(entry)
     print()
     _latency_table(rows)
     if args.json:
         Path(args.json).write_text(json.dumps(rows, indent=2))
         print(f"\nwrote {args.json}")
+    finish(failed)
 
 
 def _latency_table(rows) -> None:
@@ -232,12 +318,11 @@ def _latency_table(rows) -> None:
             print(f"{head}{r['clock_kind']:<6}{r['units']:>7}{r['live']:>8}"
                   f"{r['p50_us']:>12.1f}{r['p99_us']:>12.1f}"
                   f"{r['max_us']:>14.1f}  {r['checksum']}")
-        match = e["checksum_match"]
         print(f"{'':<14}checksums: "
-              f"{'ok' if match else ('n/a' if match is None else 'MISMATCH')}")
+              f"{'ok' if e['checksum_match'] else 'MISMATCH'}")
 
 
-def main() -> None:
+def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="+", help="subset of program names")
     ap.add_argument("--backends", nargs="+", default=list(BACKENDS),
@@ -247,24 +332,21 @@ def main() -> None:
     ap.add_argument("--json", help="write full results here")
     ap.add_argument("--latency", action="store_true",
                     help="run the GC pause benchmarks in latency/")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.latency:
         return latency_main(args)
 
-    names = sorted(p.stem for p in PROGRAMS.glob("*.lox"))
-    if args.only:
-        names = [n for n in names if n in args.only]
+    names = select(sorted(p.stem for p in PROGRAMS.glob("*.lox")), args.only)
+    preflight(EXPECTED, names, args.backends, "programs")
 
-    rows = []
+    rows, failed = [], []
     for name in names:
         entry = {"program": name, "backends": {}}
-        cs = {}
         for backend in args.backends:
             print(f"  {name:20s} [{backend}] ...", end=" ", flush=True)
             r = run_pair(name, backend, args.procs, args.timeout)
             entry["backends"][backend] = r
             if r["ok"]:
-                cs[backend] = r["checksum"]
                 warn = f" ({len(r['launch_failures'])} launch(es) failed)" \
                     if r.get("launch_failures") else ""
                 print(f"steady={r['steady_us']/1000:.1f}ms "
@@ -272,11 +354,8 @@ def main() -> None:
                       f"{warn}")
             else:
                 print(f"FAIL: {r['error']}")
-        # None means "fewer than two backends produced a checksum" — there is
-        # nothing to compare, so this is not evidence of agreement.
-        entry["checksum_match"] = None if len(cs) < 2 else len(set(cs.values())) == 1
-        if entry["checksum_match"] is False:
-            print(f"  !! {name}: checksum MISMATCH {cs}")
+        if not verdict(EXPECTED, name, entry, args.backends):
+            failed.append(name)
         rows.append(entry)
 
     print()
@@ -284,6 +363,7 @@ def main() -> None:
     if args.json:
         Path(args.json).write_text(json.dumps(rows, indent=2))
         print(f"\nwrote {args.json}")
+    finish(failed)
 
 
 def _table(rows, backends):
@@ -311,8 +391,7 @@ def _table(rows, backends):
                 line += f"{vals[b]/nat:>10.2f}"
             else:
                 line += f"{'-':>10}"
-        match = e["checksum_match"]
-        line += f"   {'ok' if match else ('n/a' if match is None else 'MISMATCH')}"
+        line += f"   {'ok' if e['checksum_match'] else 'MISMATCH'}"
         print(line)
 
 
