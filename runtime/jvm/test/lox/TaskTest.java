@@ -3,6 +3,9 @@ package lox;
 import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -20,7 +23,7 @@ public final class TaskTest {
 
     private static LoxGlobals globals;
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         globals = LoxRuntime.init();
         checkMessageRule();
         checkSendAndReceiveInOrder();
@@ -38,6 +41,8 @@ public final class TaskTest {
         checkCloseWakesAParkedAccept();
         checkSendWakesAPollingWorker();
         checkReadyChannelNobodyWaitsOnDoesNotSpin();
+        checkWritableChannelNobodyWaitsOnDoesNotSpin();
+        checkFinishedConnectKeepsNoKey();
         checkSpawnWorkerEntry();
         checkWorker();
 
@@ -223,8 +228,9 @@ public final class TaskTest {
 
     // Bounds that only catch a hang; far above any loaded time.
     private static final long HANG_SECONDS = 60;
-    // A worker that sleeps returns from select a few times at most. One that
-    // spins on a ready channel passes this at once.
+    // A worker that sleeps returns from select 0 times in these cases (40
+    // runs, also under CPU load). One that spins on a ready channel passes
+    // this limit at once.
     private static final long SPIN_RETURNS = 50;
     // Waiting this long for a spin cannot fail a correct run: it only gives a
     // broken run time to show the spin.
@@ -345,6 +351,25 @@ public final class TaskTest {
         server.close();
     }
 
+    // Runs the spin check on the main worker: a second worker watches the
+    // select returns of the main worker while the main task waits for its
+    // message. `disarm` names the case in a hang report.
+    private static void watchForSpin(String disarm, String spinMessage) {
+        watched = LoxWorker.current();
+        spinCheck = true;
+        spun = false;
+        sawPollingWorker = false;
+        Watchdog dog = new Watchdog(watched);
+        LoxRuntime.declarations = () -> {};
+        task("spawn_worker", new Prober(NO_UPVALUES), task("self"));
+        Object got = task("receive");
+        dog.disarm(disarm);
+        spinCheck = false;
+        checkEquals("wake", got, "the message from the other worker arrives");
+        check(sawPollingWorker, "the main worker slept in its poller");
+        check(!spun, spinMessage);
+    }
+
     // A channel that is ready and that no task waits on must not keep the
     // poller from sleeping: the interest of a drained key is reset.
     private static void checkReadyChannelNobodyWaitsOnDoesNotSpin() {
@@ -354,22 +379,79 @@ public final class TaskTest {
         // The peer of the second pair reads end of stream, which stays ready
         // after its reader returned.
         ended[0].closeWrite();
-        watched = LoxWorker.current();
-        spinCheck = true;
-        spun = false;
-        sawPollingWorker = false;
-        Watchdog dog = new Watchdog(watched);
-        LoxRuntime.declarations = () -> {};
-        task("spawn_worker", new Prober(NO_UPVALUES), task("self"));
-        Object got = task("receive");
-        dog.disarm("a send from another worker ends the sleep of a polling worker");
-        spinCheck = false;
-        checkEquals("wake", got, "the message from the other worker arrives");
-        check(sawPollingWorker, "the main worker slept in its poller");
-        check(!spun,
-              "a ready channel that no task waits on does not wake the poller");
+        watchForSpin("a read-ready channel that no task waits on lets the poller sleep",
+                     "a ready channel that no task waits on does not wake the poller");
         closeAndReap(idle);
         closeAndReap(ended);
+        server.close();
+    }
+
+    // A socket is writable whenever its send buffer has room, so the write
+    // interest of a drained key must be reset or the poller spins.
+    private static void checkWritableChannelNobodyWaitsOnDoesNotSpin() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] idle = parkReader(server);
+        LoxSocket[] pair = connectedPair(server);
+        // Larger than the send and receive buffers of the pair together, so
+        // the writer parks in OP_WRITE until the main task reads.
+        final int size = 1 << 25;
+        task("spawn", fn("writer", () -> {
+            pair[0].write("x".repeat(size));
+        }));
+        LoxOps.yield(null);
+        checkEquals(size, ((String)pair[1].readBytes(size)).length(),
+                    "the reader gets every byte of the parked write");
+        LoxOps.yield(null); // the writer returns
+        watchForSpin("a writable channel that no task waits on lets the poller sleep",
+                     "a writable channel that no task waits on does not wake the poller");
+        closeAndReap(idle);
+        closeAndReap(pair);
+        server.close();
+    }
+
+    // The connect wait of a channel ends when the connection finishes. The
+    // program may never close that Socket, so the selector must not keep it.
+    // A connect to loopback finishes at once unless the accept queue of the
+    // server is full: the kernel then drops the first SYN and the connect
+    // waits for its retry, after the server took a connection.
+    private static void checkFinishedConnectKeepsNoKey() throws IOException {
+        // A select drops the cancelled keys of the earlier cases.
+        sleepSeconds(0.01);
+        checkEquals(0, LoxWorker.current().selectorKeyCount(),
+                    "the selector starts with no key");
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        InetSocketAddress address =
+            new InetSocketAddress("127.0.0.1", (int)server.port());
+        List<SocketChannel> fillers = new ArrayList<>();
+        int queued = 0;
+        for (;;) {
+            SocketChannel filler = SocketChannel.open();
+            filler.configureBlocking(false);
+            fillers.add(filler);
+            if (!filler.connect(address) && !filler.finishConnect()) {
+                break; // the accept queue is full
+            }
+            queued++;
+        }
+        final int accepts = queued;
+        int[] keysWhileWaiting = {-1};
+        task("spawn", fn("acceptor", () -> {
+            keysWhileWaiting[0] = LoxWorker.current().selectorKeyCount();
+            for (int i = 0; i < accepts; i++) {
+                ((LoxSocket)server.accept()).close();
+            }
+        }));
+        LoxSocket made = LoxSocket.connect("127.0.0.1", (int)server.port());
+        checkEquals(1, keysWhileWaiting[0],
+                    "the connect waited for its channel in the poller");
+        LoxOps.yield(null);
+        sleepSeconds(0.01);
+        checkEquals(0, LoxWorker.current().selectorKeyCount(),
+                    "the selector keeps no key of a connect that finished");
+        made.close();
+        for (SocketChannel filler : fillers) {
+            filler.close();
+        }
         server.close();
     }
 
