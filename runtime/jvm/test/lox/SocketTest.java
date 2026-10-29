@@ -7,6 +7,29 @@ import static lox.TestSupport.checkThrows;
 import java.io.IOException;
 
 public final class SocketTest {
+    private static LoxSocket connectOrNull(String host, int port) {
+        try {
+            return LoxSocket.connect(host, port);
+        } catch (LoxError e) {
+            return null;
+        }
+    }
+
+    /** The text of the fault that a plain connect to {@code ip} raises. */
+    private static String connectFailure(java.net.InetAddress ip, int port) {
+        try (java.nio.channels.SocketChannel c = java.nio.channels.SocketChannel.open()) {
+            c.configureBlocking(false);
+            if (!c.connect(new java.net.InetSocketAddress(ip, port))) {
+                while (!c.finishConnect()) {
+                    Thread.sleep(1);
+                }
+            }
+            return null;
+        } catch (IOException | InterruptedException e) {
+            return e.getMessage();
+        }
+    }
+
     public static void main(String[] args) throws IOException {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         check(server.port() > 0, "listen() binds a real port");
@@ -85,6 +108,56 @@ public final class SocketTest {
             LoxSocket.resolver = h -> new java.net.InetAddress[] {noListener, noListener};
             checkThrows(() -> LoxSocket.connect("multi.test", secondPort), LoxError.class,
                         "connect() raises when every address fails");
+
+            // Two bad addresses before the good one: a connect that stops
+            // after the second address fails here.
+            LoxSocket.resolver = h -> new java.net.InetAddress[] {noListener, noListener, listening};
+            LoxSocket viaThird = connectOrNull("multi.test", secondPort);
+            check(viaThird != null, "connect() falls through to the third address");
+            if (viaThird != null) {
+                viaThird.writeline("third");
+                viaThird.closeWrite();
+                LoxSocket thirdPeer = (LoxSocket)second.accept();
+                checkEquals("third\n", thirdPeer.read(),
+                            "the third address is the one that connected");
+                thirdPeer.close();
+                viaThird.close();
+            }
+
+            // A good first address wins: a connect that tries only the last
+            // address fails here.
+            LoxSocket.resolver = h -> new java.net.InetAddress[] {listening, noListener};
+            LoxSocket viaFirst = connectOrNull("multi.test", secondPort);
+            check(viaFirst != null, "connect() uses the first address when it works");
+            if (viaFirst != null) {
+                viaFirst.writeline("first");
+                viaFirst.closeWrite();
+                LoxSocket firstPeer = (LoxSocket)second.accept();
+                checkEquals("first\n", firstPeer.read(),
+                            "the first address is the one that connected");
+                firstPeer.close();
+                viaFirst.close();
+            }
+
+            // When every address fails, the fault is the one of the last
+            // address. The two failures differ in their text.
+            java.net.InetAddress unreachable = java.net.InetAddress.getByName("255.255.255.255");
+            String refused = connectFailure(noListener, secondPort);
+            String lastFailure = connectFailure(unreachable, secondPort);
+            check(refused != null && lastFailure != null && !refused.equals(lastFailure),
+                  "the two bad addresses fail with different texts");
+            LoxSocket.resolver = h -> new java.net.InetAddress[] {noListener, unreachable};
+            LoxError lastError = null;
+            try {
+                LoxSocket.connect("multi.test", secondPort);
+            } catch (LoxError e) {
+                lastError = e;
+            }
+            String reported = lastError == null ? "" : lastError.getMessage();
+            check(reported.endsWith(": " + lastFailure),
+                  "connect() reports the fault of the last address (got '" + reported + "')");
+            check(refused == null || !reported.contains(refused),
+                  "connect() does not report the fault of an earlier address");
         } finally {
             LoxSocket.resolver = saved;
             second.close();

@@ -148,8 +148,9 @@ TEST(NetProcessTest, LongLineDoesNotLeaveCapacityInTheInputBuffer) {
     EXPECT_LE(sock->inbuf.size(), 4096u);
 }
 
-// A deque costs about 600 bytes. A Socket that never parks in a write must
-// not own one, also after it reads, writes with room, and closes.
+// A Socket with a writer queue is about 480 bytes larger. A Socket that never
+// parks in a write must not own one, also after it reads, writes with room, and
+// closes.
 TEST(NetProcessTest, SocketThatNeverParksAWriteHasNoWriterQueue) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "

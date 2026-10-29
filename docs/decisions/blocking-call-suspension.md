@@ -239,6 +239,14 @@ while the name resolves; then the TCP connect suspends. When `host` is a
 numeric address, there is no resolution, so `connect` suspends fully. The spec
 states this exception on `connect`.
 
+When one name resolves to more than one address, `connect` tries the addresses
+in the order of the resolver of the backend and reports the failure of the
+last one. The spec does not bind that order. The native backend uses the order
+of `getaddrinfo`, which can put `::1` first for `localhost`. The JVM backend
+puts IPv4 first. The difference shows only if two addresses of one name both
+listen, and a program must not depend on it. The JVM backend keeps the order
+of its resolver. The spec does not change.
+
 ### Resume and repeated suspension
 
 A call of the first class waits only when its wait is not over at the call.
