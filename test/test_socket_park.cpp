@@ -363,6 +363,27 @@ TEST_F(SocketParkTest, ASecondReaderScansTheBufferAsItIsNow) {
     EXPECT_EQ(globalString(vm, "l2"), "yy");
 }
 
+// As above, but the data after the first line holds a second newline already.
+// An offset from before the park that points past the first one would return
+// a line with a newline inside it.
+TEST_F(SocketParkTest, ASecondReaderNeverReturnsALineWithANewline) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var l1 = "none"; var l2 = "none";
+        fun r1() { l1 = conn.readline(); task.send(me, 1); }
+        fun r2() { l2 = conn.readline(); task.send(me, 1); }
+        peer.write("xxxxx");
+        task.spawn(r1);
+        task.spawn(r2);
+        sleep(0.1);
+        peer.write("\nyy\nzz\n");
+        task.receive(); task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "l1"), "xxxxx");
+    EXPECT_EQ(globalString(vm, "l2"), "yy");
+}
+
 // A close fails the parked calls in the order in which they began to wait,
 // and the failed tasks join the run queue in that order.
 TEST_F(SocketParkTest, ACloseFailsParkedCallsInTheOrderTheyBeganToWait) {

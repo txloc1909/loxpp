@@ -105,6 +105,11 @@ struct ObjSocket : public Obj {
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
     std::string inbuf;
+    // The first `noNewlineLen` bytes of `inbuf` hold no newline, so a
+    // readline that resumes scans from here. Every removal from the front of
+    // `inbuf` must lower it by the bytes removed (not below zero), and an
+    // insertion at the front must set it to zero.
+    size_t noNewlineLen = 0;
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;
