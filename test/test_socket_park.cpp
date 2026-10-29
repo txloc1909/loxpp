@@ -337,6 +337,35 @@ TEST_F(SocketParkTest, ALongLineThatWaitedLeavesNoCapacityBehind) {
     EXPECT_LE(sock->inbuf.size(), 4096u);
 }
 
+// A line that arrives in many pieces is searched for a newline once per byte,
+// not once per piece. The text is right even when each wake-up scans the whole
+// buffer, so only the count of scanned bytes shows the cost.
+TEST_F(SocketParkTest, AReadlineScansEachByteOnce) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var got = "none";
+        fun reader() { got = conn.readline(); task.send(me, 1); }
+        fun feeder() {
+            var piece = "";
+            for (var i = 0; i < 100; i = i + 1) { piece = piece + "x"; }
+            for (var i = 0; i < 40; i = i + 1) { peer.write(piece); sleep(0.002); }
+            peer.write("\n");
+            task.send(me, 1);
+        }
+        task.spawn(reader);
+        task.spawn(feeder);
+        task.receive(); task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "got").size(), 4000u);
+    auto v = vm.getGlobal("conn");
+    ASSERT_TRUE(v.has_value());
+    ObjSocket* sock = asObjSocket(as<Obj*>(*v));
+    // One search per byte, plus the bytes of the last piece. A scan from the
+    // front at every wake-up would count about ten times this.
+    EXPECT_LE(sock->scannedBytes, 2u * 4001u);
+}
+
 // Two readers wait on one socket and a partial line is already in the buffer.
 // The first takes the line when its end arrives; the second must then find the
 // next newline in the bytes that are in the buffer now, and not wait for more

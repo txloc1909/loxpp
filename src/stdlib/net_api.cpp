@@ -370,10 +370,7 @@ static std::string takeInput(ObjSocket* s, size_t n) {
 
 // Drop the first byte of the input buffer, which is the newline that ended a
 // line.
-static void dropFirstInput(ObjSocket* s) {
-    s->inbuf.erase(0, 1);
-    s->noNewlineLen = s->noNewlineLen > 0 ? s->noNewlineLen - 1 : 0;
-}
+static void dropFirstInput(ObjSocket* s) { s->inbuf.erase(0, 1); }
 
 // Append one read chunk to the input buffer.
 static Fill fillInput(ObjSocket* s, const char* method, IoOutcome& out) {
@@ -438,7 +435,6 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
             // Keep what arrived, so a later read does not lose it.
             io.buf.append(s->inbuf);
             s->inbuf = std::move(io.buf);
-            s->noNewlineLen = 0;
             setFault(out, kNetworkError, std::move(out.faultMessage));
             return;
         }
@@ -454,6 +450,7 @@ static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
     // the front while this call is parked, which is why the offset lives in
     // the socket and every removal lowers it.
     for (;;) {
+        s->scannedBytes += s->inbuf.size() - s->noNewlineLen;
         size_t nl = s->inbuf.find('\n', s->noNewlineLen);
         if (nl != std::string::npos) {
             std::string line = takeInput(s, nl);
