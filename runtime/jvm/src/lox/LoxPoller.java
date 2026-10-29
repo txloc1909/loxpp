@@ -64,6 +64,12 @@ final class LoxPoller {
     void addFd(LoxTask task, SelectableChannel channel, int interest)
         throws ClosedChannelException {
         SelectionKey key = channel.keyFor(selector);
+        if (key != null && !key.isValid()) {
+            // A cancelled key stays registered until a select; registering
+            // the channel again before then throws.
+            selectNow();
+            key = channel.keyFor(selector);
+        }
         if (key == null) {
             channel.register(selector, interest);
         } else {
@@ -132,6 +138,9 @@ final class LoxPoller {
 
     void wake() { selector.wakeup(); }
 
+    /** The channels the selector still holds, cancelled ones included. */
+    int keyCount() { return selector.keys().size(); }
+
     /**
      * Appends the tasks whose wait is over and removes their waits: the
      * channel waits in registration order, then the timers in deadline order.
@@ -159,6 +168,7 @@ final class LoxPoller {
             }
             fdWaits.clear();
             fdWaits.addAll(kept);
+            boolean cancelled = false;
             for (SelectableChannel channel : ready.keySet()) {
                 int interest = 0;
                 for (Wait w : fdWaits) {
@@ -166,7 +176,20 @@ final class LoxPoller {
                         interest |= w.interest;
                     }
                 }
-                channel.keyFor(selector).interestOps(interest);
+                SelectionKey key = channel.keyFor(selector);
+                if (interest == 0) {
+                    // No call waits on the channel, and the program may never
+                    // close it. The selector must not keep it.
+                    key.cancel();
+                    cancelled = true;
+                } else {
+                    key.interestOps(interest);
+                }
+            }
+            if (cancelled && fdWaits.isEmpty()) {
+                // No select follows while nothing waits, and the selector
+                // holds a cancelled key until one does.
+                selectNow();
             }
         }
         long now = System.nanoTime();
