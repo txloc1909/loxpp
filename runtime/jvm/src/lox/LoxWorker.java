@@ -308,6 +308,16 @@ final class LoxWorker {
         }
     }
 
+    /** {@link LoxPoller#keyCount} of this worker; 0 before its first park. */
+    int selectorKeyCount() {
+        LOCK.lock();
+        try {
+            return poller == null ? 0 : poller.keyCount();
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
     /** Ends a sleep in the poller without making any task ready. */
     void wakePoller() {
         LOCK.lock();
