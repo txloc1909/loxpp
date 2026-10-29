@@ -15,7 +15,8 @@ Usage:
 Point it at a file with the syntax error removed and the "one diagnostic"
 check fails on purpose -- that is checkpoint step 3.
 
-Exit code 0 when every check passes, 1 otherwise. All progress goes to
+Exit code 0 when every check passes, 1 otherwise, 2 when the server does not
+exist or cannot run. All progress goes to
 stderr; stdout is left clean.
 """
 
@@ -24,6 +25,8 @@ import json
 import subprocess
 import sys
 import threading
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 CLEAN_SOURCE = """\
 fun greet(name) {
@@ -86,12 +89,15 @@ RENAME_MATCH_URI = "file:///smoke/rename_match.lox"
 
 class LspClient:
     def __init__(self, argv):
-        self.proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        try:
+            self.proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            refuse_unrunnable(argv[0], exc)
         self._next_id = 0
         self._buf = b""
         self._diagnostics = {}
@@ -248,6 +254,8 @@ def main():
     parser.add_argument("server")
     parser.add_argument("--bad-file")
     args = parser.parse_args()
+
+    require_runner(args.server)
 
     bad_source = BAD_SOURCE
     if args.bad_file:

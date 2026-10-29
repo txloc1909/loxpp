@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from runner_precondition import refuse_unrunnable, require_runner
+
 PROBE_DIR = (
     Path(__file__).resolve().parent.parent / "test/translation-probes/bootstrap-only"
 )
@@ -38,7 +40,10 @@ TIMEOUT_SECONDS = 120
 
 
 def run(cmd: list[str]) -> tuple[bytes, int]:
-    result = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_SECONDS)
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT_SECONDS)
+    except OSError as exc:
+        refuse_unrunnable(cmd[0], exc)
     return result.stdout, result.returncode
 
 
@@ -47,6 +52,8 @@ def main() -> int:
         print(__doc__, file=sys.stderr)
         return 2
     native, other = sys.argv[1], sys.argv[2]
+    require_runner(native)
+    require_runner(other)
     programs = [Path(p) for p in sys.argv[3:]] or list(DEFAULT_PROGRAMS)
 
     failed = False

@@ -5,12 +5,16 @@ Usage: check_gc_trace.py <loxpp-binary>
 
 Runs the binary on a program that allocates enough to trigger collections,
 then checks the trace file's shape and that tools/gc_report.py reads it.
+Exit status: 0 pass, 1 fail, 2 usage error or a binary that does not exist or
+cannot run.
 """
 
 import os
 import subprocess
 import sys
 import tempfile
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -85,6 +89,8 @@ def run(binary, workdir, env_extra, unset=(), program=PROGRAM):
         )
     except subprocess.TimeoutExpired:
         fail(f"the run did not end in {TIMEOUT_S} s")
+    except OSError as exc:
+        refuse_unrunnable(binary, exc)
 
 
 def fail(msg):
@@ -134,6 +140,10 @@ def check_records(path, require_shrink=False):
 
 
 def main():
+    if len(sys.argv) != 2:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+    require_runner(sys.argv[1])
     binary = os.path.abspath(sys.argv[1])
     with tempfile.TemporaryDirectory() as d:
         trace = os.path.join(d, "gc.trace")

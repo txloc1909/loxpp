@@ -53,7 +53,7 @@ Usage:
     tools/check_compile_error_cases.py [--native PATH] [--list] [--timeout SECONDS]
 
 The default native binary is build/loxpp. Exits 0 when every check passes and
-1 otherwise.
+1 otherwise. Exits 2 when the native binary does not exist or cannot run.
 """
 
 from __future__ import annotations
@@ -67,6 +67,8 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test" / "compile-errors"
@@ -450,12 +452,15 @@ class Run:
 
 
 def run_native(native: Path, program: Path, timeout: float) -> Run:
-    result = subprocess.run(
-        [str(native), str(program)],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            [str(native), str(program)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except OSError as exc:
+        refuse_unrunnable(str(native), exc)
     return Run(result.returncode, result.stdout, result.stderr)
 
 
@@ -519,9 +524,7 @@ def main() -> None:
     args = parser.parse_args()
 
     problems: list[str] = []
-    if not args.native.is_file():
-        print(f"error: no native binary at {args.native}", file=sys.stderr)
-        sys.exit(2)
+    require_runner(str(args.native))
 
     messages = source_messages()
     trace_build = os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1"

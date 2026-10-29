@@ -50,6 +50,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from runner_precondition import refuse_unrunnable, require_runner
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SPEC_PATH = REPO_ROOT / "spec" / "04-semantics.md"
 DEFAULT_NATIVE = REPO_ROOT / "build" / "loxpp"
@@ -1240,6 +1242,8 @@ def run_row(row: Row, commands: dict[str, ConsumerCommand], workdir: Path, timeo
         except subprocess.TimeoutExpired:
             results[consumer] = RunResult(outcome="crash")
             continue
+        except OSError as exc:
+            refuse_unrunnable(command.argv[0], exc)
         results[consumer] = classify(proc.returncode, proc.stdout, proc.stderr)
     return results
 
@@ -1285,6 +1289,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     require_jvm_rt_jar(args.jvm)
+    for runner in (args.native, args.jvm, args.bootstrap):
+        require_runner(runner)
 
     commands = {
         NATIVE: ConsumerCommand(NATIVE, [args.native]),

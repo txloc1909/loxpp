@@ -9,7 +9,8 @@ LOXPP_GC_TRACE file. A sweep that shifts the object table once per freed
 object takes seconds on this program; a linear sweep takes tens of
 milliseconds. The limit sits between the two with a wide margin on both sides.
 
-Exit codes: 0 pass, 1 fail, 125 skipped (a build that traces execution prints
+Exit codes: 0 pass, 1 fail, 2 usage error or a binary that does not exist or
+cannot run, 125 skipped (a build that traces execution prints
 too much to run this program quickly).
 """
 
@@ -17,6 +18,8 @@ import os
 import subprocess
 import sys
 import tempfile
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 SWEEP_LIMIT_S = 1.0
 
@@ -47,6 +50,7 @@ def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
+    require_runner(sys.argv[1])
     if os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1":
         print("skipped: build traces execution")
         return 125
@@ -58,8 +62,11 @@ def main():
             f.write(PROGRAM)
         env = {k: v for k, v in os.environ.items() if k != "LOXPP_STRESS_GC"}
         env["LOXPP_GC_TRACE"] = trace
-        r = subprocess.run([binary, src], env=env, capture_output=True,
-                           text=True, timeout=120)
+        try:
+            r = subprocess.run([binary, src], env=env, capture_output=True,
+                               text=True, timeout=120)
+        except OSError as exc:
+            refuse_unrunnable(binary, exc)
         if r.returncode != 0:
             print(f"FAIL: exit {r.returncode}: {r.stderr[:300]}")
             return 1

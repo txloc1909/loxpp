@@ -34,6 +34,9 @@
 #
 # Usage: tools/check_file_durability.sh <runner>
 #
+# Exit status: 0 when every probe passes, 1 when one fails, 2 on a usage error
+# or a <runner> that does not exist or cannot run.
+#
 #   <runner>            runs one Lox++ program, invoked as
 #                       "<runner> program.lox", inheriting stdout/stderr.
 #                       build/loxpp, tools/loxpp_jvm.sh,
@@ -46,6 +49,17 @@ if [ "$#" -ne 1 ]; then
     exit 2
 fi
 runner="$1"
+
+# A runner that is not an executable file is a setup mistake. Exit 1 is the
+# code for a probe that failed, so it must not end there.
+if [ ! -e "$runner" ]; then
+    echo "check_file_durability.sh: error: $runner does not exist" >&2
+    exit 2
+fi
+if [ ! -f "$runner" ] || [ ! -x "$runner" ]; then
+    echo "check_file_durability.sh: error: $runner is not an executable file" >&2
+    exit 2
+fi
 
 failed_probes=()
 passed_probes=()
@@ -83,6 +97,14 @@ check_probe() {
 
     "$runner" "$program_path" >"$out" 2>"$err"
     status=$?
+
+    # 126 and 127 are the shell's codes for a command it cannot execute or
+    # find, such as a wrapper whose shebang names a missing interpreter.
+    if [ "$status" -eq 126 ] || [ "$status" -eq 127 ]; then
+        echo "check_file_durability.sh: error: $runner cannot run (exit=$status)" >&2
+        sed 's/^/  stderr: /' "$err" >&2
+        exit 2
+    fi
 
     if [ ! -f "$file_path" ]; then
         echo "check_file_durability.sh: FAIL $probe_name (no file written; runner exit=$status)" >&2

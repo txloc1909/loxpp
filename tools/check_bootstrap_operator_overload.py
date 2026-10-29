@@ -27,7 +27,7 @@ Usage:
 Exits 0 when every case's bootstrap stdout matches native's byte for byte.
 Exits 1 and prints every mismatch otherwise. Exits 125 (ctest's
 SKIP_RETURN_CODE) when --trace-enabled says the binary under test was built
-with the debug trace macros on.
+with the debug trace macros on. Exits 2 when --native or --bootstrap does not exist or cannot run.
 """
 
 import argparse
@@ -37,6 +37,8 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -354,6 +356,8 @@ def run_case(cmd: list[str], case: Case, workdir: Path, timeout: float,
         )
     except subprocess.TimeoutExpired:
         return RunResult(exit_code=-1, stdout="", stderr="", timed_out=True)
+    except OSError as exc:
+        refuse_unrunnable(cmd[0], exc)
     return RunResult(exit_code=proc.returncode, stdout=proc.stdout,
                      stderr=proc.stderr)
 
@@ -395,6 +399,9 @@ def main() -> int:
         "under test was built with LOXPP_DEBUG_TRACE_EXECUTION/LOXPP_DEBUG_PRINT_CODE on",
     )
     args = parser.parse_args()
+
+    require_runner(args.native)
+    require_runner(args.bootstrap)
 
     if args.trace_enabled:
         print("SKIP: native binary was built with debug trace macros on (release preset required)")
