@@ -28,18 +28,39 @@ Native (src/stdlib/net_api.cpp):
     from the list above or an argument check by `nativeRuntimeError(`, which
     the table counts. No other halting form has a row, so a halt in a socket
     function that is not an argument check cannot pass.
-  - A fault kind assigned in two lines (`out.faultKind` then `= "X"`) is
-    still `faultKind =` outside `setFault`, so it fails.
+  - The name `faultKind` may appear only in the member declaration, in
+    `setFault`, and as the kind argument of `raiseNet(out.faultKind` and
+    `failPark(task, out.faultKind`. So every way to write the member by its
+    name fails: `=` (also over two lines), `+=`, a pointer or reference
+    alias, `std::exchange`, `std::swap`, and a designated initializer.
+  - `IoOutcome` may be created only as `IoOutcome out;` (default
+    initialized), so a positional aggregate initializer cannot set the kind
+    without the name. The type may be named only as `struct IoOutcome`,
+    `IoOutcome::`, `IoOutcome& `, and `IoOutcome out;`.
   - Comments are blanked before anything is counted, so a site inside a
-    comment does not count.
+    comment does not count. The fatal-exit scan also blanks the text inside
+    string and character literals, so a word such as `throw` in a message
+    does not fail. The other scans read the literals, because the JVM kinds
+    are string literals.
 
 JVM (runtime/jvm/src/lox/LoxSocket.java and LoxServer.java):
   - `new LoxError(` is a halting fault. Only argument checks use it, and
     `readBytesFrom`, which Process shares.
   - `makeError("KIND"` is a catchable fault of the given kind.
   - Any other `throw` fails, so a fault cannot use another exception.
-  - `LoxRuntime.fatal`, `System.exit` and `Runtime.getRuntime().halt` fail.
-    No table row lists them.
+  - `LoxRuntime.fatal`, `System.exit`, `Runtime.getRuntime().exit` and
+    `Runtime.getRuntime().halt` fail, also with spaces or a line break around
+    the dots (`System . exit`). A bare `exit(` or `halt(` (a static import)
+    fails too. No table row lists them.
+
+Limits (the script fails with a clear message, or says here what stays open):
+  - A C++ raw string `R"(...)"` and a Java text block (three quotes) are not
+    parsed. The script fails on either one, because a `"` inside could hide a
+    later fatal exit. Use an ordinary string.
+  - Stays open: a macro that pastes the member name (`fault ## Kind`), and a
+    raw write to the bytes of an `IoOutcome` (`memcpy`). No code of the file
+    does either, and a macro or a `memcpy` in a socket function is a change a
+    reviewer sees. A line-based scan cannot see them without a C++ parser.
 
 `--self-test` edits the real sources in memory, one defect at a time, and
 fails unless each defect changes the result. It proves the rules above can fail.
@@ -115,7 +136,18 @@ JAVA_METHOD = re.compile(r"^    (?:public |private )?(?:static )?(?:final )?[\w<
 FATAL_NATIVE = re.compile(
     r"(?<![\w.])(abort|runtimeError|exit|_exit|_Exit|quick_exit|terminate|throw)\b"
 )
-FATAL_JAVA = re.compile(r"\b(LoxRuntime\.fatal|System\.exit|Runtime\.getRuntime\(\)\.halt)\b")
+# `\s*` around the dots: Java allows `System . exit` and a break before `.exit`.
+FATAL_JAVA = re.compile(
+    r"\b(LoxRuntime\s*\.\s*fatal"
+    r"|System\s*\.\s*exit"
+    r"|Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*(?:halt|exit))\b"
+    r"|(?<![\w.])(?:exit|halt)\s*\("
+)
+RAW_STRING_PREFIX = re.compile(r"(?<![A-Za-z0-9_])(?:u8|u|U|L)?R$")
+
+
+class UnsupportedSource(Exception):
+    """The source has a form that the scanner cannot read safely."""
 
 
 def strip_comments(text: str) -> str:
@@ -138,6 +170,14 @@ def strip_comments(text: str) -> str:
             out.append(re.sub(r"[^\n]", " ", text[i:end]))
             i = end
         elif c == '"' or (c == "'" and not (i and text[i - 1].isalnum())):
+            if c == '"' and RAW_STRING_PREFIX.search(text, max(0, i - 3), i):
+                raise UnsupportedSource(
+                    f"line {text.count(chr(10), 0, i) + 1}: a raw string literal "
+                    'R"(...)" is not parsed; use an ordinary string')
+            if text.startswith('"""', i):
+                raise UnsupportedSource(
+                    f"line {text.count(chr(10), 0, i) + 1}: a text block is not "
+                    "parsed; use an ordinary string")
             j = i + 1
             while j < n and text[j] != c and text[j] != "\n":
                 j += 2 if text[j] == "\\" else 1
@@ -149,19 +189,50 @@ def strip_comments(text: str) -> str:
     return "".join(out)
 
 
-def native_sites(text: str) -> tuple[Counter, list[str]]:
+def blank_literals(code: str) -> str:
+    """Blanks the text inside string and char literals of comment-free code.
+
+    The quotes and the newlines stay, so the line numbers do not move.
+    """
+    out: list[str] = []
+    i, n = 0, len(code)
+    while i < n:
+        c = code[i]
+        if c == '"' or (c == "'" and not (i and code[i - 1].isalnum())):
+            j = i + 1
+            while j < n and code[j] != c and code[j] != "\n":
+                j += 2 if code[j] == "\\" else 1
+            end = min(j, n - 1)
+            out.append(c + re.sub(r"[^\n]", " ", code[i + 1 : end]) + code[end])
+            i = end + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def scan_lines(text: str) -> tuple[list[str], list[str]]:
+    """Returns (lines with literals, lines with literals blanked)."""
+    code = strip_comments(text)
+    return code.splitlines(), blank_literals(code).splitlines()
+
+
+def native_sites(text: str) -> tuple[Counter | None, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     function = None
     function_at: dict[int, str | None] = {}
-    lines = strip_comments(text).splitlines()
+    try:
+        lines, blank = scan_lines(text)
+    except UnsupportedSource as e:
+        return None, [str(e)]
     for number, line in enumerate(lines, 1):
         if line and not line[0].isspace() and not line.startswith(("}", "#")):
             m = NATIVE_FUNCTION.match(line)
             if m:
                 function = m.group(1)
         function_at[number] = function
-        fatal = FATAL_NATIVE.search(line)
+        fatal = FATAL_NATIVE.search(blank[number - 1])
         if fatal:
             problems.append(f"line {number}: {fatal.group(1)} is a fatal exit outside the table")
         if "writeStreamOrError(" in line:
@@ -202,31 +273,52 @@ def native_sites(text: str) -> tuple[Counter, list[str]]:
                         problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
                     else:
                         sites[(function, kind)] += 1
-    # A formatter can put `=` on the line after `faultKind`, so the text is
-    # scanned whole.
+    # The text is scanned whole: a formatter can put `=` on the line after
+    # `faultKind`. Only three forms may name the member (see the docstring).
     code = "\n".join(lines)
-    for m in re.finditer(r"\bfaultKind\s*=(?!=)", code):
+    for m in re.finditer(r"\bfaultKind\b", code):
         number = code.count("\n", 0, m.start()) + 1
-        if function_at[number] != "setFault":
-            problems.append(f"line {number}: faultKind is set outside setFault")
+        before = code[: m.start()]
+        after = code[m.end() :]
+        declaration = re.search(r"\n\s*const char\* $", before) and re.match(
+            r"\{nullptr\};", after
+        )
+        kind_argument = re.search(
+            r"\b(?:raiseNet\(\s*|failPark\(\s*\w+\s*,\s*)out\.$", before
+        ) and re.match(r"\s*[,)]", after)
+        if function_at[number] != "setFault" and not declaration and not kind_argument:
+            problems.append(f"line {number}: faultKind is used outside setFault")
+    for m in re.finditer(r"\bIoOutcome\b", code):
+        number = code.count("\n", 0, m.start()) + 1
+        before = code[: m.start()]
+        after = code[m.end() :]
+        if not (
+            re.search(r"\bstruct\s+$", before)
+            or after.startswith("::")
+            or re.match(r"&\s*\w+\s*[,)]", after)
+            or re.match(r"\s+\w+;", after)
+        ):
+            problems.append(
+                f"line {number}: IoOutcome is built other than as `IoOutcome out;`"
+            )
     return sites, problems
 
 
-def java_sites(text: str) -> tuple[Counter, list[str]]:
+def java_sites(text: str) -> tuple[Counter | None, list[str]]:
     sites: Counter = Counter()
     problems: list[str] = []
     method = None
-    lines = strip_comments(text).splitlines()
+    try:
+        lines, blank = scan_lines(text)
+    except UnsupportedSource as e:
+        return None, [str(e)]
     for number, line in enumerate(lines, 1):
         m = JAVA_METHOD.match(line)
         if m:
             method = m.group(1)
         # A statement can wrap, so read the line and the next one.
         window = line + (lines[number] if number < len(lines) else "")
-        fatal = FATAL_JAVA.search(line)
-        if fatal:
-            problems.append(f"line {number}: {fatal.group(1)} is a fatal exit outside the table")
-        if re.search(r"\bthrow\b", line) and not re.search(
+        if re.search(r"\bthrow\b", blank[number - 1]) and not re.search(
             r"\bthrow (new LoxError\(|LoxOps\.makeError\()", line
         ):
             problems.append(f"line {number}: a throw other than LoxError or makeError")
@@ -238,6 +330,13 @@ def java_sites(text: str) -> tuple[Counter, list[str]]:
                 problems.append(f"line {number}: makeError names an unknown kind {m.group(1)}")
             else:
                 sites[(method, m.group(1))] += 1
+    # A call can break after any token, so the fatal exits are read from the
+    # whole text, with the text of the literals blanked.
+    whole = "\n".join(blank)
+    for m in FATAL_JAVA.finditer(whole):
+        number = whole.count("\n", 0, m.start()) + 1
+        name = re.sub(r"\s+", "", m.group(0))
+        problems.append(f"line {number}: {name} is a fatal exit outside the table")
     return sites, problems
 
 
@@ -260,7 +359,7 @@ def self_test(native: str, socket: str) -> int:
 
     def sites_and_table(parse, text: str, table: dict) -> list[str]:
         found, extra = parse(text)
-        return extra + compare("t", found, table)
+        return extra + ([] if found is None else compare("t", found, table))
 
     read_fn = "static Value socketReadlineNative(int /*argc*/, Value* args) {\n"
     java_fn = "    private void checkOpen("
@@ -277,6 +376,22 @@ def self_test(native: str, socket: str) -> int:
         ("java: LoxRuntime.fatal", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static void f() { LoxRuntime.fatal("x"); }\n', True), True),
         ("java: System.exit", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System.exit(1); }\n", True), True),
         ("java: a makeError in a comment is not counted", java_sites, SOCKET_SITES, inject(socket, java_fn, '    // throw LoxOps.makeError("NetworkError", "x");\n', True), False),
+        ("native: std::terminate", native_sites, NATIVE_SITES, inject(native, read_fn, "    std::terminate();\n"), True),
+        ("native: _exit()", native_sites, NATIVE_SITES, inject(native, read_fn, "    _exit(1);\n"), True),
+        ("native: a raw string that hides an abort()", native_sites, NATIVE_SITES, inject(native, read_fn, '    const char* a = R"(")"; abort(); const char* b = R"(")";\n'), True),
+        ("native: a fatal word inside a string is not a fatal exit", native_sites, NATIVE_SITES, inject(native, read_fn, '    const char* m = "throw, exit(1) and abort()";\n'), False),
+        ("native: faultKind through a pointer alias", native_sites, NATIVE_SITES, inject(native, read_fn, '    const char** k = &out.faultKind; *k = kNetworkError;\n'), True),
+        ("native: faultKind through std::exchange", native_sites, NATIVE_SITES, inject(native, read_fn, '    std::exchange(out.faultKind, kNetworkError);\n'), True),
+        ("native: faultKind through a positional aggregate", native_sites, NATIVE_SITES, inject(native, read_fn, '    IoOutcome made{IoOutcome::Kind::Fault, "", kNetworkError};\n'), True),
+        ("native: faultKind through a designated initializer", native_sites, NATIVE_SITES, inject(native, read_fn, '    IoOutcome made{.faultKind = kNetworkError};\n'), True),
+        ("native: faultKind with +=", native_sites, NATIVE_SITES, inject(native, read_fn, '    out.faultKind += 1;\n'), True),
+        ("java: Runtime.getRuntime().halt", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { Runtime.getRuntime().halt(1); }\n", True), True),
+        ("java: Runtime.getRuntime().exit", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { Runtime.getRuntime().exit(1); }\n", True), True),
+        ("java: System . exit with spaces", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System . exit(1); }\n", True), True),
+        ("java: System.exit after a line break", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System\n        .exit(1); }\n", True), True),
+        ("java: a bare exit( from a static import", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { exit(1); }\n", True), True),
+        ("java: a fatal word inside a string is not a fatal exit", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return "System.exit and throw"; }\n', True), False),
+        ("java: a text block", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return """\n        "\n        """; }\n', True), True),
     ]
     failed = False
     for name, parse, table, mutated, must_fail in cases:
@@ -305,7 +420,8 @@ def main() -> int:
     ):
         found, extra = parse(path.read_text(encoding="utf-8"))
         problems += [f"{label}: {p}" for p in extra]
-        problems += compare(label, found, expected)
+        if found is not None:
+            problems += compare(label, found, expected)
 
     if problems:
         print("check_net_faults.py: the fault sites differ from the table", file=sys.stderr)
