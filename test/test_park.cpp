@@ -444,7 +444,10 @@ TEST_F(ParkTest, AWaitThatIsOverIsSeenAtTheNextSwitchWhenAnIntervalPassed) {
 
 // A clock that adds 250 us per read lets four switches pass between two polls.
 TEST_F(ParkTest, AWaitThatIsOverIsSeenWithinOneIntervalOfSwitches) {
-    EXPECT_LE(switchesUntilResume(std::chrono::microseconds(250)), 2 + 4);
+    const double passes = switchesUntilResume(std::chrono::microseconds(250));
+    EXPECT_LE(passes, 2 + 4);
+    // The lower bound: the poll must not run before the interval has passed.
+    EXPECT_GE(passes, 4);
 }
 
 // epoll refuses a regular file. Such a descriptor is always ready, so the
