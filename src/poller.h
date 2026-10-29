@@ -43,7 +43,10 @@ class Poller {
     // and one-shot: the record is removed when it is reported. Returns 0, with
     // errno set, when epoll refuses the descriptor (a regular file, for one).
     // The caller must call cancelFd() before it closes `fd`.
-    Token waitFd(int fd, Interest interest);
+    // With `again` set to the token of a wait that was reported, the new wait
+    // takes that token, and so keeps the place of the first wait in every
+    // order this class reports. A call that waits more than once uses it.
+    Token waitFd(int fd, Interest interest, Token again = 0);
     // Registers a wait for `deadline`. One-shot.
     Token waitUntil(Clock::time_point deadline);
     // Removes a wait that was not reported. False when it is not there.

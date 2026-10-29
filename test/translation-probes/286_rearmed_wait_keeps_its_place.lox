@@ -1,0 +1,33 @@
+// When several waits end together, the tasks whose descriptors are ready join the
+// run queue in the order in which their calls began to wait (spec/04-semantics.md,
+// Scheduling). The call `a_in.readline()` begins to wait before the call
+// `b_in.readline()`. Only a part of a line reaches `a_in` at first, so the call
+// of `reader_a` wakes, finds no end of line, and waits again. The call began to
+// wait once, at the first wait, and the second wait is part of the same call. The
+// `driver` task then makes both connections ready in one run, so both waits end
+// together. The readers continue in the order of their calls: a, then b.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: a got ab
+// CHECK: b got B
+var srv = listen("127.0.0.1", 0);
+var a_out = connect("127.0.0.1", srv.port());
+var a_in = srv.accept();
+var b_out = connect("127.0.0.1", srv.port());
+var b_in = srv.accept();
+var me = task.self();
+fun reader_a() { print "a got " + a_in.readline(); task.send(me, "done"); }
+fun reader_b() { print "b got " + b_in.readline(); task.send(me, "done"); }
+fun driver() {
+    a_out.write("a");
+    sleep(0.05);
+    a_out.writeline("b");
+    b_out.writeline("B");
+    task.send(me, "done");
+}
+task.spawn(reader_a);
+task.spawn(reader_b);
+task.spawn(driver);
+task.receive();
+task.receive();
+task.receive();

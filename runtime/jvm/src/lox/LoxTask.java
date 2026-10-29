@@ -39,6 +39,10 @@ public final class LoxTask {
     // task of the worker runs (see LoxWorker.switchTo). A task starts below
     // its first call, as native's scheduler resumes each task from an empty
     // frame stack.
+    // The number of the first wait of the call that the task is in (see
+    // LoxPoller.addFd); 0 before the first wait of a call.
+    long waitSeq;
+
     int savedFrameCount;
     int savedHandlerDepth;
 

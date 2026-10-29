@@ -49,6 +49,7 @@ public final class LoxServer {
     }
 
     public Object accept() {
+        LoxWorker.beginWaitingCall();
         for (;;) {
             if (server == null) {
                 throw LoxOps.makeError("SocketClosedError",

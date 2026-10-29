@@ -309,6 +309,7 @@ each has an off-the-shelf solution.
 | `283_sleep_without_wait_returns_at_once` | `sleep(0)` and a `sleep` of a negative duration return at once with no suspension: no other task of the worker runs first (spec/05-stdlib.md, `sleep`) — a spec probe | none (spec probe) |
 | `284_coroutine_with_parked_call_stays_running` | a coroutine whose function waits in `readline` keeps the status `"running"`, and a resume of it from another task raises `RunningCoroutineError` (spec/04-semantics.md, `co.status`) — a spec probe | none (spec probe) |
 | `285_no_deferred_call_runs_while_parked` | no deferred call of a task runs while the task waits in `readline`; it runs when the function returns (spec/04-semantics.md, Suspend Points) — a spec probe; the bootstrap interpreter fails it because of a defect (#984), so its `NOT-BINDING` line exempts it from the bootstrap gate; no probe checks this behavior in its place | none (spec probe) |
+| `286_rearmed_wait_keeps_its_place` | a call that waits again after a partial chunk began to wait at its first wait: when its descriptor and a later call's descriptor become ready together, the earlier call continues first (spec/04-semantics.md, Scheduling) — a spec probe | none (spec probe) |
 | `bootstrap-only/same_worker_blocking_call` | the bootstrap interpreter runs every worker on one host thread, so a task that sleeps keeps a task of the same worker from running until the sleep ends (spec/README.md, Conformance: scheduling is implementation-defined) — a spec probe that only the bootstrap gate runs; the `NOT-BINDING` lines of probes 260, 279, and 282 name it | none (spec probe) |
 | `bootstrap-only/cpu_bound_work_blocks_all_workers` | the bootstrap interpreter runs every worker on one host thread, so a task that computes without a suspend point also stops every task of every other worker (spec/README.md, Conformance: scheduling is implementation-defined); probes 95 and 96 do not bind the bootstrap, and this probe checks the bootstrap's own choice in their place — a spec probe that only the bootstrap gate runs | none (spec probe) |
 | `bootstrap-only/stdout_no_trailing_newline` | the last bytes that a program writes to stdout have no newline after them: the bootstrap wrapper must pass them on (issue #634), also when the interpreter runs on the JVM backend (issue #654); `check_spec_probes.py` and the CI NUL-probe steps run it, and the JVM and QBE bootstrap-wrapper gates run it too. It stays in `bootstrap-only/` because it pins the wrapper's stdout filter, not backend semantics | none (parity gate) |
@@ -405,7 +406,7 @@ tests, and `tree-sitter.txt` for the tree-sitter parse of the corpus in CI. The
 C++ tests that compile every probe (`test/corpus.h`) leave out the probes in
 `native.txt`.
 
-No consumer has a list file now. The probes `260` to `267`, `278` to `282`, `284`, and `285` are the
+No consumer has a list file now. The probes `260` to `267`, `278` to `282`, and `284` to `286` are the
 probes of the rule that a call which waits for the network or for time suspends only its task
 (`docs/decisions/blocking-call-suspension.md`), and the native VM, the JVM backend, and the QBE backend pass them all. The bootstrap interpreter
 has no file. Its `sleep` blocks every task, so probes `260`, `279`, and `282` (which wait in `sleep`)
@@ -420,7 +421,7 @@ second edit there. A new list file for a consumer other than these three needs
 two edits: pass `--xfail` in that consumer's CI step, and make the same change in its scope in
 `.pi/extensions/lib/gate-scopes.ts`, which copies the CI command text.
 
-The probes `260` to `285` are the spec probes of that rule. Each carries
+The probes `260` to `286` are the spec probes of that rule. Each carries
 `// COVERS: suspend-call <call> in <function>`, `// COVERS: suspend-context <slug>`, or
 `// COVERS: blocks-call <call> in <function>` lines, which `tools/check_blocking_decision_tables.py`
 reads: every call of class `suspends` (the call must sit in the named function of the probe), every context where a task cannot suspend,

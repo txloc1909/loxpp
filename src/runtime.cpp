@@ -1163,7 +1163,8 @@ void Runtime::rearmPark(ObjTask* task, int fd) {
     const auto interest = task->parkReason == ParkReason::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
-    const Poller::Token token = poller().waitFd(fd, interest);
+    // The call began to wait at its first wait, so it keeps that token.
+    const Poller::Token token = poller().waitFd(fd, interest, task->parkToken);
     if (token == 0) {
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
