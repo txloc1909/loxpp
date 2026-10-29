@@ -904,6 +904,10 @@ class Runtime {
     // one wait of the poller reported, in the order the Poller gives them.
     // The scheduler looks at its run queue again after the call returns.
     using PollHandler = std::function<void(const std::vector<Poller::Token>&)>;
+    // The clock that paces pollWhileBusy. A test replaces it to control the
+    // time the scheduler sees.
+    using SchedulerClock = Poller::Clock::time_point (*)();
+    void setSchedulerClock(SchedulerClock clock) { m_schedulerClock = clock; }
     void setPollHandler(PollHandler handler) {
         m_pollHandler = std::move(handler);
     }
@@ -1026,8 +1030,8 @@ class Runtime {
     // Cancels the wait of a parked task and erases it from the parked set.
     // No-op for a task that is not parked.
     void releasePark(ObjTask* task);
-    // Looks at the poller without blocking, at a bounded rate, between two
-    // tasks of a busy worker.
+    // Looks at the poller without blocking, at most once per millisecond,
+    // between two tasks of a busy worker.
     void pollWhileBusy();
     // Moves a PARKED task to the back of the run queue.
     void unparkTask(ObjTask* task);
@@ -1367,8 +1371,8 @@ class Runtime {
         std::string message;
     };
     ResumeFault m_resumeFault;
-    int m_switchesSincePoll{0};
     Poller::Clock::time_point m_lastPoll{};
+    SchedulerClock m_schedulerClock{&Poller::Clock::now};
     // Tasks of this run that have not ended, the main task included.
     int m_liveTasks{0};
     std::uint64_t m_nextTaskSerial{0};
