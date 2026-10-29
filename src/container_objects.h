@@ -99,8 +99,9 @@ struct ObjSocket : public Obj {
     // are never split by the bytes of another. An entry can be stale (its task
     // no longer waits here); the owner of the queue checks before it uses one.
     // GC-tracked, so a stale entry never dangles. The queue is allocated at
-    // the first park: a deque costs about 600 bytes, and most sockets never
-    // wait to write. Access it only through the members below.
+    // the first park: a Socket without the queue is about 480 bytes smaller,
+    // and most sockets never wait to write. Access it only through the members
+    // below.
     std::unique_ptr<std::deque<ObjTask*>> writers;
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
@@ -115,6 +116,7 @@ struct ObjSocket : public Obj {
     ~ObjSocket() override;
 
     bool hasWriters() const { return writers && !writers->empty(); }
+    // True once the first park allocated the queue; a test reads it.
     bool hasWriterQueue() const { return writers != nullptr; }
     ObjTask* frontWriter() const { return writers->front(); }
     void popWriter() { writers->pop_front(); }

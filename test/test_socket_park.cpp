@@ -1593,3 +1593,91 @@ TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoLiveWriter) {
         << (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
     EXPECT_EQ(WEXITSTATUS(status), 0) << "failed check " << WEXITSTATUS(status);
 }
+
+// ---------------------------------------------------------------------------
+// What a closed socket keeps of its writer queue.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A program that parks two writers on `c` (the peer never reads) and then runs
+// `ending`. The queue is read after the program, so the checks below see what
+// the end of a call leaves behind, not what the program does next.
+void runWithParkedWriters(const std::string& ending, VM& vm) {
+    HostListener host;
+    std::atomic<bool> release{false};
+    std::thread peer([&] {
+        int fd = host.accept();
+        while (!release.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        close(fd);
+    });
+    InterpretResult result = vm.interpret(connectToHost(host) + R"(
+        var big = "x";
+        var i = 0;
+        while (i < 26) { big = big + big; i = i + 1; }
+        var me = task.self();
+        fun w1() { try { c.write(big); } catch (e) { } task.send(me, 1); }
+        fun w2() { try { c.writeline(big); } catch (e) { } task.send(me, 1); }
+        task.spawn(w1); task.spawn(w2);
+        sleep(0.2);
+    )" + ending + R"(
+        task.receive(); task.receive();
+    )");
+    release = true;
+    peer.join();
+    ASSERT_EQ(result, InterpretResult::OK);
+}
+
+ObjSocket* globalSocket(const VM& vm, const std::string& name) {
+    auto v = vm.getGlobal(name);
+    return v.has_value() && isSocket(*v) ? asObjSocket(as<Obj*>(*v)) : nullptr;
+}
+
+} // namespace
+
+// A close fails the parked writers and drops its queue. The failed tasks end,
+// and a queue that kept them would hold them for as long as the Socket lives.
+TEST_F(SocketParkTest, ACloseLeavesNoWriterInTheQueue) {
+    VM vm;
+    runWithParkedWriters("c.close();", vm);
+    ObjSocket* c = globalSocket(vm, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->fd, -1);
+    EXPECT_FALSE(c->hasWriters());
+}
+
+// close_write fails the parked writers at once; the socket stays open and the
+// queue must not still list them.
+TEST_F(SocketParkTest, CloseWriteLeavesNoWriterInTheQueue) {
+    VM vm;
+    runWithParkedWriters("c.close_write();", vm);
+    ObjSocket* c = globalSocket(vm, "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_GE(c->fd, 0);
+    EXPECT_FALSE(c->hasWriters());
+}
+
+// A queued task that nothing else holds is a stale entry: its call ended and
+// the scheduler dropped it. The collector must reach it through the Socket,
+// or the entry dangles when the next write reads it.
+TEST_F(SocketParkTest, ATaskHeldOnlyByTheWriterQueueSurvivesACollection) {
+    MemoryManager mm;
+    auto* sock = mm.create<ObjSocket>(nullptr);
+    mm.pushTempRoot(sock);
+    const std::size_t withSocket = mm.bytesAllocated;
+    auto* task = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    sock->pushWriter(task);
+    const std::size_t withTask = mm.bytesAllocated;
+    ASSERT_GT(withTask, withSocket);
+
+    mm.collectGarbage();
+    EXPECT_EQ(mm.bytesAllocated, withTask);
+
+    // The same task with no entry in the queue is garbage.
+    sock->clearWriters();
+    mm.collectGarbage();
+    EXPECT_EQ(mm.bytesAllocated, withSocket);
+    mm.popTempRoot();
+}
