@@ -421,6 +421,14 @@ if(LOXPP_PYTHON3)
     add_test(NAME RunnerPrecondition
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_runner_precondition.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    # Issue #895: benchmarks/run.py compares every backend with a pinned
+    # checksum, so a value that is wrong on every backend fails, and a program
+    # with no pinned value is refused before any launch. The checker drives
+    # run.py with stub backends, so it needs no built binary.
+    add_test(NAME BenchmarkExpectedChecksum
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_benchmark_expected.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
 # The *_gc targets share their source with a non-_gc twin. They run under GC
