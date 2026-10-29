@@ -1344,6 +1344,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
 }
 
 bool Runtime::sendMessage(ObjTask* task, Value msg) {
+    m_mm.noteMessageNode();
     if (task->heapId == m_mm.heapId()) {
         deliverMessage(task, msg);
         return true;
@@ -1527,6 +1528,7 @@ void Runtime::drainInbox() {
         }
         // From here the receiver keeps the value that receiveMessage
         // returns; the sender's object may be gone once its count dropped.
+        m_mm.noteMessageNode();
         env.msg = m_mm.receiveMessage(env.msg);
         deliverMessage(env.target, env.msg);
     }
@@ -1813,6 +1815,7 @@ ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     // and one for the message on its way to the new worker.
     heap->hold(task);
     m_mm.adoptForeign(task);
+    m_mm.noteMessageNode();
     MemoryManager::holdValue(msg);
     {
         std::lock_guard<std::mutex> lock(heap->inbox().mutex);
@@ -1849,6 +1852,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     m_mainTask = task;
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
+    m_mm.noteMessageNode();
     task->startArg = m_mm.receiveMessage(msg);
     task->hasStartArg = true;
 

@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <dirent.h>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -589,26 +590,58 @@ TEST_F(WorkerTest, TwoWorkersExchangeManyMessages) {
     EXPECT_EQ(globalString(vm, "ok"), std::to_string(count));
 }
 
-// The bytes allocated on the heap of a task. The caller reads a worker's heap
-// only while that worker waits in receive, after a reply it sent: the reply
-// orders the worker's allocations before the read.
+// A worker writes its heap and its counters only while it runs. The inbox
+// lock orders the worker's last writes before the read of a caller that takes
+// it after the worker went idle, and the worker cannot run again before the
+// caller drops it. The heap of the calling worker needs no lock. The wait
+// only ends a hang: it is far above any loaded time.
+std::unique_lock<std::mutex> lockIdleHeap(MemoryManager* heap) {
+    if (heap == &getActiveRuntime()->memoryManager()) {
+        return {};
+    }
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    for (;;) {
+        std::unique_lock<std::mutex> lock(heap->inbox().mutex);
+        if (heap->inbox().idle || std::chrono::steady_clock::now() > end) {
+            return lock;
+        }
+        lock.unlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+// The bytes allocated on the heap of a task, read as lockIdleHeap allows.
 Value heapBytesNative(int /*argc*/, Value* argv) {
     ObjTask* t = asObjTask(as<Obj*>(argv[0]));
     MemoryManager* heap = heapById(t->heapId);
+    auto lock = lockIdleHeap(heap);
     return from<Number>(static_cast<Number>(heap->bytesAllocated));
+}
+
+// The nodes of a message that the send and receive path of a task's heap
+// visited, read as lockIdleHeap allows.
+Value messageNodesNative(int /*argc*/, Value* argv) {
+    ObjTask* t = asObjTask(as<Obj*>(argv[0]));
+    MemoryManager* heap = heapById(t->heapId);
+    auto lock = lockIdleHeap(heap);
+    return from<Number>(static_cast<Number>(heap->messageNodesVisited()));
 }
 
 // A send hands over the message without copying it. A copy would allocate in
 // proportion to the message size, on the sending heap or, at the drain, on
 // the receiving heap. The test counts the bytes allocated on both heaps over
 // many sends and never reads a clock, so the load of the host cannot change
-// the result. It does not see a copy into memory that no heap tracks.
+// the result. A copy into memory that no heap tracks is invisible to those
+// byte counts, so the test also reads the count of message nodes that the
+// path visited: a walk of the graph would make it grow with the message.
 TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
     if (stressGC()) {
         GTEST_SKIP() << "GC stress collects at every allocation";
     }
     VM vm;
     vm.runtime().defineNative("heap_bytes", heapBytesNative, 1);
+    vm.runtime().defineNative("message_nodes", messageNodesNative, 1);
     ASSERT_EQ(vm.interpret(R"(
         enum List { Empty Cons(head, tail) }
         fun build(n) {
@@ -629,13 +662,19 @@ TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
             task.receive();
             var sentBefore = heap_bytes(task.self());
             var receivedBefore = heap_bytes(w);
+            var sentNodesBefore = message_nodes(task.self());
+            var receivedNodesBefore = message_nodes(w);
             for (var i = 0; i < count; i = i + 1) task.send(w, msg);
             var sentAfter = heap_bytes(task.self());
+            var sentNodesAfter = message_nodes(task.self());
             task.send(w, "mark");
             task.receive();
             var receivedAfter = heap_bytes(w);
+            var receivedNodesAfter = message_nodes(w);
             return [(sentAfter - sentBefore) / count,
-                    (receivedAfter - receivedBefore) / count];
+                    (receivedAfter - receivedBefore) / count,
+                    (sentNodesAfter - sentNodesBefore) / count,
+                    (receivedNodesAfter - receivedNodesBefore) / count];
         }
         var count = 300;
         var small = bytesPerSend(build(100), count);
@@ -644,6 +683,10 @@ TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
         var receivedSmall = small[1];
         var sentLarge = large[0];
         var receivedLarge = large[1];
+        var sentNodesSmall = small[2];
+        var receivedNodesSmall = small[3];
+        var sentNodesLarge = large[2];
+        var receivedNodesLarge = large[3];
     )"),
               InterpretResult::OK);
 
@@ -656,6 +699,23 @@ TEST_F(WorkerTest, SendDoesNotAllocateInProportionToTheMessageSize) {
         ASSERT_TRUE(v.has_value() && is<Number>(*v)) << name;
         EXPECT_LT(as<Number>(*v), 100.0)
             << name << " allocated " << as<Number>(*v) << " bytes per send";
+    }
+
+    // Each send visits the root of the message and each receive does the
+    // same, once. The receiving count has one more message in it (the mark
+    // that ends the window), so it is a little above one. A walk of the graph
+    // would give 100 and 1000 nodes per send for the two sizes.
+    auto number = [&](const char* name) {
+        auto v = vm.getGlobal(name);
+        return v.has_value() && is<Number>(*v) ? as<Number>(*v) : -1.0;
+    };
+    EXPECT_EQ(number("sentNodesSmall"), number("sentNodesLarge"));
+    EXPECT_EQ(number("receivedNodesSmall"), number("receivedNodesLarge"));
+    for (const char* name : {"sentNodesSmall", "sentNodesLarge",
+                             "receivedNodesSmall", "receivedNodesLarge"}) {
+        EXPECT_GT(number(name), 0.0) << name;
+        EXPECT_LT(number(name), 2.0)
+            << name << " visited " << number(name) << " nodes per send";
     }
 }
 

@@ -90,6 +90,17 @@ class MemoryManager : public VmAllocBase {
         return m_collectionCount;
     }
 
+    // The nodes of a message graph that the send and receive path of this
+    // heap visited. That path hands over the root object only, so the count
+    // per message must not depend on the size of the message. Code that walks
+    // the graph of a message on this path calls noteMessageNode() for each
+    // node it visits. Only the owner thread writes the count; a test reads it
+    // after a reply that orders the read, as it does bytesAllocated.
+    void noteMessageNode() { ++m_messageNodes; }
+    [[nodiscard]] std::size_t messageNodesVisited() const {
+        return m_messageNodes;
+    }
+
     // --- Workers (docs/decisions/concurrency-model-decision.md, "Lifetime
     // across workers") ---------------------------------------------------
     //
@@ -193,6 +204,7 @@ class MemoryManager : public VmAllocBase {
     static constexpr int GC_HEAP_GROW_FACTOR = 2;
     std::size_t m_nextGC{kMinHeap};
     std::size_t m_collectionCount{0};
+    std::size_t m_messageNodes{0};
 
     int m_workerNumber{0};
     std::uint16_t m_heapId{0};
