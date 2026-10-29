@@ -362,20 +362,26 @@ TEST_F(ParkTest, TheEndOfTheProgramAbandonsParkedTasksAndTheirWaits) {
 // A task that is ready does not starve a wait that is over: two tasks pass a
 // message to each other for as long as the program lets them, and the
 // sleeper still wakes while they do it. `seen` is read when the passing
-// ends, before the queue runs empty and the sleeper could wake by that.
+// ends, before the queue runs empty and the sleeper could wake by that. The
+// passing stops after a count of messages, not after a time: the sleeper needs
+// 20 ms of real time, a message takes more than 100 ns even in a release build
+// (about 190 ns), so 2 million messages take more than 200 ms. A slower host
+// needs fewer messages for the same time, so the count cannot fail a correct
+// build.
 TEST_F(ParkTest, ARunnableTaskDoesNotStarveASleeper) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var me = task.self();
         var woke = false;
         var seen = false;
-        var begin = time();
-        fun sleeper() { sleep(0.2); woke = true; }
+        var passed = 0;
+        fun sleeper() { sleep(0.02); woke = true; }
         fun player(other) {
             while (true) {
                 var m = task.receive();
                 if (m == "stop") { task.send(me, "done"); return; }
-                if (woke or time() - begin >= 3) {
+                passed = passed + 1;
+                if (woke or passed >= 2000000) {
                     seen = woke;
                     task.send(other, "stop");
                     task.send(me, "done");

@@ -110,6 +110,9 @@ struct ObjSocket : public Obj {
     // `inbuf` must lower it by the bytes removed (not below zero), and an
     // insertion at the front must set it to zero.
     size_t noNewlineLen = 0;
+    // The bytes that readline has searched for a newline, counted so a test
+    // can see the cost of a line that arrives in pieces.
+    size_t scannedBytes = 0;
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;

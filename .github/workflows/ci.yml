@@ -559,8 +559,9 @@ jobs:
       # The spec probes of test/translation-probes/ (the files with a STATUS
       # line), against the stdout the spec defines. A consumer that cannot pass
       # a probe yet lists it in an expected-failure file under
-      # tools/spec-probe-xfail/ and passes --xfail (the differential steps read
-      # the native file as --oracle-xfail). Each step names its file even
+      # tools/spec-probe-xfail/ and passes --xfail. The differential steps
+      # pass neither --xfail nor --oracle-xfail, so a list gates only through
+      # its own spec-probe step. Each step names its file even
       # while the file is absent, so a file added later is gated at once. The
       # bootstrap interpreter uses NOT-BINDING lines instead of a file.
       # Release only: the debug preset's instruction trace floods stdout (see

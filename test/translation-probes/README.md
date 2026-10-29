@@ -395,8 +395,9 @@ QBE bootstrap wrappers (issue #654).
 A consumer that does not pass a probe yet lists it in
 `tools/spec-probe-xfail/<consumer>.txt` (for example `native` or `qbe`),
 and its gate passes that file with `--xfail`: a listed probe must fail, and a
-listed probe that passes fails the gate until its line is deleted. A differential
-step also passes native's file as `--oracle-xfail`, so a backend that passes a
+listed probe that passes fails the gate until its line is deleted.
+`tools/diff_runtimes.py` also accepts `--xfail` and `--oracle-xfail` (native's file),
+but no CI step passes them. With both, a backend that passes a
 probe before native does is not a divergence. That needs the oracle entry: a
 consumer entry whose probe the consumer passes while native fails it is a
 divergence, because the consumer's line is stale and no entry explains native's
@@ -417,9 +418,13 @@ An absent file is an empty list, so a consumer with no gap needs no
 file, and a node that finds a gap creates the file it needs. The spec-probe
 steps of `.github/workflows/ci.yml` for native, JVM, and QBE already pass
 `--xfail tools/spec-probe-xfail/<consumer>.txt`, so a new file is gated with no
-second edit there. A new list file for a consumer other than these three needs
-two edits: pass `--xfail` in that consumer's CI step, and make the same change in its scope in
-`.pi/extensions/lib/gate-scopes.ts`, which copies the CI command text.
+second edit there. A new list file for another consumer needs a reader, and the reader
+depends on the consumer. The `tooling` list needs no edit: `test/corpus.h` reads
+`tools/spec-probe-xfail/tooling.txt` for the tooling parser and resolver tests. The
+`tree-sitter` list needs no edit either: the tree-sitter step of
+`.github/workflows/ci.yml` reads `tools/spec-probe-xfail/tree-sitter.txt` when the file exists.
+Any other consumer needs two edits: pass `--xfail` in that consumer's CI step, and make the same
+change in its scope in `.pi/extensions/lib/gate-scopes.ts`, which copies the CI command text.
 
 The probes `260` to `286` are the spec probes of that rule. Each carries
 `// COVERS: suspend-call <call> in <function>`, `// COVERS: suspend-context <slug>`, or

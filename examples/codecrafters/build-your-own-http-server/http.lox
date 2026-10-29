@@ -498,12 +498,22 @@ fun main() {
     }
     var directory = directoryFromArgs();
     var server = listen("0.0.0.0", portFromEnv());
+    // A fault of accept() that does not go away would print every 20 ms, so
+    // the first one is the only one printed.
+    var acceptFaultPrinted = false;
     while (true) {
         try {
             var conn = server.accept();
             spawnServe(conn, directory);
         } catch (e) {
             // Out of descriptors, for example. Wait for open connections to close.
+            if (!acceptFaultPrinted) {
+                acceptFaultPrinted = true;
+                try {
+                    print "accept fault: " + e.message;
+                } catch (ignored) {
+                }
+            }
             sleep(0.02);
         }
     }
