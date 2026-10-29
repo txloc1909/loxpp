@@ -76,6 +76,15 @@ cmake --build build-profile --target loxpp
 tools/build_lox_rt.sh
 ```
 
+## Task switch cost
+
+`benchmarks/task_ping_pong.lox` sends messages between two tasks, 1,000,000
+task switches with no park. `benchmarks/task_switch_cost.sh BINARY_A [BINARY_B]`
+runs it on one or two release builds in alternating runs on one pinned core,
+and prints the median user plus system CPU time and the ns per task switch.
+`benchmarks/coroutine_cost.sh` does the same for the cost of a coroutine yield
+and the size of a suspended coroutine.
+
 ## GC pause latency
 
 `latency/gc_latency.lox` measures the pause a collection adds to a program.

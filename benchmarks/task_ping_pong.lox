@@ -1,9 +1,10 @@
 // Pure message ping-pong between two tasks: 1,000,000 task switches, no park.
-// It measures the cost of one task switch. Compare two release builds
-// (A B A B, 15 runs or more, one pinned CPU) and read the user CPU time:
+// It measures the cost of one task switch. benchmarks/task_switch_cost.sh runs
+// it: it alternates the runs of two release builds on one pinned core and
+// reads the user plus system CPU time. By hand:
 //   taskset -c 3 build/loxpp benchmarks/task_ping_pong.lox
-// Instruction counts are more stable than time: count the user instructions
-// of the same command with `perf stat -e instructions:u`.
+// Wall time is noisy and no instruction counter is in the dev image, so use
+// 15 runs or more of each build and compare the medians.
 var N = 500000;
 var main = task.self();
 fun echo() {
