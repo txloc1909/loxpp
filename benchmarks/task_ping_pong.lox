@@ -1,0 +1,24 @@
+// Pure message ping-pong between two tasks: 1,000,000 task switches, no park.
+// It measures the cost of one task switch. Compare two release builds
+// (A B A B, 15 runs or more, one pinned CPU) and read the user CPU time:
+//   taskset -c 3 build/loxpp benchmarks/task_ping_pong.lox
+// Instruction counts are more stable than time: count the user instructions
+// of the same command with `perf stat -e instructions:u`.
+var N = 500000;
+var main = task.self();
+fun echo() {
+    var i = 0;
+    while (i < N) {
+        var m = task.receive();
+        task.send(main, m);
+        i = i + 1;
+    }
+}
+var t = task.spawn(echo);
+var i = 0;
+while (i < N) {
+    task.send(t, i);
+    task.receive();
+    i = i + 1;
+}
+print "done";

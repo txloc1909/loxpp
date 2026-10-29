@@ -1425,7 +1425,12 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
     m_currentTask = nullptr;
-    m_resumeFault = ResumeFault{};
+    // A fault the resumed coroutine did not raise must not reach the next
+    // resume. The reset is conditional because it builds and moves two
+    // strings, which a task switch that raised no fault should not pay for.
+    if (m_resumeFault.pending) {
+        m_resumeFault = ResumeFault{};
+    }
 
     if (!ok) {
         endTaskOrLine(task);
