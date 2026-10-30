@@ -2654,6 +2654,24 @@ fun blockingSleep(seconds) {
     return nil;
 }
 
+// The calls of class `suspends` in spec/05-stdlib.md, "Blocking calls", that
+// this file reaches through a host native, by the qualified name that table
+// uses. A call on this list parks its host task, so the host runs the other
+// interpreted tasks while it waits, and the caller must run it through
+// Interpreter.saveHostSuspendState/restoreHostSuspendState.
+//
+// `sleep` is absent because blockingSleep above blocks this one-thread
+// implementation instead of suspending (spec/README.md, Conformance), so no
+// other task runs during it and no per-task state needs saving.
+// tools/check_bootstrap_suspend_calls.py holds this list to the spec table.
+fun isSuspendingHostCall(name) {
+    if (name == "connect") return true;
+    if (name == "Socket.read" or name == "Socket.read_bytes" or
+        name == "Socket.readline" or name == "Socket.readlines" or
+        name == "Socket.write" or name == "Socket.writeline") return true;
+    return name == "Server.accept";
+}
+
 // True when v is a Function or a BoundMethod, the exact set type() reports as
 // "Function" or "BoundMethod" (see reflectTypeName above). coroutine.create
 // and task.spawn accept exactly this set: a closure, a native, a math
@@ -2818,6 +2836,23 @@ class LoxNative {
         this.name   = name;
         this.loxTag = "native";
     }
+    // `connect` is the one host native of this class that this file runs
+    // through the park path: `sleep` is classed `suspends` too, but
+    // blockingSleep blocks this one thread instead, so isSuspendingHostCall
+    // leaves it out.
+    call(interp, args) {
+        if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);
+        var saved = interp.saveHostSuspendState();
+        var result = nil;
+        try {
+            result = this.dispatch(interp, args);
+        } catch (e) {
+            interp.restoreHostSuspendState(saved);
+            throw e;
+        }
+        interp.restoreHostSuspendState(saved);
+        return result;
+    }
     arity() {
         if (this.name == "clock" or this.name == "input" or
             this.name == "args" or this.name == "time") return 0;
@@ -2834,7 +2869,7 @@ class LoxNative {
             this.name == "is_file" or this.name == "stat") return 1;
         return 1;
     }
-    call(interp, args) {
+    dispatch(interp, args) {
         if (this.name == "clock") return clock();
         if (this.name == "input") return input();
         if (this.name == "ord") return ord(args[0]);
@@ -3223,11 +3258,23 @@ class InterpSocketMethod {
         return 1;
     }
     call(interp, args) {
+        if (!isSuspendingHostCall("Socket." + this.name)) {
+            try {
+                return this.hostCall(args);
+            } catch (e) {
+                return hostNetFault(interp, e);
+            }
+        }
+        var saved = interp.saveHostSuspendState();
+        var result = nil;
         try {
-            return this.hostCall(args);
+            result = this.hostCall(args);
         } catch (e) {
+            interp.restoreHostSuspendState(saved);
             return hostNetFault(interp, e);
         }
+        interp.restoreHostSuspendState(saved);
+        return result;
     }
     hostCall(args) {
         if (this.name == "read")      return this.socket.handle.read();
@@ -3265,11 +3312,23 @@ class InterpServerMethod {
     }
     arity() { return 0; }
     call(interp, args) {
+        if (!isSuspendingHostCall("Server." + this.name)) {
+            try {
+                return this.hostCall();
+            } catch (e) {
+                return hostNetFault(interp, e);
+            }
+        }
+        var saved = interp.saveHostSuspendState();
+        var result = nil;
         try {
-            return this.hostCall();
+            result = this.hostCall();
         } catch (e) {
+            interp.restoreHostSuspendState(saved);
             return hostNetFault(interp, e);
         }
+        interp.restoreHostSuspendState(saved);
+        return result;
     }
     hostCall() {
         if (this.name == "accept") return InterpSocket(this.server.handle.accept());
@@ -3646,6 +3705,29 @@ class Interpreter {
         t.savedNativeDepth    = this.nativeDepth;
         t.savedTryDepth       = this.tryDepth;
         t.savedCo             = this.currentCo;
+    }
+
+    // A call of class `suspends` (spec/05-stdlib.md, "Blocking calls") parks
+    // this host task. The host then runs the other interpreted tasks on its one
+    // thread, and each of them overwrites the per-task state below as it runs,
+    // so nothing puts this task's own back when its native call returns: that
+    // return lands in the caller of this method, not in parkTask's caller.
+    // The caller therefore keeps the saved list in its own frame, which belongs
+    // to this host task and so survives the park.
+    saveHostSuspendState() {
+        return [this.currentTask, this.globals, this.pendingDefers,
+                this.stringifyDepth, this.nativeDepth, this.tryDepth,
+                this.currentCo];
+    }
+
+    restoreHostSuspendState(saved) {
+        this.currentTask    = saved[0];
+        this.globals        = saved[1];
+        this.pendingDefers  = saved[2];
+        this.stringifyDepth = saved[3];
+        this.nativeDepth    = saved[4];
+        this.tryDepth       = saved[5];
+        this.currentCo      = saved[6];
     }
 
     unparkTask(t) {

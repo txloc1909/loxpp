@@ -334,6 +334,55 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Issue #984: a task that parks in a call of class `suspends` keeps its
+    # pending deferred calls, so it runs them when its function returns. The
+    # bootstrap lost them because every other interpreted task overwrote its
+    # per-task state while it waited. Probe 285 pins it in the shared
+    # spec-probe gate; this runs the same differential comparison in ctest.
+    # Same trace-noise constraint as BootstrapOperatorOverload above.
+    add_test(NAME BootstrapDeferAfterPark
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
+                $<TARGET_FILE:loxpp>
+                ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/285_no_deferred_call_runs_while_parked.lox
+                --skip-on-trace
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapDeferAfterPark PROPERTIES
+        ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # Issue #984: a call of class `suspends` parks its host task, so the
+    # bootstrap must run it through Interpreter.saveHostSuspendState. This
+    # holds isSuspendingHostCall's list to the `suspends` rows of
+    # spec/05-stdlib.md's Blocking calls table, both ways, so a call added to
+    # one side cannot be missing from the other, and it requires each of the
+    # three dispatch sites to hold its own guard line, negation included. It
+    # reads no program, so the trace-noise constraint of
+    # BootstrapOperatorOverload does not apply.
+    add_test(NAME BootstrapSuspendCalls
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_suspend_calls.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    # Issue #984: the review of PR #983 found that the bootstrap lost a task's
+    # deferred call when the task resumed after a socket park. One case here
+    # runs per field of the per-task state the park overwrites, plus one for the
+    # Socket class, one for the Server class, and one for the restore on the
+    # fault path of each of those two classes. Nine cases compare against
+    # native; the `nativeDepth` and `stringifyDepth` cases compare against the
+    # bootstrap itself, because native blocks the worker there and never
+    # returns (issue #1008). Then a mutation of the bootstrap changes the line
+    # that one case pins, and that case must fail, so every saved field and
+    # every restore on the fault path needs a case that catches it. Release
+    # build only: the comparison needs an untraced stdout.
+    add_test(NAME BootstrapParkState
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
+                --native $<TARGET_FILE:loxpp>
+                --interpreter ${PROJECT_SOURCE_DIR}/bootstrap/loxpp_interpreter.lox
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapParkState PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issues #674, #707: a property read of a List method that is not a direct
     # call is a halting fault on every consumer. Probes 118 and 119 pin it in
     # the shared spec-probe gate; this runs the same differential comparison

@@ -2,14 +2,8 @@
 // suspends (spec/04-semantics.md, Suspend Points). `worker` defers a call and
 // then waits in readline(). `checker` of the same worker prints, then sends the
 // line. The deferred call runs only when `worker` returns, after the line.
-// The bootstrap interpreter fails this probe because of a defect, not because
-// of a scheduling choice: its output stops after `got line` and has no
-// `deferred ran` line (#984). The NOT-BINDING line only exempts the probe from
-// the bootstrap gate until #984 is done. The probe it names checks `sleep` and
-// does not check this behavior.
 // STATUS: ok
 // TIMEOUT: 10
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: before
 // CHECK: checker ran
 // CHECK: got line
