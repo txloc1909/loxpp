@@ -355,20 +355,23 @@ if(LOXPP_PYTHON3)
     # bootstrap must run it through Interpreter.saveHostSuspendState. This
     # holds isSuspendingHostCall's list to the `suspends` rows of
     # spec/05-stdlib.md's Blocking calls table, both ways, so a call added to
-    # one side cannot be missing from the other, and requires each of the
-    # three dispatch sites to consult the list. It reads no program, so the
-    # trace-noise constraint of BootstrapOperatorOverload does not apply.
+    # one side cannot be missing from the other, and it requires each of the
+    # three dispatch sites to hold its own guard line, negation included. It
+    # reads no program, so the trace-noise constraint of
+    # BootstrapOperatorOverload does not apply.
     add_test(NAME BootstrapSuspendCalls
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_suspend_calls.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
     # Issue #984: the review of PR #983 found that the bootstrap lost a task's
-    # deferred call when the task resumed after a socket park. A case here runs
-    # for each field of the per-task state the park overwrites, and for each
-    # class of suspending call, against native; then a mutation of the bootstrap
-    # removes the line each case pins, and that case must fail. A saved field
-    # that no case catches therefore fails this check. Release build only: the
-    # differential comparison needs an untraced stdout.
+    # deferred call when the task resumed after a socket park. One case here
+    # runs per field of the per-task state the park overwrites, and per class of
+    # suspending call: against native for the seven fields that native can
+    # reach, and against the bootstrap itself for the two where native blocks
+    # the worker and never returns. Then a mutation of the bootstrap removes the
+    # line that one case pins, and that case must fail, so every saved field
+    # needs a case that catches it. Release build only: the comparison needs an
+    # untraced stdout.
     add_test(NAME BootstrapParkState
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
                 --native $<TARGET_FILE:loxpp>

@@ -7,7 +7,7 @@ host task, and the host then runs the other interpreted tasks on its one
 thread. Every one of them overwrites bootstrap/loxpp_interpreter.lox's
 per-task state: `currentTask`, `globals`, `pendingDefers`, `stringifyDepth`,
 `nativeDepth`, `tryDepth` and `currentCo`. The call returns into the caller's
-frame, not into parkTask's caller, so Interp.saveHostSuspendState and
+frame, not into parkTask's caller, so Interpreter.saveHostSuspendState and
 restoreHostSuspendState put that state back from a list the caller holds.
 
 This check has two parts.
@@ -16,33 +16,26 @@ This check has two parts.
    case runs on native and on the bootstrap, and the bootstrap's stdout and
    its zero/non-zero outcome must match native's. The exact status and every
    message are implementation-defined (spec/README.md, Conformance), so a
-   halting case needs only a non-zero status on both.
+   halting case needs only a non-zero status on both. The two cases whose
+   oracle is the bootstrap itself are the exception, and say why.
 
 2. A mutation per case: the case's own line is removed from a copy of the
-   interpreter, and the case must then differ from native. A line that no case
-   catches fails this check, because the claim that the state is restored
+   interpreter, and the case must then differ from its oracle. A line that no
+   case catches fails this check, because the claim that the state is restored
    would then rest on nothing.
 
-Two fields have no case, and no check can give them one:
-
-- `nativeDepth` is non-zero only inside a frame that native reaches from C++,
-  such as a deferred call or the `__str__` of `print`. A suspends call in such
-  a frame blocks the worker instead of suspending (spec/04-semantics.md,
-  "Contexts where a task cannot suspend"), so the only park that can happen
-  above zero is inside a deferred call. A task that parks there and then
-  yields or receives raises a fault, and the depth is what decides whether it
-  raises. A fault's message is implementation-defined (spec/README.md,
-  Conformance), so no case can compare two runtimes on it. The defect is
-  reachable there: a clobbered depth turns that fault into a suspension.
-- `stringifyDepth` is non-zero only while `stringify` runs, and a suspends call
-  there blocks the worker by the same rule, so no park can happen while it is
-  above zero. It is saved and restored with the rest because it belongs to the
-  task by the same rule; nothing observable depends on it.
+`nativeDepth` and `stringifyDepth` are non-zero only inside a frame that
+native reaches from C++, such as a deferred call or the `__str__` of `print`.
+A suspends call in such a frame blocks the worker instead of suspending
+(spec/04-semantics.md, "Contexts where a task cannot suspend"), so native never
+returns from those two programs and cannot be the oracle for them. The
+bootstrap parks instead, which is a separate defect (issue #1008), so those
+two cases use the unmutated bootstrap as the oracle. What they pin is that
+removing the restore line changes what the bootstrap does; they do not say
+that parking there is right.
 
 The three dispatch sites that consult `isSuspendingHostCall` are pinned by
-tools/check_bootstrap_suspend_calls.py, not here: `connect` parks only while a
-handshake is in flight, and filling a listener's backlog to force that costs
-thousands of connections.
+tools/check_bootstrap_suspend_calls.py, not here.
 
 Release build only: the debug preset's LOXPP_DEBUG_TRACE_EXECUTION and
 LOXPP_DEBUG_PRINT_CODE flood native's stdout, so this check skips itself
@@ -52,7 +45,7 @@ Usage:
     tools/check_bootstrap_park_state.py [--native PATH] [--interpreter PATH]
                                         [--timeout SECONDS] [--trace-enabled]
 
-Exits 0 when every case matches native and every mutation is caught, 1
+Exits 0 when every case matches its oracle and every mutation is caught, 1
 otherwise, and 125 (ctest's SKIP_RETURN_CODE) when the build under test traces
 execution.
 """
@@ -81,6 +74,11 @@ class Case:
     covers: str
     program: str
     mutation: str
+    # "native": native runs the program to completion, so it is the oracle.
+    # "bootstrap": native blocks the worker where this program waits (the
+    # contexts rule, spec/04-semantics.md), so the unmutated bootstrap is the
+    # oracle: the mutation must change what the bootstrap itself does.
+    oracle: str = "native"
 
 
 # A text edit of the interpreter that removes what one case pins.
@@ -98,6 +96,8 @@ MUTATIONS = {
     "restore_globals": ("        this.globals        = saved[1];\n", ""),
     "restore_tryDepth": ("        this.tryDepth       = saved[5];\n", ""),
     "restore_currentCo": ("        this.currentCo      = saved[6];\n", ""),
+    "restore_nativeDepth": ("        this.nativeDepth    = saved[4];\n", ""),
+    "restore_stringifyDepth": ("        this.stringifyDepth = saved[3];\n", ""),
 }
 
 
@@ -255,6 +255,70 @@ task.receive();
         "restore_tryDepth",
     ),
     Case(
+        "native_depth_survives",
+        "nativeDepth",
+        SETUP
+        + """\
+fun inner() {
+    print "inner got " + conn.readline();
+    try {
+        task.receive();
+    } catch (e) {
+        print "caught " + e.kind;
+    }
+}
+fun outer() {
+    defer inner();
+    print "outer returns";
+}
+fun worker() { outer(); task.send(me, "done"); }
+fun checker() { peer.writeline("line"); task.send(me, "done"); }
+task.spawn(worker);
+task.spawn(checker);
+task.receive();
+task.receive();
+""",
+        "restore_nativeDepth",
+        oracle="bootstrap",
+    ),
+    Case(
+        "stringify_depth_survives",
+        "stringifyDepth",
+        SETUP
+        + """\
+class P {
+    init() {}
+    __str__() {
+        print "str before";
+        print "str got " + conn.readline();
+        return "P";
+    }
+}
+fun worker() {
+    print P();
+    var deep = [];
+    var i = 0;
+    while (i < 100) {
+        deep = [deep];
+        i = i + 1;
+    }
+    print deep;
+    task.send(me, "done");
+}
+fun checker() {
+    print "checker ran";
+    peer.writeline("line");
+    task.send(me, "done");
+}
+task.spawn(worker);
+task.spawn(checker);
+task.receive();
+task.receive();
+""",
+        "restore_stringifyDepth",
+        oracle="bootstrap",
+    ),
+    Case(
         "coroutine_survives",
         "currentCo",
         SETUP
@@ -363,23 +427,38 @@ def main() -> int:
         base = make_runner(Path(args.interpreter).read_text(), args.native, workdir / "base")
 
         for case in CASES:
-            native = run([args.native], case.program, workdir, args.timeout)
-            if native.timed_out:
-                failures.append(f"{case.name}: native timed out -- fix the case")
-                continue
-            if native.exit_code != 0:
-                failures.append(
-                    f"{case.name}: native exits {native.exit_code} -- fix the case"
-                )
-                continue
-            bootstrap = run(base, case.program, workdir, args.timeout, env=env)
-            if differs(native, bootstrap):
-                failures.append(
-                    f"{case.name} ({case.covers}): the bootstrap diverges from native\n"
-                    f"  native:    {native.stdout!r}\n"
-                    f"  bootstrap: {bootstrap.stdout!r}"
-                )
-                continue
+            if case.oracle == "native":
+                oracle = run([args.native], case.program, workdir, args.timeout)
+                if oracle.timed_out:
+                    failures.append(f"{case.name}: native timed out -- fix the case")
+                    continue
+                if oracle.exit_code != 0:
+                    failures.append(
+                        f"{case.name}: native exits {oracle.exit_code} -- fix the case"
+                    )
+                    continue
+                bootstrap = run(base, case.program, workdir, args.timeout, env=env)
+                if differs(oracle, bootstrap):
+                    failures.append(
+                        f"{case.name} ({case.covers}): the bootstrap diverges from native\n"
+                        f"  native:    {oracle.stdout!r}\n"
+                        f"  bootstrap: {bootstrap.stdout!r}"
+                    )
+                    continue
+            else:
+                oracle = run(base, case.program, workdir, args.timeout, env=env)
+                if oracle.timed_out:
+                    failures.append(
+                        f"{case.name}: the bootstrap timed out -- fix the case"
+                    )
+                    continue
+                again = run(base, case.program, workdir, args.timeout, env=env)
+                if differs(oracle, again):
+                    failures.append(
+                        f"{case.name} ({case.covers}): the bootstrap run is not "
+                        "repeatable, so it cannot be the oracle"
+                    )
+                    continue
 
             old, new = MUTATIONS[case.mutation]
             text = Path(args.interpreter).read_text()
@@ -394,7 +473,7 @@ def main() -> int:
             )
             caught_by = caught.setdefault(case.mutation, case.name)
             result = run(mutated, case.program, workdir, args.timeout, env=env)
-            if differs(native, result):
+            if differs(oracle, result):
                 caught[case.mutation] = caught_by
             else:
                 failures.append(
@@ -408,9 +487,11 @@ def main() -> int:
         print("\n\n".join(failures))
         return 1
 
+    native_oracle = sum(1 for case in CASES if case.oracle == "native")
     print(
-        f"OK: {len(CASES)} park-state case(s) match native, and the "
-        f"{len(MUTATIONS)} mutation(s) of the saved state are each caught."
+        f"OK: {native_oracle} park-state case(s) match native and "
+        f"{len(CASES) - native_oracle} pin what the bootstrap does where native "
+        f"blocks; each of the {len(MUTATIONS)} mutation(s) of the saved state is caught."
     )
     return 0
 

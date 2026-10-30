@@ -20,11 +20,11 @@ This script holds that list to the spec table, in both directions:
   has no per-task state to save.
 
 It also checks the other half: each of the three classes that dispatch to a
-host native (`LoxNative`, `InterpSocketMethod`, `InterpServerMethod`) must
-consult the list in its own `call`, so a guard that is deleted or inverted
-cannot leave a call unwrapped while the list still names it. This half is
-static because `connect` parks only while a handshake is in flight, and
-forcing that costs thousands of connections.
+host native (`LoxNative`, `InterpSocketMethod`, `InterpServerMethod`) must hold
+its negation guard in its own `call`, as written, so a guard that is deleted or
+that loses its `!` cannot leave a call unwrapped while the list still names it.
+This half is static, so it covers `connect` without a program that makes a
+handshake wait.
 
 A missing entry is the defect that lost a task's deferred call when the task
 resumed after a socket park (issue #984).
@@ -52,9 +52,18 @@ EXEMPTIONS = {
 CALL = re.compile(r"^(?:(\w+)\.)?(\w+)\(")
 LIST_FN = re.compile(r"^fun isSuspendingHostCall\(name\) \{\n(.*?)^\}", re.S | re.M)
 LISTED_NAME = re.compile(r'name == "([^"]+)"')
-# The three classes that reach a host native, in the order the file defines
-# them. Each one's own `call` is where the guard belongs.
-DISPATCH_CLASSES = ("LoxNative", "InterpSocketMethod", "InterpServerMethod")
+# The three classes that reach a host native, each with the one guard line
+# its own `call` must hold. The line is checked as written, not as a substring:
+# a guard whose `!` is dropped wraps every call, so `connect` would lose the
+# state while this script still saw the name.
+DISPATCH_GUARDS = {
+    "LoxNative":
+        "if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);",
+    "InterpSocketMethod":
+        'if (!isSuspendingHostCall("Socket." + this.name)) {',
+    "InterpServerMethod":
+        'if (!isSuspendingHostCall("Server." + this.name)) {',
+}
 CALL_METHOD = re.compile(r"^    call\(interp, args\) \{\n(.*?)^    \}", re.S | re.M)
 
 
@@ -76,9 +85,9 @@ def listed_calls(text: str) -> set[str]:
 
 
 def unwrapped_dispatch_sites(text: str) -> list[str]:
-    """Returns the dispatch classes whose `call` does not consult the list."""
+    """Returns the dispatch classes whose `call` lacks its guard line."""
     problems = []
-    for cls in DISPATCH_CLASSES:
+    for cls, guard in DISPATCH_GUARDS.items():
         start = text.find(f"class {cls} {{")
         if start < 0:
             problems.append(f"the interpreter has no class {cls}")
@@ -87,10 +96,10 @@ def unwrapped_dispatch_sites(text: str) -> list[str]:
         if method is None:
             problems.append(f"class {cls} has no call(interp, args) method")
             continue
-        if "isSuspendingHostCall(" not in method.group(1):
+        if guard not in method.group(1):
             problems.append(
-                f"class {cls}'s call does not consult isSuspendingHostCall, so a "
-                "call it dispatches can park without saving the per-task state"
+                f"class {cls}'s call does not hold the guard {guard!r}, so a call "
+                "it dispatches can park without saving the per-task state"
             )
     return problems
 
@@ -157,7 +166,7 @@ def main() -> None:
         problems,
         f"{len(classes)} blocking calls; every `suspends` call is wrapped "
         f"({len(wrapped)} wrapped, {len(EXEMPTIONS)} exempt), and all "
-        f"{len(DISPATCH_CLASSES)} dispatch sites consult the list",
+        f"{len(DISPATCH_GUARDS)} dispatch sites hold their guard",
     )
 
 
