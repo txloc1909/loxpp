@@ -19,6 +19,13 @@ This script holds that list to the spec table, in both directions:
 - no `blocks` row is on the list: a blocking call runs no other task, so it
   has no per-task state to save.
 
+It also checks the other half: each of the three classes that dispatch to a
+host native (`LoxNative`, `InterpSocketMethod`, `InterpServerMethod`) must
+consult the list in its own `call`, so a guard that is deleted or inverted
+cannot leave a call unwrapped while the list still names it. This half is
+static because `connect` parks only while a handshake is in flight, and
+forcing that costs thousands of connections.
+
 A missing entry is the defect that lost a task's deferred call when the task
 resumed after a socket park (issue #984).
 
@@ -45,6 +52,10 @@ EXEMPTIONS = {
 CALL = re.compile(r"^(?:(\w+)\.)?(\w+)\(")
 LIST_FN = re.compile(r"^fun isSuspendingHostCall\(name\) \{\n(.*?)^\}", re.S | re.M)
 LISTED_NAME = re.compile(r'name == "([^"]+)"')
+# The three classes that reach a host native, in the order the file defines
+# them. Each one's own `call` is where the guard belongs.
+DISPATCH_CLASSES = ("LoxNative", "InterpSocketMethod", "InterpServerMethod")
+CALL_METHOD = re.compile(r"^    call\(interp, args\) \{\n(.*?)^    \}", re.S | re.M)
 
 
 def call_name(cell: str) -> str | None:
@@ -64,6 +75,26 @@ def listed_calls(text: str) -> set[str]:
     return set(LISTED_NAME.findall(m.group(1)))
 
 
+def unwrapped_dispatch_sites(text: str) -> list[str]:
+    """Returns the dispatch classes whose `call` does not consult the list."""
+    problems = []
+    for cls in DISPATCH_CLASSES:
+        start = text.find(f"class {cls} {{")
+        if start < 0:
+            problems.append(f"the interpreter has no class {cls}")
+            continue
+        method = CALL_METHOD.search(text, start)
+        if method is None:
+            problems.append(f"class {cls} has no call(interp, args) method")
+            continue
+        if "isSuspendingHostCall(" not in method.group(1):
+            problems.append(
+                f"class {cls}'s call does not consult isSuspendingHostCall, so a "
+                "call it dispatches can park without saving the per-task state"
+            )
+    return problems
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--stdlib", help="path to a copy of spec/05-stdlib.md")
@@ -75,7 +106,8 @@ def main() -> None:
     try:
         text = spec_path("05-stdlib.md", args.stdlib).read_text(encoding="utf-8")
         rows = table(section(text, "## Blocking calls"), "Call")
-        wrapped = listed_calls(interpreter_path.read_text(encoding="utf-8"))
+        interpreter_text = interpreter_path.read_text(encoding="utf-8")
+        wrapped = listed_calls(interpreter_text)
     except (SpecError, OSError) as exc:
         report("check_bootstrap_suspend_calls.py", [f"cannot read the input: {exc}"], "")
         return
@@ -118,11 +150,14 @@ def main() -> None:
         if name not in classes:
             problems.append(f"the exemption for {name!r} outlived its table row")
 
+    problems.extend(unwrapped_dispatch_sites(interpreter_text))
+
     report(
         "check_bootstrap_suspend_calls.py",
         problems,
         f"{len(classes)} blocking calls; every `suspends` call is wrapped "
-        f"({len(wrapped)} wrapped, {len(EXEMPTIONS)} exempt)",
+        f"({len(wrapped)} wrapped, {len(EXEMPTIONS)} exempt), and all "
+        f"{len(DISPATCH_CLASSES)} dispatch sites consult the list",
     )
 
 
