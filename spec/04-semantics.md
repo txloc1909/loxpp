@@ -790,8 +790,10 @@ deleting a key that is not present.
 A task can suspend inside the body of a `for`-in statement (see [Suspend
 Points](#suspend-points)). Another task of the worker then runs, and it can
 change the iterated Map. The next iterator step of the suspended task is then a
-runtime error that halts the program, as above. So a `for`-in over a Map that
-another task can change must not contain a call that can suspend.
+runtime error that halts the program, as above. `catch` cannot stop it. So a
+`for`-in over a Map that another task can change must not contain a call that
+can suspend. A program that must change such a Map lets one task own it and
+makes the other tasks ask that task by message.
 
 **`break`** and **`continue`** work as described below.
 
