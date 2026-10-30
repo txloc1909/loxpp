@@ -412,8 +412,8 @@ probes of the rule that a call which waits for the network or for time suspends 
 (`docs/decisions/blocking-call-suspension.md`), and the native VM, the JVM backend, and the QBE backend pass them all. The bootstrap interpreter
 has no file. Its `sleep` blocks every task, so probes `260`, `279`, and `282` (which wait in `sleep`)
 carry a `NOT-BINDING` line that names `bootstrap-only/same_worker_blocking_call`. Probe `285`
-carries the same line because of a bootstrap defect (#984): it prints no `deferred ran` line. The bootstrap
-passes the other probes of the rule, so they bind it.
+binds the bootstrap since #984: it lost the deferred call of the parked task before that
+fix. The bootstrap passes the other probes of the rule, so they bind it.
 An absent file is an empty list, so a consumer with no gap needs no
 file, and a node that finds a gap creates the file it needs. The spec-probe
 steps of `.github/workflows/ci.yml` for native, JVM, and QBE already pass
