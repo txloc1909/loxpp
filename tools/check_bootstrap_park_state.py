@@ -22,9 +22,13 @@ This check has two parts.
    native as the oracle, and say why below.
 
 2. A mutation per case: the case's own line is removed from a copy of the
-   interpreter, and the case must then differ from its oracle. A line that no
-   case catches fails this check, because the claim that the state is restored
-   would then rest on nothing.
+   interpreter, and the case must then differ from its oracle.
+
+3. Two rules that keep 2 complete. Every field that restoreHostSuspendState
+   puts back must have a `restore_<field>` mutation, and no mutation may sit in
+   MUTATIONS that no case runs. So a saved field that no case covers, or a
+   mutation that quietly stopped running, fails rather than passing with a
+   count that includes it.
 
 `nativeDepth` and `stringifyDepth` are non-zero only inside a frame that
 native reaches from C++, such as a deferred call or the `__str__` of `print`.
@@ -69,6 +73,9 @@ INTERPRETER = REPO_ROOT / "bootstrap" / "loxpp_interpreter.lox"
 WRAPPER = REPO_ROOT / "bootstrap" / "lox_wrapper.sh"
 
 SKIP_RETURN_CODE = 125
+
+RESTORE_FN = re.compile(r"^    restoreHostSuspendState\(saved\) \{\n(.*?)^    \}", re.S | re.M)
+RESTORE_LINE = re.compile(r"^        this\.(\w+) += saved\[\d+\];$", re.M)
 
 
 @dataclass
@@ -389,6 +396,14 @@ def differs(native: RunResult, other: RunResult) -> bool:
     return other.stdout != native.stdout
 
 
+def restored_fields(text: str) -> list[str]:
+    """The interpreter fields that restoreHostSuspendState puts back."""
+    m = RESTORE_FN.search(text)
+    if m is None:
+        raise ValueError("the interpreter has no restoreHostSuspendState(saved) method")
+    return RESTORE_LINE.findall(m.group(1))
+
+
 def make_runner(interpreter_text: str, native: str, directory: Path) -> list[str]:
     """Writes a wrapper and an interpreter into `directory`, and returns the
     command that runs it."""
@@ -428,11 +443,35 @@ def main() -> int:
 
     env = {**os.environ, "LANGUAGE": "LOXPP"}
     failures: list[str] = []
-    caught: dict[str, str] = {}
+    caught: set[str] = set()
+
+    interpreter_text = Path(args.interpreter).read_text()
+    try:
+        fields = restored_fields(interpreter_text)
+    except ValueError as exc:
+        failures.append(str(exc))
+        fields = []
+    used = {case.mutation for case in CASES}
+    for field in fields:
+        if f"restore_{field}" not in MUTATIONS:
+            failures.append(
+                f"the interpreter restores `{field}`, but MUTATIONS has no "
+                f"'restore_{field}', so nothing checks that its restore line is there"
+            )
+        elif f"restore_{field}" not in used:
+            failures.append(
+                f"the mutation 'restore_{field}' is in MUTATIONS but no case runs it"
+            )
+    for mutation in MUTATIONS:
+        if mutation not in used:
+            failures.append(
+                f"the mutation {mutation!r} is in MUTATIONS but no case runs it, "
+                "so it proves nothing"
+            )
 
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
-        base = make_runner(Path(args.interpreter).read_text(), args.native, workdir / "base")
+        base = make_runner(interpreter_text, args.native, workdir / "base")
 
         for case in CASES:
             if case.oracle == "native":
@@ -469,20 +508,19 @@ def main() -> int:
                     continue
 
             old, new = MUTATIONS[case.mutation]
-            text = Path(args.interpreter).read_text()
-            if text.count(old) != 1:
+            if interpreter_text.count(old) != 1:
                 failures.append(
                     f"{case.name}: the mutation {case.mutation!r} matches "
-                    f"{text.count(old)} place(s) in the interpreter, not one"
+                    f"{interpreter_text.count(old)} place(s) in the interpreter, not one"
                 )
                 continue
             mutated = make_runner(
-                text.replace(old, new), args.native, workdir / f"m_{case.mutation}"
+                interpreter_text.replace(old, new), args.native,
+                workdir / f"m_{case.mutation}",
             )
-            caught_by = caught.setdefault(case.mutation, case.name)
             result = run(mutated, case.program, workdir, args.timeout, env=env)
             if differs(oracle, result):
-                caught[case.mutation] = caught_by
+                caught.add(case.mutation)
             else:
                 failures.append(
                     f"{case.name} ({case.covers}): the mutation {case.mutation!r} "
@@ -499,7 +537,8 @@ def main() -> int:
     print(
         f"OK: {native_oracle} park-state case(s) match native and "
         f"{len(CASES) - native_oracle} pin what the bootstrap does where native "
-        f"blocks; each of the {len(MUTATIONS)} mutation(s) of the saved state is caught."
+        f"blocks; {len(fields)} restored field(s) each have a case, and each of the "
+        f"{len(caught)} mutation(s) that ran was caught."
     )
     return 0
 
