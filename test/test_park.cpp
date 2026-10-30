@@ -17,12 +17,14 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
 #include <fstream>
 #include <functional>
+#include <pthread.h>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -116,12 +118,16 @@ double switchesUntilResume(PClock::duration step) {
     return std::stod(globalString(vm, "at"));
 }
 
-// A VM whose `park_far` parks, and whose host timer calls `act` 80 ms after
-// the program starts, with the task that parked.
+// A VM whose `park_far` parks, and whose host timer calls `act` with the task
+// that parked, at the first expiry of the timer after the park and after
+// `ready` holds. Start-up of the VM and the other tasks of the program have no
+// fixed bound (a debug build under GC stress on a loaded CPU takes more than
+// 80 ms), so a timer that expires too early arms again.
 class ParkRig {
   public:
-    explicit ParkRig(std::function<void(Runtime&, ObjTask*)> act)
-        : m_act(std::move(act)) {
+    explicit ParkRig(std::function<void(Runtime&, ObjTask*)> act,
+                     std::function<bool(ObjTask*)> ready = nullptr)
+        : m_act(std::move(act)), m_ready(std::move(ready)) {
         g_parked = nullptr;
         Runtime& rt = m_vm.runtime();
         rt.defineNative("park_far", parkFarNative, 0);
@@ -130,7 +136,12 @@ class ParkRig {
         rt.setPollHandler([this, &rt](const std::vector<Poller::Token>& ready) {
             for (Poller::Token token : ready) {
                 if (token == m_hostWait) {
-                    ASSERT_NE(g_parked, nullptr);
+                    if (g_parked == nullptr ||
+                        (m_ready && !m_ready(g_parked))) {
+                        m_hostWait = rt.poller().waitUntil(
+                            PClock::now() + std::chrono::milliseconds(10));
+                        continue;
+                    }
                     m_act(rt, g_parked);
                 }
             }
@@ -141,6 +152,7 @@ class ParkRig {
   private:
     VM m_vm;
     std::function<void(Runtime&, ObjTask*)> m_act;
+    std::function<bool(ObjTask*)> m_ready;
     Poller::Token m_hostWait{0};
 };
 
@@ -292,14 +304,16 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
 // message. A message that arrives while the task is parked does not wake it,
 // and it is still in the mailbox when the park ends.
 TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
-    ParkRig rig([](Runtime& rt, ObjTask* task) {
-        // The send ran during the park. It left the task parked, with the
-        // message in its mailbox.
-        EXPECT_EQ(task->state, TaskState::PARKED);
-        EXPECT_EQ(task->mailbox.size(), 1u);
-        EXPECT_NE(task->parkReason, ParkReason::NONE);
-        rt.completePark(task, from<Number>(42.0));
-    });
+    ParkRig rig(
+        [](Runtime& rt, ObjTask* task) {
+            // The send ran during the park. It left the task parked, with the
+            // message in its mailbox.
+            EXPECT_EQ(task->state, TaskState::PARKED);
+            EXPECT_EQ(task->mailbox.size(), 1u);
+            EXPECT_NE(task->parkReason, ParkReason::NONE);
+            rt.completePark(task, from<Number>(42.0));
+        },
+        [](ObjTask* task) { return task->mailbox.size() == 1u; });
     ASSERT_EQ(rig.vm().interpret(R"(
         var me = task.self();
         var sleeper;
@@ -634,4 +648,26 @@ TEST_F(ParkTest, AVeryLongSleepDoesNotEndEarly) {
     )"),
               InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "woke"), "0");
+}
+
+// A thread that exits while the sampler reads it must give "no sample". The
+// sampler runs in a std::thread of the tests above, where an exception ends
+// the process.
+TEST(ThreadSamplerTest, ASampleOfAThreadThatExitsDoesNotThrow) {
+    std::atomic<bool> stop{false};
+    std::thread churn([&] {
+        while (!stop) {
+            std::thread victim(
+                [] { pthread_setname_np(pthread_self(), "loxpp-victim"); });
+            victim.join();
+        }
+    });
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    EXPECT_NO_THROW({
+        while (std::chrono::steady_clock::now() < end) {
+            sampleThread("loxpp-victim");
+        }
+    });
+    stop = true;
+    churn.join();
 }

@@ -2,11 +2,12 @@
 
 #include <chrono>
 #include <dirent.h>
+#include <fcntl.h>
 #include <fstream>
-#include <iterator>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 // Samples the CPU use and the state of a named thread of this process, to
@@ -37,12 +38,28 @@ inline ThreadSample sampleThread(const std::string& name) {
         if (threadName != name) {
             continue;
         }
-        std::ifstream statFile("/proc/self/task/" + tid + "/stat");
-        std::string stat((std::istreambuf_iterator<char>(statFile)),
-                         std::istreambuf_iterator<char>());
+        // read(2), not iostreams: a thread that exits during the read makes
+        // the read fail with ESRCH, and a stream buffer iterator throws then.
+        std::string stat;
+        const int fd = ::open(("/proc/self/task/" + tid + "/stat").c_str(),
+                              O_RDONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char buf[512];
+            ssize_t n;
+            while ((n = ::read(fd, buf, sizeof buf)) > 0) {
+                stat.append(buf, static_cast<std::size_t>(n));
+            }
+            ::close(fd);
+        }
+        // A thread that exits between the read of its name and the read of its
+        // stat leaves no stat text. That thread is gone: report no sample.
+        const std::size_t paren = stat.rfind(')');
+        if (paren == std::string::npos || paren + 2 > stat.size()) {
+            break;
+        }
         // The fields after the ")" of the command name: state is field 3,
         // utime and stime are fields 14 and 15.
-        std::istringstream rest(stat.substr(stat.rfind(')') + 2));
+        std::istringstream rest(stat.substr(paren + 2));
         std::vector<std::string> fields;
         std::string field;
         while (rest >> field) {
