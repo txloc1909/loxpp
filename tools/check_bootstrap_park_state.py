@@ -12,12 +12,14 @@ restoreHostSuspendState put that state back from a list the caller holds.
 
 This check has two parts.
 
-1. One case per field of that state and per class of suspending call. Each
-   case runs on native and on the bootstrap, and the bootstrap's stdout and
-   its zero/non-zero outcome must match native's. The exact status and every
-   message are implementation-defined (spec/README.md, Conformance), so a
-   halting case needs only a non-zero status on both. The two cases whose
-   oracle is the bootstrap itself are the exception, and say why.
+1. One case per field of that state, and one for the Socket and one for the
+   Server class of suspending call (a `connect` park cannot be made cheaply, so
+   tools/check_bootstrap_suspend_calls.py holds that site to its guard alone).
+   Each case runs on native and on the bootstrap, and the bootstrap's stdout
+   and its zero/non-zero outcome must match native's. The exact status and
+   every message are implementation-defined (spec/README.md, Conformance), so a
+   halting case needs only a non-zero status on both. Two cases cannot use
+   native as the oracle, and say why below.
 
 2. A mutation per case: the case's own line is removed from a copy of the
    interpreter, and the case must then differ from its oracle. A line that no
@@ -59,6 +61,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from runner_precondition import refuse_unrunnable, require_runner
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -370,6 +373,8 @@ def run(runner: list[str], program: str, workdir: Path, timeout: float,
         )
     except subprocess.TimeoutExpired:
         return RunResult(exit_code=-1, stdout="", timed_out=True)
+    except OSError as exc:
+        refuse_unrunnable(runner[0], exc)
     return RunResult(exit_code=proc.returncode, stdout=proc.stdout.strip())
 
 
@@ -413,6 +418,8 @@ def main() -> int:
         "under test was built with LOXPP_DEBUG_TRACE_EXECUTION/LOXPP_DEBUG_PRINT_CODE on",
     )
     args = parser.parse_args()
+
+    require_runner(args.native)
 
     if args.trace_enabled:
         print("SKIP: native binary was built with debug trace macros on (release preset required)")

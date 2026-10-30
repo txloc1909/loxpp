@@ -365,13 +365,14 @@ if(LOXPP_PYTHON3)
 
     # Issue #984: the review of PR #983 found that the bootstrap lost a task's
     # deferred call when the task resumed after a socket park. One case here
-    # runs per field of the per-task state the park overwrites, and per class of
-    # suspending call: against native for the seven fields that native can
-    # reach, and against the bootstrap itself for the two where native blocks
-    # the worker and never returns. Then a mutation of the bootstrap removes the
-    # line that one case pins, and that case must fail, so every saved field
-    # needs a case that catches it. Release build only: the comparison needs an
-    # untraced stdout.
+    # runs per field of the per-task state the park overwrites, plus one for the
+    # Socket class and one for the Server class of suspending call. Seven cases
+    # compare against native; the `nativeDepth` and `stringifyDepth` cases
+    # compare against the bootstrap itself, because native blocks the worker
+    # there and never returns (issue #1008). Then a mutation of the bootstrap
+    # removes the line that one case pins, and that case must fail, so every
+    # saved field needs a case that catches it. Release build only: the
+    # comparison needs an untraced stdout.
     add_test(NAME BootstrapParkState
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
                 --native $<TARGET_FILE:loxpp>
