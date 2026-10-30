@@ -12,9 +12,11 @@ restoreHostSuspendState put that state back from a list the caller holds.
 
 This check has two parts.
 
-1. One case per field of that state, and one for the Socket and one for the
-   Server class of suspending call (a `connect` park cannot be made cheaply, so
-   tools/check_bootstrap_suspend_calls.py holds that site to its guard alone).
+1. One case per field of that state, one for the Socket class and one for the
+   Server class of suspending call, and one for the restore on the fault path
+   of each of those two classes, where a close wakes the waiting call with a
+   catchable `SocketClosedError`. A `connect` park cannot be made cheaply, so
+   tools/check_bootstrap_suspend_calls.py holds that site to its guard alone.
    Each case runs on native and on the bootstrap, and the bootstrap's stdout
    and its zero/non-zero outcome must match native's. The exact status and
    every message are implementation-defined (spec/README.md, Conformance), so a
@@ -92,7 +94,7 @@ class Case:
     oracle: str = "native"
 
 
-# A text edit of the interpreter that removes what one case pins.
+# A text edit of the interpreter that changes what one case pins.
 MUTATIONS = {
     "socket_guard": (
         '        if (!isSuspendingHostCall("Socket." + this.name)) {\n',
