@@ -579,6 +579,11 @@ implementation; a portable program does not depend on it. A failed write does
 not change what a later read returns. A wrong argument type is a runtime error
 that halts the program.
 
+When two tasks write to one Socket at the same time, the bytes of one call
+can mix with the bytes of the other, and the language does not say which call
+sends first. A program that needs whole messages uses one writer task for the
+Socket.
+
 A call that reads or writes suspends its task while it waits (see [Blocking
 calls](#blocking-calls)). A task of the same worker can call `close()` on a
 Socket while another task waits in a call on it. The close wakes the waiting
