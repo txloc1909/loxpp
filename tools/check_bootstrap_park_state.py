@@ -199,11 +199,12 @@ task.receive();
     Case(
         "worker_globals_survive",
         "globals",
-        # The spawn_worker task is the last task to run before the parked task
-        # resumes, so only a restored `globals` gives the parked task its own
-        # worker's declarations. It writes the line that wakes the parked task
-        # for that reason, and the parked task asks for it by message, so no
-        # ordering between runs depends on the scheduler.
+        # The spawn_worker task runs while the parked task waits, so only a
+        # restored `globals` gives the parked task its own worker's
+        # declarations. The two workers' lines must not depend on the order in
+        # which the scheduler resumes them (spec/04-semantics.md, Workers and
+        # Tasks), so the other worker prints both of its lines before it wakes
+        # the parked task: every line it writes is then on stdout first.
         """\
 var srv = listen("127.0.0.1", 0);
 var port = srv.port();
@@ -214,8 +215,8 @@ fun note() { print "deferred ran"; }
 fun entry(p) {
     var s = connect("127.0.0.1", p);
     print "x got " + s.readline();
-    s.writeline("line");
     print "x wrote";
+    s.writeline("line");
 }
 fun worker() {
     var c = connX;
