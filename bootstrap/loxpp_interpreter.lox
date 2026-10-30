@@ -2658,7 +2658,7 @@ fun blockingSleep(seconds) {
 // this file reaches through a host native, by the qualified name that table
 // uses. A call on this list parks its host task, so the host runs the other
 // interpreted tasks while it waits, and the caller must run it through
-// Interp.saveHostSuspendState/restoreHostSuspendState.
+// Interpreter.saveHostSuspendState/restoreHostSuspendState.
 //
 // `sleep` is absent because blockingSleep above blocks this one-thread
 // implementation instead of suspending (spec/README.md, Conformance), so no
@@ -2836,9 +2836,10 @@ class LoxNative {
         this.name   = name;
         this.loxTag = "native";
     }
-    // `connect` is the one host native of this class that spec/05-stdlib.md
-    // classes `suspends`, so it is the one that needs the per-task state
-    // around it (isSuspendingHostCall).
+    // `connect` is the one host native of this class that this file runs
+    // through the park path: `sleep` is classed `suspends` too, but
+    // blockingSleep blocks this one thread instead, so isSuspendingHostCall
+    // leaves it out.
     call(interp, args) {
         if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);
         var saved = interp.saveHostSuspendState();

@@ -8,7 +8,7 @@ every one of them overwrites the interpreter's per-task state as it runs:
 `tryDepth`, and `currentCo`. Nothing puts that state back when the parked task
 resumes, because the native call returns into the caller's own Lox frame, not
 into parkTask's caller. So bootstrap/loxpp_interpreter.lox runs every such call
-through Interp.saveHostSuspendState/restoreHostSuspendState, and the set of
+through Interpreter.saveHostSuspendState/restoreHostSuspendState, and the set of
 calls that take that path is the list in `isSuspendingHostCall`.
 
 This script holds that list to the spec table, in both directions:
