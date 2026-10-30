@@ -334,6 +334,36 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # Issue #984: a task that parks in a call of class `suspends` keeps its
+    # pending deferred calls, so it runs them when its function returns. The
+    # bootstrap lost them because every other interpreted task overwrote its
+    # per-task state while it waited. Probe 285 pins it in the shared
+    # spec-probe gate; this runs the same differential comparison in ctest.
+    # Same trace-noise constraint as BootstrapOperatorOverload above.
+    add_test(NAME BootstrapDeferAfterPark
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_runtimes.py
+                $<TARGET_FILE:loxpp>
+                ${PROJECT_SOURCE_DIR}/bootstrap/lox_wrapper.sh
+                ${PROJECT_SOURCE_DIR}/test/translation-probes/285_no_deferred_call_runs_while_parked.lox
+                --skip-on-trace
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapDeferAfterPark PROPERTIES
+        ENVIRONMENT "LANGUAGE=LOXPP;LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # Issue #984: a call of class `suspends` parks its host task, so the
+    # bootstrap must run it through Interp.saveHostSuspendState. This holds
+    # isSuspendingHostCall's list to the `suspends` rows of
+    # spec/05-stdlib.md's Blocking calls table, both ways, so a call added to
+    # one side cannot be missing from the other. Same trace-noise constraint
+    # as BootstrapOperatorOverload above.
+    add_test(NAME BootstrapSuspendCalls
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_suspend_calls.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(BootstrapSuspendCalls PROPERTIES
+        ENVIRONMENT "LOXPP_BOOTSTRAP_TRACE_ENABLED=${LOXPP_BOOTSTRAP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # Issues #674, #707: a property read of a List method that is not a direct
     # call is a halting fault on every consumer. Probes 118 and 119 pin it in
     # the shared spec-probe gate; this runs the same differential comparison
