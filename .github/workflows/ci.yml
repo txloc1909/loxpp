@@ -802,18 +802,31 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R BootstrapListMethodRead --output-on-failure --no-tests=error"
 
-      # BootstrapDeferAfterPark and BootstrapParkState self-skip on debug
-      # (SKIP_RETURN_CODE 125), so this release leg is the one place they run.
-      # Issue #984 is the defect they pin. --no-tests=error fails the step if a
-      # name stops being registered.
-      - name: Run bootstrap park-state checks
+      # BootstrapDeferAfterPark self-skips on debug (SKIP_RETURN_CODE 125), so
+      # this release leg is the one place the entry runs. Issue #984 is the
+      # defect it pins. --no-tests=error fails the step when no test matches the
+      # name, so a build that stopped registering it fails here; one name per
+      # step is what makes that check cover this entry alone.
+      - name: Run bootstrap deferred-call-after-park differential
         if: matrix.preset == 'release'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "ctest --test-dir build -R 'BootstrapDeferAfterPark|BootstrapParkState' --output-on-failure --no-tests=error"
+            bash -c "ctest --test-dir build -R BootstrapDeferAfterPark --output-on-failure --no-tests=error"
+
+      # BootstrapParkState self-skips on debug (SKIP_RETURN_CODE 125), so this
+      # release leg is the one place the entry runs. Issue #984 is the defect it
+      # pins. One name per step, for the reason above.
+      - name: Run bootstrap park-state check
+        if: matrix.preset == 'release'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "ctest --test-dir build -R BootstrapParkState --output-on-failure --no-tests=error"
 
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
