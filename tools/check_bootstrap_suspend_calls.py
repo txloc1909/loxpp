@@ -19,12 +19,14 @@ This script holds that list to the spec table, in both directions:
 - no `blocks` row is on the list: a blocking call runs no other task, so it
   has no per-task state to save.
 
-It also checks the other half: each of the three classes that dispatch to a
-host native (`LoxNative`, `InterpSocketMethod`, `InterpServerMethod`) must hold
-its negation guard in its own `call`, as written, so a guard that is deleted or
-that loses its `!` cannot leave a call unwrapped while the list still names it.
-This half is static, so it covers `connect` without a program that makes a
-handshake wait.
+It also checks the other half: each of the three classes that can dispatch a
+call of class `suspends` (`LoxNative` for `connect`, `InterpSocketMethod` and
+`InterpServerMethod`) must hold its negation guard in its own `call`, as
+written, so a guard that is deleted or that loses its `!` cannot leave a call
+unwrapped while the list still names it. The other two classes that reach a
+host native, `InterpFileMethod` and `InterpProcessMethod`, hold no `suspends`
+row, so they need no guard. This half is static, so it covers `connect` without
+a program that makes a handshake wait.
 
 A missing entry is the defect that lost a task's deferred call when the task
 resumed after a socket park (issue #984).
@@ -52,10 +54,10 @@ EXEMPTIONS = {
 CALL = re.compile(r"^(?:(\w+)\.)?(\w+)\(")
 LIST_FN = re.compile(r"^fun isSuspendingHostCall\(name\) \{\n(.*?)^\}", re.S | re.M)
 LISTED_NAME = re.compile(r'name == "([^"]+)"')
-# The three classes that reach a host native, each with the one guard line
-# its own `call` must hold. The line is checked as written, not as a substring:
-# a guard whose `!` is dropped wraps every call, so `connect` would lose the
-# state while this script still saw the name.
+# The three classes that can dispatch a `suspends` call, each with the one guard
+# line its own `call` must hold. The line is checked as written, not as a
+# substring: a guard whose `!` is dropped wraps every call, so `connect` would
+# lose the state while this script still saw the name.
 DISPATCH_GUARDS = {
     "LoxNative":
         "if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);",
