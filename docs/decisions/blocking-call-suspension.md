@@ -623,6 +623,7 @@ the shared layer where the class belongs.
 | A gate site runs the probe directory without the lists | #920: the S8 script and two lines of the gate scope in `.pi` ran the probe directory without the lists that CI used | The gate scripts | Each site that runs the probe directory under a consumer passes the same lists as CI. The review of #920 holds an audit of 17 sites. #954 (open at close) covers a new list file |
 | A check or a test measures more than it names | #929 and #933: a count of the descriptors of the process, and wall-clock bounds, failed on a loaded debug runner | The test suite | A test does not count a process-wide resource while another thread runs, and does not bound a time. See #934 and #935 (#935 open at close) |
 | A mutation that no test catches | #927, #933: the wake of a polling worker, `liveWriter`, the EOF check of `close_write` | The unit tests of the poller and the park code | #948, #951 and #956 (open at close) |
+| A suspended task's state lives in shared interpreter fields | #984: the bootstrap lost a task's pending deferred call when the task resumed after a socket park, because the other tasks overwrote the interpreter's per-task state while it waited | The per-task state of the bootstrap interpreter (`Interp`) | Every host call that parks a task saves that state in its own frame and restores it on return. `tools/check_bootstrap_suspend_calls.py` holds the set of such calls to the Blocking calls table |
 
 ## Follow-ups
 
