@@ -21,8 +21,9 @@ This check has two parts.
    halting case needs only a non-zero status on both. Two cases cannot use
    native as the oracle, and say why below.
 
-2. A mutation per case: the case's own line is removed from a copy of the
-   interpreter, and the case must then differ from its oracle.
+2. A mutation per case: the case's own line is changed in a copy of the
+   interpreter (removed, or replaced by a form that skips the guard), and the
+   case must then differ from its oracle.
 
 3. Two rules that keep 2 complete. Every field that restoreHostSuspendState
    puts back must have a `restore_<field>` mutation, and no mutation may sit in
@@ -100,6 +101,18 @@ MUTATIONS = {
     "server_guard": (
         '        if (!isSuspendingHostCall("Server." + this.name)) {\n',
         "        if (true) {\n",
+    ),
+    # The fault path: a close wakes the waiting call, so its catch must restore
+    # the state too. The two sites differ in the host call above the catch.
+    "socket_fault_restore": (
+        "            result = this.hostCall(args);\n        } catch (e) {\n"
+        "            interp.restoreHostSuspendState(saved);\n",
+        "            result = this.hostCall(args);\n        } catch (e) {\n",
+    ),
+    "server_fault_restore": (
+        "            result = this.hostCall();\n        } catch (e) {\n"
+        "            interp.restoreHostSuspendState(saved);\n",
+        "            result = this.hostCall();\n        } catch (e) {\n",
     ),
     "restore_pendingDefers": ("        this.pendingDefers  = saved[2];\n", ""),
     "restore_currentTask": ("        this.currentTask    = saved[0];\n", ""),
@@ -241,6 +254,56 @@ connX.writeline("go");
 task.receive();
 """,
         "restore_globals",
+    ),
+    Case(
+        "socket_fault_survives",
+        "a Socket call that a close wakes",
+        SETUP
+        + """\
+fun reader() {
+    var self0 = task.self();
+    defer note();
+    try {
+        print "before " + conn.readline();
+    } catch (e) {
+        print "caught " + e.kind;
+    }
+    print "same task: " + str(self0 == task.self());
+    task.send(me, "done");
+}
+fun closer() { conn.close(); task.send(me, "done"); }
+task.spawn(reader);
+task.spawn(closer);
+task.receive();
+task.receive();
+""",
+        "socket_fault_restore",
+    ),
+    Case(
+        "server_fault_survives",
+        "an accept that a close wakes",
+        """\
+var srv = listen("127.0.0.1", 0);
+var me = task.self();
+fun note() { print "deferred ran"; }
+fun acceptor() {
+    var self0 = task.self();
+    defer note();
+    try {
+        srv.accept();
+    } catch (e) {
+        print "caught " + e.kind;
+    }
+    print "same task: " + str(self0 == task.self());
+    task.send(me, "done");
+}
+fun closer() { srv.close(); task.send(me, "done"); }
+task.spawn(acceptor);
+task.spawn(closer);
+task.receive();
+task.receive();
+""",
+        "server_fault_restore",
     ),
     Case(
         "try_depth_survives",

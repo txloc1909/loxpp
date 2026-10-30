@@ -19,14 +19,14 @@ This script holds that list to the spec table, in both directions:
 - no `blocks` row is on the list: a blocking call runs no other task, so it
   has no per-task state to save.
 
-It also checks the other half: each of the three classes that can dispatch a
-call of class `suspends` (`LoxNative` for `connect`, `InterpSocketMethod` and
-`InterpServerMethod`) must hold its negation guard in its own `call`, as
-written, so a guard that is deleted or that loses its `!` cannot leave a call
-unwrapped while the list still names it. The other two classes that reach a
-host native, `InterpFileMethod` and `InterpProcessMethod`, hold no `suspends`
-row, so they need no guard. This half is static, so it covers `connect` without
-a program that makes a handshake wait.
+It also checks the other half: each class that can dispatch a call of class
+`suspends` must hold its negation guard in its own `call`, as written, so a
+guard that is deleted or that loses its `!` cannot leave a call unwrapped while
+the list still names it. Those classes are `LoxNative` (for `connect`),
+`InterpSocketMethod` and `InterpServerMethod`; a class that cannot dispatch
+such a call, `InterpFileMethod` and `InterpProcessMethod` among them, needs no
+guard. This half is static, so it covers `connect` without a program that makes
+a handshake wait.
 
 A missing entry is the defect that lost a task's deferred call when the task
 resumed after a socket park (issue #984).

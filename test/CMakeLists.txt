@@ -370,8 +370,9 @@ if(LOXPP_PYTHON3)
     # compare against native; the `nativeDepth` and `stringifyDepth` cases
     # compare against the bootstrap itself, because native blocks the worker
     # there and never returns (issue #1008). Then a mutation of the bootstrap
-    # removes the line that one case pins, and that case must fail, so every
-    # saved field needs a case that catches it. Release build only: the
+    # changes the line that one case pins, and that case must fail, so every
+    # saved field and every restore on the fault path needs a case that catches
+    # it. Release build only: the
     # comparison needs an untraced stdout.
     add_test(NAME BootstrapParkState
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
