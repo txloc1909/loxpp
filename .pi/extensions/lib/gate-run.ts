@@ -33,6 +33,11 @@ export function gateContainerName(pid: number, index: number): string {
   return `${GATE_NAME_PREFIX}-${pid}-${index}`;
 }
 
+/** The line a failed gate adds, so a stuck container is one command away. */
+export function gateFailureNote(name: string): string {
+  return `container: ${name} (remove a stuck run with: podman rm -f --time 0 ${name})`;
+}
+
 export interface GateArgvSpec {
   image: string;
   /** The absolute checkout: podman makes a relative host path a named volume. */
@@ -102,6 +107,7 @@ export function buildGateScript(spec: GateScriptSpec): string {
       reach: "children",
       // The removal is what ends the container; the signals alone do not.
       afterSignal: [remove],
+      afterGrace: [remove],
     }),
     "",
     "# An abort must end the run too, so it does what the watcher does: forward",
@@ -110,6 +116,10 @@ export function buildGateScript(spec: GateScriptSpec): string {
     "abort() {",
     '  command kill -TERM "$child" 2>/dev/null',
     `  ${remove}`,
+    // A removal can fail, for example when podman cannot answer. The client
+    // must still end, or the tool call waits forever.
+    `  sleep ${spec.graceS ?? 2}`,
+    '  pid_gone "$child" || command kill -KILL "$child" 2>/dev/null',
     "}",
     "trap 'abort' TERM INT HUP",
     // `wait` returns on the trap, so it repeats until the client is gone.

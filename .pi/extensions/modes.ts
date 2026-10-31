@@ -48,7 +48,7 @@ import {
   type Mode,
   type PolicyState,
 } from "./lib/mode-policy.ts";
-import { buildGateScript, gateContainerName, gateRunArgv } from "./lib/gate-run.ts";
+import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./lib/gate-run.ts";
 import { GATE_SCOPES, gatePlan, type GateScope } from "./lib/gate-scopes.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
@@ -60,9 +60,10 @@ const REPO = "txloc1909/loxpp";
 const GATE_OUTPUT_CAP = 8000;
 const READ_OUTPUT_CAP = 12000;
 const STATUS_OUTPUT_CAP = 2000;
-const STAGNATION_LIMIT = 3;
+const STAGNATION_LIMIT = 3; // identical gate failures on an unchanged tree before a mode stops
+
 /** Counts gate runs, so each one names its own container. */
-let gateRunIndex = 0; // identical gate failures on an unchanged tree before a mode stops
+let gateRunIndex = 0;
 
 // The gate always runs inside the dev container: AGENTS.md's dev model puts the
 // agent on the host and program execution in the container, where the toolchain
@@ -282,7 +283,7 @@ async function runGate(
   // command away from removal.
   return {
     passed: r.code === 0,
-    output: r.code === 0 ? output : `${output}\n\ncontainer: ${name} (remove a stuck run with: podman rm -f --time 0 ${name})`,
+    output: r.code === 0 ? output : `${output}\n\n${gateFailureNote(name)}`,
   };
 }
 
