@@ -519,8 +519,10 @@ count other than 3, a `seconds` that is not a Number, and a `seconds` that is
 not greater than zero are runtime errors. A `nil` limit is a runtime error.
 
 The call suspends its task while it waits for the connection, as `connect`
-does. The limit does not end the wait for a name to resolve, so a call with a
-host name can take longer than `seconds`.
+does. The call can end before `seconds` pass, because the operating system
+has its own limit on a connection attempt, and this specification does not bind
+that limit. Whether `seconds` covers the time to resolve a host name is
+implementation-defined.
 
 **Arity:** 3  
 **Returns:** Socket  
