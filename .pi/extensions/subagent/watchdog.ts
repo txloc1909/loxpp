@@ -43,12 +43,22 @@ export function parentPidLines(): string[] {
  * `kill -0` also succeeds for a zombie that nobody has reaped yet, so the
  * process state decides. `ps` answers on every platform kitty runs on; reading
  * `/proc` would leave the zombie to the fallback and keep the run alive forever.
+ *
+ * An empty answer means one of two things: the pid is gone, or `ps` cannot
+ * answer at all. The two are told apart by asking `ps` about this script's own
+ * pid, which certainly exists. Without that check a `ps` that fails makes every
+ * run look orphaned, and the watcher then kills a live run and its work. The
+ * safe direction is to kill only on evidence of death: when `ps` cannot answer,
+ * the run is left alone, which is the behaviour before this watch existed.
  */
 export function watchdogFunctions(): string[] {
   return [
     "parent_alive() {",
     `  state=$(ps -o stat= -p "$parent_pid" 2>/dev/null | tr -d '[:space:]')`,
-    '  [ -n "$state" ] || return 1',
+    "  if [ -z \"$state\" ]; then",
+    `    [ -n "$(ps -o stat= -p "$$" 2>/dev/null | tr -d '[:space:]')" ] || return 0`,
+    "    return 1",
+    "  fi",
     "  case $state in",
     "    Z*) return 1 ;;",
     "  esac",
@@ -88,8 +98,11 @@ export interface WatchOptions {
    * KITTY_WINDOW_ID, which kitty sets in the window the script runs in.
    */
   closeWindow?: { kitten: string; socket: string };
-  /** Defaults to `children`, the shape kitty's window gives. */
-  reach?: WatchReach;
+  /**
+   * Required, with no default: a call site that forgets it would silently stop
+   * at the child and leave the commands the child started behind.
+   */
+  reach: WatchReach;
 }
 
 /**
@@ -100,8 +113,10 @@ export interface WatchOptions {
 export function watchdogLines(opts: WatchOptions = {}): string[] {
   const poll = opts.pollS ?? WATCH_POLL_S;
   const grace = opts.graceS ?? WATCH_GRACE_S;
+  // An omitted reach falls to the group branch, which `leads_group` guards, so
+  // a caller that forgets it cannot lose the commands the child started.
   const signals = (signal: string): string =>
-    (opts.reach ?? "children") === "children"
+    opts.reach === "children"
       ? `  kill -${signal} "$child" 2>/dev/null`
       : `  if leads_group; then kill -${signal} "-$$" 2>/dev/null; else kill -${signal} "$child" 2>/dev/null; fi`;
   const close = opts.closeWindow

@@ -129,7 +129,7 @@ test("every module that starts a process is accounted for", () => {
   const starters = fs
     .readdirSync(dir)
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
-    .filter((file) => /\bspawn(Sync)?\(/.test(fs.readFileSync(path.join(dir, file), "utf8")))
+    .filter((file) => /\b(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/.test(fs.readFileSync(path.join(dir, file), "utf8")))
     .sort();
   assert.deepEqual(
     starters,
@@ -276,6 +276,40 @@ test("the unattended wrapper never signals a group it does not lead", { timeout:
     } finally {
       wrapper.kill("SIGKILL");
       bystander.kill("SIGKILL");
+    }
+  });
+});
+
+test("a ps that cannot answer does not make a live parent look dead", { timeout: 20000 }, async () => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    // A `ps` that fails for every pid. An empty answer means "gone" only when
+    // `ps` can answer at all, or every live run looks orphaned.
+    const bin = path.join(dir, "bin");
+    await fs.promises.mkdir(bin);
+    await fs.promises.writeFile(path.join(bin, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+
+    const parent = standInParent();
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      assert.equal(alive(childPid), true, "a parent that ps cannot read is not a dead parent");
+      assert.equal(await readOr(path.join(dir, "kitten.log"), ""), "", "no close call without evidence of death");
+    } finally {
+      script.kill("SIGKILL");
+      parent.kill("SIGKILL");
     }
   });
 });
