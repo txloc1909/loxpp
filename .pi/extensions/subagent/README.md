@@ -178,7 +178,8 @@ close.
 
 The watcher kills only on evidence: when `ps` cannot answer for any pid, it
 cannot tell a live parent from a dead one, so it leaves the run alone. That is
-the behaviour before this watch existed.
+the behaviour before this watch existed. The watch also assumes that pi and the
+run script see one PID namespace. A `ps` that cannot see pi reads pi as gone.
 
 The watcher stops at the end of a normal run, so it never closes a window that
 `hold` keeps open.
