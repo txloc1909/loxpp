@@ -521,6 +521,12 @@ public final class LoxRuntime {
                           args -> LoxSocket.connect(requireString(args[0]),
                                                     requirePort(args[1], 1))));
         globals.define(
+            "connect_within",
+            new LoxNative("connect_within", 3,
+                          args -> LoxSocket.connect(requireString(args[0]),
+                                                    requirePort(args[1], 1),
+                                                    requireLimitNanos(args[2]))));
+        globals.define(
             "listen",
             new LoxNative("listen", 2,
                           args -> LoxServer.listen(requireString(args[0]),
@@ -554,6 +560,20 @@ public final class LoxRuntime {
             throw new LoxError("Port must be an integer in range.");
         }
         return (int)raw;
+    }
+
+    // The limit of connect in nanoseconds, never below 1. A limit that is
+    // greater than 0 but too small for a nanosecond still ends the wait.
+    private static long requireLimitNanos(Object v) {
+        if (!(v instanceof Double)) {
+            throw new LoxError("connect_within() limit must be a number.");
+        }
+        double seconds = (Double)v;
+        // The comparison is false for NaN, so NaN is refused too.
+        if (!(seconds > 0)) {
+            throw new LoxError("connect_within() limit must be greater than 0.");
+        }
+        return Math.max(1L, (long)Math.min(seconds * 1e9, (double)(1L << 60)));
     }
 
     private static LoxList requireStringList(Object v) {

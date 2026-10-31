@@ -1743,6 +1743,7 @@ default set names a flag.
 | `input()` | blocking call | every call | yes | — |
 | `sleep(seconds)` | blocking call | every call | yes | — |
 | `connect(host, port)` | blocking call | every call | yes | — |
+| `connect_within(host, port, seconds)` | blocking call | every call | yes | — |
 | `run(program, args)` | blocking call | every call | yes | — |
 | `Socket.read()` | blocking call | every call | yes | — |
 | `Socket.read_bytes(n)` | blocking call | every call | yes | — |

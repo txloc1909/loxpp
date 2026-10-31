@@ -1,0 +1,9 @@
+// STATUS: error
+// CHECK: before
+// connect takes two arguments. A call with a third argument is a runtime error
+// that halts the program, as for every built-in with a fixed arity
+// (spec/05-stdlib.md, connect_within). The limit belongs to connect_within.
+var l = listen("127.0.0.1", 0);
+print "before";
+connect("127.0.0.1", l.port(), 1);
+print "after";

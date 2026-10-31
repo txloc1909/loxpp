@@ -1141,6 +1141,11 @@ void Runtime::parkTask(ObjTask* task) {
     task->parkReason = request.reason;
     task->parkToken = token;
     m_parkedTasks.emplace(token, task);
+    if (task->io.hasDeadline) {
+        const Poller::Token timer = poller().waitUntil(task->io.deadline);
+        task->parkTimerToken = timer;
+        m_parkTimers.emplace(timer, task);
+    }
 }
 
 void Runtime::releasePark(ObjTask* task) {
@@ -1153,6 +1158,13 @@ void Runtime::releasePark(ObjTask* task) {
         m_poller->cancel(task->parkToken);
     }
     m_parkedTasks.erase(task->parkToken);
+    if (task->parkTimerToken != 0) {
+        if (m_poller != nullptr) {
+            m_poller->cancel(task->parkTimerToken);
+        }
+        m_parkTimers.erase(task->parkTimerToken);
+        task->parkTimerToken = 0;
+    }
     task->parkReason = ParkReason::NONE;
     task->parkToken = 0;
     task->io = ParkedIo{};
@@ -1244,6 +1256,15 @@ void Runtime::pollWhileBusy() {
 
 void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
     for (Poller::Token token : ready) {
+        auto limit = m_parkTimers.find(token);
+        if (limit != m_parkTimers.end()) {
+            ObjTask* task = limit->second;
+            m_parkTimers.erase(limit);
+            task->parkTimerToken = 0;
+            const std::string message = task->io.timeoutMessage;
+            failPark(task, "NetworkError", message.c_str());
+            continue;
+        }
         auto found = m_parkedTasks.find(token);
         if (found == m_parkedTasks.end()) {
             continue;
@@ -1494,6 +1515,7 @@ void Runtime::endTasks() {
     m_runQueue.clear();
     m_waitingTasks.clear();
     m_parkedTasks.clear();
+    m_parkTimers.clear();
     m_parkRequest = ParkRequest{};
     m_resumeFault = ResumeFault{};
     m_liveTasks = 0;
