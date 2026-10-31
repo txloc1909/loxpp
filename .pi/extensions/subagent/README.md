@@ -172,7 +172,13 @@ that shell's process group and does not lead it. The watcher therefore signals
 the child alone, and the close call ends the rest: kitty ends what lives in the
 window it closes, so the commands the child started go too. A held window closes
 as well, because the run has no parent to report to and a stray window is what
-this watch exists to remove.
+this watch exists to remove. If that close call itself fails, the child is still
+gone, and the window stays open with the commands it started, for a person to
+close.
+
+The watcher kills only on evidence: when `ps` cannot answer for any pid, it
+cannot tell a live parent from a dead one, so it leaves the run alone. That is
+the behaviour before this watch existed.
 
 The watcher stops at the end of a normal run, so it never closes a window that
 `hold` keeps open.
