@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventStream, type StreamState } from "./stream.ts";
+import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "../lib/watchdog.ts";
 
 export const STDERR_CAP = 4000;
 export const KILL_GRACE_MS = 2000;
@@ -49,6 +50,8 @@ export interface PrintRunOptions {
   signal?: AbortSignal;
   onProgress?: (state: StreamState) => void;
   killGraceMs?: number;
+  watchPollS?: number;
+  watchGraceS?: number;
 }
 
 export interface PrintRunResult {
@@ -56,6 +59,47 @@ export interface PrintRunResult {
   state: StreamState;
   stderr: string;
   aborted: boolean;
+}
+
+export interface PrintScriptSpec {
+  command: string[];
+  watchPollS?: number;
+  watchGraceS?: number;
+}
+
+/**
+ * The script that starts an unattended child. `spawn` runs this script, not pi,
+ * because a `SIGKILL` of this process runs no handler and would leave the child
+ * with its own process group and pipes to nobody. The wrapper watches the
+ * parent pid and ends the child when it is gone.
+ *
+ * The child needs no terminal, so it gets `/dev/null`, and it keeps the pipes
+ * of this script for stdout and stderr. The script exits with the child's code,
+ * so the caller's `close` event still reports what pi returned.
+ *
+ * `runPrintChild` spawns this script detached, so it leads its own group and
+ * the watcher's group signal reaches the commands the child started.
+ */
+export function buildPrintScript(spec: PrintScriptSpec): string {
+  const [command, ...args] = spec.command;
+  return [
+    "#!/bin/sh",
+    "# Written by the Lox++ pi subagent extension.",
+    "set -u",
+    ...parentPidLines(),
+    ...watchdogFunctions(),
+    // `spawn` now starts this shell, so a command that is not there is this
+    // script's job to report, as spawn used to report it with ENOENT.
+    `command -v ${shellQuote(command)} >/dev/null 2>&1 || { printf '%s\\n' ${shellQuote(`loxpp subagent: cannot start ${command}`)} >&2; exit 127; }`,
+    `${[command, ...args].map(shellQuote).join(" ")} </dev/null &`,
+    "child=$!",
+    ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS, reach: "group-when-led" }),
+    'wait "$child"',
+    "status=$?",
+    ...stopWatcherLines(),
+    'exit "$status"',
+    "",
+  ].join("\n");
 }
 
 export function runPrintChild(opts: PrintRunOptions): Promise<PrintRunResult> {
@@ -69,7 +113,14 @@ export function runPrintChild(opts: PrintRunOptions): Promise<PrintRunResult> {
     // Detached, so the child leads a process group: an abort then reaches the
     // commands the child started, not only the child. A shell that does not
     // forward signals would otherwise leave its own child holding the pipe.
-    const child = spawn(opts.command, opts.args, {
+    // The wrapper script, not pi, is what runs here, so it also inherits this
+    // group and the watchdog can signal all of it.
+    const script = buildPrintScript({
+      command: [opts.command, ...opts.args],
+      watchPollS: opts.watchPollS,
+      watchGraceS: opts.watchGraceS,
+    });
+    const child = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(process.pid)], {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["ignore", "pipe", "pipe"],

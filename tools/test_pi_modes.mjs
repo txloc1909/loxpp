@@ -71,7 +71,14 @@ const SCENARIOS = {
           ? { text: `thinking ${turn}` }
           : { tool: { name: "loxpp_gate", args: { scope: "native" } } },
     gate: "fail-each",
-    expect: { stop: "after 12 gate runs", gateRuns: 12, shimRuns: 12, minTurns: 24 },
+    expect: {
+      stop: "after 12 gate runs",
+      gateRuns: 12,
+      shimRuns: 12,
+      minTurns: 24,
+      // A failed gate names its container, so a person can find a stuck one.
+      toolResultIncludes: ["GATE FAILED", "container: loxpp-gate-", "podman rm -f --time 0 loxpp-gate-"],
+    },
   },
   // The same, but the last allowed gate run passes: one grace turn tells the
   // agent to call loxpp_done.
@@ -212,6 +219,11 @@ function writePodmanShim(dir, mode) {
 case "$1" in
   --version) echo "podman version 5.0.0"; exit 0 ;;
   image) exit 0 ;;
+  rm)
+    r=$(cat "${counter}.rm" 2>/dev/null || echo 0)
+    echo "$((r + 1))" > "${counter}.rm"
+    echo "$*" >> "${counter}.rm.argv"
+    exit 0 ;;
   run)
     n=$(cat "${counter}" 2>/dev/null || echo 0)
     n=$((n + 1))
@@ -326,11 +338,21 @@ function collect(entries) {
   const messages = entries
     .filter((e) => e.type === "custom_message")
     .map((e) => ({ kind: e.customType, text: String(e.content ?? "") }));
+  // What a tool call returned, so a scenario can assert on the text a person
+  // sees. `loxpp_gate` is the tool whose failure output names its container.
+  const toolResults = entries
+    .filter((e) => e.type === "message" && e.message?.role === "toolResult")
+    .map((e) =>
+      (e.message?.content ?? [])
+        .filter((part) => part?.type === "text")
+        .map((part) => String(part.text ?? ""))
+        .join("\n"),
+    );
   const states = entries
     .filter((e) => e.type === "custom" && e.customType === "loxpp-modes")
     .map((e) => e.data?.autonomy?.policy)
     .filter(Boolean);
-  return { messages, state: states.at(-1) };
+  return { messages, state: states.at(-1), toolResults };
 }
 
 async function run(name) {
@@ -371,12 +393,13 @@ async function run(name) {
       prompt: "/loop test goal",
       turnLimit: scenario.turns,
     });
-    const { messages, state } = collect(entries);
+    const { messages, state, toolResults } = collect(entries);
     const gateRuns = existsSync(gateCounter) ? Number(readFileSync(gateCounter, "utf8")) : 0;
+    const gateRemovals = existsSync(`${gateCounter}.rm`) ? Number(readFileSync(`${gateCounter}.rm`, "utf8")) : 0;
     // What the shim actually received: the image and the script the gate ran.
     const shimArgv = existsSync(`${gateCounter}.argv`) ? readFileSync(`${gateCounter}.argv`, "utf8") : "";
     const turns = entries.filter((e) => e.type === "message" && e.message?.role === "assistant").length;
-    return { messages, state, gateRuns, shimArgv, turns, stderr };
+    return { messages, state, gateRuns, gateRemovals, shimArgv, toolResults, turns, stderr };
   } finally {
     server.close();
   }
@@ -425,6 +448,17 @@ for (const name of only ? [only] : Object.keys(SCENARIOS)) {
   // executes. It proves the gate really ran, separately from the policy counter.
   if (expect.shimRuns !== undefined && result.gateRuns !== expect.shimRuns) {
     failures.push(`expected ${expect.shimRuns} gate container runs, got ${result.gateRuns}`);
+  }
+  // The wrapper removes a leftover container before each run, so the real gate
+  // path proves it reaches `podman rm` (#1016).
+  if (expect.shimRuns !== undefined && result.gateRemovals !== expect.shimRuns) {
+    failures.push(`expected ${expect.shimRuns} container removals, got ${result.gateRemovals}`);
+  }
+  if (expect.toolResultIncludes !== undefined) {
+    const text = (result.toolResults ?? []).join("\n");
+    for (const needle of expect.toolResultIncludes) {
+      if (!text.includes(needle)) failures.push(`expected a tool result to carry "${needle}", got: ${text.slice(0, 400) || "(none)"}`);
+    }
   }
   for (const needle of expect.shimArgvIncludes ?? []) {
     if (!result.shimArgv.includes(needle)) {

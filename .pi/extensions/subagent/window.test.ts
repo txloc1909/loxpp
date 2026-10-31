@@ -130,6 +130,8 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.ok(argv.includes("--cwd=" + cwd));
     assert.ok(argv.includes("--dont-take-focus"));
     assert.equal(argv.includes("--hold"), false);
+    assert.match(String(argv.at(-2)), /[/\\]run\.sh$/, "kitty runs the script the extension wrote");
+    assert.equal(argv.at(-1), String(process.pid), "the run script watches this process");
 
     // A `kitten @` without a socket writes into pi's terminal, so every call
     // must name the socket itself.
@@ -296,6 +298,7 @@ test("a watched child keeps the terminal and writes its own events", async () =>
     const script = await fs.promises.readFile(path.join(path.dirname(eventsPath), "run.sh"), "utf8");
     assert.equal(script.includes("</dev/null"), false, "stdin stays with the terminal");
     assert.equal(script.includes(`> ${eventsPath}`), false, "stdout stays with the terminal");
+    assert.match(script, /0<&3/, "the child keeps the terminal on its stdin");
     assert.match(script, /2> /, "stderr still goes to the log");
 
     await fs.promises.writeFile(path.join(cwd, "go"), "");

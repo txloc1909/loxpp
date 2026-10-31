@@ -36,6 +36,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -48,6 +49,7 @@ import {
   type Mode,
   type PolicyState,
 } from "./lib/mode-policy.ts";
+import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./lib/gate-run.ts";
 import { GATE_SCOPES, gatePlan, type GateScope } from "./lib/gate-scopes.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
@@ -265,15 +267,22 @@ async function runGate(
   const { image, script } = gatePlan(scope);
   // podman -v needs an absolute host path; a relative one becomes a named volume.
   const absCwd = path.resolve(cwd);
-  const argv = [
-    "podman", "run", "--rm",
-    "-v", `${absCwd}:/workspace:z`,
-    "-v", "loxpp-ccache:/ccache",
-    image,
-    "bash", "-lc", script,
-  ];
-  const r = await runArgv(argv, absCwd, signal);
-  return { passed: r.code === 0, output: tail(r.output, GATE_OUTPUT_CAP) };
+  // One name per call, so a stuck run can be found and removed by name, and no
+  // two runs share one. A random suffix, not a counter: a reload of this
+  // extension resets a counter, and two live runs would then share a name.
+  const name = gateContainerName(process.pid, randomBytes(4).toString("hex"));
+  // The container runs under a wrapper that watches pi: a `SIGKILL` of pi runs
+  // no handler here, and the container would otherwise keep building with
+  // nobody to read the result (#1016).
+  const wrapper = buildGateScript({ argv: gateRunArgv({ image, cwd: absCwd, name, script }), name });
+  const r = await runArgv(["/bin/sh", "-c", wrapper, "loxpp-gate", String(process.pid)], absCwd, signal);
+  const output = tail(r.output, GATE_OUTPUT_CAP);
+  // A failed gate names its container, so a run that is still stuck is one
+  // command away from removal.
+  return {
+    passed: r.code === 0,
+    output: r.code === 0 ? output : `${output}\n\n${gateFailureNote(name)}`,
+  };
 }
 
 async function ciGreen(
