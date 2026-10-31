@@ -829,6 +829,9 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         const bool innermost = co->waitingInner == nullptr;
         if (!innermost) {
             wake = resumeWaitingInner(co, entry);
+        } else if (m_currentTask != nullptr &&
+                   m_currentTask->sel.pendingRetry) {
+            wake = retrySelectiveReceive(entry);
         }
         if (wake == WakeResult::Run) {
             loopOk = (innermost && m_resumeFault.pending)
@@ -1252,6 +1255,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         if (task->io.op != IoOp::NONE) {
             resumeParkedIo(*this, task);
         } else {
+            task->sel.timedOut = task->sel.pendingRetry;
             completePark(task, from<Nil>(Nil{}));
         }
     }
@@ -1309,6 +1313,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->pendingValue = Value{};
     task->hasPendingFault = false;
     task->io = ParkedIo{};
+    task->sel = ObjTask::SelectiveReceive{};
     releasePark(task);
     m_waitingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
@@ -1340,6 +1345,10 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
         task->state = TaskState::READY;
         m_waitingTasks.erase(task);
         m_runQueue.push_back(task);
+    } else if (task->state == TaskState::PARKED && task->sel.pendingRetry) {
+        // A receive_* call with a limit: the message ends the wait of the
+        // limit, and the call tests the message when the task runs.
+        unparkTask(task);
     }
 }
 
@@ -1362,6 +1371,12 @@ bool Runtime::sendMessage(ObjTask* task, Value msg) {
 
 bool Runtime::receiveFromNative(Value* out) {
     ObjTask* task = m_currentTask;
+    if (m_selectDepth > 0) {
+        raiseFromNative("YieldAcrossNativeError",
+                        "Cannot receive in a function that receive_where "
+                        "calls.");
+        return false;
+    }
     if (!task->mailbox.empty()) {
         *out = task->mailbox.front();
         task->mailbox.pop_front();
@@ -1375,6 +1390,118 @@ bool Runtime::receiveFromNative(Value* out) {
     m_taskSwitchPending = true;
     m_taskSwitchInner = nullptr;
     return false;
+}
+
+bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
+                               double seconds, Value* out) {
+    ObjTask* task = m_currentTask;
+    if (m_selectDepth > 0) {
+        raiseFromNative("YieldAcrossNativeError",
+                        "Cannot receive in a function that receive_where "
+                        "calls.");
+        return false;
+    }
+    task->sel = ObjTask::SelectiveReceive{};
+    task->sel.hasWant = hasWant;
+    task->sel.want = want;
+    task->sel.limited = limited;
+    if (limited) {
+        task->sel.deadline = Poller::deadlineAfter(seconds);
+    }
+    return selectStep(task, out);
+}
+
+bool Runtime::selectStep(ObjTask* task, Value* out) {
+    auto& sel = task->sel;
+    while (sel.scanned < task->mailbox.size()) {
+        const std::size_t at = sel.scanned;
+        if (!sel.hasWant) {
+            *out = task->mailbox[at];
+            task->mailbox.erase(task->mailbox.begin() +
+                                static_cast<std::ptrdiff_t>(at));
+            sel = ObjTask::SelectiveReceive{};
+            return true;
+        }
+        const Value msg = task->mailbox[at];
+        push(sel.want);
+        push(msg);
+        Value verdict;
+        bool ok;
+        ++m_selectDepth;
+        {
+            SynchronousRun run(*this);
+            ok = invokeCallableFromNative(1, &verdict);
+        }
+        --m_selectDepth;
+        if (!ok) {
+            task->sel = ObjTask::SelectiveReceive{};
+            return false;
+        }
+        if (!isFalsy(verdict)) {
+            *out = msg;
+            task->mailbox.erase(task->mailbox.begin() +
+                                static_cast<std::ptrdiff_t>(at));
+            task->sel = ObjTask::SelectiveReceive{};
+            return true;
+        }
+        ++task->sel.scanned;
+    }
+    if (sel.timedOut) {
+        task->sel = ObjTask::SelectiveReceive{};
+        raiseFromNative("TimeoutError", "The limit of the receive passed.");
+        return false;
+    }
+    if (!taskCanSuspend()) {
+        task->sel = ObjTask::SelectiveReceive{};
+        raiseFromNative("YieldAcrossNativeError",
+                        "Cannot receive across a native callback.");
+        return false;
+    }
+    if (sel.limited) {
+        m_parkRequest = ParkRequest{ParkReason::TIMER, -1, sel.deadline};
+    }
+    sel.pendingRetry = true;
+    m_taskSwitchPending = true;
+    m_taskSwitchInner = nullptr;
+    return false;
+}
+
+Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
+    ObjTask* task = m_currentTask;
+    task->sel.pendingRetry = false;
+    // The call runs as callNative runs a native: one native deeper, with the
+    // boundary of the loop that the restored frames run in.
+    OpResult savedOutcome = m_reentrantOutcome;
+    m_reentrantOutcome = OpResult::OK;
+    int savedBoundary = m_nativeStopAtFrameCount;
+    m_nativeStopAtFrameCount = entry;
+    bool savedResumable = m_resumableMode;
+    m_resumableMode = false;
+    ++m_nativeDepth;
+    Value result;
+    bool ok = selectStep(task, &result);
+    --m_nativeDepth;
+    m_resumableMode = savedResumable;
+    m_nativeStopAtFrameCount = savedBoundary;
+    OpResult outcome = m_reentrantOutcome;
+    m_reentrantOutcome = savedOutcome;
+    if (ok) {
+        stackTop[-1] = result;
+        return WakeResult::Run;
+    }
+    if (m_taskSwitchPending) {
+        pop();
+        suspendForTaskSwitch(nullptr);
+        return WakeResult::Suspended;
+    }
+    switch (outcome) {
+    case OpResult::Resumed:
+        return WakeResult::Run;
+    case OpResult::Stop:
+        return WakeResult::Stop;
+    default:
+        return WakeResult::Fatal;
+    }
 }
 
 bool Runtime::resumeTask(ObjTask* task) {
@@ -1457,7 +1584,7 @@ bool Runtime::resumeTask(ObjTask* task) {
             return true;
         }
         task->state = TaskState::WAITING;
-        task->receiving = true;
+        task->receiving = !task->sel.pendingRetry;
         m_waitingTasks.insert(task);
         return true;
     }
@@ -2467,6 +2594,7 @@ void Runtime::resetStack() {
     m_currentCoroutine = nullptr;
     m_yieldedValue = Value{};
     m_stackOverflow = false;
+    m_selectDepth = 0;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {
         deferList.clear();

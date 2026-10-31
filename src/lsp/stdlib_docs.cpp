@@ -206,7 +206,7 @@ constexpr std::array<StdlibEntry, 1> kCoroutine = {{
 
 // `task.<name>`: src/stdlib/task_api.cpp. Descriptions condensed from
 // spec/05-stdlib.md, task.
-constexpr std::array<StdlibEntry, 6> kTask = {{
+constexpr std::array<StdlibEntry, 9> kTask = {{
     {"spawn", "task.spawn(fn) -> Task", 1,
      "Makes a new task on this worker that calls `fn`; returns its handle."},
     {"spawn_worker", "task.spawn_worker(fn, msg) -> Task", 2,
@@ -215,6 +215,16 @@ constexpr std::array<StdlibEntry, 6> kTask = {{
      "Appends the message `msg` to the mailbox of task `t`. Never waits."},
     {"receive", "task.receive() -> Any", 0,
      "Takes the next message of this task; waits while the mailbox is empty."},
+    {"receive_within", "task.receive_within(seconds) -> Any", 1,
+     "Takes the next message of this task; raises TimeoutError when none "
+     "arrives within `seconds`."},
+    {"receive_where", "task.receive_where(want) -> Any", 1,
+     "Takes the first message for which `want(msg)` is truthy; the other "
+     "messages stay in order. Waits while none matches."},
+    {"receive_where_within", "task.receive_where_within(want, seconds) -> Any",
+     2,
+     "Like `receive_where`, and raises TimeoutError when no message matches "
+     "within `seconds`."},
     {"self", "task.self() -> Task", 0, "The handle of the current task."},
     {"pending", "task.pending() -> Number", 0,
      "The number of messages in the mailbox of the current task."},

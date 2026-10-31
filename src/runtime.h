@@ -423,6 +423,16 @@ class Runtime {
     // YieldAcrossNativeError (outcome recorded for callNative).
     bool receiveFromNative(Value* out);
 
+    // task.receive_within, task.receive_where, and task.receive_where_within
+    // for the current task, after their argument checks. `want` is read only
+    // when `hasWant` is set, `seconds` only when `limited` is set. The result
+    // is as for receiveFromNative: true with the message in *out, or false
+    // after a task switch was requested or a fault was raised. When a task
+    // switch was requested, resumeCoroutine runs the call again in the
+    // frames of the task (retrySelectiveReceive) when the task runs again.
+    bool selectiveReceive(Value want, bool hasWant, bool limited,
+                          double seconds, Value* out);
+
     // A native that waits for time or a descriptor calls this instead of
     // waiting. True: the current task suspends when the native returns, and
     // the native returns a placeholder; the task is PARKED and leaves the run
@@ -1044,6 +1054,9 @@ class Runtime {
     // coroutine. False when the fault ended the program.
     bool raiseResumeFault(int entry);
 
+    // One pass of a receive_* call over the messages it has not tested. The
+    // caller has set up task->sel. Result as for receiveFromNative.
+    bool selectStep(ObjTask* task, Value* out);
     // True when a receive on an empty mailbox can suspend the current task:
     // every C++ frame between the task's base and the receive native is the
     // resume of a coroutine the task resumed, so a suspension loses no C++
@@ -1066,6 +1079,11 @@ class Runtime {
     // must not run.
     enum class WakeResult : std::uint8_t { Run, Suspended, Stop, Fatal };
     WakeResult resumeWaitingInner(ObjCoroutine* co, int entry);
+    // The resume of the innermost coroutine of a task that waits in a
+    // receive_* call: the call runs again, in the restored frames, as if the
+    // native were called a second time. The value on top of the stack is the
+    // resume value, which the call replaces with its result.
+    WakeResult retrySelectiveReceive(int entry);
 
     // A C++ caller that needs the result of Lox code before it goes on: a
     // deferred-call drain (reentrantCall), a map key's __hash__ or __eq__,
@@ -1352,6 +1370,10 @@ class Runtime {
     // The tasks that wait in task.receive(), rooted so the deadlock report
     // can name each one.
     std::unordered_set<ObjTask*> m_waitingTasks;
+    // Greater than 0 while a `want` function of a receive_where call runs. A
+    // receive in it would remove a message from the mailbox that the call
+    // is testing.
+    int m_selectDepth{0};
     // What parkCurrentTask asked for, until resumeTask carries it out.
     struct ParkRequest {
         ParkReason reason{ParkReason::NONE};
