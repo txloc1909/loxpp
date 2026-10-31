@@ -20,6 +20,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildRunScript, closeWindowArgv } from "../subagent/kitty.ts";
 import { buildPrintScript } from "../subagent/print.ts";
+import { buildGateScript, gateRunArgv } from "./gate-run.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 /** Fast enough for a test, and still several real poll cycles. */
@@ -166,9 +167,14 @@ test("every script builder carries the watchdog", () => {
     socket: "unix:/tmp/sock",
   });
   const unattended = buildPrintScript({ command: ["/bin/sh", "-c", "true"] });
+  const gate = buildGateScript({
+    argv: gateRunArgv({ image: "loxpp-dev-env", cwd: "/repo", name: "loxpp-gate-1-abc", script: "true" }),
+    name: "loxpp-gate-1-abc",
+  });
   for (const [name, script] of [
     ["the watched run script", watched],
     ["the unattended wrapper", unattended],
+    ["the gate wrapper", gate],
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
   }
