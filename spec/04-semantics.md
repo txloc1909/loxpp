@@ -1592,8 +1592,9 @@ owns one **mailbox**, a first-in first-out queue of messages. A task never
 moves to another worker.
 
 The primitive is spawn, send, and receive: the members of the global `task`
-object (§05-stdlib). Channels, pools, and other patterns are libraries over
-these.
+object (§05-stdlib). Receive has three more forms, which take a message with
+a limit on the wait, with a condition on the message, or with both. Channels,
+pools, and other patterns are libraries over these.
 
 ### The main task
 
@@ -1714,6 +1715,83 @@ status `"running"`, so a resume of it from another task is a
 `RunningCoroutineError`. When the task runs again, the receive returns
 inside that coroutine.
 
+### `task.receive_within`, `task.receive_where`, and `task.receive_where_within`
+
+These three calls are receives with a limit, with a condition, or with both.
+Each has a fixed number of arguments.
+
+- `task.receive_within(seconds)` removes the message at the head of the
+  mailbox and returns it, as `task.receive()` does. It raises `TimeoutError`
+  when no message arrives within `seconds`.
+- `task.receive_where(want)` removes the first message of the mailbox for
+  which `want` is true, and returns it. It waits until there is such a
+  message.
+- `task.receive_where_within(want, seconds)` is `task.receive_where(want)`
+  with the limit of `task.receive_within(seconds)`.
+
+1. `want`, when the call has it, must be a Function or a BoundMethod; any
+   other value is a runtime error. `seconds`, when the call has it, must be a
+   Number greater than zero; any other value, a NaN included, is a runtime
+   error. `want` is checked first. A `seconds` so large that the wait cannot
+   end is a limit that never passes.
+2. The call tests the messages of the mailbox in order, from the head. For
+   each message `m` it calls `want(m)` (for `task.receive_within`, the head
+   is the selected message and `want` is not called). A message is
+   **selected** when `want(m)` returns a value that is not `nil` and not
+   `false`. The call removes the first selected message from the mailbox and
+   returns it. A message that is not selected stays in the mailbox, and the
+   messages keep their order, so a later receive sees them as if this call
+   had not run.
+3. When no message of the mailbox is selected, the current task suspends, as
+   in `task.receive()`. Each time the task runs again after a message
+   arrived, the call tests the messages that arrived since its last test, in
+   order. The call calls `want` at most once for each message. The call ends
+   when a message is selected.
+4. The limit starts at the start of the call and covers the whole call: every
+   wait, and the time that `want` takes. When the limit passes, the call
+   raises `TimeoutError`, and the mailbox is unchanged. A message that is in
+   the mailbox when the task runs again is tested before the limit counts: a
+   message that arrives as the limit passes is not lost. It is returned if it
+   is selected, and it stays in the mailbox if it is not.
+5. A task that waits in one of these calls is not deadlocked while it has a
+   limit: its limit can pass (see [Deadlock](#deadlock)).
+6. If the call must suspend while a native callback is between the start of
+   the task and the call, or while a deferred call runs, the call raises
+   `YieldAcrossNativeError`, for the same reason as in
+   [`task.receive`](#taskreceive). The limit does not change this rule: a
+   call that finds a selected message does not suspend.
+
+**The `want` function.** `want` runs in the current task, between two
+suspend points of the task: the call is not a suspend point while `want`
+runs. It is a context where a task cannot suspend (see [Contexts where a task
+cannot suspend](#contexts-where-a-task-cannot-suspend)).
+
+- A `yield` in `want`, or in a function that `want` calls, raises
+  `YieldAcrossNativeError`. A call of class suspends blocks the worker, as the
+  contexts rule says.
+- A call of `task.receive()`, `task.receive_within`, `task.receive_where`, or
+  `task.receive_where_within` in `want`, or in a function that `want` calls,
+  raises `YieldAcrossNativeError`, also when the mailbox holds a message.
+  Such a call would change the mailbox that this call is testing.
+- A `task.send` in `want` works. A message that `want` sends to its own task
+  is appended, and the call tests it, after the messages that were there.
+  `task.pending()` in `want` counts the messages that are in the mailbox,
+  the tested ones included.
+- A throw that `want` does not catch ends the call, and it propagates from
+  the call as from any other call. No message is removed. A halting fault in
+  `want` halts the program, as everywhere.
+
+**Selective receive.** A task that holds two channel ends, as in [Bounding a
+Mailbox](#bounding-a-mailbox-non-normative), takes the items of one channel
+and the credits of the other from one mailbox with `task.receive_where`:
+
+```lox
+var msg = task.receive_where(isCredit);
+```
+
+The items that `isCredit` does not select wait in the mailbox, in order,
+until a call selects them.
+
 ### `task.self` and `task.pending`
 
 `task.self()` returns the handle of the current task.
@@ -1740,6 +1818,9 @@ default set names a flag.
 |---|---|---|---|---|
 | `yield` | yield | in any task, outside every coroutine that the task resumed | yes | — |
 | `task.receive()` | receive | the mailbox is empty | yes | — |
+| `task.receive_within(seconds)` | receive | the mailbox is empty | yes | — |
+| `task.receive_where(want)` | receive | no message of the mailbox is selected | yes | — |
+| `task.receive_where_within(want, seconds)` | receive | no message of the mailbox is selected | yes | — |
 | `input()` | blocking call | every call | yes | — |
 | `sleep(seconds)` | blocking call | every call | yes | — |
 | `connect(host, port)` | blocking call | every call | yes | — |
@@ -1814,6 +1895,7 @@ fault, and the result does not depend on the state of the network.
 | `__str__` | `print`, `str()`, an element or key of a List or Map that is printed, a `__str__` inside a `__str__`, an uncaught throw of an instance that is not an `Error` |
 | a map key's `__hash__` and `__eq__` | `m[k]`, `m[k] = v`, a Map literal, `k in m`, `Map.has`, `Map.del`, and a hash collision |
 | `reflect.callMethod` | the method, or a callable field |
+| a receive condition | `want`, for each message that `task.receive_where` or `task.receive_where_within` tests |
 | a deferred call | every drain: at a normal return, after a caught throw, after a run-time fault, after an uncaught throw, at the end of a task function, at the end of a coroutine function |
 | a native entry | a task or coroutine whose entry is a native function or a bound native |
 | a nested coroutine | each coroutine that the task resumes inside one of the contexts above |
@@ -1825,7 +1907,10 @@ every operator method and its reflected form, in `__lt__`, `__gt__`,
 coroutine that the task resumes outside the contexts above.
 
 `task.receive()` on an empty mailbox raises `YieldAcrossNativeError` in the
-same contexts (see [`task.receive`](#taskreceive)). The two rules differ
+same contexts (see [`task.receive`](#taskreceive)), and so does a receive with
+a limit or a condition that must suspend (see
+[`task.receive_within`](#taskreceive_within-taskreceive_where-and-taskreceive_where_within)).
+The two rules differ
 because a receive has no way to continue without a message, and a call of
 class suspends has a way: it waits in place.
 
@@ -1838,7 +1923,9 @@ first in, first out, and it has no priorities.
 2. A task that suspends at a `yield` joins the back of the run queue. The
    main task follows the same rule.
 3. A task that suspends in `task.receive()` leaves the run queue. When a
-   message arrives in its mailbox, it joins the back of the run queue.
+   message arrives in its mailbox, it joins the back of the run queue. A task
+   that suspends in a receive with a limit or a condition follows the same
+   rule, and it also joins the back of the run queue when its limit passes.
 4. A task that suspends in a call that waits for the network or for time
    leaves the run queue. When its wait ends, it joins the back of the run
    queue.
@@ -1849,7 +1936,7 @@ When several waits have ended by the time the worker has no task that is
 ready to run, the tasks join the run queue in this order: first the tasks
 whose wait is for a connection, a Socket, or a Server and has ended, in the
 order in which their calls began to wait, then the tasks whose sleep has
-expired, in the order of their deadlines.
+expired or whose limit has passed, in the order of their deadlines.
 
 The order in which the tasks of one worker run is therefore defined, with one
 limit: an event outside the program decides when a wait ends, and so which
@@ -1883,14 +1970,17 @@ different workers print never mix inside one line.
 
 ### Deadlock
 
-When the main task waits in `task.receive()`, no task on any worker is
-running or ready to run, no task waits in a blocking call, and no message is
-on its way to a task, the program can never progress. A task that waits in a
-call of class suspends is a task that can continue: its event can arrive, so
-it prevents a deadlock. It then ends with
-`DeadlockError`. It is a halting fault (see [Halting
-Faults](#halting-faults)). The report can list the tasks that wait in `task.receive()`. It does not list
-a task that waits in a blocking call.
+When the main task waits in a receive without a limit (`task.receive()` or
+`task.receive_where(want)`), no task on any worker is running or ready to
+run, no task waits in a blocking call, no task waits in a receive with a
+limit, and no message is on its way to a task, the program can never
+progress. A task that waits in a call of class suspends is a task that can
+continue: its event can arrive, so it prevents a deadlock. A task that waits
+in a receive with a limit is one too: its limit can pass. The program then
+ends with `DeadlockError`. It is a halting fault (see [Halting
+Faults](#halting-faults)). The report can list the tasks that wait in a
+receive without a limit. It does not list a task that waits in a blocking call
+or in a receive with a limit.
 
 ### Worker and Task Faults
 
@@ -1898,7 +1988,8 @@ a task that waits in a blocking call.
 |---|---|---|
 | `SendError` | `task.send(t, msg)` or `task.spawn_worker(fn, msg)`, where `msg` is not a message | yes |
 | `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes |
-| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is between the start of the task and the receive, or while a deferred call runs | yes |
+| `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is between the start of the task and the receive, or while a deferred call runs; a receive with a limit or a condition that must suspend in the same places; any receive in the `want` function of `task.receive_where` or `task.receive_where_within` | yes |
+| `TimeoutError` | `task.receive_within(seconds)` or `task.receive_where_within(want, seconds)`, where the limit passes and no message is selected | yes |
 | `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no |
 
 A catchable fault in this table is delivered to a `catch` block as an
@@ -1932,8 +2023,9 @@ no credit. So, when every consumer takes each item it gets, some task can
 always run, from the highest rank down. A cycle of channels breaks this
 rule, and then two full channels can wait on each other. A task between two
 ranks holds two ends, so its mailbox gets the items of one channel and the
-credits of the other. The library in `examples/credit_channel.lox` lets a
-task hold one end only.
+credits of the other. Such a task takes each kind with `task.receive_where`,
+which leaves the other kind in the mailbox. The library in
+`examples/credit_channel.lox` lets a task hold one end only.
 
 ---
 
