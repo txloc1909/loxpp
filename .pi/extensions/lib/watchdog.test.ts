@@ -18,8 +18,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildRunScript, closeWindowArgv } from "./kitty.ts";
-import { buildPrintScript } from "./print.ts";
+import { buildRunScript, closeWindowArgv } from "../subagent/kitty.ts";
+import { buildPrintScript } from "../subagent/print.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 /** Fast enough for a test, and still several real poll cycles. */
@@ -130,18 +130,29 @@ test("shellQuote survives a real shell", () => {
   assert.equal(result.stdout, nasty);
 });
 
-test("every module that starts a process is accounted for", () => {
-  const dir = path.dirname(fileURLToPath(import.meta.url));
-  const starters = fs
-    .readdirSync(dir)
-    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
-    .filter((file) => /\b(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/.test(fs.readFileSync(path.join(dir, file), "utf8")))
+test("every module in the extensions tree that starts a process is accounted for", () => {
+  // Every module here runs inside pi, so every process it starts outlives a
+  // SIGKILL of pi unless something watches pi. This list is the ground truth:
+  // a new starter fails the test until it gets a decision.
+  const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const modules: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) modules.push(full);
+    }
+  };
+  walk(root);
+  const starters = modules
+    .filter((file) => /\b(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/.test(fs.readFileSync(file, "utf8")))
+    .map((file) => path.relative(root, file).split(path.sep).join("/"))
     .sort();
-  assert.deepEqual(
-    starters,
-    ["print.ts", "window.ts"],
-    "a module that starts a process needs a watchdog decision, and this list is the ground truth",
-  );
+  // Each entry names what watches pi for it:
+  //   modes.ts             the gate wrapper in lib/gate-run.ts
+  //   subagent/print.ts    the unattended wrapper it builds
+  //   subagent/window.ts   the run script kitty runs (kitten calls are short)
+  assert.deepEqual(starters, ["modes.ts", "subagent/print.ts", "subagent/window.ts"], "a module that starts a process needs a watchdog decision");
 });
 
 test("every script builder carries the watchdog", () => {
