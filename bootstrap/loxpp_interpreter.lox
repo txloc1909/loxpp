@@ -3479,6 +3479,10 @@ class InterpTask {
         this.mailbox   = [];
         this.head      = 0;
         this.waiting   = false;
+        // True while the task waits in a receive_* call with a limit. Such a
+        // task can still run when its timer ends, so it counts as ready for
+        // the deadlock check.
+        this.limited   = false;
         this.dead      = false;
         // The host task handle. The main task gets its handle when it first
         // waits, so a program that never uses tasks never needs a host that
@@ -3510,17 +3514,51 @@ class InterpTask {
         return m;
     }
 
+    // Removes and returns the message `at` places after the head. The
+    // messages before it keep their order.
+    takeAt(at) {
+        var place = this.head + at;
+        var m = this.mailbox[place];
+        while (place > this.head) {
+            this.mailbox[place] = this.mailbox[place - 1];
+            place = place - 1;
+        }
+        this.take();
+        return m;
+    }
+
     // The host task's function.
     run() { this.interp.runTask(this); }
 
     toString() { return "<task>"; }
 }
 
+// The limit of a receive_* call: sleeps in a host task of its own, so the
+// other host tasks run, then sends its number to the waiting host task. The
+// waiting task may have ended by then.
+class SelectTimer {
+    init(host, seconds, gen) {
+        this.host = host;
+        this.seconds = seconds;
+        this.gen = gen;
+    }
+
+    run() {
+        sleep(this.seconds);
+        try {
+            task.send(this.host, this.gen);
+        } catch (e) {
+        }
+    }
+}
+
 class InterpTaskFn {
     init(name) { this.name = name; this.loxTag = "native"; }
     arity() {
         if (this.name == "spawn") return 1;
-        if (this.name == "spawn_worker" or this.name == "send") return 2;
+        if (this.name == "spawn_worker" or this.name == "send" or
+            this.name == "receive_where_within") return 2;
+        if (this.name == "receive_within" or this.name == "receive_where") return 1;
         return 0;
     }
     call(interp, args) {
@@ -3528,6 +3566,12 @@ class InterpTaskFn {
         if (this.name == "spawn_worker") return interp.taskSpawnWorker(args[0], args[1]);
         if (this.name == "send")         return interp.taskSend(args[0], args[1]);
         if (this.name == "receive")      return interp.taskReceive();
+        if (this.name == "receive_within")
+            return interp.taskReceiveChecked(false, true, nil, args[0]);
+        if (this.name == "receive_where")
+            return interp.taskReceiveChecked(true, false, args[0], 0);
+        if (this.name == "receive_where_within")
+            return interp.taskReceiveChecked(true, true, args[0], args[1]);
         if (this.name == "self")         return interp.currentTask;
         return interp.currentTask.pending();
     }
@@ -3627,6 +3671,10 @@ class Interpreter {
         // call). A yield cannot cross such a frame on native, so it must not
         // here.
         this.nativeDepth = 0;
+        // Greater than 0 while a `want` function of a receive_where call runs.
+        this.selectDepth = 0;
+        // The number of the last receive_* call that made a timer.
+        this.selectGen = 0;
         // Number of try blocks that are executing in the running task, the
         // resumer's under a running coroutine's own. A target-level stack
         // overflow is fatal, and skips every pending deferred call, only
@@ -3810,7 +3858,7 @@ class Interpreter {
         t.mailbox.append(msg);
         if (t.waiting) {
             t.waiting = false;
-            this.readyTasks = this.readyTasks + 1;
+            if (!t.limited) this.readyTasks = this.readyTasks + 1;
             task.send(t.host, true);
         }
         return nil;
@@ -3822,6 +3870,7 @@ class Interpreter {
     // the state "running".
     taskReceive() {
         var t = this.currentTask;
+        if (this.selectDepth > 0) return this.receiveInWant();
         if (t.pending() > 0) return t.take();
         if (this.nativeDepth > 0) {
             this.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
@@ -3832,9 +3881,101 @@ class Interpreter {
         this.readyTasks = this.readyTasks - 1;
         this.checkDeadlock();
         this.parkTask(t);
-        task.receive();
+        this.awaitWake(0);
         this.unparkTask(t);
         return t.take();
+    }
+
+    receiveInWant() {
+        this.setError("YieldAcrossNativeError", "Cannot receive in a function that receive_where calls.", 0);
+        return nil;
+    }
+
+    // Waits on the host mailbox for the wake of a send (true), or for the
+    // tick of the timer `gen`. The tick of an earlier call is not for this
+    // wait, and is dropped. Returns what ended the wait.
+    awaitWake(gen) {
+        var tok = task.receive();
+        while (tok != true and tok != gen) tok = task.receive();
+        return tok;
+    }
+
+    // The argument checks of task.receive_within, task.receive_where, and
+    // task.receive_where_within, in the order of spec/04-semantics.md.
+    taskReceiveChecked(hasWant, limited, want, seconds) {
+        if (hasWant and !isFunctionOrBoundMethod(want)) {
+            this.fatalError("task.receive_where expects a function.");
+            return nil;
+        }
+        if (limited) {
+            if (!isNumberValue(seconds)) {
+                this.fatalError("task.receive_within expects a number of seconds.");
+                return nil;
+            }
+            if (!(seconds > 0)) {
+                this.fatalError("task.receive_within expects a limit greater than zero.");
+                return nil;
+            }
+        }
+        return this.taskReceiveSelective(hasWant, limited, want, seconds);
+    }
+
+    // The receive_* calls (spec/04-semantics.md, task.receive_within): test
+    // each message once, in order, and wait for more when none matches. A
+    // limit is a host task that sleeps and then sends its number to this
+    // task. A message that is in the mailbox when the task runs again is
+    // tested before the limit counts.
+    taskReceiveSelective(hasWant, limited, want, seconds) {
+        if (this.selectDepth > 0) return this.receiveInWant();
+        var t = this.currentTask;
+        var scanned = 0;
+        var timedOut = false;
+        var gen = 0;
+        while (true) {
+            while (scanned < t.pending()) {
+                if (!hasWant) return t.take();
+                var msg = t.mailbox[t.head + scanned];
+                this.selectDepth = this.selectDepth + 1;
+                this.nativeDepth = this.nativeDepth + 1;
+                var verdict = want.call(this, [msg]);
+                this.nativeDepth = this.nativeDepth - 1;
+                this.selectDepth = this.selectDepth - 1;
+                if (this.throwFlag) return nil;
+                if (this.isTruthy(verdict)) return t.takeAt(scanned);
+                scanned = scanned + 1;
+            }
+            if (timedOut) {
+                this.setError("TimeoutError", "The limit of the receive passed.", 0);
+                return nil;
+            }
+            if (this.nativeDepth > 0) {
+                this.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
+                return nil;
+            }
+            if (t.host == nil) t.host = task.self();
+            if (limited and gen == 0) {
+                this.selectGen = this.selectGen + 1;
+                gen = this.selectGen;
+                task.spawn(SelectTimer(t.host, seconds, gen).run);
+            }
+            t.waiting = true;
+            t.limited = limited;
+            if (!limited) {
+                this.readyTasks = this.readyTasks - 1;
+                this.checkDeadlock();
+            }
+            this.parkTask(t);
+            var tok = this.awaitWake(gen);
+            if (tok != true) {
+                timedOut = true;
+                // A send that came after the tick has put its wake in the
+                // host mailbox already, and the wake is not for a later wait.
+                if (t.waiting) t.waiting = false;
+                else task.receive();
+            }
+            this.unparkTask(t);
+            t.limited = false;
+        }
     }
 
     // The body of every host task but the main one.
@@ -5695,7 +5836,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "taskmodule") {
-            if (name == "spawn" or name == "spawn_worker" or name == "send" or name == "receive" or name == "self" or name == "pending") return InterpTaskFn(name);
+            if (name == "spawn" or name == "spawn_worker" or name == "send" or name == "receive" or name == "receive_within" or name == "receive_where" or name == "receive_where_within" or name == "self" or name == "pending") return InterpTaskFn(name);
             this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }
