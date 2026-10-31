@@ -8,6 +8,10 @@
  */
 
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 import { runPrintChild } from "./print.ts";
 import { finalOutput } from "./stream.ts";
@@ -108,6 +112,75 @@ test("a child that ignores SIGTERM is killed after the grace", async () => {
 
 test("a command that cannot start reports the failure instead of hanging", async () => {
   const run = await runPrintChild({ command: "/nonexistent/pi", args: [], cwd: process.cwd() });
-  assert.notEqual(run.exitCode, 0);
-  assert.match(run.stderr, /ENOENT|no such file/i);
+  assert.equal(run.exitCode, 127);
+  assert.match(run.stderr, /cannot start \/nonexistent\/pi/);
+});
+
+/** An exited process that nobody has reaped yet still answers `kill -0`. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  if (!fs.existsSync("/proc/self/stat")) return true;
+  try {
+    return !/\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(what: string, check: () => boolean, timeoutMs = 8000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    if (check()) return;
+    if (Date.now() >= until) assert.fail(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+test("a run ends its child when the parent pi process is killed", { timeout: 20000 }, async () => {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-watchdog-"));
+  const childPidFile = path.join(dir, "child.pid");
+  // The caller of runPrintChild is the process whose death the wrapper must
+  // notice, so it runs in a stand-in that the test can kill with SIGKILL.
+  const caller = path.join(dir, "caller.ts");
+  await fs.promises.writeFile(
+    caller,
+    [
+      `import { runPrintChild } from ${JSON.stringify(path.resolve(".pi/extensions/subagent/print.ts"))};`,
+      `const run = runPrintChild({`,
+      `  command: "/bin/sh",`,
+      `  args: ["-c", ${JSON.stringify(`printf '%s' $$ > ${childPidFile}; sleep 60`)}],`,
+      `  cwd: ${JSON.stringify(dir)},`,
+      `  watchPollS: 0.05,`,
+      `  watchGraceS: 0.3,`,
+      `});`,
+      `run.then((result) => process.exit(result.exitCode));`,
+    ].join("\n"),
+  );
+
+  const parent: ChildProcess = spawn(process.execPath, [caller], { stdio: "ignore" });
+  try {
+    let childPid = 0;
+    await waitFor("the child to start", () => {
+      try {
+        childPid = Number.parseInt(fs.readFileSync(childPidFile, "utf8").trim(), 10);
+      } catch {
+        return false;
+      }
+      return Number.isInteger(childPid) && childPid > 1;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(alive(childPid), true, "the child lives while the parent lives");
+
+    const exited = new Promise<void>((resolve) => parent.once("exit", () => resolve()));
+    parent.kill("SIGKILL");
+    await exited;
+    await waitFor("the child to end", () => !alive(childPid));
+  } finally {
+    parent.kill("SIGKILL");
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
 });
