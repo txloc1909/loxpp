@@ -14,15 +14,16 @@
  * - `podman rm -f --time 0 <name>` ended and removed a running container.
  *
  * So the wrapper removes the container itself. It knows the name because it
- * passes one, and it removes a leftover of that name before it starts, so a
- * container from an earlier crash cannot refuse this run.
+ * passes one, and every call's name is unique, so a leftover of that exact name
+ * belongs to a dead run and removing it cannot touch a live one. `podman run`
+ * refuses a name that is already taken, so the removal also unblocks this run.
  *
  * Pure argv and string helpers only, so the tests load this module directly.
  */
 
 import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "./watchdog.ts";
 
-/** The container name prefix. The rest is pi's pid and a counter. */
+/** The container name prefix. The rest is pi's pid and a value made unique. */
 export const GATE_NAME_PREFIX = "loxpp-gate";
 
 /**
@@ -97,9 +98,9 @@ export function buildGateScript(spec: GateScriptSpec): string {
     "set -u",
     ...parentPidLines(),
     ...watchdogFunctions(),
-    // An earlier run can leave a container with this name behind, because the
-    // pid and the counter belong to a dead session. A leftover name refuses a
-    // new run, so it goes first.
+    // A name is unique per call, so a container that already holds this name
+    // belongs to a dead run, and `podman run` would refuse the name. It goes
+    // first.
     remove,
     `${spec.argv.map(shellQuote).join(" ")} </dev/null &`,
     "child=$!",
