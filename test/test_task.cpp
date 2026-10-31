@@ -474,3 +474,23 @@ TEST_F(TaskTest, ReceiveWhereKeepsItsFunctionAliveAcrossACollection) {
               InterpretResult::OK);
     expect_string(h, "log", "w2");
 }
+
+// A message ends the wait of a limit at once. The bound on the time only
+// catches a wait that the message did not end: the limit is far above the
+// time of a loaded machine.
+TEST_F(TaskTest, AMessageEndsTheWaitOfTheLimit) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var main = task.self();
+        fun sender() { task.send(main, "m"); }
+        task.spawn(sender);
+        var start = time();
+        var got = task.receive_within(120);
+        var log = got;
+        if (time() - start >= 60) {
+            log = log + " slow";
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "m");
+}
