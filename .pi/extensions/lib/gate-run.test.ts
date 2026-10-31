@@ -274,6 +274,26 @@ test("a container created after the first removal is still removed", { timeout: 
   }
 });
 
+test("an abort that lands before the container exists still ends it", { timeout: 20000 }, async () => {
+  // The first two removals land before the container exists: the one before the
+  // run, and the abort's own. A killed client does not remove its container, so
+  // the abort's second removal is what ends it.
+  const b = await box({ FAKE_RM_NOOP_FIRST: "2" });
+  const proc = wrapper(b, process.pid);
+  const done = finish(proc);
+  try {
+    await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
+    const clientPid = await clientPidOf(b);
+    proc.kill("SIGTERM");
+    await waitFor("the wrapper to end", async () => !alive(proc.pid!));
+    assert.equal(fs.existsSync(b.marker), false, "the container is removed");
+    await waitFor("the client to end", () => !alive(clientPid));
+  } finally {
+    proc.kill("SIGKILL");
+    await done;
+  }
+});
+
 test("an abort still ends the run when the removal fails", { timeout: 20000 }, async () => {
   const b = await box({ FAKE_IGNORE_TERM: "1", FAKE_RM_FAIL: "1" });
   const proc = wrapper(b, process.pid);
