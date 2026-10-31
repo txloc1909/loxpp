@@ -105,6 +105,9 @@ jobs:
       - name: Check credit channel copies
         run: tools/check_credit_channel_copies.py
 
+      - name: Check wait first copies
+        run: tools/check_wait_first_copies.py
+
   pi-extensions:
     name: pi extension (subagent)
     runs-on: ubuntu-latest

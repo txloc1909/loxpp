@@ -463,6 +463,12 @@ if(LOXPP_PYTHON3)
     # skip instead of a false red.
     set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
 
+    # Lox++ has no import, so the library of examples/wait_first.lox is also in
+    # each probe that tests it. The checker fails when a copy differs.
+    add_test(NAME WaitFirstCopies
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_wait_first_copies.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # Issue #907: a tool that spawns a runner from its command line refuses a
     # runner that does not exist or cannot start with exit 2, not with a
     # traceback or with the code for a failed case. The checker runs each tool
