@@ -167,10 +167,18 @@ async function sandbox(): Promise<Box> {
   );
 
   // A copy, so the pi packages resolve from this directory. A symlinked
-  // extension would resolve its imports from the repository instead.
+  // extension would resolve its imports from the repository instead. The
+  // extension imports the shared modules from `../lib`, so the copy keeps that
+  // layout.
   for (const entry of await fs.promises.readdir(HERE)) {
     if (!entry.endsWith(".ts") || entry.endsWith(".test.ts")) continue;
     await fs.promises.copyFile(path.join(HERE, entry), path.join(ext, entry));
+  }
+  const lib = path.join(root, "lib");
+  await fs.promises.mkdir(lib, { recursive: true });
+  for (const entry of await fs.promises.readdir(path.join(HERE, "..", "lib"))) {
+    if (!entry.endsWith(".ts") || entry.endsWith(".test.ts")) continue;
+    await fs.promises.copyFile(path.join(HERE, "..", "lib", entry), path.join(lib, entry));
   }
   // A copy, so the pi packages resolve from this directory, and a link to the
   // installation's own copy of each one.

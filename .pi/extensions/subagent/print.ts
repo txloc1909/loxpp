@@ -12,7 +12,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventStream, type StreamState } from "./stream.ts";
-import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "./watchdog.ts";
+import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "../lib/watchdog.ts";
 
 export const STDERR_CAP = 4000;
 export const KILL_GRACE_MS = 2000;
