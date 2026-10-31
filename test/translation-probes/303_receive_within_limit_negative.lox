@@ -1,0 +1,10 @@
+// A negative limit of task.receive_within is a runtime error, which halts the
+// program (spec/04-semantics.md, task.receive_within, step 1). The mailbox
+// holds a message, so a call that checks its limit late would return it.
+// STATUS: error
+// CHECK: before
+var me = task.self();
+task.send(me, 1);
+print "before";
+task.receive_within(-1);
+print "after";

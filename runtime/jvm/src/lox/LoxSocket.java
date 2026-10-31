@@ -262,6 +262,16 @@ public final class LoxSocket {
     static volatile Resolver resolver = InetAddress::getAllByName;
 
     public static LoxSocket connect(String host, int port) {
+        return connect(host, port, 0);
+    }
+
+    /**
+     * {@code limitNanos} above 0 is the limit of the whole call; the call
+     * raises a NetworkError when it passes before the connection is made.
+     */
+    public static LoxSocket connect(String host, int port, long limitNanos) {
+        final boolean timed = limitNanos > 0;
+        final long deadline = System.nanoTime() + limitNanos;
         // Every resolved address is tried in order, as native does: the first
         // one can be unusable (an IPv6 address on a host with IPv6 off) while a
         // later one works. The last failure is the one reported.
@@ -271,6 +281,10 @@ public final class LoxSocket {
             // A host name resolves here and blocks the worker; a numeric
             // address does not (spec/05-stdlib.md, connect).
             for (InetAddress ip : resolver.resolve(host)) {
+                if (timed && deadline - System.nanoTime() <= 0) {
+                    throw LoxOps.makeError("NetworkError",
+                                           timeoutMessage(host, port));
+                }
                 SocketChannel channel = null;
                 try {
                     channel = SocketChannel.open();
@@ -278,7 +292,12 @@ public final class LoxSocket {
                     InetSocketAddress address = new InetSocketAddress(ip, port);
                     if (!channel.connect(address)) {
                         while (!channel.finishConnect()) {
-                            LoxWorker.waitChannel(channel, SelectionKey.OP_CONNECT);
+                            if (timed && deadline - System.nanoTime() <= 0) {
+                                throw LoxOps.makeError("NetworkError",
+                                                       timeoutMessage(host, port));
+                            }
+                            LoxWorker.waitChannel(channel, SelectionKey.OP_CONNECT,
+                                                  timed, deadline);
                         }
                     }
                     LoxSocket made = new LoxSocket(channel);
@@ -302,6 +321,11 @@ public final class LoxSocket {
         throw LoxOps.makeError("NetworkError",
                                "connect(): cannot connect to '" + host + ":" +
                                    port + "': " + failure);
+    }
+
+    private static String timeoutMessage(String host, int port) {
+        return "connect_within(): timed out connecting to '" + host + ":" +
+               port + "'";
     }
 
     /**

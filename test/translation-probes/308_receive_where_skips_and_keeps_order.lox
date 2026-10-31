@@ -1,0 +1,30 @@
+// task.receive_where removes the first message for which `want` is true. The
+// messages it skips stay in the mailbox in their order, and other receives
+// find them as if the call had not run (spec/04-semantics.md,
+// task.receive_within, step 2). `want` is true for a value that is not nil and
+// not false, so a String is selected here by the result of `==`.
+// STATUS: ok
+// COVERS: receive-point task.receive_where
+// CHECK: a
+// CHECK: 4
+// CHECK: b
+// CHECK: 3
+// CHECK: 1
+// CHECK: 2
+// CHECK: 3
+// CHECK: 0
+fun isText(m) { return type(m) == "String"; }
+var me = task.self();
+task.send(me, 1);
+task.send(me, "a");
+task.send(me, 2);
+task.send(me, "b");
+task.send(me, 3);
+print task.receive_where(isText);
+print task.pending();
+print task.receive_where(isText);
+print task.pending();
+print task.receive();
+print task.receive();
+print task.receive();
+print task.pending();

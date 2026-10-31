@@ -1,0 +1,35 @@
+// A receive with a condition inside a coroutine suspends the whole task, as
+// task.receive does. The coroutine keeps the status "running", and a resume of
+// it from another task is a RunningCoroutineError. When a selected message
+// arrives, the call returns inside the coroutine (spec/04-semantics.md,
+// task.receive_within and task.receive).
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: running
+// CHECK: RunningCoroutineError
+// CHECK: co got target
+// CHECK: 7
+// CHECK: other
+// CHECK: dead
+fun isTarget(m) { return m == "target"; }
+fun body() {
+    var m = task.receive_where_within(isTarget, 60);
+    print "co got " + m;
+    return 7;
+}
+var co = coroutine.create(body);
+var owner = task.self();
+fun intruder() {
+    print co.status();
+    try {
+        co.resume();
+    } catch (e) {
+        print e.kind;
+    }
+    task.send(owner, "other");
+    task.send(owner, "target");
+}
+task.spawn(intruder);
+print co.resume();
+print task.receive();
+print co.status();

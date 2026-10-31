@@ -159,6 +159,7 @@ The rule has two classes. Both are rules of the spec, not stages.
 |---|---|---|
 | `sleep(seconds)` | time | timer queue |
 | `connect(host, port)` | the connection | name resolution on the worker, then a nonblocking connect (`EPOLLOUT`, `SO_ERROR`) |
+| `connect_within(host, port, seconds)` | the connection, or the limit | as `connect`, plus a timer wait of the same task |
 | `Socket.read()` | the peer to close | socket read readiness, until EOF |
 | `Socket.read_bytes(n)` | the bytes, or the peer to close | socket read readiness, until `n` or EOF |
 | `Socket.readline()` | a line, or the peer to close | socket read readiness and the socket's input buffer |
@@ -213,6 +214,7 @@ QBE on `main` at d19037d, checked with a probe for each:
 | `__str__` | `print`, `str()`, an element or key of a List or Map that is printed, a `__str__` inside a `__str__`, an uncaught throw of an instance that is not an `Error` |
 | a map key's `__hash__` and `__eq__` | `m[k]`, `m[k] = v`, a Map literal, `k in m`, `Map.has`, `Map.del`, and a hash collision |
 | `reflect.callMethod` | the method, or a callable field |
+| a receive condition | `want`, for each message that `task.receive_where` or `task.receive_where_within` tests |
 | a deferred call | every drain: at a normal return, after a caught throw, after a run-time fault, after an uncaught throw, at the end of a task function, at the end of a coroutine function |
 | a native entry | a task or coroutine whose entry is a native function or a bound native |
 | a nested coroutine | each coroutine that the task resumes inside one of the contexts above |
@@ -246,6 +248,10 @@ of `getaddrinfo`, which can put `::1` first for `localhost`. The JVM backend
 puts IPv4 first. The difference shows only if two addresses of one name both
 listen, and a program must not depend on it. The JVM backend keeps the order
 of its resolver. The spec does not change.
+
+`connect_within` (#937) is `connect` with a timer wait added to the same
+suspended task. The timer cannot end a name resolution, because that blocks
+the worker; a resolver thread (#946) would end that exception.
 
 ### Resume and repeated suspension
 

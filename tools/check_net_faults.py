@@ -91,14 +91,15 @@ NATIVE_SITES = {
     ("asPort", HALT): 2,
     ("asByteCount", HALT): 2,
     ("socketWriteCall", HALT): 1,
-    ("connectNative", NETWORK): 1,
+    ("connectCommon", HALT): 2,
+    ("connectCommon", NETWORK): 1,
     ("stepConnect", NETWORK): 1,
     ("listenNative", NETWORK): 2,
     ("fillInput", NETWORK): 1,
     ("stepReadBytes", NETWORK): 1,
     ("stepAccept", NETWORK): 1,
     ("step", CLOSED): 2,
-    ("runIo", NETWORK): 1,
+    ("runIo", NETWORK): 2,
     ("closeDescriptor", CLOSED): 1,
     ("checkSocketRead", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
@@ -116,7 +117,7 @@ SOCKET_SITES = {
     ("checkWritable", CLOSED): 1,
     ("fill", NETWORK): 1,
     ("writeBytes", NETWORK): 1,
-    ("connect", NETWORK): 1,
+    ("connect", NETWORK): 3,
 }
 
 SERVER_SITES = {

@@ -1,0 +1,33 @@
+// A receive with a limit or a condition that would suspend while a native
+// callback is on the call chain raises YieldAcrossNativeError, as task.receive
+// does, and the limit does not change it. A call that finds a selected message
+// does not suspend, so it works there (spec/04-semantics.md,
+// task.receive_within, step 6).
+// STATUS: ok
+// CHECK: 1 2
+// CHECK: YieldAcrossNativeError
+// CHECK: YieldAcrossNativeError
+// CHECK: YieldAcrossNativeError
+fun yes(m) { return true; }
+class Reader {
+    __str__() {
+        return str(task.receive_within(5)) + " " +
+               str(task.receive_where_within(yes, 5));
+    }
+}
+class WithinOnEmpty {
+    __str__() { return str(task.receive_within(5)); }
+}
+class WhereOnEmpty {
+    __str__() { return str(task.receive_where(yes)); }
+}
+class WhereWithinOnEmpty {
+    __str__() { return str(task.receive_where_within(yes, 5)); }
+}
+var me = task.self();
+task.send(me, 1);
+task.send(me, 2);
+print Reader();
+try { print WithinOnEmpty(); } catch (e) { print e.kind; }
+try { print WhereOnEmpty(); } catch (e) { print e.kind; }
+try { print WhereWithinOnEmpty(); } catch (e) { print e.kind; }

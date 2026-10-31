@@ -1,0 +1,39 @@
+// A task that holds two channel ends gets the items of one channel and the
+// credits of the other in one mailbox (issue #632). With task.receive_where it
+// takes the credits first and leaves the items in the mailbox in order, then
+// takes the items. Nothing is lost or reordered, and the task needs no stash.
+// STATUS: ok
+// CHECK: credit 1
+// CHECK: credit 2
+// CHECK: item a
+// CHECK: item b
+// CHECK: item c
+enum Msg { Item(value) Credit(n) }
+fun isCredit(m) {
+    return match m {
+        case Msg.Credit(n) => true
+        case _ => false
+    };
+}
+fun isItem(m) {
+    return match m {
+        case Msg.Item(v) => true
+        case _ => false
+    };
+}
+var me = task.self();
+task.send(me, Msg.Item("a"));
+task.send(me, Msg.Credit(1));
+task.send(me, Msg.Item("b"));
+task.send(me, Msg.Credit(2));
+task.send(me, Msg.Item("c"));
+var c1 = task.receive_where(isCredit);
+var c2 = task.receive_where(isCredit);
+print "credit " + str(match c1 { case Msg.Credit(n) => n case _ => nil });
+print "credit " + str(match c2 { case Msg.Credit(n) => n case _ => nil });
+var i = 0;
+while (i < 3) {
+    var m = task.receive_where(isItem);
+    print "item " + str(match m { case Msg.Item(v) => v case _ => nil });
+    i = i + 1;
+}

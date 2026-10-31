@@ -1,0 +1,11 @@
+// DIAGNOSTIC: Cannot use 'break' outside a loop or match.
+// Compile error in the `want` function of a receive: the whole program is
+// compiled before the main task runs, so the receive never runs and stdout is
+// empty.
+fun want(m) {
+  break;
+}
+print "main ran";
+task.send(task.self(), 1);
+task.receive_where(want);
+task.receive_where_within(want, 1);

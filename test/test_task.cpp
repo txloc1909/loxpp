@@ -363,3 +363,134 @@ TEST_F(TaskTest, NativeEntryReceiveOnEmptyMailboxIsUncaught) {
               std::string::npos)
         << err;
 }
+
+// A receive_where call that waits runs again in the frames of the task, also
+// when two coroutines lie between the task and the call. Each wake tests the
+// new message once, and a message that does not match stays in order.
+TEST_F(TaskTest, ReceiveWhereWaitsInsideTwoCoroutines) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var main = task.self();
+        fun isText(m) { return type(m) == "String"; }
+        fun innerBody() {
+            return task.receive_where(isText);
+        }
+        fun outerBody() {
+            var inner = coroutine.create(innerBody);
+            yield "outer got " + inner.resume();
+        }
+        fun owner() {
+            var outer = coroutine.create(outerBody);
+            log = log + outer.resume() + ";";
+            task.send(main, task.pending());
+        }
+        var t = task.spawn(owner);
+        yield;
+        task.send(t, 1);
+        yield;
+        task.send(t, 2);
+        yield;
+        task.send(t, "x");
+        var left = task.receive();
+        log = log + "left " + str(left);
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "outer got x;left 2");
+}
+
+// A throw out of `want` on a later pass reaches the try around the call, and
+// the message that `want` rejected or threw on stays in the mailbox.
+TEST_F(TaskTest, ReceiveWhereThrowAfterTheWakeIsCaughtInTheTask) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var main = task.self();
+        fun pick(m) {
+            if (m == 2) {
+                throw "bad";
+            }
+            return false;
+        }
+        fun owner() {
+            try {
+                task.receive_where(pick);
+            } catch (e) {
+                log = log + "caught " + e + ";";
+            }
+            task.send(main, task.pending());
+        }
+        var t = task.spawn(owner);
+        yield;
+        task.send(t, 1);
+        yield;
+        task.send(t, 2);
+        var left = task.receive();
+        log = log + "left " + str(left);
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "caught bad;left 2");
+}
+
+// A limit that passes with no matching message raises TimeoutError in the
+// task, and the unmatched message is still there.
+TEST_F(TaskTest, ReceiveWhereWithinRaisesTimeoutErrorAndKeepsMessages) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        fun never(m) { return false; }
+        task.send(task.self(), "kept");
+        try {
+            task.receive_where_within(never, 0.05);
+        } catch (e) {
+            log = e.kind + ";" + task.receive();
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "TimeoutError;kept");
+}
+
+// The `want` function and its closure stay reachable while the task waits.
+TEST_F(TaskTest, ReceiveWhereKeepsItsFunctionAliveAcrossACollection) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var log = "";
+        var main = task.self();
+        // Only the waiting call holds the function that makeWanted returns.
+        fun makeWanted(text) {
+            fun isWanted(m) { return m == text; }
+            return isWanted;
+        }
+        fun owner() {
+            task.send(main, task.receive_where(makeWanted("w" + str(1 + 1))));
+        }
+        var t = task.spawn(owner);
+        yield;
+        var junk = [];
+        for (var i = 0; i < 2000; i = i + 1) { junk.append("j" + str(i)); }
+        task.send(t, "w2");
+        log = task.receive();
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "w2");
+}
+
+// A message ends the wait of a limit at once. The bound on the time only
+// catches a wait that the message did not end: the limit is far above the
+// time of a loaded machine.
+TEST_F(TaskTest, AMessageEndsTheWaitOfTheLimit) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var main = task.self();
+        fun sender() { task.send(main, "m"); }
+        task.spawn(sender);
+        var start = time();
+        var got = task.receive_within(120);
+        var log = got;
+        if (time() - start >= 60) {
+            log = log + " slow";
+        }
+    )"),
+              InterpretResult::OK);
+    expect_string(h, "log", "m");
+}

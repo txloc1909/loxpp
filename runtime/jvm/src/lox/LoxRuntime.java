@@ -521,6 +521,12 @@ public final class LoxRuntime {
                           args -> LoxSocket.connect(requireString(args[0]),
                                                     requirePort(args[1], 1))));
         globals.define(
+            "connect_within",
+            new LoxNative("connect_within", 3,
+                          args -> LoxSocket.connect(requireString(args[0]),
+                                                    requirePort(args[1], 1),
+                                                    requireLimitNanos(args[2]))));
+        globals.define(
             "listen",
             new LoxNative("listen", 2,
                           args -> LoxServer.listen(requireString(args[0]),
@@ -554,6 +560,20 @@ public final class LoxRuntime {
             throw new LoxError("Port must be an integer in range.");
         }
         return (int)raw;
+    }
+
+    // The limit of connect in nanoseconds, never below 1. A limit that is
+    // greater than 0 but too small for a nanosecond still ends the wait.
+    private static long requireLimitNanos(Object v) {
+        if (!(v instanceof Double)) {
+            throw new LoxError("connect_within() limit must be a number.");
+        }
+        double seconds = (Double)v;
+        // The comparison is false for NaN, so NaN is refused too.
+        if (!(seconds > 0)) {
+            throw new LoxError("connect_within() limit must be greater than 0.");
+        }
+        return Math.max(1L, (long)Math.min(seconds * 1e9, (double)(1L << 60)));
     }
 
     private static LoxList requireStringList(Object v) {
@@ -802,6 +822,26 @@ public final class LoxRuntime {
             return LoxWorker.current().receive(canSuspend);
         }));
         module.fields.put(
+            "receive_within", new LoxNative("receive_within", 1, args -> {
+                long nanos = requireLimit("task.receive_within", args[0]);
+                return LoxWorker.current().receiveSelective(
+                    null, true, nanos, canSuspendHere());
+            }));
+        module.fields.put(
+            "receive_where", new LoxNative("receive_where", 1, args -> {
+                requireWant("task.receive_where", args[0]);
+                return LoxWorker.current().receiveSelective(
+                    args[0], false, 0, canSuspendHere());
+            }));
+        module.fields.put(
+            "receive_where_within",
+            new LoxNative("receive_where_within", 2, args -> {
+                requireWant("task.receive_where_within", args[0]);
+                long nanos = requireLimit("task.receive_where_within", args[1]);
+                return LoxWorker.current().receiveSelective(
+                    args[0], true, nanos, canSuspendHere());
+            }));
+        module.fields.put(
             "self",
             new LoxNative("self", 0, args -> LoxWorker.current().current));
         module.fields.put(
@@ -809,6 +849,30 @@ public final class LoxRuntime {
                 return (double)LoxWorker.current().pending();
             }));
         globals.define("task", module);
+    }
+
+    private static boolean canSuspendHere() {
+        return LoxOps.callbackDepthOfChain() == 0;
+    }
+
+    private static void requireWant(String name, Object want) {
+        if (!(want instanceof LoxClosure) &&
+            !(want instanceof LoxBoundMethod) && !(want instanceof LoxNative)) {
+            throw new LoxError(name + " expects a function.");
+        }
+    }
+
+    // The limit of a receive_* call in nanoseconds: a Number greater than
+    // zero. A Number that is not greater than zero includes NaN.
+    private static long requireLimit(String name, Object seconds) {
+        if (!(seconds instanceof Double)) {
+            throw new LoxError(name + " expects a number of seconds.");
+        }
+        double value = (Double)seconds;
+        if (!(value > 0)) {
+            throw new LoxError(name + " expects a limit greater than zero.");
+        }
+        return (long)Math.min(value * 1e9, 1e18);
     }
 
     private static void requireMessage(Object msg) {

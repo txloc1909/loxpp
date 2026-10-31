@@ -131,7 +131,8 @@ void setConnectTestHooks(const ConnectTestHooks* hooks) {
 
 // Resolves the name on the worker, and runs the connect from the first
 // address. The TCP connect is nonblocking: the call parks where it can.
-static Value connectNative(int /*argc*/, Value* argv) {
+// `withLimit` says that argv[2] is the limit of connect_within.
+static Value connectCommon(Value* argv, bool withLimit) {
     std::string host;
     if (!asStringArg(argv[0], host)) {
         return from<Nil>(Nil{});
@@ -139,6 +140,23 @@ static Value connectNative(int /*argc*/, Value* argv) {
     int port = 0;
     if (!asPort(argv[1], 1, port)) {
         return from<Nil>(Nil{});
+    }
+    bool hasLimit = false;
+    Poller::Clock::time_point deadline{};
+    if (withLimit) {
+        if (!is<Number>(argv[2])) {
+            nativeRuntimeError("connect_within() limit must be a number.");
+            return from<Nil>(Nil{});
+        }
+        const double seconds = as<Number>(argv[2]);
+        // The comparison is false for NaN, so NaN is refused too.
+        if (!(seconds > 0)) {
+            nativeRuntimeError(
+                "connect_within() limit must be greater than 0.");
+            return from<Nil>(Nil{});
+        }
+        hasLimit = true;
+        deadline = Poller::deadlineAfter(seconds);
     }
 
     struct addrinfo hints;
@@ -178,8 +196,20 @@ static Value connectNative(int /*argc*/, Value* argv) {
     ParkedIo io;
     io.op = IoOp::CONNECT;
     io.method = "connect";
+    io.hasDeadline = hasLimit;
+    io.deadline = deadline;
+    io.timeoutMessage = "connect_within(): timed out connecting to '" +
+                        hostPort(host, port) + "'";
     io.connect = std::move(state);
     return runIo(std::move(io));
+}
+
+static Value connectNative(int /*argc*/, Value* argv) {
+    return connectCommon(argv, false);
+}
+
+static Value connectWithinNative(int /*argc*/, Value* argv) {
+    return connectCommon(argv, true);
 }
 
 static Value listenNative(int /*argc*/, Value* argv) {
@@ -696,15 +726,38 @@ static Value finish(const ParkedIo& io, IoOutcome& out) {
 
 // Waits in the kernel until `fd` is ready for `events`. The worker does not run
 // another task meanwhile. False, with `err` set, when poll(2) itself fails.
-static bool waitFd(int fd, short events, std::string& err) {
+// `timedOut` is set when `deadline` passed first; `hasDeadline` false waits
+// without a limit.
+static bool waitFd(int fd, short events, std::string& err, bool hasDeadline,
+                   Poller::Clock::time_point deadline, bool& timedOut) {
     struct pollfd pfd = {fd, events, 0};
-    while (::poll(&pfd, 1, -1) < 0) {
-        if (errno != EINTR) {
+    for (;;) {
+        int timeoutMs = -1;
+        if (hasDeadline && deadline != Poller::Clock::time_point::max()) {
+            const auto left = deadline - Poller::Clock::now();
+            if (left <= Poller::Clock::duration::zero()) {
+                timedOut = true;
+                return true;
+            }
+            // Rounded up, so poll(2) never returns before the deadline.
+            const auto ms =
+                std::chrono::ceil<std::chrono::milliseconds>(left).count();
+            timeoutMs = static_cast<int>(std::min<long long>(ms, INT_MAX));
+        }
+        const int r = ::poll(&pfd, 1, timeoutMs);
+        if (r > 0) {
+            return true;
+        }
+        if (r < 0 && errno != EINTR) {
             err = std::strerror(errno);
             return false;
         }
     }
-    return true;
+}
+
+static bool waitFd(int fd, short events, std::string& err) {
+    bool timedOut = false;
+    return waitFd(fd, events, err, false, {}, timedOut);
 }
 
 // Runs a call to its end, or to the point where the task parks.
@@ -733,8 +786,14 @@ static Value runIo(ParkedIo io) {
             return from<Nil>(Nil{});
         }
         std::string err;
-        if (!waitFd(fd, connecting ? POLLOUT : POLLIN, err)) {
+        bool timedOut = false;
+        if (!waitFd(fd, connecting ? POLLOUT : POLLIN, err, io.hasDeadline,
+                    io.deadline, timedOut)) {
             raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
+            return from<Nil>(Nil{});
+        }
+        if (timedOut) {
+            raiseNet(kNetworkError, io.timeoutMessage);
             return from<Nil>(Nil{});
         }
     }
@@ -1074,6 +1133,7 @@ NetClasses registerNetAPI(StdlibRegistrar& reg) {
     reg.addMethod(server, "close", serverCloseNative, 0);
 
     reg.defineGlobal("connect", connectNative, 2);
+    reg.defineGlobal("connect_within", connectWithinNative, 3);
     reg.defineGlobal("listen", listenNative, 2);
 
     s_socketClass = socket;
