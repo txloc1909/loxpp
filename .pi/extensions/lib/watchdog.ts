@@ -6,9 +6,10 @@
  * nowhere to arrive. The script that starts the child watches the parent
  * instead. It polls the parent's pid and signals the run when the pid is gone.
  *
- * Both run kinds share this text: the script kitty runs in a watched window,
- * and the wrapper `print.ts` spawns. The script receives the parent pid as its
- * first argument, because kitty starts it from its own environment.
+ * Three call sites share this text: the script kitty runs in a watched window,
+ * the wrapper `print.ts` spawns for an unattended run, and the wrapper
+ * `gate-run.ts` builds for a gate container. Each script receives the parent
+ * pid as its first argument, because kitty starts it from its own environment.
  *
  * Pure string helpers only, so the tests load this module directly.
  */
