@@ -1,0 +1,22 @@
+// When the limit passes with no message, task.receive_within raises the
+// catchable TimeoutError and leaves the mailbox as it was. No stale message
+// remains: the next receive gets the next message that is sent, and only that
+// (spec/04-semantics.md, task.receive_within, step 4).
+// STATUS: ok
+// COVERS: receive-point task.receive_within
+// TIMEOUT: 30
+// CHECK: TimeoutError
+// CHECK: 0
+// CHECK: after
+// CHECK: 0
+var me = task.self();
+try {
+    task.receive_within(0.05);
+    print "no fault";
+} catch (e) {
+    print e.kind;
+}
+print task.pending();
+task.send(me, "after");
+print task.receive();
+print task.pending();

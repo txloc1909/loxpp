@@ -1,0 +1,36 @@
+// A throw that `want` does not catch ends the call and propagates from it, on
+// the first test and on a test after a wait. No message is removed
+// (spec/04-semantics.md, task.receive_within, `want`).
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: caught first
+// CHECK: 1
+// CHECK: caught late
+// CHECK: 2
+var me = task.self();
+fun bad(m) {
+    if (m == "boom") {
+        throw "boom";
+    }
+    return false;
+}
+task.send(me, "boom");
+try {
+    task.receive_where(bad);
+} catch (e) {
+    print "caught first";
+}
+print task.pending();
+task.receive();
+fun later() {
+    task.send(me, 1);
+    yield;
+    task.send(me, "boom");
+}
+task.spawn(later);
+try {
+    task.receive_where(bad);
+} catch (e) {
+    print "caught late";
+}
+print task.pending();

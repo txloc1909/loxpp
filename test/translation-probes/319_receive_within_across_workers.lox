@@ -1,0 +1,20 @@
+// A receive with a limit takes messages that another worker sends, and the
+// messages of one worker arrive in the order of its sends (spec/04-semantics.md,
+// task.send). The condition skips the numbers and takes the first String; the
+// numbers stay in the mailbox in order.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: from worker
+// CHECK: 1
+// CHECK: 2
+fun isText(m) { return type(m) == "String"; }
+fun helper(parent) {
+    task.send(parent, 1);
+    task.send(parent, 2);
+    sleep(0.05);
+    task.send(parent, "from worker");
+}
+task.spawn_worker(helper, task.self());
+print task.receive_where_within(isText, 60);
+print task.receive_within(60);
+print task.receive_within(60);

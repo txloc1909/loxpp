@@ -1,0 +1,23 @@
+// A call of any receive form in `want` raises YieldAcrossNativeError, also when
+// the mailbox holds a message. Such a call would change the mailbox that the
+// outer call is testing (spec/04-semantics.md, task.receive_within, `want`).
+// No message is removed.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: YieldAcrossNativeError
+// CHECK: YieldAcrossNativeError
+// CHECK: YieldAcrossNativeError
+// CHECK: YieldAcrossNativeError
+// CHECK: 2
+fun takes(m) { return task.receive(); }
+fun takesWithin(m) { return task.receive_within(1); }
+fun takesWhere(m) { return task.receive_where(takes); }
+fun takesBoth(m) { return task.receive_where_within(takes, 1); }
+var me = task.self();
+task.send(me, 1);
+task.send(me, 2);
+try { task.receive_where(takes); } catch (e) { print e.kind; }
+try { task.receive_where(takesWithin); } catch (e) { print e.kind; }
+try { task.receive_where(takesWhere); } catch (e) { print e.kind; }
+try { task.receive_where(takesBoth); } catch (e) { print e.kind; }
+print task.pending();

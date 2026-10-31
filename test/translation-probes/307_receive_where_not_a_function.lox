@@ -1,0 +1,10 @@
+// The `want` of task.receive_where must be a Function or a BoundMethod: any
+// other value is a runtime error, which halts the program even when the mailbox
+// holds a message (spec/04-semantics.md, task.receive_within, step 1).
+// STATUS: error
+// CHECK: before
+var me = task.self();
+task.send(me, 1);
+print "before";
+task.receive_where(42);
+print "after";

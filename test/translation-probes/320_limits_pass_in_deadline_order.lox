@@ -1,0 +1,27 @@
+// When several waits end together, the tasks whose limit has passed join the run
+// queue in the order of their deadlines (spec/04-semantics.md, Scheduling). The
+// three tasks begin to wait together, with the limits 0.5, 0.1, and 0.3 in
+// that order of their calls. They run in the order of the deadlines.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: limit 0.1
+// CHECK: limit 0.3
+// CHECK: limit 0.5
+var me = task.self();
+fun limited(seconds) {
+    try {
+        task.receive_within(seconds);
+    } catch (e) {
+        print "limit " + str(seconds);
+    }
+    task.send(me, "done");
+}
+fun late() { limited(0.5); }
+fun middle() { limited(0.3); }
+fun early() { limited(0.1); }
+task.spawn(late);
+task.spawn(early);
+task.spawn(middle);
+task.receive();
+task.receive();
+task.receive();

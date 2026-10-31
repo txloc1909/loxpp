@@ -1,0 +1,19 @@
+// `want` runs where the task cannot suspend. A `yield` in it raises
+// YieldAcrossNativeError (spec/04-semantics.md, task.receive_within, `want`),
+// and no message is removed.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: YieldAcrossNativeError
+// CHECK: 1
+fun yielding(m) {
+    yield;
+    return true;
+}
+var me = task.self();
+task.send(me, 1);
+try {
+    task.receive_where(yielding);
+} catch (e) {
+    print e.kind;
+}
+print task.pending();

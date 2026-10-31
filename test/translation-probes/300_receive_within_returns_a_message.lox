@@ -1,0 +1,24 @@
+// task.receive_within(seconds) returns the head of the mailbox at once when the
+// mailbox holds a message, and a message that arrives within the limit ends the
+// wait (spec/04-semantics.md, task.receive_within). A message may be nil, so a
+// limit that passes cannot be a returned value: it is a fault (see probe 301).
+// The limits here are far above the time of the probe, so the result does not
+// depend on a race.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: 1
+// CHECK: nil
+// CHECK: late
+// CHECK: 0
+var me = task.self();
+task.send(me, 1);
+task.send(me, nil);
+print task.receive_within(60);
+print task.receive_within(60);
+fun later() {
+    sleep(0.05);
+    task.send(me, "late");
+}
+task.spawn(later);
+print task.receive_within(60);
+print task.pending();

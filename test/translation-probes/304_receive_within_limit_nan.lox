@@ -1,0 +1,7 @@
+// The limit of task.receive_within must be greater than zero, and a NaN is not
+// (spec/04-semantics.md, task.receive_within, step 1): a runtime error.
+// STATUS: error
+// CHECK: before
+print "before";
+task.receive_within(0 / 0);
+print "after";
