@@ -67,6 +67,7 @@ BLOCKS_PROBED = ["input", "run", "Process.readline"]
 CODE_MARKERS = {
     "sleep": r"\bsleep\(",
     "connect": r"\bconnect\(",
+    "connect_within": r"\bconnect_within\(",
     "input": r"\binput\(",
     "run": r"\brun\(",
     "read": r"\.read\(",

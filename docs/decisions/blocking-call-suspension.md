@@ -159,6 +159,7 @@ The rule has two classes. Both are rules of the spec, not stages.
 |---|---|---|
 | `sleep(seconds)` | time | timer queue |
 | `connect(host, port)` | the connection | name resolution on the worker, then a nonblocking connect (`EPOLLOUT`, `SO_ERROR`) |
+| `connect_within(host, port, seconds)` | the connection, or the limit | as `connect`, plus a timer wait of the same task |
 | `Socket.read()` | the peer to close | socket read readiness, until EOF |
 | `Socket.read_bytes(n)` | the bytes, or the peer to close | socket read readiness, until `n` or EOF |
 | `Socket.readline()` | a line, or the peer to close | socket read readiness and the socket's input buffer |
@@ -246,6 +247,10 @@ of `getaddrinfo`, which can put `::1` first for `localhost`. The JVM backend
 puts IPv4 first. The difference shows only if two addresses of one name both
 listen, and a program must not depend on it. The JVM backend keeps the order
 of its resolver. The spec does not change.
+
+`connect_within` (#937) is `connect` with a timer wait added to the same
+suspended task. The timer cannot end a name resolution, because that blocks
+the worker; a resolver thread (#946) would end that exception.
 
 ### Resume and repeated suspension
 

@@ -1,0 +1,169 @@
+// STATUS: ok
+// CHECK: worker got hi
+// CHECK: main alive
+// The timer task of a limited receive sends its tick when the limit is over.
+// When the task that waited has ended by then, the send raises DeadTaskError in
+// the timer task. The library catches it, so the timer task ends quietly and
+// the program goes on (spec/04-semantics.md, task.send). The worker takes its
+// message at once and ends; main waits until the timer is over.
+// The library text is the one in examples/wait_first.lox
+// (tools/check_wait_first_copies.py).
+
+// --- wait first library: begin -------------------------------------------
+//
+// An Inbox is the one way a task receives while it uses this library. It
+// holds the messages that a selective receive passed over (the stash), and it
+// drops the late message of a limit that is over.
+//
+// A limit is a timer task. It sleeps, then sends InboxTick(id) to the task
+// that waits. A tick of a limit that is over arrives later; the Inbox knows
+// it by its id, and drops it. A task that takes messages with task.receive()
+// instead of its Inbox would see the tick as a message.
+//
+// One Inbox belongs to one task: its stash is the messages that this task
+// passed over. A task that uses receiveWithin or receiveIfWithin must not call
+// a bare task.receive() while a limited call can have a stale tick in flight,
+// because the bare call can take the tick as a message.
+//
+// A Socket limit closes the Socket. The read that waits then ends, and the
+// Socket is unusable: a limit on a read is the end of the connection.
+
+enum InboxTick { Tick(id) }
+enum Waited { Got(message) TimedOut }
+
+class Inbox {
+    init() {
+        this.stash = [];
+        this.lastId = 0;
+        this.liveId = 0;
+    }
+
+    // The message that the test accepts, or TimedOut when `seconds` pass
+    // first. `seconds` of nil means no limit. A message the test refuses
+    // goes to the stash, in order.
+    pick(want, seconds) {
+        for (var i = 0; i < len(this.stash); i = i + 1) {
+            if (want(this.stash[i])) {
+                var found = this.stash[i];
+                var rest = [];
+                for (var j = 0; j < len(this.stash); j = j + 1) {
+                    if (j != i) { rest.append(this.stash[j]); }
+                }
+                this.stash = rest;
+                return Waited.Got(found);
+            }
+        }
+        var id = 0;
+        if (seconds != nil) {
+            this.lastId = this.lastId + 1;
+            id = this.lastId;
+            this.liveId = id;
+            var owner = task.self();
+            fun timer() {
+                sleep(seconds);
+                try {
+                    task.send(owner, InboxTick.Tick(id));
+                } catch (e) {
+                    // The task ended before its limit did: nobody waits.
+                    if (e.kind != "DeadTaskError") { throw e; }
+                }
+            }
+            task.spawn(timer);
+        }
+        while (true) {
+            var m = task.receive();
+            var tickId = match m {
+                case InboxTick.Tick(t) => t
+                case _ => nil
+            };
+            if (tickId == nil) {
+                if (want(m)) {
+                    this.liveId = 0;
+                    return Waited.Got(m);
+                }
+                this.stash.append(m);
+            } else if (tickId == this.liveId) {
+                this.liveId = 0;
+                return Waited.TimedOut();
+            }
+        }
+    }
+
+    // The oldest message that the test accepts.
+    receiveIf(want) {
+        var w = this.pick(want, nil);
+        return match w { case Waited.Got(m) => m case _ => nil };
+    }
+
+    // The oldest message.
+    receive() {
+        return this.receiveIf(inboxAny);
+    }
+
+    // The oldest message, or TimedOut when `seconds` pass first.
+    receiveWithin(seconds) {
+        return this.pick(inboxAny, seconds);
+    }
+
+    // The oldest message that the test accepts, or TimedOut.
+    receiveIfWithin(want, seconds) {
+        return this.pick(want, seconds);
+    }
+}
+
+fun inboxAny(m) { return true; }
+
+// A timer that closes `socket` after `seconds`, unless stop() comes first.
+// `fired` says whether it closed the Socket.
+class ReadLimit {
+    init(socket, seconds) {
+        this.socket = socket;
+        this.fired = false;
+        this.stopped = false;
+        var limit = this;
+        fun timer() {
+            sleep(seconds);
+            if (!limit.stopped) {
+                limit.fired = true;
+                limit.socket.close();
+            }
+        }
+        task.spawn(timer);
+    }
+
+    stop() { this.stopped = true; }
+}
+
+// A line from `socket`, or TimedOut when `seconds` pass first. After
+// TimedOut the Socket is closed. A peer that closes first gives the nil of
+// readline, as it does without a limit.
+fun readlineWithin(socket, seconds) {
+    var limit = ReadLimit(socket, seconds);
+    try {
+        var line = socket.readline();
+        limit.stop();
+        return Waited.Got(line);
+    } catch (e) {
+        limit.stop();
+        if (limit.fired and e.kind == "SocketClosedError") {
+            return Waited.TimedOut();
+        }
+        throw e;
+    }
+}
+// --- wait first library: end ---------------------------------------------
+
+var main = task.self();
+
+fun work() {
+    var inbox = Inbox();
+    var w = inbox.receiveWithin(0.05);
+    var s = match w { case Waited.Got(m) => m case _ => "timed out" };
+    print "worker got " + s;
+    task.send(main, "done");
+}
+var t = task.spawn(work);
+task.send(t, "hi");
+task.receive();
+sleep(0.3);
+print "main alive";

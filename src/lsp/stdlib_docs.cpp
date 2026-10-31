@@ -11,7 +11,7 @@ namespace {
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp, integer_module.cpp. Descriptions condensed from
 // spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 31> kGlobals = {{
+constexpr std::array<StdlibEntry, 32> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -47,6 +47,8 @@ constexpr std::array<StdlibEntry, 31> kGlobals = {{
      "A map of file metadata (is_dir, is_file, size, mtime), or nil."},
     {"connect", "connect(host, port) -> Socket", 2,
      "Opens a TCP connection and returns a connected Socket."},
+    {"connect_within", "connect_within(host, port, seconds) -> Socket", 3,
+     "Like connect, and raises a NetworkError when `seconds` pass first."},
     {"listen", "listen(host, port) -> Server", 2,
      "Binds a listening TCP socket; port 0 picks a free port."},
     {"spawn", "spawn(program, args) -> Process", 2,

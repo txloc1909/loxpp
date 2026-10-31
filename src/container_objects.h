@@ -7,6 +7,7 @@
 #include "vm_allocator.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -535,6 +536,11 @@ struct ParkedIo {
     // connect: the addresses left to try and the attempt in progress. There is
     // no target, because the Socket does not exist yet.
     std::shared_ptr<ConnectState> connect;
+    // connect with a limit: the time at which the call fails with a
+    // NetworkError that carries `timeoutMessage`.
+    bool hasDeadline{false};
+    std::chrono::steady_clock::time_point deadline{};
+    std::string timeoutMessage;
 };
 
 // The object lives in the heap of its worker. A handle on another worker is
@@ -557,6 +563,9 @@ struct ObjTask : public Obj {
     // mailbox, so task.pending() never sees them.
     ParkReason parkReason{ParkReason::NONE};
     std::uint64_t parkToken{0};
+    // The Poller token of the limit of a connect call that waits for a
+    // descriptor, or 0. The limit is a second wait of the same task.
+    std::uint64_t parkTimerToken{0};
     // The value of the parked call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;

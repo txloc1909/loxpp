@@ -509,6 +509,27 @@ name resolves, so the call suspends for the whole wait.
 
 ---
 
+## `connect_within(host, port, seconds) -> Socket`
+
+Like `connect(host, port)`, with a limit for the whole call. `seconds` must be
+a Number greater than zero. When the limit passes before the connection is
+made, the call raises a catchable `NetworkError`. All three arguments are
+required, and `host` and `port` follow the rules of `connect`. An argument
+count other than 3, a `seconds` that is not a Number, and a `seconds` that is
+not greater than zero are runtime errors. A `nil` limit is a runtime error.
+
+The call suspends its task while it waits for the connection, as `connect`
+does. The call can end before `seconds` pass, because the operating system
+has its own limit on a connection attempt, and this specification does not bind
+that limit. Whether `seconds` covers the time to resolve a host name is
+implementation-defined.
+
+**Arity:** 3  
+**Returns:** Socket  
+**Suspends:** yes
+
+---
+
 ## `listen(host, port) -> Server`
 
 Binds a listening TCP socket to `host` at `port`, and returns a Server. Both
@@ -908,7 +929,8 @@ A call of class suspends blocks the worker, and does not suspend, in two
 cases. First, the task cannot suspend where the call is made: see
 [§04-semantics, Suspend Points](04-semantics.md#contexts-where-a-task-cannot-suspend).
 The call then waits as a call of class blocks does, and it raises no fault.
-Second, `connect` blocks the worker while it resolves a host name.
+Second, `connect` and `connect_within` block the worker while they resolve a
+host name.
 
 The table lists all the blocking calls.
 
@@ -917,6 +939,7 @@ The table lists all the blocking calls.
 | `input()` | blocks | a line on standard input |
 | `sleep(seconds)` | suspends | time |
 | `connect(host, port)` | suspends | the connection |
+| `connect_within(host, port, seconds)` | suspends | the connection, or the limit |
 | `run(program, args)` | blocks | the child to exit |
 | `Socket.read()` | suspends | the peer to close |
 | `Socket.read_bytes(n)` | suspends | the bytes, or the peer to close |

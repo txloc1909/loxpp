@@ -1,0 +1,26 @@
+// connect_within to a numeric address and the accept of that connection can sit
+// in two tasks of one worker, as for connect (268_connect_numeric_address_pair).
+// The probe checks what binds: both tasks finish, whichever way they are
+// scheduled (spec/05-stdlib.md, connect_within). The limit is far above any
+// time the connection needs.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-call connect_within in client
+// CHECK: both finished
+var srv = listen("127.0.0.1", 0);
+var me = task.self();
+fun server() {
+    var c = srv.accept();
+    c.close();
+    task.send(me, "done");
+}
+fun client() {
+    var c = connect_within("127.0.0.1", srv.port(), 3600);
+    c.close();
+    task.send(me, "done");
+}
+task.spawn(client);
+task.spawn(server);
+task.receive();
+task.receive();
+print "both finished";

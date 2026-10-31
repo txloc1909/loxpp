@@ -1025,3 +1025,79 @@ TEST_F(ConnectParkTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
     host.stop();
     expectNoNewDescriptors(before);
 }
+
+// A limit on connect: the listener never takes the connection, so only the
+// limit ends the wait. The ticker, a task of the same worker, runs while the
+// main task waits, the call raises a NetworkError that a catch receives, and
+// the descriptor of the attempt is closed.
+TEST_F(ConnectParkTest, ALimitEndsAParkedConnect) {
+    SlowListener host;
+    REQUIRE_SLOW(host);
+    const auto before = openDescriptors();
+    {
+        VM vm;
+        ASSERT_EQ(vm.interpret("var kind = \"none\"; var msg = \"\";"
+                               "var log = \"\";"
+                               "fun ticker() { log = log + \"T\"; }"
+                               "task.spawn(ticker);"
+                               "try { connect_within(\"127.0.0.1\", " +
+                               std::to_string(host.port()) +
+                               R"(, 0.2);
+            kind = "connected"; } catch (e) { kind = e.kind; msg = e.message; }
+        )"),
+                  InterpretResult::OK);
+        EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
+        EXPECT_NE(globalString(vm, "msg").find("127.0.0.1:" +
+                                               std::to_string(host.port())),
+                  std::string::npos)
+            << globalString(vm, "msg");
+        EXPECT_EQ(globalString(vm, "log"), "T");
+        EXPECT_TRUE(vm.runtime().hasPoller());
+    }
+    host.stop();
+    expectNoNewDescriptors(before);
+}
+
+// The connection is made before the limit passes: the call returns the Socket,
+// and the timer of the limit does not end any later wait of the task.
+TEST_F(ConnectParkTest, AConnectThatFinishesBeforeTheLimitReturnsASocket) {
+    SlowListener host;
+    REQUIRE_SLOW(host);
+    ConnectTestHooks armHooks;
+    host.armOnConnect(armHooks, 100, false);
+    HookGuard armGuard(armHooks);
+    VM vm;
+    ASSERT_EQ(vm.interpret("var kind = \"none\";"
+                           "var c = connect_within(\"127.0.0.1\", " +
+                           std::to_string(host.port()) +
+                           R"(, 3600);
+        kind = type(c);
+        sleep(0.3);
+        kind = kind + " " + type(c);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "kind"), "Socket Socket");
+}
+
+// A task that cannot suspend waits in poll(2), and the limit ends that wait.
+TEST_F(ConnectParkTest, ALimitEndsABlockedConnect) {
+    SlowListener host;
+    REQUIRE_SLOW(host);
+    const auto before = openDescriptors();
+    {
+        VM vm;
+        ASSERT_EQ(vm.interpret("var kind = \"none\";"
+                               "class A { __str__() {"
+                               "  try { connect_within(\"127.0.0.1\", " +
+                               std::to_string(host.port()) +
+                               R"(, 0.2);
+                    kind = "connected"; } catch (e) { kind = e.kind; }
+                return "a"; } }
+            var s = str(A());
+        )"),
+                  InterpretResult::OK);
+        EXPECT_EQ(globalString(vm, "kind"), "NetworkError");
+    }
+    host.stop();
+    expectNoNewDescriptors(before);
+}
