@@ -310,6 +310,16 @@ each has an off-the-shelf solution.
 | `284_coroutine_with_parked_call_stays_running` | a coroutine whose function waits in `readline` keeps the status `"running"`, and a resume of it from another task raises `RunningCoroutineError` (spec/04-semantics.md, `co.status`) — a spec probe | none (spec probe) |
 | `285_no_deferred_call_runs_while_parked` | no deferred call of a task runs while the task waits in `readline`; it runs when the function returns (spec/04-semantics.md, Suspend Points) — a spec probe | none (spec probe) |
 | `286_rearmed_wait_keeps_its_place` | a call that waits again after a partial chunk began to wait at its first wait: when its descriptor and a later call's descriptor become ready together, the earlier call continues first (spec/04-semantics.md, Scheduling) — a spec probe | none (spec probe) |
+| `287_connect_within_limit_full_backlog` | `connect_within` on a listener whose queue is full ends with a `NetworkError` when the limit passes; no external network — a spec probe (issue #937) | none (spec probe) |
+| `288_connect_within_limit_not_number` | a limit that is not a Number halts the program — a spec probe (issue #937) | none (spec probe) |
+| `289_connect_within_limit_zero` | a limit of zero halts the program — a spec probe (issue #937) | none (spec probe) |
+| `290_connect_within_limit_negative` | a negative limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `291_connect_within_limit_nan` | a NaN limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `292_connect_three_arguments` | `connect` with a third argument halts the program (arity 2) — a spec probe (issue #937) | none (spec probe) |
+| `293_connect_within_limit_succeeds` | `connect_within` returns the Socket when the connection is made in time — a spec probe (issue #937) | none (spec probe) |
+| `294_connect_within_arguments` | `connect_within` with 2 arguments halts the program (arity 3) — a spec probe (issue #937) | none (spec probe) |
+| `295_connect_within_limit_nil` | a `nil` limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `296_connect_within_numeric_address_pair` | `connect_within` to a numeric address and the `accept`, in two tasks of one worker, both finish — a spec probe (issue #937) | none (spec probe) |
 | `300_receive_within_returns_a_message` | `task.receive_within` returns the head at once, nil included, and a message that arrives within the limit ends the wait (spec/04-semantics.md, `task.receive_within`) — a spec probe | none (spec probe) |
 | `301_receive_within_limit_passes` | a limit that passes with no message raises the catchable `TimeoutError`, and leaves no stale message behind — a spec probe | none (spec probe) |
 | `302_receive_within_limit_zero` | a limit of zero is a runtime error — a spec probe | none (spec probe) |
