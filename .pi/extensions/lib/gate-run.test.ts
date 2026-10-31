@@ -26,7 +26,7 @@ case "$1" in
   --version) echo "podman version 6.1.4"; exit 0 ;;
   image) exit 0 ;;
   rm)
-    printf 'rm %s\\n' "$flat" >> "$FAKE_LOG"
+    printf '%s\\n' "$flat" >> "$FAKE_LOG"
     if [ -n "\${FAKE_RM_FAIL:-}" ]; then exit 1; fi
     n=$(cat "$FAKE_RMCOUNT" 2>/dev/null || echo 0)
     n=$((n + 1))
@@ -35,7 +35,7 @@ case "$1" in
     rm -f "$FAKE_MARKER"
     exit 0 ;;
   run)
-    printf 'run %s\\n' "$flat" >> "$FAKE_LOG"
+    printf '%s\\n' "$flat" >> "$FAKE_LOG"
     printf '%s\\n' "$FAKE_PID" > "$FAKE_PIDFILE"
     : > "$FAKE_MARKER"
     printf '%s\\n' "\${FAKE_OUT:-gate output}"
@@ -58,6 +58,7 @@ interface Box {
   script: string;
   marker: string;
   log: string;
+  name: string;
 }
 
 async function box(extra: Record<string, string> = {}): Promise<Box> {
@@ -69,7 +70,7 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
   const log = path.join(dir, "calls.log");
   const pidfile = path.join(dir, "client.pid");
   const rmcount = path.join(dir, "rm.count");
-  const name = gateContainerName(process.pid, 1);
+  const name = gateContainerName(process.pid, "deadbeef");
   const script = buildGateScript({
     argv: gateRunArgv({ image: "loxpp-dev-env", cwd: dir, name, script: "set -e\ncd /workspace" }),
     name,
@@ -80,6 +81,7 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
     script,
     marker,
     log,
+    name,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -157,9 +159,9 @@ async function killParent(parent: ChildProcess): Promise<void> {
 const clientPidOf = async (b: Box): Promise<number> => Number.parseInt((await readOr(path.join(b.dir, "client.pid"))).trim(), 10);
 
 test("the gate argv names the container and the wrapper removes it", () => {
-  const name = gateContainerName(4242, 7);
-  assert.equal(name, "loxpp-gate-4242-7");
-  assert.notEqual(gateContainerName(4242, 8), name, "the counter keeps two runs apart");
+  const name = gateContainerName(4242, "c0ffee01");
+  assert.equal(name, "loxpp-gate-4242-c0ffee01");
+  assert.notEqual(gateContainerName(4242, "c0ffee02"), name, "the unique part keeps two runs apart");
 
   const argv = gateRunArgv({ image: "loxpp-dev-env", cwd: "/repo", name, script: "make" });
   assert.ok(argv.includes("--rm"));
@@ -205,9 +207,13 @@ test("the container ends when the parent dies", { timeout: 20000 }, async () => 
     await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
     await waitFor("the client to end", () => !alive(clientPid));
     const log = await calls(b);
+    // The removal names this run's container, so a wrapper cannot remove
+    // another run's container. The second removal is held by the race test
+    // below: a container this one already removed ends its client.
+    const after = log.slice(log.findIndex((line) => line.startsWith("run")) + 1);
     assert.ok(
-      log.slice(log.findIndex((line) => line.startsWith("run")) + 1).some((line) => line.startsWith("rm")),
-      "a removal follows the gate",
+      after.some((line) => line.startsWith(`rm -f --time 0 ${b.name}`)),
+      `a removal of ${b.name} follows the gate, got: ${after.join(" | ")}`,
     );
   } finally {
     proc.kill("SIGKILL");
@@ -319,7 +325,7 @@ test("a failed gate names its container", () => {
 });
 
 test("a leftover container of the same name is removed before the run", () => {
-  const name = gateContainerName(1, 1);
+  const name = gateContainerName(1, "abc12345");
   const script = buildGateScript({ argv: ["podman", "run", `--name=${name}`], name });
   const removeAt = script.indexOf("rm -f");
   assert.ok(removeAt > 0 && removeAt < script.indexOf("'podman' 'run'"), "the removal comes before the run");

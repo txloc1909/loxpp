@@ -27,10 +27,14 @@ export const GATE_NAME_PREFIX = "loxpp-gate";
 
 /**
  * A name that is unique to one call and visible in `podman ps`: pi's pid plus a
- * counter, so two runs from one session cannot pick the same name.
+ * value the caller makes unique.
+ *
+ * Not a module-level counter: pi can load an extension again, which resets the
+ * module and restarts the counter, and two live runs then share a name. The
+ * stale-container removal would then remove the other run's container.
  */
-export function gateContainerName(pid: number, index: number): string {
-  return `${GATE_NAME_PREFIX}-${pid}-${index}`;
+export function gateContainerName(pid: number, unique: string): string {
+  return `${GATE_NAME_PREFIX}-${pid}-${unique}`;
 }
 
 /** The line a failed gate adds, so a stuck container is one command away. */

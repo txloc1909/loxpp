@@ -36,6 +36,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -61,9 +62,6 @@ const GATE_OUTPUT_CAP = 8000;
 const READ_OUTPUT_CAP = 12000;
 const STATUS_OUTPUT_CAP = 2000;
 const STAGNATION_LIMIT = 3; // identical gate failures on an unchanged tree before a mode stops
-
-/** Counts gate runs, so each one names its own container. */
-let gateRunIndex = 0;
 
 // The gate always runs inside the dev container: AGENTS.md's dev model puts the
 // agent on the host and program execution in the container, where the toolchain
@@ -269,10 +267,10 @@ async function runGate(
   const { image, script } = gatePlan(scope);
   // podman -v needs an absolute host path; a relative one becomes a named volume.
   const absCwd = path.resolve(cwd);
-  // One name per call, so a stuck run can be found and removed by name, and
-  // two runs from this session cannot collide.
-  gateRunIndex += 1;
-  const name = gateContainerName(process.pid, gateRunIndex);
+  // One name per call, so a stuck run can be found and removed by name, and no
+  // two runs share one. A random suffix, not a counter: a reload of this
+  // extension resets a counter, and two live runs would then share a name.
+  const name = gateContainerName(process.pid, randomBytes(4).toString("hex"));
   // The container runs under a wrapper that watches pi: a `SIGKILL` of pi runs
   // no handler here, and the container would otherwise keep building with
   // nobody to read the result (#1016).
