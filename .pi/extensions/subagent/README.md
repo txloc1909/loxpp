@@ -161,17 +161,18 @@ session that started it, and every shutdown path stops its jobs.
 
 A `SIGKILL` of pi runs no handler in pi, so no shutdown path runs and the child
 would keep its window with nobody to report to. The run script watches pi
-instead. It polls pi's pid, and it treats a zombie as dead, because `kill -0`
-also answers for a process that nobody has reaped yet. When the pid is gone, the
-watcher sends `SIGTERM` to the run, waits, sends `SIGKILL`, and closes the
-window. The close call names the socket, and the script learns its own window
-id from `KITTY_WINDOW_ID`. A held window closes too: the run has no parent to
-report to, and a stray window is what this watch exists to remove.
+instead. It polls pi's pid and reads that process's state, because `kill -0`
+also answers for a zombie that nobody has reaped yet. When the pid is gone, the
+watcher signals the child, waits, kills it, and closes the window. The close
+call names the socket, and the script learns its own window id from
+`KITTY_WINDOW_ID`.
 
-The watcher signals the process group of the run, so it reaches the commands the
-child started. It does that only when the script leads its own group, which
-kitty guarantees for a window's command. A caller that shares a group with the
-script gets no group signal.
+kitty runs a window's command under `kitten run-shell`, so the script shares
+that shell's process group and does not lead it. The watcher therefore signals
+the child alone, and the close call ends the rest: kitty ends what lives in the
+window it closes, so the commands the child started go too. A held window closes
+as well, because the run has no parent to report to and a stray window is what
+this watch exists to remove.
 
 The watcher stops at the end of a normal run, so it never closes a window that
 `hold` keeps open.
@@ -189,9 +190,13 @@ ending. When pi exits, it kills the group of every run still alive.
 
 The child runs under a short shell script, not directly under pi, for the same
 reason as a watched run: a `SIGKILL` of pi runs no handler. The script watches
-pi's pid and ends the child and the commands it started when pi is gone. It also
-reports a command that is not there (`loxpp subagent: cannot start ...`, exit
-code 127), which `spawn` used to report as `ENOENT`.
+pi's pid and ends the child and the commands it started when pi is gone. There
+is no window to close here, so the script signals the whole process group, and
+it does that only when it leads its own group, which `print.ts` arranges by
+spawning it detached. A caller that shares a group with the script is never
+signalled. The script also reports a command that is not there
+(`loxpp subagent: cannot start ...`, exit code 127), which `spawn` used to
+report as `ENOENT`.
 
 ## Tests
 
