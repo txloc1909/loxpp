@@ -40,28 +40,34 @@ export function parentPidLines(): string[] {
 }
 
 /**
- * `kill -0` also succeeds for a zombie that nobody has reaped yet, so the
- * process state decides. `ps` answers on every platform kitty runs on; reading
- * `/proc` would leave the zombie to the fallback and keep the run alive forever.
+ * `kill -0` also succeeds for a zombie that nobody has reaped yet, so a pid's
+ * state decides whether it is gone. `ps` answers on every platform kitty runs
+ * on; reading `/proc` would leave the zombie to a fallback that keeps the run
+ * alive forever.
  *
  * An empty answer means one of two things: the pid is gone, or `ps` cannot
  * answer at all. The two are told apart by asking `ps` about this script's own
  * pid, which certainly exists. Without that check a `ps` that fails makes every
  * run look orphaned, and the watcher then kills a live run and its work. The
- * safe direction is to kill only on evidence of death: when `ps` cannot answer,
- * the run is left alone, which is the behaviour before this watch existed.
+ * safe direction is to act only on evidence: when `ps` cannot answer, the run is
+ * left alone, which is the behaviour before this watch existed.
+ *
+ * The watch also assumes that pi and this script share a PID namespace. A `ps`
+ * that cannot see pi would report it gone.
  */
 export function watchdogFunctions(): string[] {
   return [
-    "parent_alive() {",
-    `  state=$(ps -o stat= -p "$parent_pid" 2>/dev/null | tr -d '[:space:]')`,
-    "  if [ -z \"$state\" ]; then",
-    `    [ -n "$(ps -o stat= -p "$$" 2>/dev/null | tr -d '[:space:]')" ] || return 0`,
+    "process_state() {",
+    `  command ps -o stat= -p "$1" 2>/dev/null | tr -d '[:space:]'`,
+    "}",
+    "",
+    "pid_gone() {",
+    '  pid_state=$(process_state "$1")',
+    '  if [ -n "$pid_state" ]; then',
+    "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    "  case $state in",
-    "    Z*) return 1 ;;",
-    "  esac",
+    '  [ -n "$(process_state "$$")" ] || return 1',
     "  return 0",
     "}",
     "",
@@ -69,7 +75,7 @@ export function watchdogFunctions(): string[] {
     "# reach a caller that shares this script's group. It is used only when the",
     "# script leads its group, which print.ts arranges by spawning it detached.",
     "leads_group() {",
-    `  [ "$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')" = "$$" ]`,
+    `  [ "$(command ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')" = "$$" ]`,
     "}",
   ];
 }
@@ -130,9 +136,14 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
   return [
     "(",
     `  ${WATCHDOG_MARKER}`,
-    `  while parent_alive && kill -0 "$child" 2>/dev/null; do sleep ${poll}; done`,
-    "  # The run ended on its own: a held window stays, and nothing closes it.",
-    '  kill -0 "$child" 2>/dev/null || exit 0',
+    "  # The child ending first means the run finished by itself, and a held",
+    "  # window then stays. The parent ending first is what this watch is for.",
+    "  while :; do",
+    '    pid_gone "$child" && exit 0',
+    '    pid_gone "$parent_pid" && break',
+    `    sleep ${poll}`,
+    "  done",
+    '  pid_gone "$child" && exit 0',
     // The TERM below may reach this subshell when it signals a group, so it
     // must survive that signal to close the window and to send the KILL.
     "  trap '' TERM",

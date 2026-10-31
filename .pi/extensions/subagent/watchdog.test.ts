@@ -47,6 +47,12 @@ async function killParent(parent: ChildProcess): Promise<void> {
   await exited;
 }
 
+/** The first letter of the process state: `Z` for an exited process. */
+function state(pid: number): string {
+  const out = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout;
+  return out.trim().slice(0, 1);
+}
+
 /** An exited process that nobody has reaped yet still answers `kill -0`. */
 function alive(pid: number): boolean {
   try {
@@ -325,17 +331,28 @@ test("a zombie parent counts as dead, so its run ends", { timeout: 20000 }, asyn
       exitPath: path.join(dir, "exit.code"),
     });
 
-    // A shell blocked in `sleep` does not reap a background child, so killing
-    // that child leaves a zombie: a pid that `kill -0` still answers for.
-    const holder = spawn("/bin/sh", ["-c", `sleep 300 & printf '%s' $! > ${shellQuote(zombiePidFile)}; sleep 300`], {
-      stdio: "ignore",
-    });
+    // A zombie exists only while its parent has not reaped it, and a shell
+    // reaps a killed background child at once on some systems. A node process
+    // that holds its event loop busy cannot reap at all, so the zombie lasts
+    // and this precondition does not depend on the shell.
+    const holder = spawn(
+      process.execPath,
+      [
+        "-e",
+        [
+          "const { spawn } = require(\"node:child_process\");",
+          `require("node:fs").writeFileSync(${JSON.stringify(zombiePidFile)}, String(spawn("sleep", ["300"], { stdio: "ignore" }).pid));`,
+          "const until = Date.now() + 30000; while (Date.now() < until) {}",
+        ].join(" "),
+      ],
+      { stdio: "ignore" },
+    );
     try {
       const zombie = await readPid(zombiePidFile);
       process.kill(zombie, "SIGKILL");
-      await waitFor("the process to become a zombie", () => !alive(zombie));
+      await waitFor("the state to become a zombie", () => /^Z/.test(state(zombie)), 5000);
+      assert.equal(alive(zombie), false, "the test helper counts a zombie as gone");
       assert.doesNotThrow(() => process.kill(zombie, 0), "the zombie still answers kill -0");
-      assert.match(spawnSync("ps", ["-o", "stat=", "-p", String(zombie)], { encoding: "utf8" }).stdout, /^\s*Z/);
 
       // The watcher must read the state, not only `kill -0`, or it waits for a
       // parent that has already died.
