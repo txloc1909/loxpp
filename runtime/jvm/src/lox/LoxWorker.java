@@ -161,6 +161,11 @@ final class LoxWorker {
             target.deliver(msg);
             if (target.state == LoxTask.State.WAITING) {
                 target.worker.makeReady(target);
+            } else if (target.state == LoxTask.State.PARKED &&
+                       target.limitedWait) {
+                // A message ends the wait of a receive_* call with a limit.
+                target.worker.poller.cancelTimer(target);
+                target.worker.makeReady(target);
             }
         } finally {
             LOCK.unlock();
@@ -174,6 +179,7 @@ final class LoxWorker {
      */
     Object receive(boolean canSuspend) {
         LoxTask self = current;
+        rejectInWant();
         LOCK.lock();
         try {
             while (!self.hasMessage()) {
@@ -187,6 +193,100 @@ final class LoxWorker {
             return self.takeMessage();
         } finally {
             LOCK.unlock();
+        }
+    }
+
+    // Greater than 0 while a `want` function of a receive_where call runs. A
+    // receive in it would remove a message that the call is testing. Only
+    // the running task of the worker reads or writes it.
+    private int selectDepth;
+
+    private void rejectInWant() {
+        if (selectDepth > 0) {
+            throw LoxOps.makeError("YieldAcrossNativeError",
+                                   "Cannot receive in a function that "
+                                       + "receive_where calls.");
+        }
+    }
+
+    /**
+     * task.receive_within, task.receive_where, and task.receive_where_within
+     * (spec/04-semantics.md, task.receive_within). {@code want} is null for
+     * receive_within. {@code limitNanos} is read only when {@code limited}.
+     * The call tests each message once, in order, and waits for more when
+     * none matches. A message that is in the mailbox when the task runs again
+     * is tested before the limit counts, so a message that arrives with the
+     * limit wins.
+     */
+    Object receiveSelective(Object want, boolean limited, long limitNanos,
+                            boolean canSuspend) {
+        rejectInWant();
+        LoxTask self = current;
+        // Capped so that the deadline cannot overflow nanoTime's range.
+        long deadline =
+            limited ? System.nanoTime() + Math.min(limitNanos, 1L << 60) : 0;
+        int scanned = 0;
+        for (;;) {
+            Object candidate;
+            LOCK.lock();
+            try {
+                if (scanned >= self.pending()) {
+                    awaitMessage(self, canSuspend, limited, deadline);
+                    continue;
+                }
+                if (want == null) {
+                    return self.takeMessage();
+                }
+                candidate = self.peekAt(scanned);
+            } finally {
+                LOCK.unlock();
+            }
+            if (callWant(want, candidate)) {
+                LOCK.lock();
+                try {
+                    return self.removeAt(scanned);
+                } finally {
+                    LOCK.unlock();
+                }
+            }
+            scanned++;
+        }
+    }
+
+    private boolean callWant(Object want, Object msg) {
+        selectDepth++;
+        LoxOps.enterCallback();
+        try {
+            return !LoxOps.isFalsy(LoxOps.call(want, new Object[] {msg}));
+        } finally {
+            LoxOps.exitCallback();
+            selectDepth--;
+        }
+    }
+
+    // Caller holds LOCK. Returns when the task ran again after a wait, so the
+    // caller tests the mailbox again. The limit raises only here, when no
+    // message is there to test.
+    private void awaitMessage(LoxTask self, boolean canSuspend,
+                              boolean limited, long deadline) {
+        if (limited && deadline - System.nanoTime() <= 0) {
+            throw LoxOps.makeError("TimeoutError",
+                                   "The limit of the receive passed.");
+        }
+        if (!canSuspend) {
+            throw LoxOps.makeError("YieldAcrossNativeError",
+                                   "Cannot receive across a native callback.");
+        }
+        if (!limited) {
+            suspend(self, LoxTask.State.WAITING);
+            return;
+        }
+        ensurePoller().addTimer(self, deadline);
+        self.limitedWait = true;
+        try {
+            suspend(self, LoxTask.State.PARKED);
+        } finally {
+            self.limitedWait = false;
         }
     }
 

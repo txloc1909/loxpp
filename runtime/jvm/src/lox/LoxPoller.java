@@ -95,6 +95,11 @@ final class LoxPoller {
         timers.add(new Wait(nextSeq++, task, null, 0, deadlineNanos));
     }
 
+    /** Removes the timer of {@code task}, if it has one. */
+    void cancelTimer(LoxTask task) {
+        timers.removeIf(w -> w.task == task);
+    }
+
     /**
      * Removes every wait on {@code channel} and appends the tasks, in
      * registration order. A channel must leave the poller before it closes.

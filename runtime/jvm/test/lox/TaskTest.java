@@ -31,6 +31,9 @@ public final class TaskTest {
         checkSpawnOrderAndDeadTask();
         checkReceiveSuspendsTheTask();
         checkReceiveAcrossNative();
+        checkReceiveWithin();
+        checkReceiveWhere();
+        checkReceiveWhereRules();
         checkEachTaskHasItsOwnCounters();
         checkReceiveInCoroutineKeepsItRunning();
         checkReceiveInNativeCoroutineEntryRaises();
@@ -175,6 +178,100 @@ public final class TaskTest {
               "a receive that must suspend under a callback raises");
         checkEquals("Cannot receive across a native callback.", messageOf(err),
                     "the receive message differs from the yield message");
+    }
+
+    private static LoxClosure want(java.util.function.Function<Object, Object> f) {
+        return new LoxClosure("want", 1, NO_UPVALUES) {
+            @Override
+            protected Object invoke(Object self, Object[] a) {
+                return f.apply(a[0]);
+            }
+        };
+    }
+
+    private static void checkReceiveWithin() {
+        Object me = task("self");
+        LoxError none = raised(() -> task("receive_within", 0.05));
+        check(none != null && none.isCatchable() &&
+                  "TimeoutError".equals(kindOf(none)),
+              "a limit that passes raises a catchable TimeoutError");
+        task("send", me, "now");
+        checkEquals("now", task("receive_within", 0.05),
+                    "a message in the mailbox is returned at once");
+        task("spawn", fn("late", () -> {
+            sleepSeconds(0.05);
+            task("send", me, "later");
+        }));
+        long start = System.nanoTime();
+        checkEquals("later", task("receive_within", 120.0),
+                    "a message that arrives in time ends the wait");
+        // The bound only catches a wait that the message did not end: the
+        // limit is far above the time of a loaded machine.
+        check(System.nanoTime() - start < 60_000_000_000L,
+              "a message ends the wait of the limit");
+        for (Object bad : new Object[] {0.0, -1.0, Double.NaN, "1", null}) {
+            LoxError err = raised(() -> task("receive_within", bad));
+            check(err != null && !err.isCatchable(),
+                  "a limit that is not a Number above zero is fatal: " + bad);
+        }
+        LoxOps.enterCallback();
+        try {
+            LoxError err = raised(() -> task("receive_within", 0.05));
+            check(err != null && "YieldAcrossNativeError".equals(kindOf(err)),
+                  "an empty mailbox under a callback raises, with a limit too");
+        } finally {
+            LoxOps.exitCallback();
+        }
+    }
+
+    private static void checkReceiveWhere() {
+        Object me = task("self");
+        for (Object m : new Object[] {1.0, "a", 2.0, "b"}) {
+            task("send", me, m);
+        }
+        LoxClosure isText = want(m -> m instanceof String);
+        checkEquals("a", task("receive_where", isText),
+                    "the first message that matches is taken");
+        checkEquals(3.0, task("pending"), "the other messages stay");
+        checkEquals("b", task("receive_where", isText), "the next match");
+        checkEquals(1.0, task("receive"), "unmatched messages keep their order");
+        checkEquals(2.0, task("receive"), "and the last of them");
+        task("spawn", fn("sender", () -> {
+            task("send", me, 7.0);
+            LoxOps.yield(null);
+            task("send", me, "late");
+        }));
+        checkEquals("late", task("receive_where", isText),
+                    "a wait tests each new message");
+        checkEquals(7.0, task("receive"), "the rejected message stays");
+        LoxError none = raised(() -> task("receive_where_within", isText, 0.05));
+        check(none != null && "TimeoutError".equals(kindOf(none)),
+              "no match within the limit raises TimeoutError");
+        task("send", me, "x");
+        checkEquals("x", task("receive_where_within", isText, 0.05),
+                    "a match in the mailbox is taken");
+    }
+
+    private static void checkReceiveWhereRules() {
+        Object me = task("self");
+        task("send", me, "kept");
+        LoxClosure boom = want(m -> {
+            throw LoxOps.makeError("TestError", "boom");
+        });
+        LoxError err = raised(() -> task("receive_where", boom));
+        check(err != null && "TestError".equals(kindOf(err)),
+              "a throw in want reaches the caller");
+        checkEquals(1.0, task("pending"), "the message stays after a throw");
+        LoxClosure inner = want(m -> task("receive"));
+        LoxError nested = raised(() -> task("receive_where", inner));
+        check(nested != null && "YieldAcrossNativeError".equals(kindOf(nested)),
+              "a receive in want raises, also when the mailbox has a message");
+        LoxClosure sees = want(m -> task("pending").equals(1.0));
+        checkEquals("kept", task("receive_where", sees),
+                    "want reads task.pending");
+        LoxError notFn = raised(() -> task("receive_where", "x"));
+        check(notFn != null && !notFn.isCatchable(),
+              "a want that is not a function is fatal");
     }
 
     private static void sleepSeconds(double seconds) {

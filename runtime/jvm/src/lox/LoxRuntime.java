@@ -802,6 +802,26 @@ public final class LoxRuntime {
             return LoxWorker.current().receive(canSuspend);
         }));
         module.fields.put(
+            "receive_within", new LoxNative("receive_within", 1, args -> {
+                long nanos = requireLimit("task.receive_within", args[0]);
+                return LoxWorker.current().receiveSelective(
+                    null, true, nanos, canSuspendHere());
+            }));
+        module.fields.put(
+            "receive_where", new LoxNative("receive_where", 1, args -> {
+                requireWant("task.receive_where", args[0]);
+                return LoxWorker.current().receiveSelective(
+                    args[0], false, 0, canSuspendHere());
+            }));
+        module.fields.put(
+            "receive_where_within",
+            new LoxNative("receive_where_within", 2, args -> {
+                requireWant("task.receive_where_within", args[0]);
+                long nanos = requireLimit("task.receive_where_within", args[1]);
+                return LoxWorker.current().receiveSelective(
+                    args[0], true, nanos, canSuspendHere());
+            }));
+        module.fields.put(
             "self",
             new LoxNative("self", 0, args -> LoxWorker.current().current));
         module.fields.put(
@@ -809,6 +829,30 @@ public final class LoxRuntime {
                 return (double)LoxWorker.current().pending();
             }));
         globals.define("task", module);
+    }
+
+    private static boolean canSuspendHere() {
+        return LoxOps.callbackDepthOfChain() == 0;
+    }
+
+    private static void requireWant(String name, Object want) {
+        if (!(want instanceof LoxClosure) &&
+            !(want instanceof LoxBoundMethod) && !(want instanceof LoxNative)) {
+            throw new LoxError(name + " expects a function.");
+        }
+    }
+
+    // The limit of a receive_* call in nanoseconds: a Number greater than
+    // zero. A Number that is not greater than zero includes NaN.
+    private static long requireLimit(String name, Object seconds) {
+        if (!(seconds instanceof Double)) {
+            throw new LoxError(name + " expects a number of seconds.");
+        }
+        double value = (Double)seconds;
+        if (!(value > 0)) {
+            throw new LoxError(name + " expects a limit greater than zero.");
+        }
+        return (long)Math.min(value * 1e9, 1e18);
     }
 
     private static void requireMessage(Object msg) {
