@@ -370,6 +370,19 @@ each has an off-the-shelf solution.
 | `qbe-only/s8_promotion_loop` | a non-captured loop counter and accumulator carried across the back-edge by a phi give the same result under `LOXPP_STRESS_GC=1` | none (QBE-only gate) |
 | `qbe-only/V1_fresh_cell_no_lists` | the `V1_fresh_cell` hazard with no list opcodes (S4): a captured loop-body local needs a fresh cell per iteration, checked through globals instead of a list slot | P4 |
 | `qbe-only/V3_loopvar_no_lists` | the `V3_loopvar` hazard with no list opcodes (S4): a closure capturing the loop variable itself shares one open upvalue across every iteration | P4 |
+| `287_connect_within_limit_full_backlog` | `connect_within` on a listener whose queue is full ends with a `NetworkError` when the limit passes; no external network — a spec probe (issue #937) | none (spec probe) |
+| `288_connect_within_limit_not_number` | a limit that is not a Number halts the program — a spec probe (issue #937) | none (spec probe) |
+| `289_connect_within_limit_zero` | a limit of zero halts the program — a spec probe (issue #937) | none (spec probe) |
+| `290_connect_within_limit_negative` | a negative limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `291_connect_within_limit_nan` | a NaN limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `292_connect_three_arguments` | `connect` with a third argument halts the program (arity 2) — a spec probe (issue #937) | none (spec probe) |
+| `293_connect_within_limit_succeeds` | `connect_within` returns the Socket when the connection is made in time — a spec probe (issue #937) | none (spec probe) |
+| `294_connect_within_arguments` | `connect_within` with 2 arguments halts the program (arity 3) — a spec probe (issue #937) | none (spec probe) |
+| `295_connect_within_limit_nil` | a `nil` limit halts the program — a spec probe (issue #937) | none (spec probe) |
+| `296_connect_within_numeric_address_pair` | `connect_within` to a numeric address and the `accept`, in two tasks of one worker, both finish — a spec probe (issue #937) | none (spec probe) |
+| `297_wait_first_receive` | `Inbox` of `examples/wait_first.lox`: selective receive with a stash, receive with a limit, a stale tick dropped — a spec probe (issue #937) | none (spec probe) |
+| `298_wait_first_read_limit` | `readlineWithin` of `examples/wait_first.lox`: a Socket read limit through `close()` — a spec probe (issue #937) | none (spec probe) |
+| `299_wait_first_limit_after_task_ended` | the timer task of a limited receive survives a send to an ended task (`DeadTaskError` caught) — a spec probe (issue #937) | none (spec probe) |
 
 The `66` to `96` probes are **spec probes** for the workers and tasks of
 `spec/04-semantics.md`. A spec probe carries a `// STATUS: ok` or
