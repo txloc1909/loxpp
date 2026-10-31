@@ -114,7 +114,10 @@ Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `interactive`,
    pi's own window keeps the placement independent of which kitty window has
    focus. The socket address keeps kitty's reply out of pi's terminal.
 2. kitty runs a small shell script. The script enters the working directory and
-   starts the child.
+   starts the child, and it starts a watcher beside the child. The watcher polls
+   pi's pid. A `SIGKILL` of pi runs no handler in pi, so the watcher is the only
+   thing that ends such a run: it signals the run and closes the window (see
+   "When the parent pi dies").
 3. The child keeps the terminal: its keys and its TUI stay in the window, and
    only its stderr goes to a log file. It saves a session named
    `subagent: <agent>`. The parent cannot read that terminal, so the child
@@ -125,7 +128,8 @@ Other parameters: `agentScope`, `confirmProjectAgents`, `cwd`, `interactive`,
    job, its window and its current tool. pi tails the event file, and the
    window's title shows the turn count, the current tool, or `waiting for you`
    when the child is back at its prompt.
-5. The child exits, and the exit code goes to a third file. kitty closes the
+5. The child exits, and the exit code goes to a third file. The script stops the
+   watcher, so a window that `hold` keeps open stays open. kitty closes the
    window at once, and pi sends `close-window` as a safety net. `hold: true`
    turns both closes off.
 6. The parent gets a `subagent-result` message with the child's last assistant
@@ -153,6 +157,25 @@ A person can end a watched run at any moment:
 No notification is sent to a session that has ended: a job belongs to the
 session that started it, and every shutdown path stops its jobs.
 
+### When the parent pi dies
+
+A `SIGKILL` of pi runs no handler in pi, so no shutdown path runs and the child
+would keep its window with nobody to report to. The run script watches pi
+instead. It polls pi's pid, and it treats a zombie as dead, because `kill -0`
+also answers for a process that nobody has reaped yet. When the pid is gone, the
+watcher sends `SIGTERM` to the run, waits, sends `SIGKILL`, and closes the
+window. The close call names the socket, and the script learns its own window
+id from `KITTY_WINDOW_ID`. A held window closes too: the run has no parent to
+report to, and a stray window is what this watch exists to remove.
+
+The watcher signals the process group of the run, so it reaches the commands the
+child started. It does that only when the script leads its own group, which
+kitty guarantees for a window's command. A caller that shares a group with the
+script gets no group signal.
+
+The watcher stops at the end of a normal run, so it never closes a window that
+`hold` keeps open.
+
 ## How an unattended run works
 
 The child runs `--mode json -p --no-session` as a plain subprocess: stdout
@@ -163,6 +186,12 @@ abort ends it and the commands it started: `SIGTERM` first, then `SIGKILL` after
 two seconds. Without the group, a shell that does not forward signals leaves its
 own child holding the pipe, and the tool call waits for that child instead of
 ending. When pi exits, it kills the group of every run still alive.
+
+The child runs under a short shell script, not directly under pi, for the same
+reason as a watched run: a `SIGKILL` of pi runs no handler. The script watches
+pi's pid and ends the child and the commands it started when pi is gone. It also
+reports a command that is not there (`loxpp subagent: cannot start ...`, exit
+code 127), which `spawn` used to report as `ENOENT`.
 
 ## Tests
 
