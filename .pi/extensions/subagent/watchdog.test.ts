@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { buildRunScript, closeWindowArgv } from "./kitty.ts";
 import { buildPrintScript } from "./print.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
@@ -121,6 +122,20 @@ test("shellQuote survives a real shell", () => {
   const result = spawnSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, nasty);
+});
+
+test("every module that starts a process is accounted for", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const starters = fs
+    .readdirSync(dir)
+    .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts"))
+    .filter((file) => /\bspawn(Sync)?\(/.test(fs.readFileSync(path.join(dir, file), "utf8")))
+    .sort();
+  assert.deepEqual(
+    starters,
+    ["print.ts", "window.ts"],
+    "a module that starts a process needs a watchdog decision, and this list is the ground truth",
+  );
 });
 
 test("every script builder carries the watchdog", () => {
@@ -240,41 +255,83 @@ test("a run that ends on its own leaves its held window alone when the parent di
   });
 });
 
-test("a script that does not lead its group never signals the group", { timeout: 20000 }, async () => {
+test("the unattended wrapper never signals a group it does not lead", { timeout: 20000 }, async () => {
   await withTempDir(async (dir) => {
-    const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
-    const scriptPath = await watchedScript(dir, {
-      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
-      kitten,
-      exitPath: path.join(dir, "exit.code"),
+    const script = buildPrintScript({
+      command: ["/bin/sh", "-c", `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`],
+      ...WATCH,
     });
 
-    // Not detached: the script shares this test's process group, so a group
+    // Not detached: the wrapper shares this test's process group, so a group
     // signal would reach the test runner. The bystander makes that visible.
     const parent = standInParent();
     const bystander = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
-      stdio: "ignore",
-      env: { ...process.env, KITTY_WINDOW_ID: "42" },
-    });
+    const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(parent.pid)], { stdio: "ignore" });
     try {
       const childPid = await readPid(childPidFile);
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid));
       assert.equal(alive(bystander.pid!), true, "a process in the caller's group is untouched");
     } finally {
-      script.kill("SIGKILL");
+      wrapper.kill("SIGKILL");
       bystander.kill("SIGKILL");
     }
   });
 });
 
-test("an unattended wrapper ends its child when the parent dies", { timeout: 20000 }, async () => {
+test("a zombie parent counts as dead, so its run ends", { timeout: 20000 }, async () => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const zombiePidFile = path.join(dir, "zombie.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    // A shell blocked in `sleep` does not reap a background child, so killing
+    // that child leaves a zombie: a pid that `kill -0` still answers for.
+    const holder = spawn("/bin/sh", ["-c", `sleep 300 & printf '%s' $! > ${shellQuote(zombiePidFile)}; sleep 300`], {
+      stdio: "ignore",
+    });
+    try {
+      const zombie = await readPid(zombiePidFile);
+      process.kill(zombie, "SIGKILL");
+      await waitFor("the process to become a zombie", () => !alive(zombie));
+      assert.doesNotThrow(() => process.kill(zombie, 0), "the zombie still answers kill -0");
+      assert.match(spawnSync("ps", ["-o", "stat=", "-p", String(zombie)], { encoding: "utf8" }).stdout, /^\s*Z/);
+
+      // The watcher must read the state, not only `kill -0`, or it waits for a
+      // parent that has already died.
+      const script = spawn("/bin/sh", [scriptPath, String(zombie)], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, KITTY_WINDOW_ID: "42" },
+      });
+      try {
+        const childPid = await readPid(childPidFile);
+        await waitFor("the child to end", () => !alive(childPid));
+      } finally {
+        script.kill("SIGKILL");
+      }
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+});
+
+test("an unattended wrapper ends its child and its grandchild when the parent dies", { timeout: 20000 }, async () => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
+    const grandchildPidFile = path.join(dir, "grandchild.pid");
     const script = buildPrintScript({
-      command: ["/bin/sh", "-c", `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`],
+      command: [
+        "/bin/sh",
+        "-c",
+        `printf '%s' $$ > ${shellQuote(childPidFile)}; sh -c 'printf "%s" $$ > ${grandchildPidFile}; sleep 60' & sleep 60`,
+      ],
       ...WATCH,
     });
 
@@ -286,11 +343,13 @@ test("an unattended wrapper ends its child when the parent dies", { timeout: 200
     });
     try {
       const childPid = await readPid(childPidFile);
+      const grandchildPid = await readPid(grandchildPidFile);
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(alive(childPid), true, "the child lives while the parent lives");
 
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid));
+      await waitFor("the grandchild to end", () => !alive(grandchildPid));
     } finally {
       wrapper.kill("SIGKILL");
       parent.kill("SIGKILL");

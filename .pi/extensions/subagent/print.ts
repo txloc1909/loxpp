@@ -76,6 +76,9 @@ export interface PrintScriptSpec {
  * The child needs no terminal, so it gets `/dev/null`, and it keeps the pipes
  * of this script for stdout and stderr. The script exits with the child's code,
  * so the caller's `close` event still reports what pi returned.
+ *
+ * `runPrintChild` spawns this script detached, so it leads its own group and
+ * the watcher's group signal reaches the commands the child started.
  */
 export function buildPrintScript(spec: PrintScriptSpec): string {
   const [command, ...args] = spec.command;
@@ -90,7 +93,7 @@ export function buildPrintScript(spec: PrintScriptSpec): string {
     `command -v ${shellQuote(command)} >/dev/null 2>&1 || { printf '%s\\n' ${shellQuote(`loxpp subagent: cannot start ${command}`)} >&2; exit 127; }`,
     `${[command, ...args].map(shellQuote).join(" ")} </dev/null &`,
     "child=$!",
-    ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS }),
+    ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS, reach: "group-when-led" }),
     'wait "$child"',
     "status=$?",
     ...stopWatcherLines(),

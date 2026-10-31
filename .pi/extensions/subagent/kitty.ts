@@ -167,7 +167,14 @@ export function buildRunScript(spec: RunScriptSpec): string {
     "exec 3<&0",
     `${spec.command.map(quote).join(" ")} 0<&3 2> ${quote(spec.stderrPath)} &`,
     "child=$!",
-    ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS, closeWindow: { kitten: spec.kitten, socket: spec.socket } }),
+    ...watchdogLines({
+      pollS: spec.watchPollS,
+      graceS: spec.watchGraceS,
+      // kitty runs this script under `kitten run-shell`, so it does not lead a
+      // group of its own: the close call below is what ends the window.
+      reach: "children",
+      closeWindow: { kitten: spec.kitten, socket: spec.socket },
+    }),
     'wait "$child"',
     "status=$?",
     ...stopWatcherLines(),

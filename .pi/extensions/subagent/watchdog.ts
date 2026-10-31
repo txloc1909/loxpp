@@ -41,29 +41,41 @@ export function parentPidLines(): string[] {
 
 /**
  * `kill -0` also succeeds for a zombie that nobody has reaped yet, so the
- * state field of `/proc/<pid>/stat` is read where `/proc` exists.
+ * process state decides. `ps` answers on every platform kitty runs on; reading
+ * `/proc` would leave the zombie to the fallback and keep the run alive forever.
  */
 export function watchdogFunctions(): string[] {
   return [
     "parent_alive() {",
-    '  if [ -r "/proc/$parent_pid/stat" ]; then',
-    '    case "$(cat "/proc/$parent_pid/stat" 2>/dev/null)" in',
-    "      *') Z'*) return 1 ;;",
-    "    esac",
-    "    return 0",
-    "  fi",
-    '  kill -0 "$parent_pid" 2>/dev/null',
+    `  state=$(ps -o stat= -p "$parent_pid" 2>/dev/null | tr -d '[:space:]')`,
+    '  [ -n "$state" ] || return 1',
+    "  case $state in",
+    "    Z*) return 1 ;;",
+    "  esac",
+    "  return 0",
     "}",
     "",
-    "# The group signal must reach the child's own commands, and it must not",
+    "# A group signal must reach the commands the child started, and it must not",
     "# reach a caller that shares this script's group. It is used only when the",
-    "# script leads its group: kitty makes a window's command a session leader,",
-    "# and print.ts starts the wrapper detached.",
+    "# script leads its group, which print.ts arranges by spawning it detached.",
     "leads_group() {",
     `  [ "$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')" = "$$" ]`,
     "}",
   ];
 }
+
+/**
+ * How far the signals reach.
+ *
+ * - `children`: the child process only. kitty runs the window's command under
+ *   `kitten run-shell`, so the script shares a group with that shell and does
+ *   not lead it. The close call below is what ends the window and the rest of
+ *   what runs in it.
+ * - `group-when-led`: the script's group when the script leads it. print.ts
+ *   spawns the wrapper detached, so that is the normal path there, and the
+ *   group signal reaches the commands the child started.
+ */
+export type WatchReach = "children" | "group-when-led";
 
 export interface WatchOptions {
   /** Poll interval, in seconds. */
@@ -76,6 +88,8 @@ export interface WatchOptions {
    * KITTY_WINDOW_ID, which kitty sets in the window the script runs in.
    */
   closeWindow?: { kitten: string; socket: string };
+  /** Defaults to `children`, the shape kitty's window gives. */
+  reach?: WatchReach;
 }
 
 /**
@@ -86,12 +100,15 @@ export interface WatchOptions {
 export function watchdogLines(opts: WatchOptions = {}): string[] {
   const poll = opts.pollS ?? WATCH_POLL_S;
   const grace = opts.graceS ?? WATCH_GRACE_S;
-  const group = (signal: string): string =>
-    `  if leads_group; then kill -${signal} "-$$" 2>/dev/null; else kill -${signal} "$child" 2>/dev/null; fi`;
+  const signals = (signal: string): string =>
+    (opts.reach ?? "children") === "children"
+      ? `  kill -${signal} "$child" 2>/dev/null`
+      : `  if leads_group; then kill -${signal} "-$$" 2>/dev/null; else kill -${signal} "$child" 2>/dev/null; fi`;
   const close = opts.closeWindow
     ? [
-        // kitty's match flag separates the field from the value with a colon,
-        // as `closeWindowArgv` does.
+        // The window holds the rest of the run: kitty kills what lives in the
+        // window it closes. kitty's match flag separates the field from the
+        // value with a colon, as `closeWindowArgv` does.
         `  ${shellQuote(opts.closeWindow.kitten)} @ --to=${shellQuote(opts.closeWindow.socket)} close-window --match=id:"\${KITTY_WINDOW_ID:-}" >/dev/null 2>&1`,
       ]
     : [];
@@ -101,13 +118,13 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     `  while parent_alive && kill -0 "$child" 2>/dev/null; do sleep ${poll}; done`,
     "  # The run ended on its own: a held window stays, and nothing closes it.",
     '  kill -0 "$child" 2>/dev/null || exit 0',
-    // This subshell sends the group signal, so it must survive that signal to
-    // send the KILL after it.
+    // The TERM below may reach this subshell when it signals a group, so it
+    // must survive that signal to close the window and to send the KILL.
     "  trap '' TERM",
-    group("TERM"),
-    ...close,
+    signals("TERM"),
     `  sleep ${grace}`,
-    group("KILL"),
+    signals("KILL"),
+    ...close,
     ") >/dev/null 2>&1 &",
     "watcher=$!",
   ];
