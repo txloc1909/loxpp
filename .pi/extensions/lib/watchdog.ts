@@ -19,9 +19,11 @@ export const WATCH_POLL_S = 1;
 export const WATCH_GRACE_S = 2;
 
 /**
- * A test asserts that each of the three builders writes this marker, and the
- * process-starter scan names every module that starts a process, so a new
- * builder fails a test until it gets a watchdog decision.
+ * A test asserts that each of the three builders writes this marker. A separate
+ * test names every module that starts a process, so a new module with its own
+ * `spawn` fails until it is listed. The three builders are named by hand: a
+ * fourth builder inside a listed module would need that list updated by a
+ * reviewer, which no test detects.
  */
 export const WATCHDOG_MARKER = "# loxpp subagent watchdog";
 
