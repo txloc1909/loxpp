@@ -28,14 +28,18 @@ final class LoxPoller {
         final SelectableChannel channel; // null for a timer
         final int interest;
         final long deadline;
+        // A channel wait with a limit ends when the deadline passes, even if
+        // the channel is not ready.
+        final boolean timed;
 
         Wait(long seq, LoxTask task, SelectableChannel channel, int interest,
-             long deadline) {
+             long deadline, boolean timed) {
             this.seq = seq;
             this.task = task;
             this.channel = channel;
             this.interest = interest;
             this.deadline = deadline;
+            this.timed = timed;
         }
     }
 
@@ -66,7 +70,8 @@ final class LoxPoller {
      * the number of its first wait as {@code seq}, so its wait keeps its place
      * among the waits that began after it; 0 starts a new call.
      */
-    long addFd(LoxTask task, SelectableChannel channel, int interest, long seq)
+    long addFd(LoxTask task, SelectableChannel channel, int interest, long seq,
+               boolean timed, long deadlineNanos)
         throws ClosedChannelException {
         SelectionKey key = channel.keyFor(selector);
         if (key != null && !key.isValid()) {
@@ -87,12 +92,12 @@ final class LoxPoller {
         while (at > 0 && fdWaits.get(at - 1).seq > seq) {
             at--;
         }
-        fdWaits.add(at, new Wait(seq, task, channel, interest, 0));
+        fdWaits.add(at, new Wait(seq, task, channel, interest, deadlineNanos, timed));
         return seq;
     }
 
     void addTimer(LoxTask task, long deadlineNanos) {
-        timers.add(new Wait(nextSeq++, task, null, 0, deadlineNanos));
+        timers.add(new Wait(nextSeq++, task, null, 0, deadlineNanos, true));
     }
 
     /** Removes the timer of {@code task}, if it has one. */
@@ -133,8 +138,20 @@ final class LoxPoller {
      */
     void select() {
         long timeout = 0; // 0 sleeps without a limit
+        boolean limited = false;
+        long first = 0;
         if (!timers.isEmpty()) {
-            long left = timers.first().deadline - System.nanoTime();
+            limited = true;
+            first = timers.first().deadline;
+        }
+        for (Wait w : fdWaits) {
+            if (w.timed && (!limited || w.deadline - first < 0)) {
+                limited = true;
+                first = w.deadline;
+            }
+        }
+        if (limited) {
+            long left = first - System.nanoTime();
             if (left <= 0) {
                 return;
             }
@@ -211,6 +228,13 @@ final class LoxPoller {
             }
         }
         long now = System.nanoTime();
+        for (Iterator<Wait> it = fdWaits.iterator(); it.hasNext();) {
+            Wait w = it.next();
+            if (w.timed && w.deadline - now <= 0) {
+                out.add(w.task);
+                it.remove();
+            }
+        }
         while (!timers.isEmpty() && timers.first().deadline - now <= 0) {
             out.add(timers.pollFirst().task);
         }

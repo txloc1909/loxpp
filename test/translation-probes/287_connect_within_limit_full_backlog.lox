@@ -1,0 +1,29 @@
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: NetworkError
+// CHECK: after
+// A connect with a limit raises a catchable NetworkError when the limit
+// passes before the connection is made (spec/05-stdlib.md, connect_within). The
+// Server never accepts, so its queue of waiting connections fills, and the
+// operating system then leaves the next connection unanswered. The loop
+// connects until the first NetworkError and closes each Socket at once; a
+// connection that the Server did not accept stays in the queue. The size of
+// the queue differs between backends and hosts, so the count in the loop is
+// only a guard against a host that never fills the queue.
+var l = listen("127.0.0.1", 0);
+var port = l.port();
+var failed = false;
+var i = 0;
+while (i < 100000 and !failed) {
+    try {
+        var s = connect_within("127.0.0.1", port, 0.3);
+        s.close();
+    } catch (e) {
+        print e.kind;
+        failed = true;
+    }
+    i = i + 1;
+}
+if (!failed) print "queue never full";
+l.close();
+print "after";

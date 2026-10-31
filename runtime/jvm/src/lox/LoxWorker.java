@@ -538,13 +538,30 @@ final class LoxWorker {
      * task parks if it can suspend; otherwise the worker waits in place.
      */
     static void waitChannel(SelectableChannel channel, int interest) {
+        waitChannel(channel, interest, false, 0);
+    }
+
+    /**
+     * As {@link #waitChannel(SelectableChannel, int)}, and also returns when
+     * {@link System#nanoTime} reaches {@code deadlineNanos} if {@code timed}.
+     * The caller checks the time after it returns.
+     */
+    static void waitChannel(SelectableChannel channel, int interest,
+                            boolean timed, long deadlineNanos) {
         if (LoxOps.callbackDepthOfChain() == 0) {
-            current().parkOnChannel(channel, interest);
+            current().parkOnChannel(channel, interest, timed, deadlineNanos);
             return;
         }
         try (Selector own = Selector.open()) {
             channel.register(own, interest);
-            own.select();
+            if (timed) {
+                long left = deadlineNanos - System.nanoTime();
+                if (left > 0) {
+                    own.select(Math.max(1, (left + 999_999) / 1_000_000));
+                }
+            } else {
+                own.select();
+            }
         } catch (IOException e) {
             throw new IllegalStateException("cannot wait for a channel", e);
         }
@@ -603,12 +620,14 @@ final class LoxWorker {
         }
     }
 
-    private void parkOnChannel(SelectableChannel channel, int interest) {
+    private void parkOnChannel(SelectableChannel channel, int interest,
+                               boolean timed, long deadlineNanos) {
         LoxTask self = current;
         LOCK.lock();
         try {
             self.waitSeq = ensurePoller().addFd(self, channel, interest,
-                                                self.waitSeq);
+                                                self.waitSeq, timed,
+                                                deadlineNanos);
             suspend(self, LoxTask.State.PARKED);
         } catch (ClosedChannelException e) {
             // The channel closed before the wait began; the caller sees it.

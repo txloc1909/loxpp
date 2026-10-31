@@ -2665,7 +2665,7 @@ fun blockingSleep(seconds) {
 // other task runs during it and no per-task state needs saving.
 // tools/check_bootstrap_suspend_calls.py holds this list to the spec table.
 fun isSuspendingHostCall(name) {
-    if (name == "connect") return true;
+    if (name == "connect" or name == "connect_within") return true;
     if (name == "Socket.read" or name == "Socket.read_bytes" or
         name == "Socket.readline" or name == "Socket.readlines" or
         name == "Socket.write" or name == "Socket.writeline") return true;
@@ -2859,7 +2859,7 @@ class LoxNative {
         if (this.name == "open") return 2;
         if (this.name == "connect" or this.name == "listen" or
             this.name == "spawn" or this.name == "run") return 2;
-        if (this.name == "setField") return 3;
+        if (this.name == "setField" or this.name == "connect_within") return 3;
         if (this.name == "getField" or this.name == "hasField") return 2;
         if (this.name == "callMethod") return -1;
         if (this.name == "type" or this.name == "fields" or
@@ -2883,6 +2883,13 @@ class LoxNative {
         if (this.name == "connect") {
             try {
                 return InterpSocket(connect(args[0], args[1]));
+            } catch (e) {
+                return hostNetFault(interp, e);
+            }
+        }
+        if (this.name == "connect_within") {
+            try {
+                return InterpSocket(connect_within(args[0], args[1], args[2]));
             } catch (e) {
                 return hostNetFault(interp, e);
             }
@@ -3724,6 +3731,7 @@ class Interpreter {
         env.define("is_file", LoxNative("is_file"));
         env.define("stat",    LoxNative("stat"));
         env.define("connect", LoxNative("connect"));
+        env.define("connect_within", LoxNative("connect_within"));
         env.define("listen",  LoxNative("listen"));
         env.define("spawn",   LoxNative("spawn"));
         env.define("run",     LoxNative("run"));
