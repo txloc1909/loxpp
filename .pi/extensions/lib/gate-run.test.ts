@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { buildGateScript, gateContainerName, gateRunArgv } from "./gate-run.ts";
+import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./gate-run.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 const WATCH = { pollS: 0.05, graceS: 0.3 };
@@ -27,6 +27,11 @@ case "$1" in
   image) exit 0 ;;
   rm)
     printf 'rm %s\\n' "$flat" >> "$FAKE_LOG"
+    if [ -n "\${FAKE_RM_FAIL:-}" ]; then exit 1; fi
+    n=$(cat "$FAKE_RMCOUNT" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$FAKE_RMCOUNT"
+    if [ -n "\${FAKE_RM_NOOP_FIRST:-}" ] && [ "$n" -le "$FAKE_RM_NOOP_FIRST" ]; then exit 0; fi
     rm -f "$FAKE_MARKER"
     exit 0 ;;
   run)
@@ -63,6 +68,7 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
   const marker = path.join(dir, "container");
   const log = path.join(dir, "calls.log");
   const pidfile = path.join(dir, "client.pid");
+  const rmcount = path.join(dir, "rm.count");
   const name = gateContainerName(process.pid, 1);
   const script = buildGateScript({
     argv: gateRunArgv({ image: "loxpp-dev-env", cwd: dir, name, script: "set -e\ncd /workspace" }),
@@ -80,6 +86,7 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
       FAKE_LOG: log,
       FAKE_MARKER: marker,
       FAKE_PIDFILE: pidfile,
+      FAKE_RMCOUNT: rmcount,
       FAKE_PID: "$$",
       ...extra,
     },
@@ -198,7 +205,10 @@ test("the container ends when the parent dies", { timeout: 20000 }, async () => 
     await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
     await waitFor("the client to end", () => !alive(clientPid));
     const log = await calls(b);
-    assert.deepEqual(log.map((line) => line.split(" ")[0]), ["rm", "run", "rm"], "the removal follows the gate");
+    assert.ok(
+      log.slice(log.findIndex((line) => line.startsWith("run")) + 1).some((line) => line.startsWith("rm")),
+      "a removal follows the gate",
+    );
   } finally {
     proc.kill("SIGKILL");
     parent.kill("SIGKILL");
@@ -241,6 +251,51 @@ test("an abort ends the run instead of waiting for it", { timeout: 20000 }, asyn
     proc.kill("SIGKILL");
     await done;
   }
+});
+
+test("a container created after the first removal is still removed", { timeout: 20000 }, async () => {
+  // `podman run` can create the container after the first removal landed. The
+  // fake models that by ignoring its first two removals: the one before the
+  // run, and the one that should have caught the container.
+  const b = await box({ FAKE_RM_NOOP_FIRST: "2" });
+  const parent = standInParent();
+  const proc = wrapper(b, parent.pid!);
+  const done = finish(proc);
+  try {
+    await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
+    const clientPid = await clientPidOf(b);
+    await killParent(parent);
+    await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
+    await waitFor("the client to end", () => !alive(clientPid));
+  } finally {
+    proc.kill("SIGKILL");
+    parent.kill("SIGKILL");
+    await done;
+  }
+});
+
+test("an abort still ends the run when the removal fails", { timeout: 20000 }, async () => {
+  const b = await box({ FAKE_IGNORE_TERM: "1", FAKE_RM_FAIL: "1" });
+  const proc = wrapper(b, process.pid);
+  const done = finish(proc);
+  try {
+    await waitFor("the container to start", () => fs.existsSync(b.marker));
+    const clientPid = await clientPidOf(b);
+    const started = Date.now();
+    proc.kill("SIGTERM");
+    await waitFor("the wrapper to end", async () => !alive(proc.pid!), TIMEOUT_MS);
+    assert.ok(Date.now() - started < 5000, "a failed removal does not hang the tool call");
+    await waitFor("the client to end", () => !alive(clientPid));
+  } finally {
+    proc.kill("SIGKILL");
+    await done;
+  }
+});
+
+test("a failed gate names its container", () => {
+  const note = gateFailureNote("loxpp-gate-7-2");
+  assert.match(note, /loxpp-gate-7-2/);
+  assert.match(note, /podman rm -f --time 0 loxpp-gate-7-2/);
 });
 
 test("a leftover container of the same name is removed before the run", () => {

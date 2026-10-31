@@ -111,6 +111,13 @@ export interface WatchOptions {
    */
   afterSignal?: string[];
   /**
+   * Lines that run after the grace and before the KILL, so a run whose real end
+   * races the first action still ends. The gate wrapper removes its container
+   * here a second time: `podman run` can create the container after the first
+   * removal, and that container would then survive.
+   */
+  afterGrace?: string[];
+  /**
    * Required, with no default: a call site that forgets it would silently stop
    * at the child and leave the commands the child started behind.
    */
@@ -156,6 +163,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     signals("TERM"),
     ...(opts.afterSignal ?? []).map((line) => `  ${line}`),
     `  sleep ${grace}`,
+    ...(opts.afterGrace ?? []).map((line) => `  ${line}`),
     signals("KILL"),
     ...close,
     ") >/dev/null 2>&1 &",
