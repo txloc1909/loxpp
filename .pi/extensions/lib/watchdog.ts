@@ -33,7 +33,7 @@ export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
     'if [ -z "$parent_pid" ]; then',
-    "  printf '%s\\n' 'loxpp subagent: the run script needs the parent process id' >&2",
+    "  printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
     "fi",
   ];
@@ -105,6 +105,12 @@ export interface WatchOptions {
    */
   closeWindow?: { kitten: string; socket: string };
   /**
+   * Lines that run after the TERM and before the grace, so a run whose real end
+   * is not a signal can be ended there. A gate container is that case: a
+   * signalled `podman run` client does not stop its container.
+   */
+  afterSignal?: string[];
+  /**
    * Required, with no default: a call site that forgets it would silently stop
    * at the child and leave the commands the child started behind.
    */
@@ -148,6 +154,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     // must survive that signal to close the window and to send the KILL.
     "  trap '' TERM",
     signals("TERM"),
+    ...(opts.afterSignal ?? []).map((line) => `  ${line}`),
     `  sleep ${grace}`,
     signals("KILL"),
     ...close,
