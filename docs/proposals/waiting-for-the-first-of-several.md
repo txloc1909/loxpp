@@ -80,7 +80,7 @@ points 2 and 3.
 3. It is the largest change: the poller and the mailbox wake-up are separate
 paths today, and `select` joins them. The decision for the concurrency model
 keeps spawn, send and receive as the whole primitive, so C needs a decision
-that changes that line. The bootstrap interpreter cannot implement it.
+that changes that line. The bootstrap interpreter has no scheduler, so it may not implement it.
 
 ## Recommendation
 
