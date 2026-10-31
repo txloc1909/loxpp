@@ -212,6 +212,11 @@ function writePodmanShim(dir, mode) {
 case "$1" in
   --version) echo "podman version 5.0.0"; exit 0 ;;
   image) exit 0 ;;
+  rm)
+    r=$(cat "${counter}.rm" 2>/dev/null || echo 0)
+    echo "$((r + 1))" > "${counter}.rm"
+    echo "$*" >> "${counter}.rm.argv"
+    exit 0 ;;
   run)
     n=$(cat "${counter}" 2>/dev/null || echo 0)
     n=$((n + 1))
@@ -373,10 +378,11 @@ async function run(name) {
     });
     const { messages, state } = collect(entries);
     const gateRuns = existsSync(gateCounter) ? Number(readFileSync(gateCounter, "utf8")) : 0;
+    const gateRemovals = existsSync(`${gateCounter}.rm`) ? Number(readFileSync(`${gateCounter}.rm`, "utf8")) : 0;
     // What the shim actually received: the image and the script the gate ran.
     const shimArgv = existsSync(`${gateCounter}.argv`) ? readFileSync(`${gateCounter}.argv`, "utf8") : "";
     const turns = entries.filter((e) => e.type === "message" && e.message?.role === "assistant").length;
-    return { messages, state, gateRuns, shimArgv, turns, stderr };
+    return { messages, state, gateRuns, gateRemovals, shimArgv, turns, stderr };
   } finally {
     server.close();
   }
@@ -425,6 +431,11 @@ for (const name of only ? [only] : Object.keys(SCENARIOS)) {
   // executes. It proves the gate really ran, separately from the policy counter.
   if (expect.shimRuns !== undefined && result.gateRuns !== expect.shimRuns) {
     failures.push(`expected ${expect.shimRuns} gate container runs, got ${result.gateRuns}`);
+  }
+  // The wrapper removes a leftover container before each run, so the real gate
+  // path proves it reaches `podman rm` (#1016).
+  if (expect.shimRuns !== undefined && result.gateRemovals !== expect.shimRuns) {
+    failures.push(`expected ${expect.shimRuns} container removals, got ${result.gateRemovals}`);
   }
   for (const needle of expect.shimArgvIncludes ?? []) {
     if (!result.shimArgv.includes(needle)) {

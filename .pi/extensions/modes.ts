@@ -48,6 +48,7 @@ import {
   type Mode,
   type PolicyState,
 } from "./lib/mode-policy.ts";
+import { buildGateScript, gateContainerName, gateRunArgv } from "./lib/gate-run.ts";
 import { GATE_SCOPES, gatePlan, type GateScope } from "./lib/gate-scopes.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
@@ -59,7 +60,9 @@ const REPO = "txloc1909/loxpp";
 const GATE_OUTPUT_CAP = 8000;
 const READ_OUTPUT_CAP = 12000;
 const STATUS_OUTPUT_CAP = 2000;
-const STAGNATION_LIMIT = 3; // identical gate failures on an unchanged tree before a mode stops
+const STAGNATION_LIMIT = 3;
+/** Counts gate runs, so each one names its own container. */
+let gateRunIndex = 0; // identical gate failures on an unchanged tree before a mode stops
 
 // The gate always runs inside the dev container: AGENTS.md's dev model puts the
 // agent on the host and program execution in the container, where the toolchain
@@ -265,15 +268,22 @@ async function runGate(
   const { image, script } = gatePlan(scope);
   // podman -v needs an absolute host path; a relative one becomes a named volume.
   const absCwd = path.resolve(cwd);
-  const argv = [
-    "podman", "run", "--rm",
-    "-v", `${absCwd}:/workspace:z`,
-    "-v", "loxpp-ccache:/ccache",
-    image,
-    "bash", "-lc", script,
-  ];
-  const r = await runArgv(argv, absCwd, signal);
-  return { passed: r.code === 0, output: tail(r.output, GATE_OUTPUT_CAP) };
+  // One name per call, so a stuck run can be found and removed by name, and
+  // two runs from this session cannot collide.
+  gateRunIndex += 1;
+  const name = gateContainerName(process.pid, gateRunIndex);
+  // The container runs under a wrapper that watches pi: a `SIGKILL` of pi runs
+  // no handler here, and the container would otherwise keep building with
+  // nobody to read the result (#1016).
+  const wrapper = buildGateScript({ argv: gateRunArgv({ image, cwd: absCwd, name, script }), name });
+  const r = await runArgv(["/bin/sh", "-c", wrapper, "loxpp-gate", String(process.pid)], absCwd, signal);
+  const output = tail(r.output, GATE_OUTPUT_CAP);
+  // A failed gate names its container, so a run that is still stuck is one
+  // command away from removal.
+  return {
+    passed: r.code === 0,
+    output: r.code === 0 ? output : `${output}\n\ncontainer: ${name} (remove a stuck run with: podman rm -f --time 0 ${name})`,
+  };
 }
 
 async function ciGreen(
