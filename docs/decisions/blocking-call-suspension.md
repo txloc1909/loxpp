@@ -162,6 +162,7 @@ The rule has two classes. Both are rules of the spec, not stages.
 | `connect_within(host, port, seconds)` | the connection, or the limit | as `connect`, plus a timer wait of the same task |
 | `Socket.read()` | the peer to close | socket read readiness, until EOF |
 | `Socket.read_bytes(n)` | the bytes, or the peer to close | socket read readiness, until `n` or EOF |
+| `Socket.read_some(n)` | a byte, or the peer to close | socket read readiness and the socket's input buffer |
 | `Socket.readline()` | a line, or the peer to close | socket read readiness and the socket's input buffer |
 | `Socket.readlines()` | the peer to close | socket read readiness and the socket's input buffer, until EOF |
 | `Socket.write(text)` | room in the connection | socket write readiness; keep the string and an offset |

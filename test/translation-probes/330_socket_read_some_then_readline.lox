@@ -1,0 +1,16 @@
+// A line call that follows read_some starts at the first byte that read_some
+// did not take (spec/05-stdlib.md, Socket).
+// STATUS: ok
+// CHECK: some: [ab
+// CHECK: c]
+// CHECK: line: d
+// CHECK: nil
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+peer.write("ab\ncd\n");
+peer.close();
+print "some: [" + conn.read_some(4) + "]";
+print "line: " + conn.readline();
+var last = conn.readline();
+print last;

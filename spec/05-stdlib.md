@@ -632,6 +632,25 @@ do. `n` must be an integer in the range 0 to 2147483647.
 **Returns:** String  
 **Suspends:** yes
 
+### `s.read_some(n) -> String`
+
+Waits until at least one byte of the Socket is available, then returns the
+bytes that are available, up to `n` bytes, as one String. It does not wait for
+more bytes. At end of stream, when the peer has closed its write direction and
+no bytes remain, it returns `""`. `n` must be an integer in the range 1 to
+2147483647; any other value, including `0`, and any other type is a runtime
+error that halts the program. Zero is not allowed because `""` is the result
+at end of stream.
+
+A byte that an earlier call took from the Socket is not returned again. A byte
+that an earlier call left unread, for example the bytes after a line that
+`readline` returned, is returned first. The result does not depend on how an
+implementation buffers the input.
+
+**Arity:** 1  
+**Returns:** String  
+**Suspends:** yes
+
 ### `s.readline() -> String | Nil`
 
 Reads bytes up to and including the next newline, and returns them without the
@@ -977,6 +996,7 @@ The table lists all the blocking calls.
 | `run(program, args)` | blocks | the child to exit |
 | `Socket.read()` | suspends | the peer to close |
 | `Socket.read_bytes(n)` | suspends | the bytes, or the peer to close |
+| `Socket.read_some(n)` | suspends | a byte, or the peer to close |
 | `Socket.readline()` | suspends | a line, or the peer to close |
 | `Socket.readlines()` | suspends | the peer to close |
 | `Socket.write(text)` | suspends | room in the connection |

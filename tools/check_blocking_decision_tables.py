@@ -73,6 +73,7 @@ CODE_MARKERS = {
     "run": r"\brun\(",
     "read": r"\.read\(",
     "read_bytes": r"\.read_bytes\(",
+    "read_some": r"\.read_some\(",
     "readline": r"\.readline\(",
     "readlines": r"\.readlines\(",
     "write": r"\.write\(",

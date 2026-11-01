@@ -1,0 +1,17 @@
+// When fewer bytes are wanted than are available, read_some returns n bytes and
+// the next calls return the rest in order, with no byte lost or repeated
+// (spec/05-stdlib.md, Socket). The peer sends 6 bytes in one write.
+// STATUS: ok
+// CHECK: [ab]
+// CHECK: [c]
+// CHECK: [def]
+// CHECK: []
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+peer.write("abcdef");
+peer.close();
+print "[" + conn.read_some(2) + "]";
+print "[" + conn.read_some(1) + "]";
+print "[" + conn.read_some(100) + "]";
+print "[" + conn.read_some(100) + "]";
