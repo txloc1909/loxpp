@@ -206,6 +206,24 @@ async function watchedScript(dir: string, options: { child: string; kitten: stri
   return scriptPath;
 }
 
+test("a failed body keeps its own error when the temp dir cannot be removed", async () => {
+  // The removal fails on purpose, so this case leaves the dir behind.
+  let leftover = "";
+  await assert.rejects(
+    withTempDir(async (dir) => {
+      leftover = dir;
+      await fs.promises.writeFile(path.join(dir, "keep"), "x");
+      // `rm` needs write permission on the dir to unlink what is inside it.
+      await fs.promises.chmod(dir, 0o500);
+      assert.fail("the body failed first");
+    }),
+    /the body failed first/,
+    "the body's error is the one that names the defect",
+  );
+  await fs.promises.chmod(leftover, 0o700);
+  await removeTempDir(leftover);
+});
+
 test("shellQuote survives a real shell", () => {
   const nasty = "it's $HOME `x` \"q\" \\ and\nnewline";
   const quoted = shellQuote(nasty);
