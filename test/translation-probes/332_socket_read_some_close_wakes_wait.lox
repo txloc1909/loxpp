@@ -1,0 +1,23 @@
+// close() from another task of the same worker ends the wait of a task in
+// read_some with a SocketClosedError (spec/05-stdlib.md, Socket). The peer
+// sends nothing, so only the close can end the wait.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: reader: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun reader() {
+    try { conn.read_some(10); print "reader: no fault"; }
+    catch (e) { print "reader: " + e.kind; }
+    task.send(me, "done");
+}
+fun closer() {
+    conn.close();
+    task.send(me, "done");
+}
+task.spawn(reader);
+task.spawn(closer);
+task.receive();
+task.receive();

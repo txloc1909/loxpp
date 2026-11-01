@@ -1,0 +1,11 @@
+// read_some takes exactly one argument. A call with none halts the program
+// (spec/05-stdlib.md, Socket).
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: before
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+print "before";
+conn.read_some();
+print "after";

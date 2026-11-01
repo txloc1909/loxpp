@@ -1830,6 +1830,7 @@ default set names a flag.
 | `run(program, args)` | blocking call | every call | yes | — |
 | `Socket.read()` | blocking call | every call | yes | — |
 | `Socket.read_bytes(n)` | blocking call | every call | yes | — |
+| `Socket.read_some(n)` | blocking call | every call | yes | — |
 | `Socket.readline()` | blocking call | every call | yes | — |
 | `Socket.readlines()` | blocking call | every call | yes | — |
 | `Socket.write(text)` | blocking call | every call | yes | — |

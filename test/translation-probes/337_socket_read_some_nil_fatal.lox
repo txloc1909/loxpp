@@ -1,0 +1,12 @@
+// read_some with the count nil is a runtime error that halts the program
+// (spec/05-stdlib.md, Socket). The check comes before any wait: the peer sends
+// nothing, so a call that waits first never ends and hits the timeout.
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: before
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+print "before";
+conn.read_some(nil);
+print "after";

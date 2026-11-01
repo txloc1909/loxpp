@@ -1,0 +1,14 @@
+// read_some on a closed Socket raises a catchable SocketClosedError. After
+// close_write() the read side is open, so read_some still returns what the peer
+// sent (spec/05-stdlib.md, Socket).
+// STATUS: ok
+// CHECK: after close_write: q
+// CHECK: closed: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+peer.write("q");
+conn.close_write();
+print "after close_write: " + conn.read_some(5);
+conn.close();
+try { conn.read_some(1); print "no fault"; } catch (e) { print "closed: " + e.kind; }

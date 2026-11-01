@@ -1,0 +1,14 @@
+// read_some returns the bytes that remain, and then "" at the end of the
+// stream, as many times as it is called (spec/05-stdlib.md, Socket).
+// STATUS: ok
+// CHECK: [ab]
+// CHECK: []
+// CHECK: []
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+peer.write("ab");
+peer.close();
+print "[" + conn.read_some(10) + "]";
+print "[" + conn.read_some(10) + "]";
+print "[" + conn.read_some(10) + "]";

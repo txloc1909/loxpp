@@ -2667,8 +2667,9 @@ fun blockingSleep(seconds) {
 fun isSuspendingHostCall(name) {
     if (name == "connect" or name == "connect_within") return true;
     if (name == "Socket.read" or name == "Socket.read_bytes" or
-        name == "Socket.readline" or name == "Socket.readlines" or
-        name == "Socket.write" or name == "Socket.writeline") return true;
+        name == "Socket.read_some" or name == "Socket.readline" or
+        name == "Socket.readlines" or name == "Socket.write" or
+        name == "Socket.writeline") return true;
     return name == "Server.accept";
 }
 
@@ -3286,6 +3287,7 @@ class InterpSocketMethod {
     hostCall(args) {
         if (this.name == "read")      return this.socket.handle.read();
         if (this.name == "read_bytes") return this.socket.handle.read_bytes(args[0]);
+        if (this.name == "read_some") return this.socket.handle.read_some(args[0]);
         if (this.name == "readline")  return this.socket.handle.readline();
         if (this.name == "readlines") {
             var lines = this.socket.handle.readlines();
@@ -5821,7 +5823,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "socket") {
-            if (name == "read" or name == "read_bytes" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
+            if (name == "read" or name == "read_bytes" or name == "read_some" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close_write" or name == "close") return InterpSocketMethod(name, object);
             if (isCallTarget) this.fatalError("Undefined method '" + name + "' on socket.");
             this.fatalError("Undefined property '" + name + "' on socket.");
             return nil;

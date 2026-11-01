@@ -97,6 +97,7 @@ NATIVE_SITES = {
     ("listenNative", NETWORK): 2,
     ("fillInput", NETWORK): 1,
     ("stepReadBytes", NETWORK): 1,
+    ("stepReadSome", NETWORK): 1,
     ("stepAccept", NETWORK): 1,
     ("step", CLOSED): 2,
     ("runIo", NETWORK): 2,

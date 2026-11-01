@@ -1,0 +1,36 @@
+// Socket.read_some waits for the first bytes and suspends only its task, and it
+// does not wait for the rest of n (spec/05-stdlib.md, Socket). The task
+// `reader` waits in read_some(100) on a Socket whose peer has sent nothing yet.
+// The task `ticker` of the same worker runs, writes 5 bytes, and does NOT
+// close. It closes only after the reader has answered, so the read cannot end
+// by an end of stream: an implementation that waits for 100 bytes never
+// returns, and hits the timeout. An implementation that blocks the worker
+// never runs `ticker`, and hits it too.
+// STATUS: ok
+// TIMEOUT: 10
+// COVERS: suspend-call Socket.read_some in reader
+// CHECK: ticker ran
+// CHECK: reader got: hello
+// CHECK: ticker done
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+var ticker_task = nil;
+fun reader() {
+    var got = conn.read_some(100); print "reader got: " + got;
+    task.send(ticker_task, "go");
+    task.send(me, "done");
+}
+fun ticker() {
+    print "ticker ran";
+    peer.write("hello");
+    task.receive();
+    peer.close();
+    print "ticker done";
+    task.send(me, "done");
+}
+ticker_task = task.spawn(ticker);
+task.spawn(reader);
+task.receive();
+task.receive();
