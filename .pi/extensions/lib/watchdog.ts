@@ -50,11 +50,17 @@ export function parentPidLines(): string[] {
  * alive forever.
  *
  * An empty answer means one of two things: the pid is gone, or `ps` cannot
- * answer at all. The two are told apart by asking `ps` about this script's own
- * pid, which certainly exists. Without that check a `ps` that fails makes every
- * run look orphaned, and the watcher then kills a live run and its work. The
- * safe direction is to act only on evidence: when `ps` cannot answer, the run is
- * left alone, which is the behaviour before this watch existed.
+ * answer at all. The two are told apart by asking `ps` about pid 1, which
+ * exists in every PID namespace `ps` can read. Without that check a `ps` that
+ * fails makes every run look orphaned, and the watcher then kills a live run
+ * and its work. The safe direction is to act only on evidence: when `ps`
+ * cannot answer, the run is left alone, which is the behaviour before this
+ * watch existed.
+ *
+ * The probe must not be this script's own pid: a script that was signalled
+ * alone no longer exists, `ps` cannot answer for it either, and the watcher
+ * then reads every pid as live and polls forever. Pid 1 does not depend on the
+ * script's life, so the answer stays about `ps` and not about the script.
  *
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
@@ -71,7 +77,7 @@ export function watchdogFunctions(): string[] {
     "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    '  [ -n "$(process_state "$$")" ] || return 1',
+    '  [ -n "$(process_state 1)" ] || return 1',
     "  return 0",
     "}",
     "",

@@ -388,6 +388,44 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
   });
 });
 
+processTest("a watcher ends when its script is signalled alone", async (left) => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 0.3`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    const parent = standInParent();
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      await readPid(childPidFile, left());
+      // The script dies alone here, as it did when a fake kitten closed a
+      // window by its pid. Its watcher must still end when its child does:
+      // `pid_gone` asks pid 1 whether `ps` can answer, not the script, because
+      // a script that is gone cannot answer for itself.
+      script.kill("SIGTERM");
+      await waitFor("the run's process group to end", () => {
+        try {
+          process.kill(-script.pid!, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      }, left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
 processTest("a run that ends on its own leaves its held window alone when the parent dies later", async (left) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
