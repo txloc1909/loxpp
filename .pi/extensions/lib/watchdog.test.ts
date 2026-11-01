@@ -9,6 +9,12 @@
  * Each case uses a real stand-in parent process and a real child process, so
  * the signal path is the one production takes. The stand-in parent is a process
  * the test may kill, which the test process itself is not.
+ *
+ * A run keeps writing into the temp dir until its last member is gone: the
+ * script writes the exit code and the watcher writes its close call, both at
+ * the moment the child ends. Every test that spawns a detached run ends that
+ * run's whole process group before it returns, so no writer survives the temp
+ * dir's removal.
  */
 
 import assert from "node:assert/strict";
@@ -32,7 +38,23 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   try {
     await fn(dir);
   } finally {
+    await removeTempDir(dir);
+  }
+}
+
+/**
+ * `rm` unlinks the entries and then calls `rmdir`. A writer that is still live
+ * leaves an entry behind between those two steps, and `ENOTEMPTY` names the
+ * directory, not the writer. This error names the entries that were left, so
+ * the next occurrence shows what wrote them.
+ */
+async function removeTempDir(dir: string): Promise<void> {
+  try {
     await fs.promises.rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    const left = fs.existsSync(dir) ? fs.readdirSync(dir).sort().join(", ") : "(the directory was already gone)";
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`a process was still writing when the temp dir was removed: it held ${left}: ${detail}`);
   }
 }
 
@@ -46,6 +68,32 @@ async function killParent(parent: ChildProcess): Promise<void> {
   parent.kill("SIGKILL");
   // Wait for the exit, so nothing answers `kill -0` for a zombie afterwards.
   await exited;
+}
+
+/**
+ * End a run this test spawned detached, so the leader owns its group: the
+ * watcher and the commands the child started are members of that group, and a
+ * signal to the leader's pid alone leaves them behind. The wait returns only
+ * when every member is gone, which is what makes the temp dir's removal safe.
+ */
+async function stopRun(run: ChildProcess): Promise<void> {
+  const group = run.pid === undefined ? undefined : -run.pid;
+  if (group !== undefined) {
+    try {
+      process.kill(group, "SIGKILL");
+    } catch {
+      // The group is already gone.
+    }
+  }
+  await waitFor("the run's process group to end", () => {
+    if (group === undefined) return true;
+    try {
+      process.kill(group, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 }
 
 /** The first letter of the process state: `Z` for an exited process. */
@@ -213,7 +261,7 @@ test("a watched run ends its child and closes its window when the parent dies", 
       const flag = closeWindowArgv("42", "unix:/tmp/fake-kitty.sock", kitten).find((arg) => arg.startsWith("--match="))!;
       assert.ok(logged.includes(flag), `the close call uses ${flag}`);
     } finally {
-      script.kill("SIGKILL");
+      await stopRun(script);
       parent.kill("SIGKILL");
     }
   });
@@ -240,7 +288,7 @@ test("a child that ignores SIGTERM is killed after the grace", { timeout: 20000 
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid));
     } finally {
-      script.kill("SIGKILL");
+      await stopRun(script);
       parent.kill("SIGKILL");
     }
   });
@@ -263,8 +311,8 @@ test("a run that ends on its own leaves its held window alone when the parent di
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const ended = new Promise<number | null>((resolve) => script.once("exit", (code) => resolve(code)));
-      assert.equal(await ended, 0, "the script itself exits 0");
+      const finished = new Promise<number | null>((resolve) => script.once("exit", (code) => resolve(code)));
+      assert.equal(await finished, 0, "the script itself exits 0");
       assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "7", "the child's code is kept");
 
       // A stale watcher would close a window that `hold` keeps open.
@@ -272,7 +320,7 @@ test("a run that ends on its own leaves its held window alone when the parent di
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(await readOr(path.join(dir, "kitten.log"), ""), "", "no watcher ran after the run ended");
     } finally {
-      script.kill("SIGKILL");
+      await stopRun(script);
       parent.kill("SIGKILL");
     }
   });
@@ -331,7 +379,10 @@ test("a ps that cannot answer does not make a live parent look dead", { timeout:
       assert.equal(alive(childPid), true, "a parent that ps cannot read is not a dead parent");
       assert.equal(await readOr(path.join(dir, "kitten.log"), ""), "", "no close call without evidence of death");
     } finally {
-      script.kill("SIGKILL");
+      // The watcher cannot end by itself while `ps` fails: it reads every pid,
+      // its own child included, as gone, and the safe direction keeps it
+      // polling. The group is the only thing that ends it.
+      await stopRun(script);
       parent.kill("SIGKILL");
     }
   });
@@ -382,7 +433,7 @@ test("a zombie parent counts as dead, so its run ends", { timeout: 20000 }, asyn
         const childPid = await readPid(childPidFile);
         await waitFor("the child to end", () => !alive(childPid));
       } finally {
-        script.kill("SIGKILL");
+        await stopRun(script);
       }
     } finally {
       holder.kill("SIGKILL");
@@ -419,7 +470,7 @@ test("an unattended wrapper ends its child and its grandchild when the parent di
       await waitFor("the child to end", () => !alive(childPid));
       await waitFor("the grandchild to end", () => !alive(grandchildPid));
     } finally {
-      wrapper.kill("SIGKILL");
+      await stopRun(wrapper);
       parent.kill("SIGKILL");
     }
   });
