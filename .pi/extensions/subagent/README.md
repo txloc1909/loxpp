@@ -193,22 +193,19 @@ returns and the watcher decides the parent is gone within about one
 process-state read of each other. Issue #1039 tracks whether that race must be
 removed.
 
-Every command the watch runs goes through `command`, so a shell function
-inherited from whatever started pi cannot change what it does: `tr` that prints
-nothing makes every pid read as gone, `head` that prints nothing makes `ps` read
-as unable to answer, `sleep` that blocks stops the poll, `printf` that prints
-nothing loses the exit code, and `kill` loses the signals.
-
-The rule stops at the shell's own structure. A function named for a builtin the
-script uses that way (`:`, `[`, `wait`, `trap`, `set`, `exec`, `exit`, `return`,
-`cd`) can still change it under bash, and one named `command` defeats the rule
-itself. bash can get past that with `builtin command`, and POSIX with
-`unset -f command`, but a parent that exports either of those can export a
-function named `unset` as well, so no POSIX script answers for a parent that
-means harm. dash rejects most of those names as function names and does not
-import exported functions at all, so that shell cannot carry the shadow in from
-the parent. The rule covers the shadows that happen by accident, which is what a
-wrapper installed in a shell profile is.
+A shell function inherited from whatever started pi cannot change what the
+watch does. Every command it runs goes through `command`: a `tr` that prints
+nothing makes every pid read as gone, a `head` that prints nothing makes `ps`
+read as unable to answer, a `sleep` that blocks stops the poll, a `printf` that
+prints nothing loses the exit code, and `[`, `wait`, `cd` and `kill` change the
+run in their own ways. A function named `command` would shadow the builtin every
+guard depends on, so each script clears it first with `unset -f command`. That
+line cannot be shadowed: `unset` is a POSIX special builtin, and bash refuses to
+import a function for a special builtin. The names the script uses for structure
+(`:`, `trap`, `set`, `exec`, `exit`, `return`, `shift`, `eval`, `.`, `break`,
+`continue`, `export`, `readonly`, `times`) are special builtins too, so no
+function for them can arrive from the parent, and dash rejects most of those
+names as function names and imports no exported functions at all.
 
 ## How an unattended run works
 

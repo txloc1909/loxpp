@@ -12,7 +12,14 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventStream, type StreamState } from "./stream.ts";
-import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "../lib/watchdog.ts";
+import {
+  clearShadowedCommand,
+  parentPidLines,
+  shellQuote,
+  stopWatcherLines,
+  watchdogFunctions,
+  watchdogLines,
+} from "../lib/watchdog.ts";
 
 export const STDERR_CAP = 4000;
 export const KILL_GRACE_MS = 2000;
@@ -86,6 +93,7 @@ export function buildPrintScript(spec: PrintScriptSpec): string {
     "#!/bin/sh",
     "# Written by the Lox++ pi subagent extension.",
     "set -u",
+    ...clearShadowedCommand(),
     ...parentPidLines(),
     ...watchdogFunctions(),
     // `spawn` now starts this shell, so a command that is not there is this
@@ -94,7 +102,7 @@ export function buildPrintScript(spec: PrintScriptSpec): string {
     `${[command, ...args].map(shellQuote).join(" ")} </dev/null &`,
     "child=$!",
     ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS, reach: "group-when-led" }),
-    'wait "$child"',
+    'command wait "$child"',
     "status=$?",
     ...stopWatcherLines(),
     'exit "$status"',

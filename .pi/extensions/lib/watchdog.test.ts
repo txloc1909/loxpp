@@ -311,13 +311,14 @@ test("every script builder carries the watchdog", () => {
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
     assert.ok(script.includes(PS_PROBE), `${name} asks ps whether it can answer at all`);
-    for (const needle of ["command tr", "command head", "command sleep", "command kill", "command printf"]) {
+    for (const needle of ["command tr", "command head", "command sleep", "command kill", "command printf", "command [", "command wait", "unset -f command"]) {
       assert.ok(script.includes(needle), `${name} runs \`${needle}\` through command, so no function shadows it`);
     }
   }
-  // The close call is the one external whose path is quoted, so it is checked
-  // by the path and not by a name.
+  // The close call and the entry directory belong to the watched run only, and
+  // the close call's path is quoted, so it is checked by the path.
   assert.ok(watched.includes(`command '${kitten}'`), "the close call runs kitten through command");
+  assert.ok(watched.includes("command cd"), "the watched run enters the caller's directory through command");
 });
 
 processTest("a watched run ends its child and closes its window when the parent dies", async (left) => {
@@ -572,6 +573,61 @@ processTest("a shadowed printf does not lose the run's exit code", async (left) 
     try {
       await waitFor("the script to end", () => script.exitCode !== null || script.signalCode !== null, left());
       assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "7", "the child's code reached the file");
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed command does not turn the watch off", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    const parent = standInParent();
+    // A `command` function shadows the builtin every other guard depends on.
+    // The script clears it with `unset -f command`, which cannot be shadowed:
+    // `unset` is a POSIX special builtin and bash does not import one.
+    const script = shadowedRun(scriptPath, parent.pid!, "command", ":");
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed [, wait or cd does not change the run", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const cwdFile = path.join(dir, "cwd");
+    const scriptPath = await watchedScript(dir, {
+      child: `pwd > ${shellQuote(cwdFile)}; printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    const parent = standInParent();
+    // `[` decides every test in the watcher, `wait` holds the script at the
+    // child, and `cd` puts the child where the caller asked. bash imports a
+    // function for each of the three.
+    const shadow = ['[() { return 1; }', "wait() { return 0; }", "cd() { return 0; }", "export -f '[' wait cd", 'exec bash "$0" "$@"'].join("\n");
+    const script = spawn("bash", ["-c", shadow, scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile, left());
+      assert.equal((await fs.promises.readFile(cwdFile, "utf8")).trim(), dir, "the child runs where the caller asked");
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());

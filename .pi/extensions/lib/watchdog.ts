@@ -32,16 +32,27 @@ export function shellQuote(value: string): string {
   return `'${value.split("'").join("'\\''")}'`;
 }
 
+/**
+ * Remove a function named `command`, which would shadow the builtin that every
+ * other guard depends on. `unset` is a POSIX special builtin, and bash does not
+ * import a function for one, so this line cannot be shadowed itself. dash has no
+ * exported functions, so there it is a no-op.
+ */
+export function clearShadowedCommand(): string[] {
+  return ["unset -f command 2>/dev/null"];
+}
+
 /** The first argument is the parent pid. Without it nothing can watch. */
 export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
-    'if [ -z "$parent_pid" ]; then',
+    'if command [ -z "$parent_pid" ]; then',
     "  command printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
     "fi",
   ];
 }
+
 
 /**
  * `kill -0` also succeeds for a zombie that nobody has reaped yet, so a pid's
@@ -66,6 +77,23 @@ export function parentPidLines(): string[] {
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
  *
+ * A shell function inherited from whatever started pi cannot change what the
+ * watch does. Every command it runs goes through `command`: a `tr` that prints
+ * nothing makes every pid read as gone, a `head` that prints nothing makes `ps`
+ * read as unable to answer, a `sleep` that blocks stops the poll, a `printf`
+ * that prints nothing loses the exit code, and `[`, `wait`, `cd` and `kill`
+ * change the run in their own ways. A function named `command` would shadow the
+ * builtin every one of those depends on, so each script clears it first with
+ * `clearShadowedCommand`.
+ *
+ * That line cannot be shadowed: `unset` is a POSIX special builtin, and bash
+ * refuses to import a function for a special builtin. The other names the
+ * script uses for structure (`:`, `trap`, `set`, `exec`, `exit`, `return`,
+ * `shift`, `eval`, `.`, `break`, `continue`, `export`, `readonly`, `times`) are
+ * special builtins too, so no function for them can arrive from the parent; and
+ * dash rejects most of those names as function names and imports no exported
+ * functions at all.
+ *
  * Every external command here runs through `command`, so a shell function
  * inherited from whatever started pi cannot change what the watch does. A
  * function named `tr` that prints nothing makes a live parent read as gone, one
@@ -74,15 +102,16 @@ export function parentPidLines(): string[] {
  * and one named `kill` loses the signals. `command` skips a function and then
  * runs the builtin, so every builtin the watch uses carries it too.
  *
- * Where the rule stops, and why. A function named for a builtin the script uses
- * for structure (`:`, `[`, `wait`, `trap`, `set`, `exec`, `exit`, `return`,
- * `cd`) can still change it under bash, and one named `command` defeats the rule
- * itself: bash has `builtin command` and POSIX has `unset -f command`, but a
- * parent that exports one of those can export a function named `unset` too, so
- * no POSIX script answers for a hostile parent. dash rejects most of those
- * names as function names, and it does not import exported functions at all, so
- * that shell cannot carry such a shadow in from the parent. The rule is for the
- * shadows that happen by accident, and it covers every command the watch runs.
+ * The rule covers every command the watch runs, and it closes the names that a
+ * parent shell can hand it: `clearShadowedCommand` removes a function named
+ * `command`, which would shadow the builtin every other guard depends on. The
+ * builtins the script uses for structure (`:`, `trap`, `set`, `exec`, `exit`,
+ * `return`, `shift`, `eval`, `.`, `break`, `continue`, `export`, `readonly`,
+ * `times`, `unset`) are POSIX special builtins, and bash refuses to import a
+ * function for one, so they cannot arrive from the parent; dash rejects most of
+ * those names as function names and imports no exported functions at all. What
+ * is left is a function the script itself defines, and it defines none of these
+ * names.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only
@@ -98,11 +127,11 @@ export function watchdogFunctions(): string[] {
     "",
     "pid_gone() {",
     '  pid_state=$(process_state "$1")',
-    '  if [ -n "$pid_state" ]; then',
+    '  if command [ -n "$pid_state" ]; then',
     "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    `  [ -n "$(${PS_PROBE} | command head -n 1)" ] || return 1`,
+    `  command [ -n "$(${PS_PROBE} | command head -n 1)" ] || return 1`,
     "  return 0",
     "}",
     "",
@@ -110,7 +139,7 @@ export function watchdogFunctions(): string[] {
     "# reach a caller that shares this script's group. It is used only when the",
     "# script leads its group, which print.ts arranges by spawning it detached.",
     "leads_group() {",
-    `  [ "$(command ps -o pgid= -p "$$" 2>/dev/null | command tr -d ' ')" = "$$" ]`,
+    `  command [ "$(command ps -o pgid= -p "$$" 2>/dev/null | command tr -d ' ')" = "$$" ]`,
     "}",
   ];
 }
