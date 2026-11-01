@@ -74,10 +74,15 @@ export function parentPidLines(): string[] {
  * and one named `kill` loses the signals. `command` skips a function and then
  * runs the builtin, so every builtin the watch uses carries it too.
  *
- * One name is left: a function named `command` itself shadows the builtin, and a
- * POSIX shell has no way past it. The rule therefore covers an accidental
- * shadow from a parent shell, not a deliberate one: whoever can export that
- * function can also set PATH, and nothing in this script can answer for both.
+ * Where the rule stops, and why. A function named for a builtin the script uses
+ * for structure (`:`, `[`, `wait`, `trap`, `set`, `exec`, `exit`, `return`,
+ * `cd`) can still change it under bash, and one named `command` defeats the rule
+ * itself: bash has `builtin command` and POSIX has `unset -f command`, but a
+ * parent that exports one of those can export a function named `unset` too, so
+ * no POSIX script answers for a hostile parent. dash rejects most of those
+ * names as function names, and it does not import exported functions at all, so
+ * that shell cannot carry such a shadow in from the parent. The rule is for the
+ * shadows that happen by accident, and it covers every command the watch runs.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only

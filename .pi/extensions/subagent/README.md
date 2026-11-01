@@ -193,14 +193,22 @@ returns and the watcher decides the parent is gone within about one
 process-state read of each other. Issue #1039 tracks whether that race must be
 removed.
 
-Every external command the watch runs goes through `command`, so a shell function
+Every command the watch runs goes through `command`, so a shell function
 inherited from whatever started pi cannot change what it does: `tr` that prints
 nothing makes every pid read as gone, `head` that prints nothing makes `ps` read
 as unable to answer, `sleep` that blocks stops the poll, `printf` that prints
-nothing loses the exit code, and `kill` loses the signals. One name is outside
-the rule: a function named `command` itself shadows the builtin, and no POSIX
-shell offers a way past it. The rule covers an accidental shadow from a parent
-shell, not a deliberate one: whoever can export that function can set PATH too.
+nothing loses the exit code, and `kill` loses the signals.
+
+The rule stops at the shell's own structure. A function named for a builtin the
+script uses that way (`:`, `[`, `wait`, `trap`, `set`, `exec`, `exit`, `return`,
+`cd`) can still change it under bash, and one named `command` defeats the rule
+itself. bash can get past that with `builtin command`, and POSIX with
+`unset -f command`, but a parent that exports either of those can export a
+function named `unset` as well, so no POSIX script answers for a parent that
+means harm. dash rejects most of those names as function names and does not
+import exported functions at all, so that shell cannot carry the shadow in from
+the parent. The rule covers the shadows that happen by accident, which is what a
+wrapper installed in a shell profile is.
 
 ## How an unattended run works
 
