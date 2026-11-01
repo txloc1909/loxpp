@@ -5,7 +5,7 @@
  * unit tests load this module with plain `node --test`.
  */
 
-import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "./watchdog.ts";
+import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "../lib/watchdog.ts";
 
 export interface KittySession {
   /** The kitty window that runs pi. Subagent windows open beside it. */

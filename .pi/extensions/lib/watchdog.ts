@@ -6,9 +6,10 @@
  * nowhere to arrive. The script that starts the child watches the parent
  * instead. It polls the parent's pid and signals the run when the pid is gone.
  *
- * Both run kinds share this text: the script kitty runs in a watched window,
- * and the wrapper `print.ts` spawns. The script receives the parent pid as its
- * first argument, because kitty starts it from its own environment.
+ * Three call sites share this text: the script kitty runs in a watched window,
+ * the wrapper `print.ts` spawns for an unattended run, and the wrapper
+ * `gate-run.ts` builds for a gate container. Each script receives the parent
+ * pid as its first argument, because kitty starts it from its own environment.
  *
  * Pure string helpers only, so the tests load this module directly.
  */
@@ -18,8 +19,11 @@ export const WATCH_POLL_S = 1;
 export const WATCH_GRACE_S = 2;
 
 /**
- * A test asserts that every script builder writes this marker, so a builder
- * cannot appear without the watchdog.
+ * A test asserts that each of the three builders writes this marker. A separate
+ * test names every module that starts a process, so a new module with its own
+ * `spawn` fails until it is listed. The three builders are named by hand: a
+ * fourth builder inside a listed module would need that list updated by a
+ * reviewer, which no test detects.
  */
 export const WATCHDOG_MARKER = "# loxpp subagent watchdog";
 
@@ -33,7 +37,7 @@ export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
     'if [ -z "$parent_pid" ]; then',
-    "  printf '%s\\n' 'loxpp subagent: the run script needs the parent process id' >&2",
+    "  printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
     "fi",
   ];
@@ -105,6 +109,19 @@ export interface WatchOptions {
    */
   closeWindow?: { kitten: string; socket: string };
   /**
+   * Lines that run after the TERM and before the grace, so a run whose real end
+   * is not a signal can be ended there. A gate container is that case: a
+   * signalled `podman run` client does not stop its container.
+   */
+  afterSignal?: string[];
+  /**
+   * Lines that run after the grace and before the KILL, so a run whose real end
+   * races the first action still ends. The gate wrapper removes its container
+   * here a second time: `podman run` can create the container after the first
+   * removal, and that container would then survive.
+   */
+  afterGrace?: string[];
+  /**
    * Required, with no default: a call site that forgets it would silently stop
    * at the child and leave the commands the child started behind.
    */
@@ -148,7 +165,9 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     // must survive that signal to close the window and to send the KILL.
     "  trap '' TERM",
     signals("TERM"),
+    ...(opts.afterSignal ?? []).map((line) => `  ${line}`),
     `  sleep ${grace}`,
+    ...(opts.afterGrace ?? []).map((line) => `  ${line}`),
     signals("KILL"),
     ...close,
     ") >/dev/null 2>&1 &",
