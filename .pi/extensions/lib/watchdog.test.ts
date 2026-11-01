@@ -80,15 +80,21 @@ async function killParent(parent: ChildProcess): Promise<void> {
   await exited;
 }
 
-/** Wait for a spawned process to end by itself, so its last write has landed. */
+/**
+ * Wait for a spawned process to end by itself, so its last write has landed.
+ * The listener goes on before the check: an `exit` that lands between a check
+ * and the attach is never replayed, and a helper that removes a flake must not
+ * add one.
+ */
 async function ended(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timed out waiting for the run script to end")), TIMEOUT_MS);
-    child.once("exit", () => {
+    const done = (): void => {
       clearTimeout(timer);
       resolve();
-    });
+    };
+    child.once("exit", done);
+    if (child.exitCode !== null || child.signalCode !== null) done();
   });
 }
 
@@ -372,6 +378,9 @@ test("the unattended wrapper never signals a group it does not lead", { timeout:
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid));
       assert.equal(alive(bystander.pid!), true, "a process in the caller's group is untouched");
+      // This wrapper shares the test's group, so it cannot be signalled as a
+      // group: wait for it to end by itself, as its own `wait` does.
+      await ended(wrapper);
     } finally {
       wrapper.kill("SIGKILL");
       bystander.kill("SIGKILL");
