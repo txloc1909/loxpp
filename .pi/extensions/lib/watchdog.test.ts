@@ -32,20 +32,23 @@ import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 /** Fast enough for a test, and still several real poll cycles. */
 const WATCH = { watchPollS: 0.05, watchGraceS: 0.3 };
 
+/** The longest one wait may take. */
+const TIMEOUT_MS = 8000;
 /** Every wait in one test draws on this budget, so their sum cannot exceed it. */
 const WAIT_BUDGET_MS = 45_000;
 
 /**
  * A test that drives real processes. Its waits share one deadline, so no sum of
  * waits can reach the outer bound first: each wait asks for what is left and
- * fails with the cause it names. The outer bound holds the whole budget plus
- * the setup and the teardown, and a test that makes more waits needs no larger
- * bound.
+ * fails with the cause it names. One wait is capped at `TIMEOUT_MS`, so a
+ * single slow step cannot take the whole budget and hide a regression. The
+ * outer bound holds the whole budget, which holds five capped waits and the
+ * fixed sleeps, plus the setup and the teardown.
  */
 function processTest(name: string, body: (left: () => number) => Promise<void>): void {
   test(name, { timeout: WAIT_BUDGET_MS + 15_000 }, async () => {
     const until = Date.now() + WAIT_BUDGET_MS;
-    await body(() => Math.max(1, until - Date.now()));
+    await body(() => Math.min(TIMEOUT_MS, Math.max(1, until - Date.now())));
   });
 }
 
@@ -108,6 +111,7 @@ async function killParent(parent: ChildProcess): Promise<void> {
  * add one.
  */
 async function ended(child: ChildProcess, timeoutMs: number): Promise<void> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for the run script to end needs a finite limit, and got ${timeoutMs}`);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timed out waiting for the run script to end")), timeoutMs);
     const done = (): void => {
@@ -174,6 +178,9 @@ function alive(pid: number): boolean {
 }
 
 async function waitFor(what: string, check: () => Promise<boolean> | boolean, timeoutMs: number): Promise<void> {
+  // The argument is required, but `node --test` strips types without checking
+  // them, so a call site that omits it must fail here and not hang.
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${what} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     if (await check()) return;
