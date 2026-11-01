@@ -1,18 +1,24 @@
 // A byte that readline left unread is returned first by read_some, and a byte
 // that read_some took is not returned again by a later call. The result does
-// not depend on how an implementation buffers (spec/05-stdlib.md, Socket).
+// not depend on how an implementation buffers (spec/05-stdlib.md, Socket). One
+// call can return fewer bytes than are available, so the program calls again
+// until it has the whole text.
 // STATUS: ok
 // CHECK: line: one
-// CHECK: some: [tw]
-// CHECK: some: [o
+// CHECK: head: tw
+// CHECK: rest: [o
 // CHECK: three]
-// CHECK: some: []
+// CHECK: end: []
 var srv = listen("127.0.0.1", 0);
 var peer = connect("127.0.0.1", srv.port());
 var conn = srv.accept();
 peer.write("one\ntwo\nthree");
 peer.close();
 print "line: " + conn.readline();
-print "some: [" + conn.read_some(2) + "]";
-print "some: [" + conn.read_some(100) + "]";
-print "some: [" + conn.read_some(1) + "]";
+var head = "";
+while (len(head) < 2) { head = head + conn.read_some(2 - len(head)); }
+print "head: " + head;
+var rest = "";
+while (len(rest) < 7) { rest = rest + conn.read_some(100); }
+print "rest: [" + rest + "]";
+print "end: [" + conn.read_some(1) + "]";

@@ -1,0 +1,47 @@
+// A stream much larger than any single read comes back whole through read_some
+// calls, in order, with no byte lost or repeated (spec/05-stdlib.md, Socket).
+// The length of one result is not specified, so the loop ends by count: it asks
+// for the bytes still missing. The peer task writes 200000 bytes in pieces whose
+// content depends on the position, so a lost, repeated or moved piece changes
+// the text. The peer closes only after the reader has the count, so the
+// loop cannot end by an end of stream.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: 200000
+// CHECK: same true
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+var total = 200000;
+var digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+var piece = "";
+var k = 0;
+while (k < 1000) { piece = piece + digits[k % 36]; k = k + 1; }
+var expected = "";
+fun writer() {
+    var sent = 0;
+    var p = 0;
+    while (sent < total) {
+        // Rotate the piece by its number so that each piece differs.
+        var text = piece;
+        var cut = p % 1000;
+        text = text[cut:1000] + text[0:cut];
+        peer.write(text);
+        expected = expected + text;
+        sent = sent + len(text);
+        p = p + 7;
+    }
+    task.receive();
+    peer.close();
+    task.send(me, "done");
+}
+var w = task.spawn(writer);
+var got = "";
+while (len(got) < total) {
+    got = got + conn.read_some(total - len(got));
+}
+task.send(w, "go");
+task.receive();
+print len(got);
+if (got == expected) { print "same true"; } else { print "same false"; }
