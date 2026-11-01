@@ -178,11 +178,13 @@ close.
 
 The watcher kills only on evidence: when `ps` cannot answer for any pid, it
 cannot tell a live parent from a dead one, so it leaves the run alone. That is
-the behaviour before this watch existed. The check asks about pid 1, and not
-about the run script's own pid: a script that was signalled alone no longer
-exists, so asking about it makes every pid read as live and the watcher polls
-forever. The watch also assumes that pi and the run script see one PID
-namespace. A `ps` that cannot see pi reads pi as gone.
+the behaviour before this watch existed. The check asks `ps` to list any pid,
+and not about one chosen pid: a script that was signalled alone no longer
+exists, so asking about the script makes every pid read as live and the watcher
+polls forever, and pid 1 is readable only by its owner on a `hidepid` mount, so
+asking about pid 1 turns the watch off for every other user. The watch also
+assumes that pi and the run script see one PID namespace. A `ps` that cannot see
+pi reads pi as gone.
 
 The watcher stops at the end of a normal run, so it never closes a window that
 `hold` keeps open.

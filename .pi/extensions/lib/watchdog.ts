@@ -50,21 +50,28 @@ export function parentPidLines(): string[] {
  * alive forever.
  *
  * An empty answer means one of two things: the pid is gone, or `ps` cannot
- * answer at all. The two are told apart by asking `ps` about pid 1, which
- * exists in every PID namespace `ps` can read. Without that check a `ps` that
- * fails makes every run look orphaned, and the watcher then kills a live run
- * and its work. The safe direction is to act only on evidence: when `ps`
- * cannot answer, the run is left alone, which is the behaviour before this
- * watch existed.
+ * answer at all. The two are told apart by asking `ps` to list any pid. Without
+ * that check a `ps` that fails makes every run look orphaned, and the watcher
+ * then kills a live run and its work. The safe direction is to act only on
+ * evidence: when `ps` cannot answer, the run is left alone, which is the
+ * behaviour before this watch existed.
  *
- * The probe must not be this script's own pid: a script that was signalled
- * alone no longer exists, `ps` cannot answer for it either, and the watcher
- * then reads every pid as live and polls forever. Pid 1 does not depend on the
- * script's life, so the answer stays about `ps` and not about the script.
+ * The probe is not a chosen pid, for two reasons. A script that was signalled
+ * alone no longer exists, so asking about the script's own pid makes every pid
+ * read as live and the watcher polls forever. And pid 1 is readable only by its
+ * owner on a `hidepid` mount, so asking about pid 1 turns the watch off for
+ * every other user. A `ps` that lists anything can answer: that is what
+ * `PS_PROBE` asks.
  *
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
  */
+/**
+ * The `ps` call that decides whether `ps` can answer at all. It is used only
+ * when a pid reads as empty, and a test asserts that every builder carries it.
+ */
+export const PS_PROBE = "command ps -e -o pid= 2>/dev/null";
+
 export function watchdogFunctions(): string[] {
   return [
     "process_state() {",
@@ -77,7 +84,7 @@ export function watchdogFunctions(): string[] {
     "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    '  [ -n "$(process_state 1)" ] || return 1',
+    `  [ -n "$(${PS_PROBE} | head -n 1)" ] || return 1`,
     "  return 0",
     "}",
     "",

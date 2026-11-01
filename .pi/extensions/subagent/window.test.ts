@@ -84,24 +84,27 @@ async function withFakeKitten(fn: (dir: string, kitten: string) => Promise<void>
   } finally {
     if (previous === undefined) delete process.env.FAKE_KITTY_DIR;
     else process.env.FAKE_KITTY_DIR = previous;
+    // The pid comes out of the dir, and the dir goes before the leak is
+    // reported: a failing test must not leave either behind.
+    let runPid = 0;
     try {
-      await requireRunEnded(dir);
-    } catch (error) {
-      // The body's error says what the test proved wrong; a run that outlived
-      // the test must not replace it.
-      if (!bodyFailed) throw error;
+      runPid = Number.parseInt(await fs.promises.readFile(path.join(dir, "window.pid"), "utf8"), 10);
+    } catch {
+      // The launch never happened, so there is no run to join.
     }
     await fs.promises.rm(dir, { recursive: true, force: true });
+    if (Number.isInteger(runPid) && runPid > 1) {
+      try {
+        await requireRunEnded(runPid);
+      } catch (error) {
+        // The body's error says what the test proved wrong; a run that outlived
+        // the test must not replace it.
+        if (!bodyFailed) throw error;
+      }
+    }
   }
 }
 
-/**
- * The run script leads its own group, and its watcher and child are members.
- * A test that closes a window leaves the child and the watcher alive, so the
- * test ends the group and requires it to be gone: a watcher that outlived its
- * run (#1030) failed no test before this, it only burned a core for a while.
- * The fake kitten records the script's pid.
- */
 /**
  * The run script leads its own group, and its watcher and child are members.
  * The run must end with its window, so a member that is still there is a leak:
@@ -109,14 +112,7 @@ async function withFakeKitten(fn: (dir: string, kitten: string) => Promise<void>
  * burned a core for a while. The group is killed after the failure is named, so
  * a leaking test does not leave the process behind.
  */
-async function requireRunEnded(dir: string): Promise<void> {
-  let pid = 0;
-  try {
-    pid = Number.parseInt(await fs.promises.readFile(path.join(dir, "window.pid"), "utf8"), 10);
-  } catch {
-    return;
-  }
-  if (!Number.isInteger(pid) || pid <= 1) return;
+async function requireRunEnded(pid: number): Promise<void> {
   const until = Date.now() + 3000;
   for (;;) {
     try {
