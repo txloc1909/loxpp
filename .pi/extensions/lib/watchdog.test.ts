@@ -33,6 +33,16 @@ import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 const WATCH = { watchPollS: 0.05, watchGraceS: 0.3 };
 const TIMEOUT_MS = 8000;
 
+/**
+ * The outer bound of a test must hold every wait inside it. A bound that is
+ * smaller fails first, with a timeout that names no cause, while the wait it
+ * was holding would have named one. `waits` counts the `waitFor`, `readPid`
+ * and `ended` calls; the slack covers process starts and the fixed sleeps.
+ */
+function bound(waits: number, slackMs = 2000): number {
+  return waits * TIMEOUT_MS + slackMs;
+}
+
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-watchdog-"));
   let bodyFailed = false;
@@ -224,6 +234,25 @@ test("a failed body keeps its own error when the temp dir cannot be removed", as
   await removeTempDir(leftover);
 });
 
+test("every test's outer bound holds the waits inside it", () => {
+  // A test that times out before its own waits fail reports a timeout, not the
+  // cause the wait names. The scan is the ground truth: a hand-written number
+  // fails, and so does a bound below the number of waits in the test.
+  const source = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
+  for (const block of source.split(/^test\(/m).slice(1)) {
+    const name = /^"([^"]+)"/.exec(block)?.[1] ?? "(a test with no name)";
+    const header = block.slice(0, block.indexOf("\n"));
+    assert.equal(/timeout: \d/.exec(header), null, `${name} derives its bound with bound(n), not a number`);
+    const declared = /timeout: bound\((\d+)/.exec(header)?.[1];
+    if (declared === undefined) continue;
+    const waits = (block.match(/\b(?:waitFor|readPid|ended)\(/g) ?? []).length;
+    assert.ok(
+      Number(declared) >= waits,
+      `${name} allows ${declared} waits and makes ${waits}: its bound can fire before a wait names its cause`,
+    );
+  }
+});
+
 test("shellQuote survives a real shell", () => {
   const nasty = "it's $HOME `x` \"q\" \\ and\nnewline";
   const quoted = shellQuote(nasty);
@@ -281,7 +310,7 @@ test("every script builder carries the watchdog", () => {
   }
 });
 
-test("a watched run ends its child and closes its window when the parent dies", { timeout: 20000 }, async () => {
+test("a watched run ends its child and closes its window when the parent dies", { timeout: bound(3) }, async () => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -320,7 +349,7 @@ test("a watched run ends its child and closes its window when the parent dies", 
   });
 });
 
-test("a child that ignores SIGTERM is killed after the grace", { timeout: 20000 }, async () => {
+test("a child that ignores SIGTERM is killed after the grace", { timeout: bound(3) }, async () => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -353,7 +382,7 @@ test("a child that ignores SIGTERM is killed after the grace", { timeout: 20000 
   });
 });
 
-test("a run that ends on its own leaves its held window alone when the parent dies later", { timeout: 20000 }, async () => {
+test("a run that ends on its own leaves its held window alone when the parent dies later", { timeout: bound(1) }, async () => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const exitPath = path.join(dir, "exit.code");
@@ -385,7 +414,7 @@ test("a run that ends on its own leaves its held window alone when the parent di
   });
 });
 
-test("the unattended wrapper never signals a group it does not lead", { timeout: 20000 }, async () => {
+test("the unattended wrapper never signals a group it does not lead", { timeout: bound(3) }, async () => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const script = buildPrintScript({
@@ -413,7 +442,7 @@ test("the unattended wrapper never signals a group it does not lead", { timeout:
   });
 });
 
-test("a ps that cannot answer does not make a live parent look dead", { timeout: 20000 }, async () => {
+test("a ps that cannot answer does not make a live parent look dead", { timeout: bound(1) }, async () => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -450,7 +479,7 @@ test("a ps that cannot answer does not make a live parent look dead", { timeout:
   });
 });
 
-test("a zombie parent counts as dead, so its run ends", { timeout: 20000 }, async () => {
+test("a zombie parent counts as dead, so its run ends", { timeout: bound(4) }, async () => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -503,7 +532,7 @@ test("a zombie parent counts as dead, so its run ends", { timeout: 20000 }, asyn
   });
 });
 
-test("an unattended wrapper ends its child and its grandchild when the parent dies", { timeout: 20000 }, async () => {
+test("an unattended wrapper ends its child and its grandchild when the parent dies", { timeout: bound(4) }, async () => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const grandchildPidFile = path.join(dir, "grandchild.pid");
