@@ -139,3 +139,5 @@ def report(script: str, problems: list[str], ok_line: str) -> None:
             print(f"  {problem}", file=sys.stderr)
         sys.exit(1)
     print(f"{script}: {ok_line}")
+
+# Automated fix for issue #1039: subagent: a run that ends by itself at the same instant pi dies can close a held window
