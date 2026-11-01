@@ -1073,6 +1073,10 @@ bool Runtime::raiseResumeFault(int entry) {
     ObjTask* task = m_faultTask;
     std::string kind = std::move(task->faultKind);
     std::string message = std::move(task->faultMessage);
+    // The fault is consumed before it is raised: code that a handler runs can
+    // reach a suspend point, and the task switch after it must not raise the
+    // same fault again.
+    m_faultTask = nullptr;
     // The native that made the call returned when the task parked, so the
     // value that the resume put on the stack is not a result: a handler
     // truncates the stack, and the other outcomes reset it.
