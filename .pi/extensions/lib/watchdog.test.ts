@@ -310,6 +310,9 @@ test("every script builder carries the watchdog", () => {
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
     assert.ok(script.includes(PS_PROBE), `${name} asks ps whether it can answer at all`);
+    for (const needle of ["command tr", "command head", "command sleep", "command kill"]) {
+      assert.ok(script.includes(needle), `${name} runs \`${needle}\` through command, so no function shadows it`);
+    }
   }
 });
 
@@ -458,6 +461,91 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
           return true;
         }
       }, left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+/**
+ * Start a watched run whose shell has one hostile exported function, the way a
+ * parent shell can hand one to pi. bash is the interpreter on purpose: dash
+ * does not import exported functions, so this shape is reachable only where the
+ * shell is bash. The run must work either way.
+ */
+function shadowedRun(scriptPath: string, parentPid: number, name: string, body: string): ChildProcess {
+  const shadow = [`${name}() { ${body}; }`, `export -f ${name}`, 'exec bash "$0" "$@"'].join("\n");
+  return spawn("bash", ["-c", shadow, scriptPath, String(parentPid)], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, KITTY_WINDOW_ID: "42" },
+  });
+}
+
+processTest("a shadowed tr does not make every pid read as gone", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    const parent = standInParent();
+    // A `tr` that prints nothing leaves `process_state` empty for every pid, so
+    // `pid_gone` answers "gone" for all of them and the watcher exits at its
+    // first poll: the run then outlives the parent.
+    const script = shadowedRun(scriptPath, parent.pid!, "tr", ":");
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed head does not turn the watch off", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    const parent = standInParent();
+    // A `head` that prints nothing makes `ps` read as unable to answer, which
+    // the fallback takes as "leave the run alone".
+    const script = shadowedRun(scriptPath, parent.pid!, "head", ":");
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed sleep does not stop the poll", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    const parent = standInParent();
+    // A `sleep` that blocks forever stops the poll, so the watcher never sees
+    // the dead parent.
+    const script = shadowedRun(scriptPath, parent.pid!, "sleep", "command sleep 60");
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());

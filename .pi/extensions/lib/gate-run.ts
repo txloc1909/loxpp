@@ -123,7 +123,7 @@ export function buildGateScript(spec: GateScriptSpec): string {
     `  ${remove}`,
     // A removal can fail, for example when podman cannot answer. The client
     // must still end, or the tool call waits forever.
-    `  sleep ${spec.graceS ?? 2}`,
+    `  command sleep ${spec.graceS ?? 2}`,
     // The same race as in the watcher: `podman run` can create the container
     // after the first removal landed, so a second removal follows the grace.
     `  ${remove}`,

@@ -186,8 +186,17 @@ asking about pid 1 turns the watch off for every other user. The watch also
 assumes that pi and the run script see one PID namespace. A `ps` that cannot see
 pi reads pi as gone.
 
-The watcher stops at the end of a normal run, so it never closes a window that
-`hold` keeps open.
+The watcher stops at the end of a normal run, so it does not close a window that
+`hold` keeps open. One race remains: a run that ends by itself in the same
+instant that pi dies can still close a held window, because the script's `wait`
+returns and the watcher decides the parent is gone within about one
+process-state read of each other. Issue #1039 tracks whether that race must be
+removed.
+
+Every external command the watch runs goes through `command`, so a shell function
+inherited from whatever started pi cannot change what it does. A function named
+`tr` that prints nothing makes every pid read as gone, one named `head` makes
+`ps` read as unable to answer, and one named `sleep` stops the poll.
 
 ## How an unattended run works
 

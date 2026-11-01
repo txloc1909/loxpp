@@ -65,6 +65,13 @@ export function parentPidLines(): string[] {
  *
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
+ *
+ * Every external command here runs through `command`, so a shell function
+ * inherited from whatever started pi cannot change what the watch does. A
+ * function named `tr` that prints nothing makes a live parent read as gone, one
+ * named `head` makes `ps` read as unable to answer, and one named `sleep` makes
+ * the poll spin or never run. `kill` and `printf` are builtins, and `command`
+ * skips a function before it reaches the builtin.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only
@@ -75,7 +82,7 @@ export const PS_PROBE = "command ps -e -o pid= 2>/dev/null";
 export function watchdogFunctions(): string[] {
   return [
     "process_state() {",
-    `  command ps -o stat= -p "$1" 2>/dev/null | tr -d '[:space:]'`,
+    `  command ps -o stat= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
     "}",
     "",
     "pid_gone() {",
@@ -84,7 +91,7 @@ export function watchdogFunctions(): string[] {
     "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    `  [ -n "$(${PS_PROBE} | head -n 1)" ] || return 1`,
+    `  [ -n "$(${PS_PROBE} | command head -n 1)" ] || return 1`,
     "  return 0",
     "}",
     "",
@@ -92,7 +99,7 @@ export function watchdogFunctions(): string[] {
     "# reach a caller that shares this script's group. It is used only when the",
     "# script leads its group, which print.ts arranges by spawning it detached.",
     "leads_group() {",
-    `  [ "$(command ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')" = "$$" ]`,
+    `  [ "$(command ps -o pgid= -p "$$" 2>/dev/null | command tr -d ' ')" = "$$" ]`,
     "}",
   ];
 }
@@ -153,14 +160,14 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
   // a caller that forgets it cannot lose the commands the child started.
   const signals = (signal: string): string =>
     opts.reach === "children"
-      ? `  kill -${signal} "$child" 2>/dev/null`
-      : `  if leads_group; then kill -${signal} "-$$" 2>/dev/null; else kill -${signal} "$child" 2>/dev/null; fi`;
+      ? `  command kill -${signal} "$child" 2>/dev/null`
+      : `  if leads_group; then command kill -${signal} "-$$" 2>/dev/null; else command kill -${signal} "$child" 2>/dev/null; fi`;
   const close = opts.closeWindow
     ? [
         // The window holds the rest of the run: kitty kills what lives in the
         // window it closes. kitty's match flag separates the field from the
         // value with a colon, as `closeWindowArgv` does.
-        `  ${shellQuote(opts.closeWindow.kitten)} @ --to=${shellQuote(opts.closeWindow.socket)} close-window --match=id:"\${KITTY_WINDOW_ID:-}" >/dev/null 2>&1`,
+        `  command ${shellQuote(opts.closeWindow.kitten)} @ --to=${shellQuote(opts.closeWindow.socket)} close-window --match=id:"\${KITTY_WINDOW_ID:-}" >/dev/null 2>&1`,
       ]
     : [];
   return [
@@ -171,7 +178,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     "  while :; do",
     '    pid_gone "$child" && exit 0',
     '    pid_gone "$parent_pid" && break',
-    `    sleep ${poll}`,
+    `    command sleep ${poll}`,
     "  done",
     '  pid_gone "$child" && exit 0',
     // The TERM below may reach this subshell when it signals a group, so it
@@ -179,7 +186,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     "  trap '' TERM",
     signals("TERM"),
     ...(opts.afterSignal ?? []).map((line) => `  ${line}`),
-    `  sleep ${grace}`,
+    `  command sleep ${grace}`,
     ...(opts.afterGrace ?? []).map((line) => `  ${line}`),
     signals("KILL"),
     ...close,
@@ -194,5 +201,5 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
  * before the script exits, so no stale watcher closes a held window later.
  */
 export function stopWatcherLines(): string[] {
-  return ['kill "$watcher" 2>/dev/null'];
+  return ['command kill "$watcher" 2>/dev/null'];
 }
