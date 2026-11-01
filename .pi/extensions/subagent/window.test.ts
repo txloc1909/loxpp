@@ -52,7 +52,10 @@ if (sub === "launch") {
 } else if (sub === "close-window") {
   fs.appendFileSync(file("closed.log"), rest.join(" ") + "\\n");
   try {
-    process.kill(Number(fs.readFileSync(file("window.pid"), "utf8")), "SIGTERM");
+    // kitty ends what lives in the window it closes: the script's whole group,
+    // which holds the child and the watcher too. A signal to the script's pid
+    // alone leaves both behind.
+    process.kill(-Number(fs.readFileSync(file("window.pid"), "utf8")), "SIGHUP");
   } catch {
     // already gone
   }
@@ -72,12 +75,61 @@ async function withFakeKitten(fn: (dir: string, kitten: string) => Promise<void>
   process.env.FAKE_KITTY_DIR = dir;
   const work = path.join(dir, "work");
   await fs.promises.mkdir(work);
+  let bodyFailed = false;
   try {
     await fn(work, kitten);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
     if (previous === undefined) delete process.env.FAKE_KITTY_DIR;
     else process.env.FAKE_KITTY_DIR = previous;
+    // The pid comes out of the dir, and the dir goes before the leak is
+    // reported: a failing test must not leave either behind.
+    let runPid = 0;
+    try {
+      runPid = Number.parseInt(await fs.promises.readFile(path.join(dir, "window.pid"), "utf8"), 10);
+    } catch {
+      // The launch never happened, so there is no run to join.
+    }
     await fs.promises.rm(dir, { recursive: true, force: true });
+    if (Number.isInteger(runPid) && runPid > 1) {
+      try {
+        await requireRunEnded(runPid);
+      } catch (error) {
+        // The body's error says what the test proved wrong; a run that outlived
+        // the test must not replace it.
+        if (!bodyFailed) throw error;
+      }
+    }
+  }
+}
+
+/**
+ * The run script leads its own group, and its watcher and child are members.
+ * The run must end with its window, so a member that is still there is a leak:
+ * a watcher that outlived its run (#1030) failed no test before this, it only
+ * burned a core for a while. The group is killed after the failure is named, so
+ * a leaking test does not leave the process behind.
+ */
+async function requireRunEnded(pid: number): Promise<void> {
+  const until = Date.now() + 3000;
+  for (;;) {
+    try {
+      process.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      continue;
+    }
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // The group ended while the failure was being reported.
+    }
+    assert.fail(`the run's process group outlived its window: ${pid}`);
   }
 }
 

@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { buildRunScript, closeWindowArgv } from "../subagent/kitty.ts";
 import { buildPrintScript } from "../subagent/print.ts";
 import { buildGateScript, gateRunArgv } from "./gate-run.ts";
-import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
+import { PS_PROBE, shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 /** Fast enough for a test, and still several real poll cycles. */
 const WATCH = { watchPollS: 0.05, watchGraceS: 0.3 };
@@ -309,6 +309,7 @@ test("every script builder carries the watchdog", () => {
     ["the gate wrapper", gate],
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
+    assert.ok(script.includes(PS_PROBE), `${name} asks ps whether it can answer at all`);
   }
 });
 
@@ -382,6 +383,82 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
     } finally {
       // The stand-in parent holds this process open for 60 s, so it dies
       // first: a `stopRun` that throws must not skip it.
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a ps that cannot read pid 1 still lets the run end", async (left) => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    // A `hidepid` mount: `ps` lists processes and reads this user's own pids,
+    // but pid 1 belongs to another user, and cannot be read. A probe that asks
+    // about pid 1 then turns the watch off for every run.
+    const bin = path.join(dir, "bin");
+    await fs.promises.mkdir(bin);
+    await fs.promises.writeFile(
+      path.join(bin, "ps"),
+      ["#!/bin/sh", 'case "$*" in', '  *"-p 1") exit 0 ;;', "esac", 'exec /bin/ps "$@"', ""].join("\n"),
+      { mode: 0o700 },
+    );
+
+    const parent = standInParent();
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a watcher ends when its script is signalled alone", async (left) => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 0.3`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    const parent = standInParent();
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      await readPid(childPidFile, left());
+      // The script dies alone here, as it did when a fake kitten closed a
+      // window by its pid. Its watcher must still end when its child does:
+      // `pid_gone` asks `ps` to list any pid, not about the script, because a
+      // script that is gone cannot answer for itself.
+      script.kill("SIGTERM");
+      await waitFor("the run's process group to end", () => {
+        try {
+          process.kill(-script.pid!, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      }, left());
+    } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());
     }
