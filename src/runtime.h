@@ -1388,14 +1388,11 @@ class Runtime {
     // The limit timers of parked connect calls, by Poller token. A task is
     // in m_parkedTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
-    // A fault a resumed task raises before it runs on. Set by resumeTask,
-    // consumed by the resume of the innermost coroutine of the task.
-    struct ResumeFault {
-        bool pending{false};
-        std::string kind;
-        std::string message;
-    };
-    ResumeFault m_resumeFault;
+    // The task whose pending fault this resume raises before it runs on, or
+    // null. resumeTask sets it and clears it on every switch, so a fault that
+    // the resume never reaches is dropped there and cannot reach the next
+    // resume. raiseResumeFault takes the kind and the message from the task.
+    ObjTask* m_faultTask{nullptr};
     Poller::Clock::time_point m_lastPoll{};
     SchedulerClock m_schedulerClock{&Poller::Clock::now};
     // Tasks of this run that have not ended, the main task included.
