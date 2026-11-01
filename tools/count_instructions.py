@@ -31,6 +31,9 @@ import ctypes.util
 import os
 import struct
 import sys
+from pathlib import Path
+
+from runner_precondition import refuse_unrunnable, require_runner
 
 PERF_TYPE_HARDWARE = 0
 PERF_COUNT_HW_INSTRUCTIONS = 1
@@ -99,6 +102,34 @@ def ioctl(fd: int, request: int) -> None:
         raise OSError(err, os.strerror(err))
 
 
+def require_startable(path: str) -> None:
+    """Stops with exit 2 for a runner that the kernel would refuse to start.
+
+    The child execs only after the counting event exists, so a refused exec
+    would be reported after the event call, and on a container that refuses
+    `perf_event_open` the count fails first and names the wrong problem. A
+    script whose interpreter is missing is the common case, and it is visible
+    here without a spawn.
+    """
+    require_runner(path)
+    with open(path, "rb") as script:
+        head = script.read(4096)
+    if not head.startswith(b"#!"):
+        return
+    line = head[2:].split(b"\n", 1)[0]
+    words = line.split()
+    if not words:
+        print(f"error: {path} cannot run: the #! line names no interpreter", file=sys.stderr)
+        sys.exit(2)
+    interpreter = Path(words[0].decode(errors="surrogateescape"))
+    if not interpreter.is_file() or not os.access(interpreter, os.X_OK):
+        print(
+            f"error: {path} cannot run: its interpreter {interpreter} cannot run",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def attempt(command: list[str], core: int | None) -> tuple[int, int]:
     """Runs the command once. Returns (instructions, nanoseconds off the CPU)."""
     # The child waits for a byte before it execs, so the event exists and is
@@ -106,19 +137,26 @@ def attempt(command: list[str], core: int | None) -> tuple[int, int]:
     # instead lets the child run part of the program first, and the count is
     # then short by an amount no run reports.
     read_end, write_end = os.pipe()
+    error_read, error_write = os.pipe()
     pid = os.fork()
     if pid == 0:
         try:
             os.close(write_end)
+            os.close(error_read)
             if core is not None:
                 os.sched_setaffinity(0, {core})
             os.read(read_end, 1)
             os.close(read_end)
-            os.execv(command[0], command)
+            try:
+                os.execv(command[0], command)
+            except OSError as error:
+                os.write(error_write, f"{error.errno} {error.strerror}".encode())
+                os._exit(126)
         except BaseException:
             pass
         os._exit(127)
     os.close(read_end)
+    os.close(error_write)
     fd = perf_event_open(pid)
     try:
         ioctl(fd, IOC_RESET)
@@ -129,9 +167,14 @@ def attempt(command: list[str], core: int | None) -> tuple[int, int]:
         count, enabled, running = struct.unpack("QQQ", os.read(fd, 24))
     finally:
         os.close(fd)
+    error_text = os.read(error_read, 4096).decode(errors="replace")
+    os.close(error_read)
     if not os.WIFEXITED(status):
         raise SystemExit(f"command died to signal {os.WTERMSIG(status)}")
     code = os.WEXITSTATUS(status)
+    if code == 126 and error_text:
+        number, _, message = error_text.partition(" ")
+        refuse_unrunnable(command[0], OSError(int(number), message))
     if code != 0:
         raise SystemExit(f"command exited {code}")
     return count, max(0, enabled - running)
@@ -180,6 +223,7 @@ def main() -> int:
         command = command[1:]
     if not command:
         parser.error("no command given")
+    require_startable(command[0])
     counts = []
     try:
         for index in range(args.runs):
