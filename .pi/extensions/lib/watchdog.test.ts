@@ -43,7 +43,12 @@ function bound(waits: number, slackMs = 2000): number {
   return waits * TIMEOUT_MS + slackMs;
 }
 
-async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
+async function withTempDir(
+  fn: (dir: string) => Promise<void>,
+  // A parameter so a test can make the removal fail without depending on the
+  // user id: `rm` cannot fail for root on a read-only directory.
+  remove: (dir: string) => Promise<void> = removeTempDir,
+): Promise<void> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-watchdog-"));
   let bodyFailed = false;
   try {
@@ -53,7 +58,7 @@ async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
     throw error;
   } finally {
     try {
-      await removeTempDir(dir);
+      await remove(dir);
     } catch (error) {
       // The body's error says what the test proved wrong; a removal that raced
       // a writer must not replace it.
@@ -216,22 +221,21 @@ async function watchedScript(dir: string, options: { child: string; kitten: stri
   return scriptPath;
 }
 
-test("a failed body keeps its own error when the temp dir cannot be removed", async () => {
-  // The removal fails on purpose, so this case leaves the dir behind.
-  let leftover = "";
+test("a failed body keeps its own error when the removal fails", async () => {
+  let removals = 0;
+  const failingRemoval = async (dir: string): Promise<void> => {
+    removals += 1;
+    // Remove for real, so a passing test leaves nothing behind, and then fail
+    // the way a removal that raced a writer does.
+    await removeTempDir(dir);
+    throw new Error("probe: the removal failed");
+  };
   await assert.rejects(
-    withTempDir(async (dir) => {
-      leftover = dir;
-      await fs.promises.writeFile(path.join(dir, "keep"), "x");
-      // `rm` needs write permission on the dir to unlink what is inside it.
-      await fs.promises.chmod(dir, 0o500);
-      assert.fail("the body failed first");
-    }),
+    withTempDir(() => assert.fail("the body failed first"), failingRemoval),
     /the body failed first/,
     "the body's error is the one that names the defect",
   );
-  await fs.promises.chmod(leftover, 0o700);
-  await removeTempDir(leftover);
+  assert.equal(removals, 1, "the cleanup ran, its failure was dropped, and nothing was left behind");
 });
 
 test("every test's outer bound holds the waits inside it", () => {
