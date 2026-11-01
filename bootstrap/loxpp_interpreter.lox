@@ -2667,8 +2667,9 @@ fun blockingSleep(seconds) {
 fun isSuspendingHostCall(name) {
     if (name == "connect" or name == "connect_within") return true;
     if (name == "Socket.read" or name == "Socket.read_bytes" or
-        name == "Socket.read_some" or name == "Socket.readline" or name == "Socket.readlines" or
-        name == "Socket.write" or name == "Socket.writeline") return true;
+        name == "Socket.read_some" or name == "Socket.readline" or
+        name == "Socket.readlines" or name == "Socket.write" or
+        name == "Socket.writeline") return true;
     return name == "Server.accept";
 }
 
