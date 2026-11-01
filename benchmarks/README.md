@@ -97,6 +97,16 @@ and prints the median user plus system CPU time and the ns per task switch.
 `benchmarks/coroutine_cost.sh` does the same for the cost of a coroutine yield
 and the size of a suspended coroutine.
 
+CPU time is too noisy to show a change of a few instructions per switch.
+`tools/count_instructions.py -- core N -- <command>` counts the instructions a
+run executes, with `perf_event_open`, because the dev image has no `perf` and
+no `valgrind`. One run of the program is several attempts, and the largest
+count wins: the kernel sometimes takes a counting event off the CPU, and the
+count it then reports is short. It needs a container with
+`--security-opt seccomp=unconfined`, because the default seccomp profile
+refuses `perf_event_open`, so it is a tool to run by hand and not part of
+`ctest`.
+
 ## GC pause latency
 
 `latency/gc_latency.lox` measures the pause a collection adds to a program.
