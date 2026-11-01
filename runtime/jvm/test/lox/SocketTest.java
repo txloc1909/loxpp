@@ -285,6 +285,30 @@ public final class SocketTest {
         sc.close();
         ss.close();
 
+        // read_some returns what arrived while the peer stays open. A call that
+        // waits for n bytes never returns here, so a watchdog ends the run.
+        LoxServer ws = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket wc = LoxSocket.connect("127.0.0.1", (int)ws.port());
+        wc.write("ab");
+        LoxSocket wpeer = (LoxSocket)ws.accept();
+        Thread watchdog = new Thread(() -> {
+            try {
+                Thread.sleep(20_000);
+            } catch (InterruptedException e) {
+                return;
+            }
+            System.err.println("FAIL: read_some waited for n bytes");
+            Runtime.getRuntime().halt(1);
+        });
+        watchdog.setDaemon(true);
+        watchdog.start();
+        checkEquals("ab", wpeer.readSomeArg(Double.valueOf(100)),
+                    "read_some(100) returns the 2 bytes that arrived");
+        watchdog.interrupt();
+        wpeer.close();
+        wc.close();
+        ws.close();
+
         // A bad count is fatal, and the closed-stream check precedes it.
         LoxServer is = LoxServer.listen("127.0.0.1", 0);
         LoxSocket ic = LoxSocket.connect("127.0.0.1", (int)is.port());
