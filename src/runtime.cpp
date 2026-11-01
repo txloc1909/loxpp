@@ -1555,8 +1555,8 @@ bool Runtime::resumeTask(ObjTask* task) {
             task->hasPendingFault = false;
         } else {
             received = task->pendingValue;
+            task->pendingValue = Value{};
         }
-        task->pendingValue = Value{};
         task->receiving = false;
         push(received);
         argCount = 1;
