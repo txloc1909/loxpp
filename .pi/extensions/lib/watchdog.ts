@@ -32,16 +32,28 @@ export function shellQuote(value: string): string {
   return `'${value.split("'").join("'\\''")}'`;
 }
 
+/**
+ * Remove a function named `command`, which would shadow the builtin that every
+ * other guard depends on. `unset` is a POSIX special builtin, and bash running
+ * as `/bin/sh`, or with `--posix`, does not import a function for one (plain
+ * `bash` does), so in the shell these scripts start with this line cannot be
+ * shadowed itself. dash has no exported functions, so there it is a no-op.
+ */
+export function clearShadowedCommand(): string[] {
+  return ["unset -f command 2>/dev/null"];
+}
+
 /** The first argument is the parent pid. Without it nothing can watch. */
 export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
-    'if [ -z "$parent_pid" ]; then',
-    "  printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
+    'if command [ -z "$parent_pid" ]; then',
+    "  command printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
     "fi",
   ];
 }
+
 
 /**
  * `kill -0` also succeeds for a zombie that nobody has reaped yet, so a pid's
@@ -65,6 +77,24 @@ export function parentPidLines(): string[] {
  *
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
+ *
+ * A shell function inherited from whatever started pi cannot change what the
+ * watch does. Every command it runs goes through `command`: a `tr` that prints
+ * nothing makes every pid read as gone, a `head` that prints nothing makes `ps`
+ * read as unable to answer, a `sleep` that blocks stops the poll, a `printf`
+ * that prints nothing loses the exit code, and `[`, `wait`, `cd` and `kill`
+ * change the run in their own ways. A function named `command` would shadow the
+ * builtin every one of those depends on, so each script clears it first with
+ * `clearShadowedCommand`.
+ *
+ * That line cannot be shadowed where these scripts run: they start as
+ * `/bin/sh`, and bash in that mode, or with `--posix`, refuses to import a
+ * function for a POSIX special builtin (plain `bash` would import it). The other
+ * names the script uses for structure (`:`, `trap`, `set`, `exec`, `exit`,
+ * `return`, `shift`, `eval`, `.`, `break`, `continue`, `export`, `readonly`,
+ * `times`) are special builtins too, so no function for them can arrive from the
+ * parent; and dash rejects most of those names as function names and imports no
+ * exported functions at all.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only
@@ -75,16 +105,16 @@ export const PS_PROBE = "command ps -e -o pid= 2>/dev/null";
 export function watchdogFunctions(): string[] {
   return [
     "process_state() {",
-    `  command ps -o stat= -p "$1" 2>/dev/null | tr -d '[:space:]'`,
+    `  command ps -o stat= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
     "}",
     "",
     "pid_gone() {",
     '  pid_state=$(process_state "$1")',
-    '  if [ -n "$pid_state" ]; then',
+    '  if command [ -n "$pid_state" ]; then',
     "    case $pid_state in Z*) return 0 ;; esac",
     "    return 1",
     "  fi",
-    `  [ -n "$(${PS_PROBE} | head -n 1)" ] || return 1`,
+    `  command [ -n "$(${PS_PROBE} | command head -n 1)" ] || return 1`,
     "  return 0",
     "}",
     "",
@@ -92,7 +122,7 @@ export function watchdogFunctions(): string[] {
     "# reach a caller that shares this script's group. It is used only when the",
     "# script leads its group, which print.ts arranges by spawning it detached.",
     "leads_group() {",
-    `  [ "$(command ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')" = "$$" ]`,
+    `  command [ "$(command ps -o pgid= -p "$$" 2>/dev/null | command tr -d ' ')" = "$$" ]`,
     "}",
   ];
 }
@@ -153,14 +183,14 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
   // a caller that forgets it cannot lose the commands the child started.
   const signals = (signal: string): string =>
     opts.reach === "children"
-      ? `  kill -${signal} "$child" 2>/dev/null`
-      : `  if leads_group; then kill -${signal} "-$$" 2>/dev/null; else kill -${signal} "$child" 2>/dev/null; fi`;
+      ? `  command kill -${signal} "$child" 2>/dev/null`
+      : `  if leads_group; then command kill -${signal} "-$$" 2>/dev/null; else command kill -${signal} "$child" 2>/dev/null; fi`;
   const close = opts.closeWindow
     ? [
         // The window holds the rest of the run: kitty kills what lives in the
         // window it closes. kitty's match flag separates the field from the
         // value with a colon, as `closeWindowArgv` does.
-        `  ${shellQuote(opts.closeWindow.kitten)} @ --to=${shellQuote(opts.closeWindow.socket)} close-window --match=id:"\${KITTY_WINDOW_ID:-}" >/dev/null 2>&1`,
+        `  command ${shellQuote(opts.closeWindow.kitten)} @ --to=${shellQuote(opts.closeWindow.socket)} close-window --match=id:"\${KITTY_WINDOW_ID:-}" >/dev/null 2>&1`,
       ]
     : [];
   return [
@@ -171,7 +201,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     "  while :; do",
     '    pid_gone "$child" && exit 0',
     '    pid_gone "$parent_pid" && break',
-    `    sleep ${poll}`,
+    `    command sleep ${poll}`,
     "  done",
     '  pid_gone "$child" && exit 0',
     // The TERM below may reach this subshell when it signals a group, so it
@@ -179,7 +209,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     "  trap '' TERM",
     signals("TERM"),
     ...(opts.afterSignal ?? []).map((line) => `  ${line}`),
-    `  sleep ${grace}`,
+    `  command sleep ${grace}`,
     ...(opts.afterGrace ?? []).map((line) => `  ${line}`),
     signals("KILL"),
     ...close,
@@ -194,5 +224,5 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
  * before the script exits, so no stale watcher closes a held window later.
  */
 export function stopWatcherLines(): string[] {
-  return ['kill "$watcher" 2>/dev/null'];
+  return ['command kill "$watcher" 2>/dev/null'];
 }
