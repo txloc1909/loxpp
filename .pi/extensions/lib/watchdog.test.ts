@@ -35,10 +35,20 @@ const TIMEOUT_MS = 8000;
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-watchdog-"));
+  let bodyFailed = false;
   try {
     await fn(dir);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
   } finally {
-    await removeTempDir(dir);
+    try {
+      await removeTempDir(dir);
+    } catch (error) {
+      // The body's error says what the test proved wrong; a removal that raced
+      // a writer must not replace it.
+      if (!bodyFailed) throw error;
+    }
   }
 }
 
