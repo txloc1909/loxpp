@@ -200,8 +200,9 @@ read as unable to answer, a `sleep` that blocks stops the poll, a `printf` that
 prints nothing loses the exit code, and `[`, `wait`, `cd` and `kill` change the
 run in their own ways. A function named `command` would shadow the builtin every
 guard depends on, so each script clears it first with `unset -f command`. That
-line cannot be shadowed: `unset` is a POSIX special builtin, and bash refuses to
-import a function for a special builtin. The names the script uses for structure
+line cannot be shadowed where these scripts run: they start as `/bin/sh`, and
+bash in that mode, or with `--posix`, refuses to import a function for a POSIX
+special builtin (plain `bash` would import it). The names the script uses for structure
 (`:`, `trap`, `set`, `exec`, `exit`, `return`, `shift`, `eval`, `.`, `break`,
 `continue`, `export`, `readonly`, `times`) are special builtins too, so no
 function for them can arrive from the parent, and dash rejects most of those

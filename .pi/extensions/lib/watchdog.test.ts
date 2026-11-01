@@ -474,18 +474,23 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
 });
 
 /**
- * Start a watched run whose shell has one hostile exported function, the way a
- * parent shell can hand one to pi. bash is the interpreter on purpose: dash
+ * Start a run whose shell has the given functions exported first, the way a
+ * parent shell can hand them to pi. bash is the interpreter on purpose: dash
  * does not import exported functions, so this shape is reachable only where the
  * shell is bash. The run must work either way.
  */
-function shadowedRun(scriptPath: string, parentPid: number, name: string, body: string): ChildProcess {
-  const shadow = [`${name}() { ${body}; }`, `export -f ${name}`, 'exec bash "$0" "$@"'].join("\n");
-  return spawn("bash", ["-c", shadow, scriptPath, String(parentPid)], {
+function shadowedRun(scriptPath: string, args: string[], shadow: string[]): ChildProcess {
+  const script = [...shadow, 'exec bash "$0" "$@"'].join("\n");
+  return spawn("bash", ["-c", script, scriptPath, ...args], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, KITTY_WINDOW_ID: "42" },
   });
+}
+
+/** One hostile function, exported. */
+function oneShadow(name: string, body: string): string[] {
+  return [`${name}() { ${body}; }`, `export -f ${name}`];
 }
 
 processTest("a shadowed tr does not make every pid read as gone", async (left) => {
@@ -500,7 +505,7 @@ processTest("a shadowed tr does not make every pid read as gone", async (left) =
     // A `tr` that prints nothing leaves `process_state` empty for every pid, so
     // `pid_gone` answers "gone" for all of them and the watcher exits at its
     // first poll: the run then outlives the parent.
-    const script = shadowedRun(scriptPath, parent.pid!, "tr", ":");
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("tr", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -523,7 +528,7 @@ processTest("a shadowed head does not turn the watch off", async (left) => {
     const parent = standInParent();
     // A `head` that prints nothing makes `ps` read as unable to answer, which
     // the fallback takes as "leave the run alone".
-    const script = shadowedRun(scriptPath, parent.pid!, "head", ":");
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("head", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -546,7 +551,7 @@ processTest("a shadowed sleep does not stop the poll", async (left) => {
     const parent = standInParent();
     // A `sleep` that blocks forever stops the poll, so the watcher never sees
     // the dead parent.
-    const script = shadowedRun(scriptPath, parent.pid!, "sleep", "command sleep 60");
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("sleep", "command sleep 60"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -569,7 +574,7 @@ processTest("a shadowed printf does not lose the run's exit code", async (left) 
     const parent = standInParent();
     // A `printf` that prints nothing would leave the exit file empty, and the
     // parent reads that file as the run's result.
-    const script = shadowedRun(scriptPath, parent.pid!, "printf", ":");
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("printf", ":"));
     try {
       await waitFor("the script to end", () => script.exitCode !== null || script.signalCode !== null, left());
       assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "7", "the child's code reached the file");
@@ -592,7 +597,7 @@ processTest("a shadowed command does not turn the watch off", async (left) => {
     // A `command` function shadows the builtin every other guard depends on.
     // The script clears it with `unset -f command`, which cannot be shadowed:
     // `unset` is a POSIX special builtin and bash does not import one.
-    const script = shadowedRun(scriptPath, parent.pid!, "command", ":");
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("command", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -617,12 +622,12 @@ processTest("a shadowed [, wait or cd does not change the run", async (left) => 
     // `[` decides every test in the watcher, `wait` holds the script at the
     // child, and `cd` puts the child where the caller asked. bash imports a
     // function for each of the three.
-    const shadow = ['[() { return 1; }', "wait() { return 0; }", "cd() { return 0; }", "export -f '[' wait cd", 'exec bash "$0" "$@"'].join("\n");
-    const script = spawn("bash", ["-c", shadow, scriptPath, String(parent.pid)], {
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, KITTY_WINDOW_ID: "42" },
-    });
+    const script = shadowedRun(scriptPath, [String(parent.pid!)], [
+      "[() { return 1; }",
+      "wait() { return 0; }",
+      "cd() { return 0; }",
+      "export -f '[' wait cd",
+    ]);
     try {
       const childPid = await readPid(childPidFile, left());
       assert.equal((await fs.promises.readFile(cwdFile, "utf8")).trim(), dir, "the child runs where the caller asked");
@@ -631,6 +636,63 @@ processTest("a shadowed [, wait or cd does not change the run", async (left) => 
     } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed [ does not lose the parent pid check", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    // No parent pid, and a `[` that answers 1: the script must still refuse to
+    // run, and must start no child. Without the guard it reads the empty pid as
+    // a valid one, starts the child, and then loses it.
+    const script = shadowedRun(scriptPath, [], oneShadow("[", "return 1"));
+    try {
+      await waitFor("the script to end", () => script.exitCode !== null || script.signalCode !== null, left());
+      assert.equal(script.exitCode, 1, "the script refuses to run without the parent pid");
+      assert.equal(fs.existsSync(childPidFile), false, "no child is started");
+    } finally {
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed [ does not lose the group signal", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const grandchildPidFile = path.join(dir, "grandchild.pid");
+    const wrapperPath = path.join(dir, "wrapper.sh");
+    await fs.promises.writeFile(
+      wrapperPath,
+      buildPrintScript({
+        command: [
+          "/bin/sh",
+          "-c",
+          `printf '%s' $$ > ${shellQuote(childPidFile)}; sh -c 'printf "%s" $$ > ${shellQuote(grandchildPidFile)}; sleep 60' & sleep 60`,
+        ],
+        ...WATCH,
+      }),
+      { mode: 0o700 },
+    );
+    const parent = standInParent();
+    // The wrapper leads its own group, so `leads_group` decides whether the
+    // signal reaches the grandchild. A `[` that answers 1 makes it read "not
+    // leading" and signal the child alone.
+    const wrapper = shadowedRun(wrapperPath, [String(parent.pid!)], oneShadow("[", "return 1"));
+    try {
+      const childPid = await readPid(childPidFile, left());
+      const grandchildPid = await readPid(grandchildPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+      await waitFor("the grandchild to end", () => !alive(grandchildPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(wrapper, left());
     }
   });
 });

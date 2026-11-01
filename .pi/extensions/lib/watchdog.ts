@@ -86,32 +86,14 @@ export function parentPidLines(): string[] {
  * builtin every one of those depends on, so each script clears it first with
  * `clearShadowedCommand`.
  *
- * That line cannot be shadowed: `unset` is a POSIX special builtin, and bash
- * refuses to import a function for a special builtin. The other names the
- * script uses for structure (`:`, `trap`, `set`, `exec`, `exit`, `return`,
- * `shift`, `eval`, `.`, `break`, `continue`, `export`, `readonly`, `times`) are
- * special builtins too, so no function for them can arrive from the parent; and
- * dash rejects most of those names as function names and imports no exported
- * functions at all.
- *
- * Every external command here runs through `command`, so a shell function
- * inherited from whatever started pi cannot change what the watch does. A
- * function named `tr` that prints nothing makes a live parent read as gone, one
- * named `head` makes `ps` read as unable to answer, and one named `sleep` makes
- * the poll spin or never run. A function named `printf` loses the exit code,
- * and one named `kill` loses the signals. `command` skips a function and then
- * runs the builtin, so every builtin the watch uses carries it too.
- *
- * The rule covers every command the watch runs, and it closes the names that a
- * parent shell can hand it: `clearShadowedCommand` removes a function named
- * `command`, which would shadow the builtin every other guard depends on. The
- * builtins the script uses for structure (`:`, `trap`, `set`, `exec`, `exit`,
+ * That line cannot be shadowed where these scripts run: they start as
+ * `/bin/sh`, and bash in that mode, or with `--posix`, refuses to import a
+ * function for a POSIX special builtin (plain `bash` would import it). The other
+ * names the script uses for structure (`:`, `trap`, `set`, `exec`, `exit`,
  * `return`, `shift`, `eval`, `.`, `break`, `continue`, `export`, `readonly`,
- * `times`, `unset`) are POSIX special builtins, and bash refuses to import a
- * function for one, so they cannot arrive from the parent; dash rejects most of
- * those names as function names and imports no exported functions at all. What
- * is left is a function the script itself defines, and it defines none of these
- * names.
+ * `times`) are special builtins too, so no function for them can arrive from the
+ * parent; and dash rejects most of those names as function names and imports no
+ * exported functions at all.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only
