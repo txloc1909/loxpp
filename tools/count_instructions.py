@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Counts the user-space instructions a command runs.
+
+The dev image has neither `perf` nor `valgrind`, so this uses `perf_event_open`
+directly through `ctypes`. The event counts only the instructions that the
+program itself runs (`exclude_kernel`), on the main thread of the process.
+
+Usage:
+  tools/count_instructions.py [--runs R] [--attempts N] -- <command> [args...]
+
+Each run prints one line to stdout: `run <index> <instructions>`, and the last
+line is `median <instructions>`.
+
+Why one run is several attempts. On a loaded host the kernel does not always
+keep a counting event on the CPU for the whole run; the time the event was
+enabled can exceed the time it ran, and the count is then short by an amount
+it cannot report. The loss only ever subtracts, so the tool repeats the run
+and keeps the largest count: a short count cannot win the comparison. `lost`
+reports how much of the best attempt's window the event spent off the CPU, and
+`--max-lost` fails the run when even the best attempt lost more than a bound,
+so a short count is never printed as the answer.
+
+The default seccomp profile of podman refuses `perf_event_open`, so a
+container that runs this tool needs `--security-opt seccomp=unconfined`. It is
+a tool to run by hand, not part of `ctest`.
+"""
+
+import argparse
+import ctypes
+import ctypes.util
+import os
+import struct
+import sys
+
+PERF_TYPE_HARDWARE = 0
+PERF_COUNT_HW_INSTRUCTIONS = 1
+
+# struct perf_event_attr, the leading fields only. The kernel zero-checks the
+# bytes past `size`, and ctypes zeroes the whole structure.
+class PerfEventAttr(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_uint32),
+        ("size", ctypes.c_uint32),
+        ("config", ctypes.c_uint64),
+        ("sample_period", ctypes.c_uint64),
+        ("sample_type", ctypes.c_uint64),
+        ("read_format", ctypes.c_uint64),
+        ("flags", ctypes.c_uint64),
+        ("wakeup_events", ctypes.c_uint32),
+        ("bp_type", ctypes.c_uint32),
+        ("config1", ctypes.c_uint64),
+        ("config2", ctypes.c_uint64),
+    ]
+
+
+FLAG_DISABLED = 1 << 0
+FLAG_EXCLUDE_KERNEL = 1 << 5
+FLAG_EXCLUDE_HV = 1 << 6
+
+# read_format: the count first, then the time the event was enabled and the
+# time it was on a CPU. Equal times mean the whole run was counted.
+READ_TIME_ENABLED = 1 << 0
+READ_TIME_RUNNING = 1 << 1
+READ_FORMAT = READ_TIME_ENABLED | READ_TIME_RUNNING
+
+IOC_ENABLE = 0x2400
+IOC_RESET = 0x2403
+
+# __NR_perf_event_open, x86_64.
+SYS_PERF_EVENT_OPEN = 298
+
+LIBC = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+
+
+def perf_event_open(pid: int) -> int:
+    attr = PerfEventAttr()
+    attr.type = PERF_TYPE_HARDWARE
+    attr.size = ctypes.sizeof(attr)
+    attr.config = PERF_COUNT_HW_INSTRUCTIONS
+    attr.flags = FLAG_DISABLED | FLAG_EXCLUDE_KERNEL | FLAG_EXCLUDE_HV
+    attr.read_format = READ_FORMAT
+    fd = LIBC.syscall(
+        ctypes.c_long(SYS_PERF_EVENT_OPEN),
+        ctypes.byref(attr),
+        ctypes.c_int(pid),
+        ctypes.c_int(-1),  # the task's current CPU, not a pinned one
+        ctypes.c_int(-1),  # no group
+        ctypes.c_ulong(0),
+    )
+    if fd < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return fd
+
+
+def ioctl(fd: int, request: int) -> None:
+    if LIBC.ioctl(ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_int(0)) < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+
+
+def attempt(command: list[str], core: int | None) -> tuple[int, int]:
+    """Runs the command once. Returns (instructions, nanoseconds off the CPU)."""
+    # The child waits for a byte before it execs, so the event exists and is
+    # enabled before the program's first instruction. A signal handshake
+    # instead lets the child run part of the program first, and the count is
+    # then short by an amount no run reports.
+    read_end, write_end = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(write_end)
+            if core is not None:
+                os.sched_setaffinity(0, {core})
+            os.read(read_end, 1)
+            os.close(read_end)
+            os.execv(command[0], command)
+        except BaseException:
+            pass
+        os._exit(127)
+    os.close(read_end)
+    fd = perf_event_open(pid)
+    try:
+        ioctl(fd, IOC_RESET)
+        ioctl(fd, IOC_ENABLE)
+        os.write(write_end, b"x")
+        os.close(write_end)
+        _, status = os.waitpid(pid, 0)
+        count, enabled, running = struct.unpack("QQQ", os.read(fd, 24))
+    finally:
+        os.close(fd)
+    if not os.WIFEXITED(status):
+        raise SystemExit(f"command died to signal {os.WTERMSIG(status)}")
+    code = os.WEXITSTATUS(status)
+    if code != 0:
+        raise SystemExit(f"command exited {code}")
+    return count, max(0, enabled - running)
+
+
+def measure(command: list[str], core: int | None, attempts: int) -> tuple[int, int]:
+    best = None
+    for _ in range(attempts):
+        count, lost = attempt(command, core)
+        if best is None or count > best[0]:
+            best = (count, lost)
+    assert best is not None
+    return best
+
+
+def median(values: list[int]) -> int:
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) // 2
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Count the user-space instructions a command runs."
+    )
+    parser.add_argument("--core", type=int, default=None, help="pin to this core")
+    parser.add_argument("--runs", type=int, default=1, help="number of runs")
+    parser.add_argument(
+        "--attempts",
+        type=int,
+        default=15,
+        help="attempts per run; the largest count wins (default 15)",
+    )
+    parser.add_argument(
+        "--max-lost",
+        type=int,
+        default=50_000,
+        help="nanoseconds the best attempt may spend off the CPU (default 50000)",
+    )
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        parser.error("no command given")
+    counts = []
+    try:
+        for index in range(args.runs):
+            count, lost = measure(command, args.core, args.attempts)
+            counts.append(count)
+            print(f"run {index} {count} lost {lost}", flush=True)
+            if lost > args.max_lost:
+                print(
+                    f"count_instructions: the best of {args.attempts} attempts "
+                    f"spent {lost} ns off the CPU, over --max-lost "
+                    f"{args.max_lost}; the count is short by an amount this "
+                    "run cannot bound",
+                    file=sys.stderr,
+                )
+                return 2
+    except OSError as error:
+        print(f"count_instructions: {error}", file=sys.stderr)
+        return 2
+    print(f"median {median(counts)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
