@@ -408,6 +408,15 @@ long msSince(PClock::time_point start) {
         .count();
 }
 
+// Runtime::pollWhileBusy() polls between task switches once a millisecond has
+// passed since the last poll, and that poll can report a timer before the
+// program has run its first statement: under a sanitizer on a loaded host the
+// start of interpret() can take longer than a short timer. The two tests below
+// are about the blocking wait a parked task makes, so they pin the clock that
+// paces that poll: the only poll left is the one the worker makes after its
+// task parked, whatever start-up took.
+PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
+
 } // namespace
 
 // A program that never parks makes no poller, and opens no descriptor.
@@ -446,6 +455,7 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     VM vm;
     int fired = 0;
     Runtime& rt = vm.runtime();
+    rt.setSchedulerClock(&noSwitchPoll);
     rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(300));
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
@@ -479,6 +489,7 @@ TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     VM vm;
     int fired = 0;
     Runtime& rt = vm.runtime();
+    rt.setSchedulerClock(&noSwitchPoll);
     rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(50));
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
