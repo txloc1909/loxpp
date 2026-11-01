@@ -345,8 +345,10 @@ processTest("a watched run ends its child and closes its window when the parent 
       const flag = closeWindowArgv("42", "unix:/tmp/fake-kitty.sock", kitten).find((arg) => arg.startsWith("--match="))!;
       assert.ok(logged.includes(flag), `the close call uses ${flag}`);
     } finally {
-      await stopRun(script, left());
+      // The stand-in parent holds this process open for 60 s, so it dies
+      // first: a `stopRun` that throws must not skip it.
       parent.kill("SIGKILL");
+      await stopRun(script, left());
     }
   });
 });
@@ -378,8 +380,10 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
       await ended(script, left());
       assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "137", "the KILL after the grace ended the child");
     } finally {
-      await stopRun(script, left());
+      // The stand-in parent holds this process open for 60 s, so it dies
+      // first: a `stopRun` that throws must not skip it.
       parent.kill("SIGKILL");
+      await stopRun(script, left());
     }
   });
 });
@@ -410,8 +414,10 @@ processTest("a run that ends on its own leaves its held window alone when the pa
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal(await readOr(path.join(dir, "kitten.log"), ""), "", "no watcher ran after the run ended");
     } finally {
-      await stopRun(script, left());
+      // The stand-in parent holds this process open for 60 s, so it dies
+      // first: a `stopRun` that throws must not skip it.
       parent.kill("SIGKILL");
+      await stopRun(script, left());
     }
   });
 });
@@ -475,8 +481,10 @@ processTest("a ps that cannot answer does not make a live parent look dead", asy
       // The watcher cannot end by itself while `ps` fails: it reads every pid,
       // its own child included, as gone, and the safe direction keeps it
       // polling. The group is the only thing that ends it.
-      await stopRun(script, left());
+      // The stand-in parent holds this process open for 60 s, so it dies
+      // first: a `stopRun` that throws must not skip it.
       parent.kill("SIGKILL");
+      await stopRun(script, left());
     }
   });
 });
@@ -563,8 +571,8 @@ processTest("an unattended wrapper ends its child and its grandchild when the pa
       await waitFor("the child to end", () => !alive(childPid), left());
       await waitFor("the grandchild to end", () => !alive(grandchildPid), left());
     } finally {
-      await stopRun(wrapper, left());
       parent.kill("SIGKILL");
+      await stopRun(wrapper, left());
     }
   });
 });
