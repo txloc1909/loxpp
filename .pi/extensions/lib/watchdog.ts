@@ -34,9 +34,10 @@ export function shellQuote(value: string): string {
 
 /**
  * Remove a function named `command`, which would shadow the builtin that every
- * other guard depends on. `unset` is a POSIX special builtin, and bash does not
- * import a function for one, so this line cannot be shadowed itself. dash has no
- * exported functions, so there it is a no-op.
+ * other guard depends on. `unset` is a POSIX special builtin, and bash running
+ * as `/bin/sh`, or with `--posix`, does not import a function for one (plain
+ * `bash` does), so in the shell these scripts start with this line cannot be
+ * shadowed itself. dash has no exported functions, so there it is a no-op.
  */
 export function clearShadowedCommand(): string[] {
   return ["unset -f command 2>/dev/null"];

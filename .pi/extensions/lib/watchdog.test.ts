@@ -315,6 +315,28 @@ test("every script builder carries the watchdog", () => {
       assert.ok(script.includes(needle), `${name} runs \`${needle}\` through command, so no function shadows it`);
     }
   }
+  // Every site, not only the ones with a name: no line the builders write may
+  // use a guarded command without `command` before it. This is the check the
+  // named needles cannot give, because one prefix removed from a helper leaves
+  // another site's prefix in the text.
+  const guarded = ["ps", "tr", "head", "sleep", "kill", "printf", "wait", "cd", "["];
+  for (const [label, script] of [
+    ["the watched run script", watched],
+    ["the unattended wrapper", unattended],
+    ["the gate wrapper", gate],
+  ]) {
+    for (const line of script.split("\n")) {
+      if (/^\s*#/.test(line)) continue;
+      for (const word of guarded) {
+        const token = word === "[" ? "\\[" : `\\b${word}\\b`;
+        const pattern = new RegExp(`(^|[\\s;&|({])${token}`, "g");
+        for (let match = pattern.exec(line); match !== null; match = pattern.exec(line)) {
+          const before = line.slice(0, match.index + match[1].length);
+          assert.ok(/(^|[\s$(])command\s+$/.test(before), `${label} uses \`${word}\` without command: ${line.trim()}`);
+        }
+      }
+    }
+  }
   // The close call and the entry directory belong to the watched run only, and
   // the close call's path is quoted, so it is checked by the path.
   assert.ok(watched.includes(`command '${kitten}'`), "the close call runs kitten through command");
