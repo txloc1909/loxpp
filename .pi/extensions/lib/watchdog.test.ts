@@ -444,6 +444,9 @@ processTest("the unattended wrapper never signals a group it does not lead", asy
       // group: wait for it to end by itself, as its own `wait` does.
       await ended(wrapper, left());
     } finally {
+      // The stand-in parent holds this process open for 60 s, so it dies even
+      // if an earlier `await` threw.
+      parent.kill("SIGKILL");
       wrapper.kill("SIGKILL");
       bystander.kill("SIGKILL");
     }
