@@ -11,7 +11,6 @@ import {
   launchArgv,
   listWindowsArgv,
   setTitleArgv,
-  shellQuote,
   windowIds,
 } from "./kitty.ts";
 
@@ -30,14 +29,6 @@ test("detectKitty reads the window id and the socket address", () => {
   // `allow_remote_control yes` without a listen_on line leaves no socket, and
   // `kitten @` then falls back to the terminal, where pi reads its keys.
   assert.equal(detectKitty({ KITTY_WINDOW_ID: "3", KITTY_LISTEN_ON: "  " })?.listenOn, null);
-});
-
-test("shellQuote survives a real shell", () => {
-  const nasty = "it's $HOME `x` \"q\" \\ and\nnewline";
-  const quoted = shellQuote(nasty);
-  const result = spawnSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], { encoding: "utf8" });
-  assert.equal(result.status, 0);
-  assert.equal(result.stdout, nasty);
 });
 
 test("launchArgv opens a window in the parent's tab", () => {
@@ -144,12 +135,14 @@ test("the run script keeps stdin and stdout with the child and records stderr an
         command: ["/bin/sh", "-c", 'read line; printf \'got:%s\' "$line"; printf \'boom\' >&2; exit 7'],
         stderrPath,
         exitPath,
+        kitten: "kitten",
+        socket: "unix:/tmp/kitty.sock",
       }),
     );
 
     // The keyboard reaches the child and its output reaches the window: that
     // is what makes the window a live session instead of a log sink.
-    const run = spawnSync("/bin/sh", [scriptPath], { encoding: "utf8", input: "hello\n" });
+    const run = spawnSync("/bin/sh", [scriptPath, String(process.pid)], { encoding: "utf8", input: "hello\n" });
     assert.equal(run.status, 0, "the wrapper itself exits 0");
     assert.match(run.stdout, /got:hello/);
     assert.match(run.stdout, /pi subagent: test/);
@@ -158,6 +151,8 @@ test("the run script keeps stdin and stdout with the child and records stderr an
     assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "7");
     const script = fs.readFileSync(scriptPath, "utf8");
     assert.equal(script.includes("</dev/null"), false, "no stdin redirect");
+    assert.match(script, /exec 3<&0/, "the terminal is kept on a third descriptor");
+    assert.match(script, /0<&3/, "the child gets that descriptor, not /dev/null");
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });
   }
@@ -176,10 +171,12 @@ test("buildRunScript reports a cwd it cannot enter", async () => {
         command: ["/bin/sh", "-c", "exit 0"],
         stderrPath: path.join(dir, "stderr.log"),
         exitPath,
+        kitten: "kitten",
+        socket: "unix:/tmp/kitty.sock",
       }),
     );
 
-    const run = spawnSync("/bin/sh", [scriptPath], { encoding: "utf8" });
+    const run = spawnSync("/bin/sh", [scriptPath, String(process.pid)], { encoding: "utf8" });
     assert.equal(run.status, 1);
     assert.equal(fs.readFileSync(exitPath, "utf8").trim(), "1");
     assert.match(run.stdout, /cannot enter/);

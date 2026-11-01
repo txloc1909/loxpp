@@ -141,6 +141,8 @@ export interface WindowRunOptions {
   pollMs?: number;
   livenessMs?: number;
   deadWindowGraceMs?: number;
+  watchPollS?: number;
+  watchGraceS?: number;
 }
 
 export interface WindowRunResult {
@@ -172,6 +174,10 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
       command: opts.command,
       stderrPath,
       exitPath,
+      kitten,
+      socket: target,
+      watchPollS: opts.watchPollS,
+      watchGraceS: opts.watchGraceS,
     }),
     { mode: 0o700 },
   );
@@ -187,7 +193,10 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
         session: opts.session,
         cwd: opts.cwd,
         title: opts.title,
-        command: ["/bin/sh", scriptPath],
+        // The parent pid is the script's first argument: a `SIGKILL` of this
+        // process runs no handler here, so the script watches that pid itself
+        // and ends the run when it is gone.
+        command: ["/bin/sh", scriptPath, String(process.pid)],
         hold: opts.hold,
         keepFocus: opts.keepFocus,
         env,

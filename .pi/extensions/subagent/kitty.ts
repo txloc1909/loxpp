@@ -5,6 +5,8 @@
  * unit tests load this module with plain `node --test`.
  */
 
+import { parentPidLines, shellQuote, stopWatcherLines, watchdogFunctions, watchdogLines } from "./watchdog.ts";
+
 export interface KittySession {
   /** The kitty window that runs pi. Subagent windows open beside it. */
   windowId: string;
@@ -124,11 +126,6 @@ export function windowIds(listing: string): string[] {
   return ids;
 }
 
-/** One POSIX single-quoted word. A literal quote closes, escapes, and reopens. */
-export function shellQuote(value: string): string {
-  return `'${value.split("'").join("'\\''")}'`;
-}
-
 export interface RunScriptSpec {
   /** Lines printed in the new window before the child starts. */
   header: string[];
@@ -136,6 +133,11 @@ export interface RunScriptSpec {
   command: string[];
   stderrPath: string;
   exitPath: string;
+  /** What the watchdog calls to close this window when the parent is gone. */
+  kitten: string;
+  socket: string;
+  watchPollS?: number;
+  watchGraceS?: number;
 }
 
 /**
@@ -144,20 +146,38 @@ export interface RunScriptSpec {
  * the window. Only stderr goes to a log. The exit code goes to a second file:
  * it is the parent's only proof that the run ended and how.
  *
+ * The child runs in the background so a watcher can end it when pi dies: a
+ * `SIGKILL` of pi runs no handler there. POSIX gives an asynchronous list
+ * `/dev/null` on stdin when job control is off, so the terminal is kept on a
+ * third descriptor first and handed to the child explicitly.
+ *
  * Every path is absolute, so the script does not depend on the window's cwd.
  */
 export function buildRunScript(spec: RunScriptSpec): string {
   const quote = shellQuote;
   const cdFailure = `loxpp subagent: cannot enter ${spec.cwd}`;
-  const redirect = `2> ${quote(spec.stderrPath)}`;
   return [
     "#!/bin/sh",
     "# Written by the Lox++ pi subagent extension; removed when the run ends.",
     "set -u",
+    ...parentPidLines(),
     `printf '%s\\n' ${spec.header.map(quote).join(" ")} ''`,
     `cd ${quote(spec.cwd)} || { printf '%s\\n' ${quote(cdFailure)}; printf '%s\\n' 1 > ${quote(spec.exitPath)}; exit 1; }`,
-    `${spec.command.map(quote).join(" ")} ${redirect}`,
+    ...watchdogFunctions(),
+    "exec 3<&0",
+    `${spec.command.map(quote).join(" ")} 0<&3 2> ${quote(spec.stderrPath)} &`,
+    "child=$!",
+    ...watchdogLines({
+      pollS: spec.watchPollS,
+      graceS: spec.watchGraceS,
+      // kitty runs this script under `kitten run-shell`, so it does not lead a
+      // group of its own: the close call below is what ends the window.
+      reach: "children",
+      closeWindow: { kitten: spec.kitten, socket: spec.socket },
+    }),
+    'wait "$child"',
     "status=$?",
+    ...stopWatcherLines(),
     `printf '%s\\n' "$status" > ${quote(spec.exitPath)}`,
     "",
   ].join("\n");
