@@ -175,7 +175,7 @@ Blocking calls table (`read`, `read_bytes`, `readline`, `readlines`,
 `read_err`, `err_read_bytes`, `err_readline`, `err_readlines`, `write`,
 `writeline`, `wait`). They keep today's rule.
 
-The set is the nine calls above. The property is: the call suspends only its
+The set is the calls of the table above. The property is: the call suspends only its
 task, except in a context where the task cannot suspend, and except during the
 name resolution of `connect`. The set and the property are equal by call
 identity: the rule attaches to the call, not to the function that contains it,
