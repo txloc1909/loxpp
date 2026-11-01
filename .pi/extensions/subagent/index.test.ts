@@ -284,17 +284,30 @@ function kittenLaunches(dir: string): string[][] {
 }
 
 /**
- * A wait for a watched run covers work that `window.ts` bounds itself: the
- * remote-control check and the launch for the first one, the child's exit and
- * the close for the second. `runProcess` bounds each kitten call at
- * `KITTEN_TIMEOUT_MS`, so a wait below the sum of those calls fails with a
- * cause that is not true: the run did report, after the wait had given up.
+ * A wait for a watched run covers work that `window.ts` bounds itself. The
+ * first one only sees the file the fake kitten writes, because the launch and
+ * the remote-control check already ran inside `execute`.
+ *
+ * The second covers the child's exit, the liveness `ls` that the poll loop
+ * makes while the child is alive, and the close. The `ls` and the close are
+ * each a `runProcess` at `KITTEN_TIMEOUT_MS`, so the sum is two of them. A wait
+ * below that sum fails with a cause that is not true: the run did report, after
+ * the wait had given up.
  */
 const RUN_WAIT_MS = 2 * KITTEN_TIMEOUT_MS + 5_000;
-/** Both waits, plus the setup: the sandbox copies, the import, `session_start`. */
+/**
+ * Four `KITTEN_TIMEOUT_MS` calls can pass before the end of this test: the
+ * `session_start` remote-control check, the launch, and then the liveness `ls`
+ * and the close inside the second wait. The first wait returns at once, because
+ * the launch already ran. With the setup (the sandbox copies and the import) on
+ * top, the reachable worst case is about 45 s, so this bound holds it.
+ */
 const WATCHED_TEST_MS = 2 * RUN_WAIT_MS + KITTEN_TIMEOUT_MS;
 
-async function waitFor(check: () => boolean, message: string, timeoutMs = 5000): Promise<void> {
+async function waitFor(check: () => boolean, message: string, timeoutMs: number): Promise<void> {
+  // The argument is required, but `node --test` strips types without checking
+  // them, so a call site that omits it must fail here and not hang.
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${message} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     if (check()) return;
