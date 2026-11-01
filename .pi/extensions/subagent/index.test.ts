@@ -22,6 +22,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { KITTEN_TIMEOUT_MS } from "./window.ts";
 
 const HERE = import.meta.dirname;
 
@@ -277,6 +278,17 @@ function kittenLaunches(dir: string): string[][] {
     .filter((call) => call.includes("launch"));
 }
 
+/**
+ * A wait for a watched run covers work that `window.ts` bounds itself: the
+ * remote-control check and the launch for the first one, the child's exit and
+ * the close for the second. `runProcess` bounds each kitten call at
+ * `KITTEN_TIMEOUT_MS`, so a wait below the sum of those calls fails with a
+ * cause that is not true: the run did report, after the wait had given up.
+ */
+const RUN_WAIT_MS = 2 * KITTEN_TIMEOUT_MS + 5_000;
+/** Both waits, plus the setup: the sandbox copies, the import, `session_start`. */
+const WATCHED_TEST_MS = 2 * RUN_WAIT_MS + KITTEN_TIMEOUT_MS;
+
 async function waitFor(check: () => boolean, message: string, timeoutMs = 5000): Promise<void> {
   const until = Date.now() + timeoutMs;
   for (;;) {
@@ -298,7 +310,7 @@ async function withHarness(opts: { kitty: boolean }, body: (box: Box, harness: H
   }
 }
 
-test("a watched call returns at once, and its result arrives as a message", { skip, timeout: 10_000 }, async () => {
+test("a watched call returns at once, and its result arrives as a message", { skip, timeout: WATCHED_TEST_MS }, async () => {
   await withHarness({ kitty: true }, async (box, harness) => {
     const statuses: Array<[string, string | undefined]> = [];
     const result = await harness.tool.execute(
@@ -314,13 +326,13 @@ test("a watched call returns at once, and its result arrives as a message", { sk
     assert.equal(harness.sent.length, 0, "the launch did not wait for the run");
 
     // The run is still going: its window exists, and nobody has reported it.
-    await waitFor(() => fs.existsSync(path.join(box.kittenDir, "launch.argv")), "the watched run opened a window");
+    await waitFor(() => fs.existsSync(path.join(box.kittenDir, "launch.argv")), "the watched run opened a window", RUN_WAIT_MS);
     assert.equal(kittenLaunches(box.kittenDir).length, 1, "the watched run did ask kitty for exactly one window");
     assert.equal(harness.sent.length, 0, "no result while the child is still running");
 
     // End the run, then the message that wakes the parent must arrive.
     await fs.promises.writeFile(path.join(box.work, "go"), "");
-    await waitFor(() => harness.sent.length === 1, "the end of the run was reported");
+    await waitFor(() => harness.sent.length === 1, "the end of the run was reported", RUN_WAIT_MS);
     const [{ message, options }] = harness.sent;
     assert.equal(message.customType, "subagent-result");
     assert.equal(message.display, true);
