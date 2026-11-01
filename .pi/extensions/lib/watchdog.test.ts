@@ -70,6 +70,18 @@ async function killParent(parent: ChildProcess): Promise<void> {
   await exited;
 }
 
+/** Wait for a spawned process to end by itself, so its last write has landed. */
+async function ended(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for the run script to end")), TIMEOUT_MS);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 /**
  * End a run this test spawned detached, so the leader owns its group: the
  * watcher and the commands the child started are members of that group, and a
@@ -271,10 +283,11 @@ test("a child that ignores SIGTERM is killed after the grace", { timeout: 20000 
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
+    const exitPath = path.join(dir, "exit.code");
     const scriptPath = await watchedScript(dir, {
       child: `trap '' TERM; printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
       kitten,
-      exitPath: path.join(dir, "exit.code"),
+      exitPath,
     });
 
     const parent = standInParent();
@@ -287,6 +300,11 @@ test("a child that ignores SIGTERM is killed after the grace", { timeout: 20000 
       const childPid = await readPid(childPidFile);
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid));
+      // The script records how the child ended only after `wait` returns, so
+      // the code below is the test's proof of the signal that did the work: a
+      // TERM the child ignores leaves it alive, and 137 is 128 plus SIGKILL.
+      await ended(script);
+      assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "137", "the KILL after the grace ended the child");
     } finally {
       await stopRun(script);
       parent.kill("SIGKILL");
