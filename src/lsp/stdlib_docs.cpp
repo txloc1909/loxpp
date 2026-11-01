@@ -151,7 +151,7 @@ constexpr std::array<StdlibEntry, 10> kInteger = {{
 // (src/stdlib/file_api.cpp), and the Socket/Server/Process method names that
 // do not already appear here (src/stdlib/net_api.cpp, process_api.cpp).
 // Descriptions from spec/05-stdlib.md and spec/03-types.md.
-constexpr std::array<StdlibEntry, 25> kMethods = {{
+constexpr std::array<StdlibEntry, 26> kMethods = {{
     {"has", "map.has(key) -> Boolean", 1, "True when the map contains `key`."},
     {"del", "map.del(key) -> Boolean", 1,
      "Removes `key` from the map; true when it was present."},
@@ -167,6 +167,9 @@ constexpr std::array<StdlibEntry, 25> kMethods = {{
      "Reads the rest of the file as a list of lines."},
     {"read_bytes", "socket.read_bytes(n) -> String", 1,
      "Reads up to `n` bytes, blocking until `n` arrive or the peer closes."},
+    {"read_some", "socket.read_some(n) -> String", 1,
+     "Waits for at least one byte, then returns the bytes that are there, up "
+     "to `n`; \"\" at end of stream."},
     {"write", "file.write(text) -> Nil", 1,
      "Writes `text` to the file. No newline is added."},
     {"writeline", "file.writeline(text) -> Nil", 1,
