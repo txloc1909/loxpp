@@ -526,9 +526,8 @@ function shadowedRun(scriptPath: string, args: string[], shadow: string[]): Chil
   // The script starts as `/bin/sh` in production too, so the test uses that
   // shell: where it is bash, bash runs in POSIX mode, imports a function for a
   // regular builtin and refuses one for a special builtin, exactly as it does
-  // for a real run. Where `/bin/sh` is dash, no function is imported and the
-  // hostile definitions have no effect, so the test passes without proving
-  // anything; `sh -c 'type -t command'` in the shell says which case a host is.
+  // for a real run. Where `/bin/sh` is dash, `export -f` kills this script
+  // before the run starts, so `SHADOWS_ARRIVE` is false and the tests skip.
   const script = [...shadow, 'exec /bin/sh "$0" "$@"'].join("\n");
   return spawn("/bin/sh", ["-c", script, scriptPath, ...args], {
     detached: true,
