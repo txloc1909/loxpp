@@ -634,9 +634,13 @@ do. `n` must be an integer in the range 0 to 2147483647.
 
 ### `s.read_some(n) -> String`
 
-Waits until at least one byte of the Socket is available, then returns the
-bytes that are available, up to `n` bytes, as one String. It does not wait for
-more bytes. At end of stream, when the peer has closed its write direction and
+Waits until at least one byte of the Socket is available, then returns some of
+the bytes that are available as one String. The result has at least one byte
+and at most `n` bytes. It can be shorter than the number of bytes that are
+available, and the number of bytes in one result is not specified: a program
+that needs more bytes calls `read_some` again. The bytes of all results, in
+order, are the bytes of the stream. The call does not wait for more bytes than
+the first ones that arrive. At end of stream, when the peer has closed its write direction and
 no bytes remain, it returns `""`. `n` must be an integer in the range 1 to
 2147483647; any other value, including `0`, and any other type is a runtime
 error that halts the program. Zero is not allowed because `""` is the result
