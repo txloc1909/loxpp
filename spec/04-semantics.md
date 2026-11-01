@@ -1779,7 +1779,9 @@ cannot suspend](#contexts-where-a-task-cannot-suspend)).
   the tested ones included.
 - A throw that `want` does not catch ends the call, and it propagates from
   the call as from any other call. No message is removed. A halting fault in
-  `want` halts the program, as everywhere.
+  `want` halts the program, as everywhere. A native function whose arity is
+  not 1 halts the program when it is `want`, as any call of a native function
+  with the wrong number of arguments does.
 
 **Selective receive.** A task that holds two channel ends, as in [Bounding a
 Mailbox](#bounding-a-mailbox-non-normative), takes the items of one channel
@@ -1936,8 +1938,10 @@ first in, first out, and it has no priorities.
 When several waits have ended by the time the worker has no task that is
 ready to run, the tasks join the run queue in this order: first the tasks
 whose wait is for a connection, a Socket, or a Server and has ended, in the
-order in which their calls began to wait, then the tasks whose sleep has
-expired or whose limit has passed, in the order of their deadlines.
+order in which their calls began to wait, then the tasks whose time has run
+out, in the order of their deadlines. One group holds all of them: a sleep
+that has expired, a limit of a receive that has passed, and a limit of a
+`connect_within` that has passed.
 
 The order in which the tasks of one worker run is therefore defined, with one
 limit: an event outside the program decides when a wait ends, and so which
@@ -1991,7 +1995,7 @@ or in a receive with a limit.
 | `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes |
 | `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is between the start of the task and the receive, or while a deferred call runs; a receive with a limit or a condition that must suspend in the same places; any receive in the `want` function of `task.receive_where` or `task.receive_where_within` | yes |
 | `TimeoutError` | `task.receive_within(seconds)` or `task.receive_where_within(want, seconds)`, where the limit passes and no message is selected | yes |
-| `DeadlockError` | the main task waits in `task.receive()` and no task can run again | no |
+| `DeadlockError` | the main task waits in `task.receive()` or in `task.receive_where(want)`, with no limit, and no task can run again | no |
 
 A catchable fault in this table is delivered to a `catch` block as an
 `Error` value whose `kind` is the `Kind` column. `YieldAcrossNativeError` is

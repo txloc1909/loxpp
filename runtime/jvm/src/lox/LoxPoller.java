@@ -178,7 +178,8 @@ final class LoxPoller {
 
     /**
      * Appends the tasks whose wait is over and removes their waits: the
-     * channel waits in registration order, then the timers in deadline order.
+     * channel waits in registration order, then the passed limits and timers in
+     * deadline order.
      */
     void drainReady(List<LoxTask> out) {
         if (!selector.selectedKeys().isEmpty()) {
@@ -228,15 +229,24 @@ final class LoxPoller {
             }
         }
         long now = System.nanoTime();
+        ArrayList<Wait> over = new ArrayList<>();
         for (Iterator<Wait> it = fdWaits.iterator(); it.hasNext();) {
             Wait w = it.next();
             if (w.timed && w.deadline - now <= 0) {
-                out.add(w.task);
+                over.add(w);
                 it.remove();
             }
         }
         while (!timers.isEmpty() && timers.first().deadline - now <= 0) {
-            out.add(timers.pollFirst().task);
+            over.add(timers.pollFirst());
+        }
+        // A passed limit of a channel wait and a timer are one group.
+        over.sort((a, b) -> {
+            long d = a.deadline - b.deadline;
+            return d != 0 ? (d < 0 ? -1 : 1) : Long.compare(a.seq, b.seq);
+        });
+        for (Wait w : over) {
+            out.add(w.task);
         }
     }
 }
