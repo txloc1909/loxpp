@@ -1,0 +1,64 @@
+// A passed limit of connect_within is in one group with the sleeps that have
+// expired and the limits of receives that have passed: the tasks join the run
+// queue in the order of their deadlines (spec/04-semantics.md, Scheduling).
+// The Server never accepts, so its queue fills and the next connect is not
+// answered (see probe 287). The four tasks begin to wait together with the
+// limits 0.4 (connect), 0.1 (sleep), 0.6 (receive) and 0.2 (sleep). Main then
+// busy-loops 0.9 seconds, a lower bound, so every wait has ended when main
+// suspends. The tasks run in the order of the deadlines. The start of the
+// tasks differs by far less than the 0.1 seconds between two deadlines.
+// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
+// one host thread, so a blocking call blocks every task (spec/README.md,
+// Conformance: scheduling is implementation-defined).
+// STATUS: ok
+// TIMEOUT: 60
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
+// CHECK: b woke
+// CHECK: d woke
+// CHECK: a NetworkError
+// CHECK: c TimeoutError
+var me = task.self();
+var l = listen("127.0.0.1", 0);
+var port = l.port();
+var filled = false;
+var i = 0;
+while (i < 100000 and !filled) {
+    try {
+        connect_within("127.0.0.1", port, 0.3).close();
+    } catch (e) {
+        filled = true;
+    }
+    i = i + 1;
+}
+if (!filled) print "queue never full";
+fun a() {
+    try {
+        connect_within("127.0.0.1", port, 0.4).close();
+        print "a connected";
+    } catch (e) {
+        print "a " + e.kind;
+    }
+    task.send(me, 1);
+}
+fun b() { sleep(0.1); print "b woke"; task.send(me, 1); }
+fun c() {
+    try {
+        task.receive_within(0.6);
+    } catch (e) {
+        print "c " + e.kind;
+    }
+    task.send(me, 1);
+}
+fun d() { sleep(0.2); print "d woke"; task.send(me, 1); }
+task.spawn(a);
+task.spawn(b);
+task.spawn(c);
+task.spawn(d);
+yield;
+var t0 = clock();
+while (clock() - t0 < 0.9) { }
+task.receive();
+task.receive();
+task.receive();
+task.receive();
+l.close();

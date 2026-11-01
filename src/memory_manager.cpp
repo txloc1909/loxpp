@@ -425,6 +425,7 @@ void MemoryManager::traceObject(Obj* obj) {
         }
         markValue(task->startArg);
         markValue(task->pendingValue);
+        markValue(task->sel.want);
         if (task->io.target != nullptr) {
             markObject(task->io.target);
         }

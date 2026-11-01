@@ -1,0 +1,24 @@
+// While `want` runs, task.pending() counts the messages of the mailbox, the
+// ones the call has tested included. A message that `want` sends to its own
+// task is appended, and the call tests it after the messages that were there
+// (spec/04-semantics.md, task.receive_within, `want`).
+// STATUS: ok
+// CHECK: pending 2
+// CHECK: pending 3
+// CHECK: pending 3
+// CHECK: got x
+// CHECK: 2
+var me = task.self();
+var sent = false;
+fun want(m) {
+    print "pending " + str(task.pending());
+    if (!sent) {
+        sent = true;
+        task.send(me, "x");
+    }
+    return m == "x";
+}
+task.send(me, 1);
+task.send(me, 2);
+print "got " + task.receive_where(want);
+print task.pending();

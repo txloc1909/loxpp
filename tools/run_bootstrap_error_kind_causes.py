@@ -152,6 +152,16 @@ PROBES = [
     ("receive across a native callback",
      'class R { __str__() { task.receive(); return "x"; } } try { print R(); } catch (e) { print e.kind; }',
      CATCHABLE, "YieldAcrossNativeError", '"Cannot receive across a native callback."'),
+    ("receive_within across a native callback",
+     'class R { __str__() { task.receive_within(5); return "x"; } } try { print R(); } catch (e) { print e.kind; }',
+     CATCHABLE, "YieldAcrossNativeError", '"Cannot receive across a native callback."'),
+    ("receive in the want of receive_where",
+     "fun w(m) { return task.receive(); } task.send(task.self(), 1); "
+     "try { task.receive_where(w); } catch (e) { print e.kind; }",
+     CATCHABLE, "YieldAcrossNativeError", '"Cannot receive in a function that receive_where calls."'),
+    ("receive_within limit passes",
+     "try { task.receive_within(0.05); } catch (e) { print e.kind; }",
+     CATCHABLE, "TimeoutError", '"The limit of the receive passed."'),
     ("yield across a native callback",
      'class S { init() {} __str__() { yield 1; return "x"; } } fun f() { print S(); } '
      "var co = coroutine.create(f); try { co.resume(); } catch (e) { print e.kind; }",

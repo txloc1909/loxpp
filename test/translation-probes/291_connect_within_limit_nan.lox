@@ -1,0 +1,14 @@
+// STATUS: error
+// CHECK: before
+// A limit that is NaN is a runtime error that halts the program, and a
+// try statement does not catch it (spec/05-stdlib.md, connect_within). The check of
+// the argument comes before any wait, so no connection is made.
+var l = listen("127.0.0.1", 0);
+print "before";
+try {
+    connect_within("127.0.0.1", l.port(), math.nan);
+    print "connected";
+} catch (e) {
+    print "caught";
+}
+print "after";

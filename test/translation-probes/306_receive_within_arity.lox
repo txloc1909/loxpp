@@ -1,0 +1,8 @@
+// The receive forms have a fixed number of arguments. A call with another
+// number is a runtime error, which halts the program, as for every native
+// function (spec/04-semantics.md, Halting Faults).
+// STATUS: error
+// CHECK: before
+print "before";
+task.receive_within();
+print "after";

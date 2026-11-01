@@ -11,7 +11,7 @@ namespace {
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp, integer_module.cpp. Descriptions condensed from
 // spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 31> kGlobals = {{
+constexpr std::array<StdlibEntry, 32> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -47,6 +47,8 @@ constexpr std::array<StdlibEntry, 31> kGlobals = {{
      "A map of file metadata (is_dir, is_file, size, mtime), or nil."},
     {"connect", "connect(host, port) -> Socket", 2,
      "Opens a TCP connection and returns a connected Socket."},
+    {"connect_within", "connect_within(host, port, seconds) -> Socket", 3,
+     "Like connect, and raises a NetworkError when `seconds` pass first."},
     {"listen", "listen(host, port) -> Server", 2,
      "Binds a listening TCP socket; port 0 picks a free port."},
     {"spawn", "spawn(program, args) -> Process", 2,
@@ -206,7 +208,7 @@ constexpr std::array<StdlibEntry, 1> kCoroutine = {{
 
 // `task.<name>`: src/stdlib/task_api.cpp. Descriptions condensed from
 // spec/05-stdlib.md, task.
-constexpr std::array<StdlibEntry, 6> kTask = {{
+constexpr std::array<StdlibEntry, 9> kTask = {{
     {"spawn", "task.spawn(fn) -> Task", 1,
      "Makes a new task on this worker that calls `fn`; returns its handle."},
     {"spawn_worker", "task.spawn_worker(fn, msg) -> Task", 2,
@@ -215,6 +217,16 @@ constexpr std::array<StdlibEntry, 6> kTask = {{
      "Appends the message `msg` to the mailbox of task `t`. Never waits."},
     {"receive", "task.receive() -> Any", 0,
      "Takes the next message of this task; waits while the mailbox is empty."},
+    {"receive_within", "task.receive_within(seconds) -> Any", 1,
+     "Takes the next message of this task; raises TimeoutError when none "
+     "arrives within `seconds`."},
+    {"receive_where", "task.receive_where(want) -> Any", 1,
+     "Takes the first message for which `want(msg)` is truthy; the other "
+     "messages stay in order. Waits while none matches."},
+    {"receive_where_within", "task.receive_where_within(want, seconds) -> Any",
+     2,
+     "Like `receive_where`, and raises TimeoutError when no message matches "
+     "within `seconds`."},
     {"self", "task.self() -> Task", 0, "The handle of the current task."},
     {"pending", "task.pending() -> Number", 0,
      "The number of messages in the mailbox of the current task."},

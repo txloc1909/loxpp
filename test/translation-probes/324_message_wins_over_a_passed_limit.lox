@@ -1,0 +1,34 @@
+// A message that is in the mailbox when the task runs again wins over a limit
+// that has passed (spec/04-semantics.md, task.receive_within, step 4). Task a
+// waits with the limit 0.4. Task b sleeps 0.05 and then sends to a. Main then
+// busy-loops, so by the time main suspends both waits have ended. The
+// deadline of b is earlier, so b runs first and sends; a then runs with the
+// message in its mailbox and the limit past, and it must get the message.
+// The busy loop of 0.6 seconds is a lower bound: a slower host only makes it
+// longer, and both waits have ended after 0.4 seconds. The start of the two
+// tasks must differ by less than 0.35 seconds for b to have the earlier
+// deadline, which is a wide margin.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: a got m
+// CHECK: done
+var me = task.self();
+fun a() {
+    try {
+        print "a got " + task.receive_within(0.4);
+    } catch (e) {
+        print "a " + e.kind;
+    }
+    task.send(me, 1);
+}
+var t = task.spawn(a);
+fun b() {
+    sleep(0.05);
+    task.send(t, "m");
+}
+task.spawn(b);
+yield;
+var t0 = clock();
+while (clock() - t0 < 0.6) { }
+task.receive();
+print "done";

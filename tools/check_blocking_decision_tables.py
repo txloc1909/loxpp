@@ -54,6 +54,7 @@ CONTEXT_SLUGS = {
     "`__str__`": "str",
     "a map key's `__hash__` and `__eq__`": "map-key",
     "`reflect.callMethod`": "call-method",
+    "a receive condition": "receive-want",
     "a deferred call": "defer",
     "a native entry": "native-entry",
     "a nested coroutine": "nested-coroutine",
@@ -67,6 +68,7 @@ BLOCKS_PROBED = ["input", "run", "Process.readline"]
 CODE_MARKERS = {
     "sleep": r"\bsleep\(",
     "connect": r"\bconnect\(",
+    "connect_within": r"\bconnect_within\(",
     "input": r"\binput\(",
     "run": r"\brun\(",
     "read": r"\.read\(",
@@ -81,6 +83,7 @@ CONTEXT_MARKERS = {
     "str": r"__str__",
     "map-key": r"__hash__",
     "call-method": r"\bcallMethod\(",
+    "receive-want": r"\btask\.receive_where(?:_within)?\(",
     "defer": r"\bdefer\b",
     "native-entry": r"task\.spawn\(\s*\w+\.\w+\s*\)",
     "nested-coroutine": r"coroutine\.create\(",

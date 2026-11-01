@@ -1,0 +1,21 @@
+// STATUS: ok
+// CHECK: hello
+// CHECK: hello again
+// A connect with a limit returns the Socket when the connection is made in
+// time (spec/05-stdlib.md, connect_within). The Server is on the local host, so the
+// connection completes at once; the limit is far above any time the machine
+// could need, and it is a whole Number in one call and a fraction in the other.
+var l = listen("127.0.0.1", 0);
+var a = connect_within("127.0.0.1", l.port(), 3600);
+a.writeline("hello");
+var b = connect_within("127.0.0.1", l.port(), 3600.5);
+b.writeline("hello again");
+var sa = l.accept();
+var sb = l.accept();
+print sa.readline();
+print sb.readline();
+a.close();
+b.close();
+sa.close();
+sb.close();
+l.close();

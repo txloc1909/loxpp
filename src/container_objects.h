@@ -7,6 +7,7 @@
 #include "vm_allocator.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -535,6 +536,11 @@ struct ParkedIo {
     // connect: the addresses left to try and the attempt in progress. There is
     // no target, because the Socket does not exist yet.
     std::shared_ptr<ConnectState> connect;
+    // connect with a limit: the time at which the call fails with a
+    // NetworkError that carries `timeoutMessage`.
+    bool hasDeadline{false};
+    std::chrono::steady_clock::time_point deadline{};
+    std::string timeoutMessage;
 };
 
 // The object lives in the heap of its worker. A handle on another worker is
@@ -557,11 +563,32 @@ struct ObjTask : public Obj {
     // mailbox, so task.pending() never sees them.
     ParkReason parkReason{ParkReason::NONE};
     std::uint64_t parkToken{0};
+    // The Poller token of the limit of a connect call that waits for a
+    // descriptor, or 0. The limit is a second wait of the same task.
+    std::uint64_t parkTimerToken{0};
     // The value of the parked call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
     // The network call that the task waits in, while it is PARKED on one.
     ParkedIo io;
+    // The state of a receive_within, receive_where, or receive_where_within
+    // call (spec/04-semantics.md, task.receive_within). A task that waits in
+    // one has no result to hand over when it runs again: the runtime runs the
+    // call again, in the task's own frames, and `pendingRetry` says so. The
+    // call keeps how many messages it has tested, so a message is tested once.
+    struct SelectiveReceive {
+        bool pendingRetry{false};
+        bool hasWant{false};
+        Value want;
+        std::size_t scanned{0};
+        bool limited{false};
+        std::chrono::steady_clock::time_point deadline{};
+        // Set when the wait of the limit was reported. The call still tests
+        // the messages that arrived, and raises TimeoutError only if none
+        // matches.
+        bool timedOut{false};
+    };
+    SelectiveReceive sel;
     bool hasPendingFault{false};
     std::string faultKind;
     std::string faultMessage;

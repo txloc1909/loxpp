@@ -100,6 +100,18 @@ Poller::Token Poller::waitUntil(Clock::time_point deadline) {
     return token;
 }
 
+Poller::Clock::time_point Poller::deadlineAfter(double seconds) {
+    // The 1 second margin keeps the double conversion below the clock's range.
+    const auto now = Clock::now();
+    const double room =
+        std::chrono::duration<double>(Clock::time_point::max() - now).count();
+    if (seconds >= room - 1.0) {
+        return Clock::time_point::max();
+    }
+    return now + std::chrono::duration_cast<Clock::duration>(
+                     std::chrono::duration<double>(seconds));
+}
+
 void Poller::dropFdWait(int fd, Token token) {
     auto found = m_fds.find(fd);
     if (found == m_fds.end()) {

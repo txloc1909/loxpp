@@ -509,6 +509,27 @@ name resolves, so the call suspends for the whole wait.
 
 ---
 
+## `connect_within(host, port, seconds) -> Socket`
+
+Like `connect(host, port)`, with a limit for the whole call. `seconds` must be
+a Number greater than zero. When the limit passes before the connection is
+made, the call raises a catchable `NetworkError`. All three arguments are
+required, and `host` and `port` follow the rules of `connect`. An argument
+count other than 3, a `seconds` that is not a Number, and a `seconds` that is
+not greater than zero are runtime errors. A `nil` limit is a runtime error.
+
+The call suspends its task while it waits for the connection, as `connect`
+does. The call can end before `seconds` pass, because the operating system
+has its own limit on a connection attempt, and this specification does not bind
+that limit. Whether `seconds` covers the time to resolve a host name is
+implementation-defined.
+
+**Arity:** 3  
+**Returns:** Socket  
+**Suspends:** yes
+
+---
+
 ## `listen(host, port) -> Server`
 
 Binds a listening TCP socket to `host` at `port`, and returns a Server. Both
@@ -823,8 +844,8 @@ Returns the coroutine's current state as a String: `"suspended"`,
 
 `task` is a global object bound at the start of every program, like `math`
 and `coroutine`. Its members are `spawn`, `spawn_worker`, `send`,
-`receive`, `self`, and `pending`. They are the primitive of the concurrency
-model; [§04-semantics, Workers and Tasks](04-semantics.md#workers-and-tasks)
+`receive`, `receive_within`, `receive_where`, `receive_where_within`, `self`,
+and `pending`. They are the primitive of the concurrency model; [§04-semantics, Workers and Tasks](04-semantics.md#workers-and-tasks)
 gives the full rules, and §03-types defines the Task value and the
 [messages](03-types.md#messages). `type(t)` on a Task returns `"Task"`.
 
@@ -871,6 +892,40 @@ start of the task and the receive raises `YieldAcrossNativeError`.
 **Arity:** 0  
 **Returns:** the message
 
+### `task.receive_within(seconds) -> Any`
+
+Like `task.receive()`, with a limit on the wait. `seconds` must be a Number
+greater than zero; any other value is a runtime error. If no message arrives
+within `seconds`, the call raises `TimeoutError`. A mailbox that is not empty
+returns its head at once. A call that must suspend while a native callback is
+between the start of the task and the call raises `YieldAcrossNativeError`.
+See [§04-semantics, `task.receive_within`](04-semantics.md#taskreceive_within-taskreceive_where-and-taskreceive_where_within).
+
+**Arity:** 1  
+**Returns:** the message
+
+### `task.receive_where(want) -> Any`
+
+Removes and returns the first message of the mailbox for which `want` returns
+a value that is not `nil` and not `false`. A message that is not selected stays
+in the mailbox in its place. If no message is selected, the current task
+suspends until one is. `want` must be a Function or a BoundMethod; any other
+value is a runtime error. `want` runs in the current task as a native
+callback: it cannot suspend, and a receive in it raises
+`YieldAcrossNativeError`.
+
+**Arity:** 1  
+**Returns:** the message
+
+### `task.receive_where_within(want, seconds) -> Any`
+
+`task.receive_where(want)` with the limit of `task.receive_within(seconds)`.
+If no message is selected within `seconds`, the call raises `TimeoutError` and
+the mailbox is unchanged.
+
+**Arity:** 2  
+**Returns:** the message
+
 ### `task.self() -> Task`
 
 Returns the handle of the current task.
@@ -908,7 +963,8 @@ A call of class suspends blocks the worker, and does not suspend, in two
 cases. First, the task cannot suspend where the call is made: see
 [§04-semantics, Suspend Points](04-semantics.md#contexts-where-a-task-cannot-suspend).
 The call then waits as a call of class blocks does, and it raises no fault.
-Second, `connect` blocks the worker while it resolves a host name.
+Second, `connect` and `connect_within` block the worker while they resolve a
+host name.
 
 The table lists all the blocking calls.
 
@@ -917,6 +973,7 @@ The table lists all the blocking calls.
 | `input()` | blocks | a line on standard input |
 | `sleep(seconds)` | suspends | time |
 | `connect(host, port)` | suspends | the connection |
+| `connect_within(host, port, seconds)` | suspends | the connection, or the limit |
 | `run(program, args)` | blocks | the child to exit |
 | `Socket.read()` | suspends | the peer to close |
 | `Socket.read_bytes(n)` | suspends | the bytes, or the peer to close |
@@ -941,8 +998,9 @@ Every other call in this chapter is not a blocking call and is not a
 suspend point, even when it takes time. This includes every File call, also
 on a path such as a FIFO or `/dev/stdin` where the operating system can make
 it wait: a program that reads such a path blocks its worker, but the call is
-not a suspend point. `task.receive()` suspends its task
-but does not block the worker, so it is not in this table.
+not a suspend point. `task.receive()` and its forms with a limit or a
+condition suspend their task but do not block the worker, so they are not in
+this table.
 
 ---
 

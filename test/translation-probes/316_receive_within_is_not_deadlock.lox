@@ -1,0 +1,21 @@
+// A task that waits in a receive with a limit can continue, because its limit
+// can pass, so it prevents a deadlock (spec/04-semantics.md, Deadlock). The
+// main task and `waiter` wait. `waiter` has no limit, and the main task has
+// one: no program ends with DeadlockError while the limit can pass. The main
+// task then gets TimeoutError and goes on.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: waiter waits
+// CHECK: TimeoutError
+// CHECK: main goes on
+fun waiter() {
+    print "waiter waits";
+    task.receive();
+}
+task.spawn(waiter);
+try {
+    task.receive_within(0.2);
+} catch (e) {
+    print e.kind;
+}
+print "main goes on";

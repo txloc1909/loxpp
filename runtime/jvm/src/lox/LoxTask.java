@@ -1,6 +1,5 @@
 package lox;
 
-import java.util.ArrayDeque;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -20,7 +19,7 @@ public final class LoxTask {
         DEAD,
     }
 
-    // ArrayDeque rejects null, and nil is a message.
+    // The mailbox uses null for an empty place, and nil is a message.
     private static final Object NIL = new Object();
 
     final LoxWorker worker;
@@ -33,7 +32,14 @@ public final class LoxTask {
     // What the thread of a task.spawn task runs; null for a task that
     // starts on the thread that makes it.
     Runnable body;
-    private final ArrayDeque<Object> mailbox = new ArrayDeque<>();
+    // A ring buffer, so that receive_where can read and remove a message by
+    // its place. The head and the end stay O(1), as for a deque.
+    private Object[] mailbox = new Object[8];
+    private int mailboxHead;
+    private int mailboxSize;
+    // True while the task waits in a receive_* call that has a limit: a send
+    // must take its timer away (see LoxWorker.send).
+    boolean limitedWait;
 
     // The frame count and the handler depth of this task while another
     // task of the worker runs (see LoxWorker.switchTo). A task starts below
@@ -67,16 +73,48 @@ public final class LoxTask {
         return v instanceof LoxEnum && ((LoxEnum)v).message;
     }
 
-    void deliver(Object msg) { mailbox.addLast(msg == null ? NIL : msg); }
+    void deliver(Object msg) {
+        if (mailboxSize == mailbox.length) {
+            Object[] bigger = new Object[mailbox.length * 2];
+            for (int i = 0; i < mailboxSize; i++) {
+                bigger[i] = mailbox[(mailboxHead + i) % mailbox.length];
+            }
+            mailbox = bigger;
+            mailboxHead = 0;
+        }
+        mailbox[(mailboxHead + mailboxSize) % mailbox.length] =
+            msg == null ? NIL : msg;
+        mailboxSize++;
+    }
 
-    boolean hasMessage() { return !mailbox.isEmpty(); }
+    boolean hasMessage() { return mailboxSize > 0; }
 
-    int pending() { return mailbox.size(); }
+    int pending() { return mailboxSize; }
 
-    Object takeMessage() {
-        Object m = mailbox.pollFirst();
+    /** The message at {@code at}, 0 being the head. */
+    Object peekAt(int at) {
+        Object m = mailbox[(mailboxHead + at) % mailbox.length];
         return m == NIL ? null : m;
     }
 
-    void discardMessages() { mailbox.clear(); }
+    /** Removes the message at {@code at} and keeps the order of the rest. */
+    Object removeAt(int at) {
+        Object m = peekAt(at);
+        for (int i = at; i > 0; i--) {
+            mailbox[(mailboxHead + i) % mailbox.length] =
+                mailbox[(mailboxHead + i - 1) % mailbox.length];
+        }
+        mailbox[mailboxHead] = null;
+        mailboxHead = (mailboxHead + 1) % mailbox.length;
+        mailboxSize--;
+        return m;
+    }
+
+    Object takeMessage() { return removeAt(0); }
+
+    void discardMessages() {
+        mailbox = new Object[8];
+        mailboxHead = 0;
+        mailboxSize = 0;
+    }
 }

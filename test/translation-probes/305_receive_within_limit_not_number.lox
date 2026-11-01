@@ -1,0 +1,8 @@
+// The limit of task.receive_within must be a Number: a String is a runtime
+// error, which halts the program (spec/04-semantics.md,
+// task.receive_within, step 1).
+// STATUS: error
+// CHECK: before
+print "before";
+task.receive_within("1");
+print "after";

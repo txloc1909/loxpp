@@ -1,0 +1,29 @@
+// When no message is selected, task.receive_where suspends the task. Each time
+// the task runs again, the call tests the messages that arrived, in order, and
+// calls `want` at most once for each message (spec/04-semantics.md,
+// task.receive_within, step 3). The log shows each message once, in order,
+// however many times the task wakes. The rejected messages stay in the mailbox.
+// STATUS: ok
+// TIMEOUT: 10
+// CHECK: tested 1
+// CHECK: tested 2
+// CHECK: tested 3
+// CHECK: tested t
+// CHECK: got t
+// CHECK: 3
+var me = task.self();
+fun isText(m) {
+    print "tested " + str(m);
+    return type(m) == "String";
+}
+fun sender() {
+    task.send(me, 2);
+    task.send(me, 3);
+    yield;
+    task.send(me, "t");
+}
+task.send(me, 1);
+task.spawn(sender);
+var got = task.receive_where(isText);
+print "got " + got;
+print task.pending();

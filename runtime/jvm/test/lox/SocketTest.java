@@ -163,6 +163,47 @@ public final class SocketTest {
             second.close();
         }
 
+        // A limit on connect: the listener never accepts and its queue of
+        // waiting connections is full, so only the limit ends the wait.
+        try (java.nio.channels.ServerSocketChannel full =
+                 java.nio.channels.ServerSocketChannel.open()) {
+            full.bind(new java.net.InetSocketAddress("127.0.0.1", 0), 1);
+            int fullPort = ((java.net.InetSocketAddress)full.getLocalAddress()).getPort();
+            java.util.ArrayList<java.nio.channels.SocketChannel> fillers = new java.util.ArrayList<>();
+            boolean stuck = false;
+            try {
+                for (int i = 0; i < 8 && !stuck; i++) {
+                    java.nio.channels.SocketChannel f = java.nio.channels.SocketChannel.open();
+                    fillers.add(f);
+                    f.configureBlocking(false);
+                    if (!f.connect(new java.net.InetSocketAddress("127.0.0.1", fullPort))) {
+                        long end = System.nanoTime() + 100_000_000L;
+                        while (!f.finishConnect() && System.nanoTime() < end) {
+                            Thread.sleep(1);
+                        }
+                        stuck = !f.finishConnect();
+                    }
+                }
+                if (stuck) {
+                    LoxError limit = null;
+                    try {
+                        LoxSocket.connect("127.0.0.1", fullPort, 200_000_000L);
+                    } catch (LoxError e) {
+                        limit = e;
+                    }
+                    check(limit != null, "a limit ends a connect that is not answered");
+                    check(limit != null && limit.getMessage().contains("timed out"),
+                          "the fault of a limit names the timeout");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                for (java.nio.channels.SocketChannel f : fillers) {
+                    f.close();
+                }
+            }
+        }
+
         // close_write() is a no-op after close(), matching spec/05-stdlib.md.
         LoxServer cs = LoxServer.listen("127.0.0.1", 0);
         LoxSocket cc = LoxSocket.connect("127.0.0.1", (int)cs.port());

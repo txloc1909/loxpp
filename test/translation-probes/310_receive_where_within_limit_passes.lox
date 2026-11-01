@@ -1,0 +1,31 @@
+// task.receive_where_within raises TimeoutError when the limit passes and no
+// message is selected. The mailbox is unchanged: every message, selected or
+// not, is still there in its order. A message that is selected within the limit
+// ends the wait (spec/04-semantics.md, task.receive_within, step 4).
+// STATUS: ok
+// COVERS: receive-point task.receive_where_within
+// TIMEOUT: 30
+// CHECK: TimeoutError
+// CHECK: 2
+// CHECK: 1
+// CHECK: 2
+// CHECK: wanted
+fun isText(m) { return type(m) == "String"; }
+var me = task.self();
+task.send(me, 1);
+task.send(me, 2);
+try {
+    task.receive_where_within(isText, 0.05);
+    print "no fault";
+} catch (e) {
+    print e.kind;
+}
+print task.pending();
+print task.receive();
+print task.receive();
+fun later() {
+    sleep(0.05);
+    task.send(me, "wanted");
+}
+task.spawn(later);
+print task.receive_where_within(isText, 60);

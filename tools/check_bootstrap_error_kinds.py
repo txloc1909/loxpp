@@ -141,6 +141,9 @@ EXPECTED_CALLS = [
     ('SendError', '"Value of type " + reflectTypeName(msg) + " is not a message."', JUDGED),
     ('DeadTaskError', '"Cannot send to a task that has ended."', JUDGED),
     ('YieldAcrossNativeError', '"Cannot receive across a native callback."', JUDGED),
+    ('YieldAcrossNativeError', '"Cannot receive in a function that receive_where calls."', JUDGED),
+    ('TimeoutError', '"The limit of the receive passed."', JUDGED),
+    ('YieldAcrossNativeError', '"Cannot receive across a native callback."', JUDGED),
     ('NaNKeyError', '"NaN cannot be used as a map key."', RECORDED),
     ('InvalidMapKeyError', '"Map keys must be Bool, Number, Nil, String, or an object with __hash__ and __eq__."', RECORDED),
     ('OperatorResultTypeError', '"Operator method must return a Number."', JUDGED),
@@ -212,7 +215,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 30
+EXPECTED_SPEC_TABLE_KIND_COUNT = 31
 
 
 def strip_string_literals(text: str) -> str:

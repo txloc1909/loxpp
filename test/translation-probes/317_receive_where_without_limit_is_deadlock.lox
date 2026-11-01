@@ -1,0 +1,25 @@
+// A receive without a limit has no event that can end it but a message. The
+// task `bounded` waits with a limit, so the program is not deadlocked until its
+// limit has passed and it has ended. The main task then waits in
+// task.receive_where with no limit and nothing can run again: the program ends
+// with DeadlockError, a halting fault (spec/04-semantics.md, Deadlock). The
+// `want` function is never called, because no message arrives.
+// STATUS: error
+// TIMEOUT: 30
+// CHECK: bounded waits
+// CHECK: main waits
+// CHECK: bounded timed out
+fun never(m) { return true; }
+fun bounded() {
+    print "bounded waits";
+    try {
+        task.receive_within(0.1);
+    } catch (e) {
+        print "bounded timed out";
+    }
+}
+task.spawn(bounded);
+yield;
+print "main waits";
+task.receive_where(never);
+print "main woke";

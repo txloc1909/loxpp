@@ -49,6 +49,10 @@ class Poller {
     Token waitFd(int fd, Interest interest, Token again = 0);
     // Registers a wait for `deadline`. One-shot.
     Token waitUntil(Clock::time_point deadline);
+    // The time `seconds` from now, or the latest time the clock can represent
+    // when `seconds` reaches that limit (about 292 years): such a wait does
+    // not end, and the sum never overflows. `seconds` must be greater than 0.
+    static Clock::time_point deadlineAfter(double seconds);
     // Removes a wait that was not reported. False when it is not there.
     bool cancel(Token token);
     // Removes every wait on `fd` and appends their tokens to `cancelled`, in
