@@ -45,8 +45,8 @@ const WAIT_BUDGET_MS = 45_000;
  * outer bound holds the whole budget, which holds five capped waits and the
  * fixed sleeps, plus the setup and the teardown.
  */
-function processTest(name: string, body: (left: () => number) => Promise<void>): void {
-  test(name, { timeout: WAIT_BUDGET_MS + 15_000 }, async () => {
+function processTest(name: string, body: (left: () => number) => Promise<void>, skip: false | string = false): void {
+  test(name, { skip, timeout: WAIT_BUDGET_MS + 15_000 }, async () => {
     const until = Date.now() + WAIT_BUDGET_MS;
     await body(() => Math.min(TIMEOUT_MS, Math.max(1, until - Date.now())));
   });
@@ -506,9 +506,21 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
 });
 
 /**
+ * Whether the shell a run starts in imports an exported function at all. Where
+ * `/bin/sh` is bash it does, and in POSIX mode it refuses one for a special
+ * builtin; where it is dash there is no way to export a function, so no shadow
+ * can arrive and the tests that build one skip.
+ */
+const SHADOWS_ARRIVE =
+  spawnSync("/bin/sh", ["-c", 'probe_fn() { :; }; export -f probe_fn; /bin/sh -c "type -t probe_fn"'], {
+    encoding: "utf8",
+  }).stdout.trim() === "function";
+const NO_SHADOWS = SHADOWS_ARRIVE ? false : "this shell imports no exported function, so no shadow can arrive";
+
+/**
  * Start a run whose shell has the given functions exported first, the way a
  * parent shell can hand them to pi. The run keeps the shell it has in
- * production, `/bin/sh`; the comment in the body says what that imports.
+ * production, `/bin/sh`.
  */
 function shadowedRun(scriptPath: string, args: string[], shadow: string[]): ChildProcess {
   // The script starts as `/bin/sh` in production too, so the test uses that
@@ -530,7 +542,9 @@ function oneShadow(name: string, body: string): string[] {
   return [`${name}() { ${body}; }`, `export -f ${name}`];
 }
 
-processTest("a shadowed tr does not make every pid read as gone", async (left) => {
+processTest(
+  "a shadowed tr does not make every pid read as gone",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -552,9 +566,13 @@ processTest("a shadowed tr does not make every pid read as gone", async (left) =
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed head does not turn the watch off", async (left) => {
+processTest(
+  "a shadowed head does not turn the watch off",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -575,9 +593,13 @@ processTest("a shadowed head does not turn the watch off", async (left) => {
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed sleep does not stop the poll", async (left) => {
+processTest(
+  "a shadowed sleep does not stop the poll",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -598,9 +620,13 @@ processTest("a shadowed sleep does not stop the poll", async (left) => {
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed printf does not lose the run's exit code", async (left) => {
+processTest(
+  "a shadowed printf does not lose the run's exit code",
+  async (left) => {
   await withTempDir(async (dir) => {
     const exitPath = path.join(dir, "exit.code");
     const scriptPath = await watchedScript(dir, {
@@ -620,9 +646,13 @@ processTest("a shadowed printf does not lose the run's exit code", async (left) 
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed command does not turn the watch off", async (left) => {
+processTest(
+  "a shadowed command does not turn the watch off",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -645,9 +675,13 @@ processTest("a shadowed command does not turn the watch off", async (left) => {
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed [, wait or cd does not change the run", async (left) => {
+processTest(
+  "a shadowed [, wait or cd does not change the run",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const cwdFile = path.join(dir, "cwd");
@@ -676,9 +710,13 @@ processTest("a shadowed [, wait or cd does not change the run", async (left) => 
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed [ does not lose the parent pid check", async (left) => {
+processTest(
+  "a shadowed [ does not lose the parent pid check",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -698,9 +736,13 @@ processTest("a shadowed [ does not lose the parent pid check", async (left) => {
       await stopRun(script, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
-processTest("a shadowed [ does not lose the group signal", async (left) => {
+processTest(
+  "a shadowed [ does not lose the group signal",
+  async (left) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const grandchildPidFile = path.join(dir, "grandchild.pid");
@@ -733,7 +775,9 @@ processTest("a shadowed [ does not lose the group signal", async (left) => {
       await stopRun(wrapper, left());
     }
   });
-});
+  },
+  NO_SHADOWS,
+);
 
 processTest("a run that ends on its own leaves its held window alone when the parent dies later", async (left) => {
   await withTempDir(async (dir) => {
