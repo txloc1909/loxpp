@@ -217,6 +217,11 @@ async function register(box: Box, env: { kitty: boolean }): Promise<Harness> {
   process.env.PATH = `${box.bin}:${previous.PATH}`;
   process.env.FAKE_KITTY_DIR = box.kittenDir;
   process.env.LOXPP_SUBAGENT_PI = path.join(box.bin, "pi-stand-in");
+  // An unattended run passes this process's environment to the child. When the
+  // test runs inside a watched subagent, the variable is already here, and the
+  // stand-in would take its watched branch and wait for a `go` file that an
+  // unattended run never writes.
+  delete process.env.LOXPP_SUBAGENT_EVENTS;
   process.env.PI_CODING_AGENT_DIR = box.agentDir;
   if (env.kitty) {
     process.env.KITTY_WINDOW_ID = "42";
