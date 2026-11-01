@@ -146,6 +146,26 @@ public final class LoxSocket {
         return readBytes(checkByteCountArg(arg, "read_bytes"));
     }
 
+    /**
+     * The bytes that are there, up to {@code n}, without waiting for more:
+     * the unread buffer first, else one read of the channel. "" at EOF.
+     */
+    public Object readSome(int n) {
+        LoxWorker.beginWaitingCall();
+        if (pos == lim && !fill("read_some")) {
+            return "";
+        }
+        int take = Math.min(lim - pos, n);
+        String out = new String(buf, pos, take, LoxRuntime.CHARSET);
+        pos += take;
+        return out;
+    }
+
+    public Object readSomeArg(Object arg) {
+        checkOpen("read_some");
+        return readSome(checkByteCountArg(arg, "read_some", 1));
+    }
+
     /** One line, newline stripped; null at EOF. A partial trailing line still counts. */
     public Object readline() {
         checkOpen("readline");
@@ -347,6 +367,8 @@ public final class LoxSocket {
             return new LoxNative("read", 0, a -> read());
         case "read_bytes":
             return new LoxNative("read_bytes", 1, a -> readBytesArg(a[0]));
+        case "read_some":
+            return new LoxNative("read_some", 1, a -> readSomeArg(a[0]));
         case "readline":
             return new LoxNative("readline", 0, a -> readline());
         case "readlines":
@@ -389,14 +411,20 @@ public final class LoxSocket {
      * the int range is the accepted shape.
      */
     static int checkByteCountArg(Object v, String method) {
+        return checkByteCountArg(v, method, 0);
+    }
+
+    static int checkByteCountArg(Object v, String method, int minimum) {
         if (!(v instanceof Double)) {
             throw new LoxError(method + "() byte count must be a number.");
         }
         double raw = (Double)v;
         if (Double.isNaN(raw) || Double.isInfinite(raw) ||
-            raw != Math.floor(raw) || raw < 0 || raw > Integer.MAX_VALUE) {
+            raw != Math.floor(raw) || raw < minimum ||
+            raw > Integer.MAX_VALUE) {
             throw new LoxError(method +
-                "() byte count must be an integer in range 0 to 2147483647.");
+                "() byte count must be an integer in range " + minimum +
+                " to 2147483647.");
         }
         return (int)raw;
     }
