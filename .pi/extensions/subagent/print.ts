@@ -90,7 +90,7 @@ export function buildPrintScript(spec: PrintScriptSpec): string {
     ...watchdogFunctions(),
     // `spawn` now starts this shell, so a command that is not there is this
     // script's job to report, as spawn used to report it with ENOENT.
-    `command -v ${shellQuote(command)} >/dev/null 2>&1 || { printf '%s\\n' ${shellQuote(`loxpp subagent: cannot start ${command}`)} >&2; exit 127; }`,
+    `command -v ${shellQuote(command)} >/dev/null 2>&1 || { command printf '%s\\n' ${shellQuote(`loxpp subagent: cannot start ${command}`)} >&2; exit 127; }`,
     `${[command, ...args].map(shellQuote).join(" ")} </dev/null &`,
     "child=$!",
     ...watchdogLines({ pollS: spec.watchPollS, graceS: spec.watchGraceS, reach: "group-when-led" }),

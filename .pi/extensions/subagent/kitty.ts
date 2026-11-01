@@ -161,8 +161,8 @@ export function buildRunScript(spec: RunScriptSpec): string {
     "# Written by the Lox++ pi subagent extension; removed when the run ends.",
     "set -u",
     ...parentPidLines(),
-    `printf '%s\\n' ${spec.header.map(quote).join(" ")} ''`,
-    `cd ${quote(spec.cwd)} || { printf '%s\\n' ${quote(cdFailure)}; printf '%s\\n' 1 > ${quote(spec.exitPath)}; exit 1; }`,
+    `command printf '%s\\n' ${spec.header.map(quote).join(" ")} ''`,
+    `cd ${quote(spec.cwd)} || { command printf '%s\\n' ${quote(cdFailure)}; command printf '%s\\n' 1 > ${quote(spec.exitPath)}; exit 1; }`,
     ...watchdogFunctions(),
     "exec 3<&0",
     `${spec.command.map(quote).join(" ")} 0<&3 2> ${quote(spec.stderrPath)} &`,
@@ -178,7 +178,7 @@ export function buildRunScript(spec: RunScriptSpec): string {
     'wait "$child"',
     "status=$?",
     ...stopWatcherLines(),
-    `printf '%s\\n' "$status" > ${quote(spec.exitPath)}`,
+    `command printf '%s\\n' "$status" > ${quote(spec.exitPath)}`,
     "",
   ].join("\n");
 }

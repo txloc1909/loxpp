@@ -37,7 +37,7 @@ export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
     'if [ -z "$parent_pid" ]; then',
-    "  printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
+    "  command printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
     "fi",
   ];
@@ -70,8 +70,14 @@ export function parentPidLines(): string[] {
  * inherited from whatever started pi cannot change what the watch does. A
  * function named `tr` that prints nothing makes a live parent read as gone, one
  * named `head` makes `ps` read as unable to answer, and one named `sleep` makes
- * the poll spin or never run. `kill` and `printf` are builtins, and `command`
- * skips a function before it reaches the builtin.
+ * the poll spin or never run. A function named `printf` loses the exit code,
+ * and one named `kill` loses the signals. `command` skips a function and then
+ * runs the builtin, so every builtin the watch uses carries it too.
+ *
+ * One name is left: a function named `command` itself shadows the builtin, and a
+ * POSIX shell has no way past it. The rule therefore covers an accidental
+ * shadow from a parent shell, not a deliberate one: whoever can export that
+ * function can also set PATH, and nothing in this script can answer for both.
  */
 /**
  * The `ps` call that decides whether `ps` can answer at all. It is used only

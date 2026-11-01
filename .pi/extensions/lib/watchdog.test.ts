@@ -289,13 +289,14 @@ test("every module in the extensions tree that starts a process is accounted for
 });
 
 test("every script builder carries the watchdog", () => {
+  const kitten = "/opt/kitty/bin/kitten";
   const watched = buildRunScript({
     header: ["h"],
     cwd: "/",
     command: ["/bin/sh", "-c", "true"],
     stderrPath: "/tmp/err.log",
     exitPath: "/tmp/exit.code",
-    kitten: "kitten",
+    kitten,
     socket: "unix:/tmp/sock",
   });
   const unattended = buildPrintScript({ command: ["/bin/sh", "-c", "true"] });
@@ -310,10 +311,13 @@ test("every script builder carries the watchdog", () => {
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
     assert.ok(script.includes(PS_PROBE), `${name} asks ps whether it can answer at all`);
-    for (const needle of ["command tr", "command head", "command sleep", "command kill"]) {
+    for (const needle of ["command tr", "command head", "command sleep", "command kill", "command printf"]) {
       assert.ok(script.includes(needle), `${name} runs \`${needle}\` through command, so no function shadows it`);
     }
   }
+  // The close call is the one external whose path is quoted, so it is checked
+  // by the path and not by a name.
+  assert.ok(watched.includes(`command '${kitten}'`), "the close call runs kitten through command");
 });
 
 processTest("a watched run ends its child and closes its window when the parent dies", async (left) => {
@@ -546,6 +550,28 @@ processTest("a shadowed sleep does not stop the poll", async (left) => {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a shadowed printf does not lose the run's exit code", async (left) => {
+  await withTempDir(async (dir) => {
+    const exitPath = path.join(dir, "exit.code");
+    const scriptPath = await watchedScript(dir, {
+      child: "exit 7",
+      kitten: await fakeKitten(dir),
+      exitPath,
+    });
+    const parent = standInParent();
+    // A `printf` that prints nothing would leave the exit file empty, and the
+    // parent reads that file as the run's result.
+    const script = shadowedRun(scriptPath, parent.pid!, "printf", ":");
+    try {
+      await waitFor("the script to end", () => script.exitCode !== null || script.signalCode !== null, left());
+      assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "7", "the child's code reached the file");
     } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());
