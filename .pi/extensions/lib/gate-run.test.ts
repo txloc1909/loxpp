@@ -12,12 +12,15 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./gate-run.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 const WATCH = { pollS: 0.05, graceS: 0.3 };
 const TIMEOUT_MS = 8000;
+
+/** The dirs that exist, so a box made outside `withBox` fails the file. */
+const liveDirs = new Set<string>();
 
 const FAKE_PODMAN = `#!/bin/sh
 # One log line per call: the gate script argument carries newlines of its own.
@@ -59,10 +62,15 @@ interface Box {
   marker: string;
   log: string;
   name: string;
+  /** The run wrappers this test started, in the order it started them. */
+  procs: ChildProcess[];
+  /** The stand-in parents, which hold this process open until they are killed. */
+  parents: ChildProcess[];
 }
 
 async function box(extra: Record<string, string> = {}): Promise<Box> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-gate-run-"));
+  liveDirs.add(dir);
   const bin = path.join(dir, "bin");
   await fs.promises.mkdir(bin);
   await fs.promises.writeFile(path.join(bin, "podman"), FAKE_PODMAN, { mode: 0o700 });
@@ -82,6 +90,8 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
     marker,
     log,
     name,
+    procs: [],
+    parents: [],
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
@@ -94,6 +104,79 @@ async function box(extra: Record<string, string> = {}): Promise<Box> {
     },
   };
 }
+
+/**
+ * Run one test in its own box, and remove the dir whether the body passes or
+ * fails. The stand-in parent and the run's group go first: the fake podman
+ * writes into this dir, and a writer that is still live leaves an entry behind
+ * for the removal. A body that failed keeps its own error.
+ */
+async function withBox(extra: Record<string, string>, body: (b: Box) => Promise<void>): Promise<void> {
+  const b = await box(extra);
+  let bodyFailed = false;
+  try {
+    await body(b);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    for (const parent of b.parents) parent.kill("SIGKILL");
+    try {
+      for (const proc of b.procs) await endGroup(proc);
+    } finally {
+      try {
+        await removeDir(b.dir);
+        liveDirs.delete(b.dir);
+      } catch (error) {
+        // The body's error says what the test proved wrong; a removal that
+        // raced a writer must not replace it.
+        if (!bodyFailed) throw error;
+      }
+    }
+  }
+}
+
+/**
+ * End a run's whole group and wait until no member answers: the wrapper leads
+ * its own group, which holds the fake podman client and the watcher. A signal
+ * to the wrapper's pid alone leaves the client, and the client writes here.
+ */
+async function endGroup(proc: ChildProcess): Promise<void> {
+  const group = proc.pid === undefined ? undefined : -proc.pid;
+  if (group === undefined) return;
+  try {
+    process.kill(group, "SIGKILL");
+  } catch {
+    // The group is already gone.
+  }
+  await waitFor("the run's process group to end", () => {
+    try {
+      process.kill(group, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+}
+
+/**
+ * `rm` unlinks the entries and then calls `rmdir`, so a writer that is still
+ * live leaves an entry behind and the error names the dir, not the writer.
+ */
+async function removeDir(dir: string): Promise<void> {
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  } catch (error) {
+    const left = fs.existsSync(dir) ? fs.readdirSync(dir).sort().join(", ") : "(the directory was already gone)";
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`a process was still writing when the gate temp dir was removed: it held ${left}: ${detail}`);
+  }
+}
+
+// A box made outside `withBox` would keep its dir after the file ends.
+after(() => {
+  assert.deepEqual([...liveDirs], [], "every gate-run temp dir is removed by the test that made it");
+});
 
 /** An exited process that nobody has reaped yet still answers `kill -0`. */
 function alive(pid: number): boolean {
@@ -130,11 +213,13 @@ const readOr = async (file: string, fallback = ""): Promise<string> => {
 const calls = async (b: Box): Promise<string[]> => (await readOr(b.log)).trim().split("\n").filter(Boolean);
 
 function wrapper(b: Box, parentPid: number): ChildProcess {
-  return spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid)], {
+  const proc = spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid)], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: b.env,
   });
+  b.procs.push(proc);
+  return proc;
 }
 
 async function finish(proc: ChildProcess): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -146,8 +231,10 @@ async function finish(proc: ChildProcess): Promise<{ code: number | null; stdout
   return { code, stdout, stderr };
 }
 
-function standInParent(): ChildProcess {
-  return spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+function standInParent(b: Box): ChildProcess {
+  const parent = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  b.parents.push(parent);
+  return parent;
 }
 
 async function killParent(parent: ChildProcess): Promise<void> {
@@ -176,146 +263,154 @@ test("the gate argv names the container and the wrapper removes it", () => {
 });
 
 test("a gate that ends by itself passes its code and its output through", { timeout: 20000 }, async () => {
-  const b = await box({ FAKE_SELF_EXIT: "0.1" });
-  const done = await finish(wrapper(b, process.pid));
-  assert.equal(done.code, 0);
-  assert.match(done.stdout, /gate output/);
-  const log = await calls(b);
-  assert.deepEqual(
-    log.map((line) => line.split(" ")[0]),
-    ["rm", "run"],
-    "the leftover removal runs before the gate, and nothing is removed after it",
-  );
+  await withBox({ FAKE_SELF_EXIT: "0.1" }, async (b) => {
+    const done = await finish(wrapper(b, process.pid));
+    assert.equal(done.code, 0);
+    assert.match(done.stdout, /gate output/);
+    const log = await calls(b);
+    assert.deepEqual(
+      log.map((line) => line.split(" ")[0]),
+      ["rm", "run"],
+      "the leftover removal runs before the gate, and nothing is removed after it",
+    );
+  });
 });
 
 test("a failing gate keeps its code and its stderr", { timeout: 20000 }, async () => {
-  const b = await box({ FAKE_SELF_EXIT: "0.1", FAKE_CODE: "3", FAKE_ERR: "test failed" });
-  const done = await finish(wrapper(b, process.pid));
-  assert.equal(done.code, 3);
-  assert.match(done.stderr, /test failed/);
+  await withBox({ FAKE_SELF_EXIT: "0.1", FAKE_CODE: "3", FAKE_ERR: "test failed" }, async (b) => {
+    const done = await finish(wrapper(b, process.pid));
+    assert.equal(done.code, 3);
+    assert.match(done.stderr, /test failed/);
+  });
 });
 
 test("the container ends when the parent dies", { timeout: 20000 }, async () => {
-  const b = await box();
-  const parent = standInParent();
-  const proc = wrapper(b, parent.pid!);
-  const done = finish(proc);
-  try {
-    await waitFor("the container to start", () => fs.existsSync(b.marker));
-    const clientPid = await clientPidOf(b);
-    await killParent(parent);
-    await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
-    await waitFor("the client to end", () => !alive(clientPid));
-    const log = await calls(b);
-    // The removal names this run's container, so a wrapper cannot remove
-    // another run's container. The second removal is held by the race test
-    // below: a container this one already removed ends its client.
-    const after = log.slice(log.findIndex((line) => line.startsWith("run")) + 1);
-    assert.ok(
-      after.some((line) => line.startsWith(`rm -f --time 0 ${b.name}`)),
-      `a removal of ${b.name} follows the gate, got: ${after.join(" | ")}`,
-    );
-  } finally {
-    proc.kill("SIGKILL");
-    parent.kill("SIGKILL");
-    await done;
-  }
+  await withBox({}, async (b) => {
+    const parent = standInParent(b);
+    const proc = wrapper(b, parent.pid!);
+    const done = finish(proc);
+    try {
+      await waitFor("the container to start", () => fs.existsSync(b.marker));
+      const clientPid = await clientPidOf(b);
+      await killParent(parent);
+      await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
+      await waitFor("the client to end", () => !alive(clientPid));
+      const log = await calls(b);
+      // The removal names this run's container, so a wrapper cannot remove
+      // another run's container. The second removal is held by the race test
+      // below: a container this one already removed ends its client.
+      const post = log.slice(log.findIndex((line) => line.startsWith("run")) + 1);
+      assert.ok(
+        post.some((line) => line.startsWith(`rm -f --time 0 ${b.name}`)),
+        `a removal of ${b.name} follows the gate, got: ${post.join(" | ")}`,
+      );
+    } finally {
+      proc.kill("SIGKILL");
+      parent.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("a client that ignores SIGTERM still loses its container", { timeout: 20000 }, async () => {
-  const b = await box({ FAKE_IGNORE_TERM: "1" });
-  const parent = standInParent();
-  const proc = wrapper(b, parent.pid!);
-  const done = finish(proc);
-  try {
-    await waitFor("the container to start", () => fs.existsSync(b.marker));
-    const clientPid = await clientPidOf(b);
-    await killParent(parent);
-    await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
-    await waitFor("the client to end", () => !alive(clientPid));
-  } finally {
-    proc.kill("SIGKILL");
-    parent.kill("SIGKILL");
-    await done;
-  }
+  await withBox({ FAKE_IGNORE_TERM: "1" }, async (b) => {
+    const parent = standInParent(b);
+    const proc = wrapper(b, parent.pid!);
+    const done = finish(proc);
+    try {
+      await waitFor("the container to start", () => fs.existsSync(b.marker));
+      const clientPid = await clientPidOf(b);
+      await killParent(parent);
+      await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
+      await waitFor("the client to end", () => !alive(clientPid));
+    } finally {
+      proc.kill("SIGKILL");
+      parent.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("an abort ends the run instead of waiting for it", { timeout: 20000 }, async () => {
-  const b = await box();
-  const proc = wrapper(b, process.pid);
-  const done = finish(proc);
-  try {
-    await waitFor("the container to start", () => fs.existsSync(b.marker));
-    const clientPid = await clientPidOf(b);
-    const started = Date.now();
-    proc.kill("SIGTERM");
-    await waitFor("the wrapper to end", async () => !alive(proc.pid!));
-    assert.ok(Date.now() - started < 5000, "the abort did not wait for the container's own end");
-    assert.equal(fs.existsSync(b.marker), false, "the container is removed");
-    assert.equal(alive(clientPid), false, "the client is gone");
-  } finally {
-    proc.kill("SIGKILL");
-    await done;
-  }
+  await withBox({}, async (b) => {
+    const proc = wrapper(b, process.pid);
+    const done = finish(proc);
+    try {
+      await waitFor("the container to start", () => fs.existsSync(b.marker));
+      const clientPid = await clientPidOf(b);
+      const started = Date.now();
+      proc.kill("SIGTERM");
+      await waitFor("the wrapper to end", async () => !alive(proc.pid!));
+      assert.ok(Date.now() - started < 5000, "the abort did not wait for the container's own end");
+      assert.equal(fs.existsSync(b.marker), false, "the container is removed");
+      assert.equal(alive(clientPid), false, "the client is gone");
+    } finally {
+      proc.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("a container created after the first removal is still removed", { timeout: 20000 }, async () => {
   // `podman run` can create the container after the first removal landed. The
   // fake models that by ignoring its first two removals: the one before the
   // run, and the one that should have caught the container.
-  const b = await box({ FAKE_RM_NOOP_FIRST: "2" });
-  const parent = standInParent();
-  const proc = wrapper(b, parent.pid!);
-  const done = finish(proc);
-  try {
-    await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
-    const clientPid = await clientPidOf(b);
-    await killParent(parent);
-    await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
-    await waitFor("the client to end", () => !alive(clientPid));
-  } finally {
-    proc.kill("SIGKILL");
-    parent.kill("SIGKILL");
-    await done;
-  }
+  await withBox({ FAKE_RM_NOOP_FIRST: "2" }, async (b) => {
+    const parent = standInParent(b);
+    const proc = wrapper(b, parent.pid!);
+    const done = finish(proc);
+    try {
+      await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
+      const clientPid = await clientPidOf(b);
+      await killParent(parent);
+      await waitFor("the container to be removed", () => !fs.existsSync(b.marker));
+      await waitFor("the client to end", () => !alive(clientPid));
+    } finally {
+      proc.kill("SIGKILL");
+      parent.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("an abort that lands before the container exists still ends it", { timeout: 20000 }, async () => {
   // The first two removals land before the container exists: the one before the
   // run, and the abort's own. A killed client does not remove its container, so
   // the abort's second removal is what ends it.
-  const b = await box({ FAKE_RM_NOOP_FIRST: "2" });
-  const proc = wrapper(b, process.pid);
-  const done = finish(proc);
-  try {
-    await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
-    const clientPid = await clientPidOf(b);
-    proc.kill("SIGTERM");
-    await waitFor("the wrapper to end", async () => !alive(proc.pid!));
-    assert.equal(fs.existsSync(b.marker), false, "the container is removed");
-    await waitFor("the client to end", () => !alive(clientPid));
-  } finally {
-    proc.kill("SIGKILL");
-    await done;
-  }
+  await withBox({ FAKE_RM_NOOP_FIRST: "2" }, async (b) => {
+    const proc = wrapper(b, process.pid);
+    const done = finish(proc);
+    try {
+      await waitFor("the client to start", () => fs.existsSync(path.join(b.dir, "client.pid")));
+      const clientPid = await clientPidOf(b);
+      proc.kill("SIGTERM");
+      await waitFor("the wrapper to end", async () => !alive(proc.pid!));
+      assert.equal(fs.existsSync(b.marker), false, "the container is removed");
+      await waitFor("the client to end", () => !alive(clientPid));
+    } finally {
+      proc.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("an abort still ends the run when the removal fails", { timeout: 20000 }, async () => {
-  const b = await box({ FAKE_IGNORE_TERM: "1", FAKE_RM_FAIL: "1" });
-  const proc = wrapper(b, process.pid);
-  const done = finish(proc);
-  try {
-    await waitFor("the container to start", () => fs.existsSync(b.marker));
-    const clientPid = await clientPidOf(b);
-    const started = Date.now();
-    proc.kill("SIGTERM");
-    await waitFor("the wrapper to end", async () => !alive(proc.pid!), TIMEOUT_MS);
-    assert.ok(Date.now() - started < 5000, "a failed removal does not hang the tool call");
-    await waitFor("the client to end", () => !alive(clientPid));
-  } finally {
-    proc.kill("SIGKILL");
-    await done;
-  }
+  await withBox({ FAKE_IGNORE_TERM: "1", FAKE_RM_FAIL: "1" }, async (b) => {
+    const proc = wrapper(b, process.pid);
+    const done = finish(proc);
+    try {
+      await waitFor("the container to start", () => fs.existsSync(b.marker));
+      const clientPid = await clientPidOf(b);
+      const started = Date.now();
+      proc.kill("SIGTERM");
+      await waitFor("the wrapper to end", async () => !alive(proc.pid!), TIMEOUT_MS);
+      assert.ok(Date.now() - started < 5000, "a failed removal does not hang the tool call");
+      await waitFor("the client to end", () => !alive(clientPid));
+    } finally {
+      proc.kill("SIGKILL");
+      await done;
+    }
+  });
 });
 
 test("a failed gate names its container", () => {
