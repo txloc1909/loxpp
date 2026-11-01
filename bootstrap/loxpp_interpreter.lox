@@ -2649,6 +2649,29 @@ class BlockingSleeper {
     init(seconds) { this.seconds = seconds; }
     __str__() { sleep(this.seconds); return ""; }
 }
+// Runs a host call of class `suspends` inside the __str__ that str() calls,
+// where the host cannot suspend a task, so the call blocks the worker
+// (spec/05-stdlib.md, "Blocking calls"). A fault is kept and thrown again
+// outside, so it does not pass through the host's str() frame.
+class BlockedCall {
+    init(site, interp, args) {
+        this.site   = site;
+        this.interp = interp;
+        this.args   = args;
+        this.result = nil;
+        this.failed = false;
+        this.fault  = nil;
+    }
+    __str__() {
+        try {
+            this.result = this.site.hostBody(this.interp, this.args);
+        } catch (e) {
+            this.failed = true;
+            this.fault  = e;
+        }
+        return "";
+    }
+}
 fun blockingSleep(seconds) {
     str(BlockingSleeper(seconds));
     return nil;
@@ -2656,9 +2679,10 @@ fun blockingSleep(seconds) {
 
 // The calls of class `suspends` in spec/05-stdlib.md, "Blocking calls", that
 // this file reaches through a host native, by the qualified name that table
-// uses. A call on this list parks its host task, so the host runs the other
-// interpreted tasks while it waits, and the caller must run it through
-// Interpreter.saveHostSuspendState/restoreHostSuspendState.
+// uses. A call on this list parks its host task where the task can suspend, so
+// the host runs the other interpreted tasks while it waits, and blocks the
+// worker where it cannot. Every site runs it through
+// Interpreter.callSuspending, which does both.
 //
 // `sleep` is absent because blockingSleep above blocks this one-thread
 // implementation instead of suspending (spec/README.md, Conformance), so no
@@ -2843,17 +2867,9 @@ class LoxNative {
     // leaves it out.
     call(interp, args) {
         if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);
-        var saved = interp.saveHostSuspendState();
-        var result = nil;
-        try {
-            result = this.dispatch(interp, args);
-        } catch (e) {
-            interp.restoreHostSuspendState(saved);
-            throw e;
-        }
-        interp.restoreHostSuspendState(saved);
-        return result;
+        return interp.callSuspending(this, args);
     }
+    hostBody(interp, args) { return this.dispatch(interp, args); }
     arity() {
         if (this.name == "clock" or this.name == "input" or
             this.name == "args" or this.name == "time") return 0;
@@ -3273,17 +3289,13 @@ class InterpSocketMethod {
                 return hostNetFault(interp, e);
             }
         }
-        var saved = interp.saveHostSuspendState();
-        var result = nil;
         try {
-            result = this.hostCall(args);
+            return interp.callSuspending(this, args);
         } catch (e) {
-            interp.restoreHostSuspendState(saved);
             return hostNetFault(interp, e);
         }
-        interp.restoreHostSuspendState(saved);
-        return result;
     }
+    hostBody(interp, args) { return this.hostCall(args); }
     hostCall(args) {
         if (this.name == "read")      return this.socket.handle.read();
         if (this.name == "read_bytes") return this.socket.handle.read_bytes(args[0]);
@@ -3328,17 +3340,13 @@ class InterpServerMethod {
                 return hostNetFault(interp, e);
             }
         }
-        var saved = interp.saveHostSuspendState();
-        var result = nil;
         try {
-            result = this.hostCall();
+            return interp.callSuspending(this, args);
         } catch (e) {
-            interp.restoreHostSuspendState(saved);
             return hostNetFault(interp, e);
         }
-        interp.restoreHostSuspendState(saved);
-        return result;
     }
+    hostBody(interp, args) { return this.hostCall(); }
     hostCall() {
         if (this.name == "accept") return InterpSocket(this.server.handle.accept());
         if (this.name == "port")   return this.server.handle.port();
@@ -3507,6 +3515,8 @@ class InterpTask {
         this.savedStringifyDepth = 0;
         this.savedNativeDepth    = 0;
         this.savedCo             = nil;
+        this.savedOverflowUnwinding = false;
+        this.savedOverflowDeferNest = 0;
         this.loxTag    = "task";
     }
 
@@ -3754,15 +3764,50 @@ class Interpreter {
 
     // --- tasks and workers (spec/04-semantics.md, Workers and Tasks) -------
 
-    // pendingDefers, stringifyDepth, nativeDepth, and currentCo belong to the
-    // running task. The flags (returnFlag, breakFlag, continueFlag,
-    // throwFlag) need no save: each is false at every suspend point.
+    // pendingDefers, stringifyDepth, nativeDepth, currentCo, and the two
+    // overflow flags belong to the running task. The flags (returnFlag,
+    // breakFlag, continueFlag, throwFlag) need no save: each is false at every
+    // suspend point.
     parkTask(t) {
         t.savedDefers         = this.pendingDefers;
         t.savedStringifyDepth = this.stringifyDepth;
         t.savedNativeDepth    = this.nativeDepth;
         t.savedTryDepth       = this.tryDepth;
         t.savedCo             = this.currentCo;
+        t.savedOverflowUnwinding = this.overflowUnwinding;
+        t.savedOverflowDeferNest = this.overflowDeferNest;
+    }
+
+    // True when the running task can suspend here. A suspend of the task
+    // passes through every frame above it, the frames of a coroutine it
+    // resumed among them, so one native frame anywhere forbids it
+    // (spec/04-semantics.md, "Contexts where a task cannot suspend"). A yield
+    // differs: it stops at its own coroutine, so evalYield compares against
+    // that coroutine's resumeDepth.
+    canSuspend() {
+        return this.nativeDepth == 0;
+    }
+
+    // The one path of every host call of class `suspends` in
+    // isSuspendingHostCall: a call where the task can suspend parks the host
+    // task, and a call where it cannot blocks the worker.
+    callSuspending(site, args) {
+        if (!this.canSuspend()) {
+            var blocked = BlockedCall(site, this, args);
+            str(blocked);
+            if (blocked.failed) throw blocked.fault;
+            return blocked.result;
+        }
+        var saved = this.saveHostSuspendState();
+        var result = nil;
+        try {
+            result = site.hostBody(this, args);
+        } catch (e) {
+            this.restoreHostSuspendState(saved);
+            throw e;
+        }
+        this.restoreHostSuspendState(saved);
+        return result;
     }
 
     // A call of class `suspends` (spec/05-stdlib.md, "Blocking calls") parks
@@ -3775,7 +3820,7 @@ class Interpreter {
     saveHostSuspendState() {
         return [this.currentTask, this.globals, this.pendingDefers,
                 this.stringifyDepth, this.nativeDepth, this.tryDepth,
-                this.currentCo];
+                this.currentCo, this.overflowUnwinding, this.overflowDeferNest];
     }
 
     restoreHostSuspendState(saved) {
@@ -3786,6 +3831,8 @@ class Interpreter {
         this.nativeDepth    = saved[4];
         this.tryDepth       = saved[5];
         this.currentCo      = saved[6];
+        this.overflowUnwinding = saved[7];
+        this.overflowDeferNest = saved[8];
     }
 
     unparkTask(t) {
@@ -3796,6 +3843,8 @@ class Interpreter {
         this.nativeDepth    = t.savedNativeDepth;
         this.tryDepth       = t.savedTryDepth;
         this.currentCo      = t.savedCo;
+        this.overflowUnwinding = t.savedOverflowUnwinding;
+        this.overflowDeferNest = t.savedOverflowDeferNest;
     }
 
     checkDeadlock() {
@@ -3997,6 +4046,8 @@ class Interpreter {
         this.nativeDepth    = 0;
         this.tryDepth       = 0;
         this.currentCo      = nil;
+        this.overflowUnwinding = false;
+        this.overflowDeferNest = 0;
         var fn = t.fn;
         var args = [];
         if (t.entryBody != nil) {

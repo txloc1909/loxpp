@@ -367,13 +367,15 @@ if(LOXPP_PYTHON3)
     # deferred call when the task resumed after a socket park. One case here
     # runs per field of the per-task state the park overwrites, plus one for the
     # Socket class, one for the Server class, and one for the restore on the
-    # fault path of each of those two classes. Nine cases compare against
-    # native; the `nativeDepth` and `stringifyDepth` cases compare against the
-    # bootstrap itself, because native blocks the worker there and never
-    # returns (issue #1008). Then a mutation of the bootstrap changes the line
-    # that one case pins, and that case must fail, so every saved field and
-    # every restore on the fault path needs a case that catches it. Release
-    # build only: the comparison needs an untraced stdout.
+    # fault path of each of those two classes. The script has 16 cases. 15
+    # compare against native. The `stringifyDepth` case compares with the
+    # control run of the bootstrap, because the depth limit it shows is
+    # implementation-defined. Cases for state that is live only where the task
+    # cannot suspend run with the mutation `force_park`, which makes the
+    # bootstrap park there. A mutation of the bootstrap changes the line that
+    # one case pins, and that case must fail, so every saved field and every
+    # restore on the fault path needs a case that catches it. Release build
+    # only: the comparison needs an untraced stdout.
     add_test(NAME BootstrapParkState
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
                 --native $<TARGET_FILE:loxpp>

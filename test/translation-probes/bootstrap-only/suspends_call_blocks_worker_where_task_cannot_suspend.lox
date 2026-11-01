@@ -1,0 +1,56 @@
+// A call of class suspends blocks the worker where the task cannot suspend
+// (spec/05-stdlib.md, "Blocking calls"). The bootstrap interpreter runs every
+// worker on one host thread, so a task that is parked there lets the other
+// tasks of its worker run, and a worker that is blocked does not. A process
+// outside the program ends each wait. So the output tells the two apart: the
+// "checker ran" line comes after the line of the blocked call, never before.
+// The first part waits in a deferred call, and the second part in the
+// __str__ that print calls.
+// STATUS: ok
+// CHECK: outer returns
+// CHECK: inner got line
+// CHECK: checker ran
+// CHECK: str before
+// CHECK: str got line
+// CHECK: P
+// CHECK: checker ran
+var srv = listen("127.0.0.1", 0);
+var port = srv.port();
+var me = task.self();
+
+fun feeder() {
+    return spawn("bash", ["-c", "exec 3<>/dev/tcp/127.0.0.1/" + str(port) +
+                                "; sleep 0.4; echo line >&3; sleep 0.2"]);
+}
+fun checker() { print "checker ran"; task.send(me, "done"); }
+
+var conn = nil;
+fun inner() { print "inner got " + conn.readline(); }
+fun outer() { defer inner(); print "outer returns"; }
+fun worker() { outer(); task.send(me, "done"); }
+
+var p1 = feeder();
+conn = srv.accept();
+task.spawn(worker);
+task.spawn(checker);
+task.receive();
+task.receive();
+p1.wait();
+
+class P {
+    init() {}
+    __str__() {
+        print "str before";
+        print "str got " + conn.readline();
+        return "P";
+    }
+}
+fun printer() { print P(); task.send(me, "done"); }
+
+var p2 = feeder();
+conn = srv.accept();
+task.spawn(printer);
+task.spawn(checker);
+task.receive();
+task.receive();
+p2.wait();
