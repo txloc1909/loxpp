@@ -1407,6 +1407,9 @@ public final class LoxOps {
         case "read_bytes":
             requireArity(args, 1, "read_bytes");
             return socket.readBytesArg(args[0]);
+        case "read_some":
+            requireArity(args, 1, "read_some");
+            return socket.readSomeArg(args[0]);
         case "readline":
             requireArity(args, 0, "readline");
             return socket.readline();

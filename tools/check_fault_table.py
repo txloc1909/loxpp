@@ -356,6 +356,13 @@ CATCHABLE_ROWS = [
         expected_kind="SocketClosedError",
     ),
     Row(
+        "socket_closed_error_read_some",
+        "caught",
+        "c.read_some(1);",
+        setup='var l = listen("127.0.0.1", 0);\nvar c = connect("127.0.0.1", l.port());\nc.close();\n',
+        expected_kind="SocketClosedError",
+    ),
+    Row(
         "socket_closed_error_write_after_close_write",
         "caught",
         'c.write("x");',
@@ -967,6 +974,7 @@ CATCHABLE_REGRESSION_ROWS = {
     # The Socket rows: each shares the spec row of socket_closed_error or
     # network_error.
     "socket_closed_error_read",
+    "socket_closed_error_read_some",
     "socket_closed_error_write_after_close_write",
     "network_error_listen_in_use",
 }

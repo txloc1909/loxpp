@@ -125,6 +125,57 @@ TEST_F(SocketParkTest, ReadBytesAcrossChunks) {
     EXPECT_EQ(globalString(vm, "tail"), "hij");
 }
 
+// read_some(n) returns the bytes that arrived, without waiting for n. The
+// feeder keeps the connection open until the reader answers, so only a call
+// that returns early can pass.
+TEST_F(SocketParkTest, ReadSomeReturnsWhatArrivedBeforeN) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var got = "none";
+        var feederTask = nil;
+        fun reader() { got = conn.read_some(100); task.send(feederTask, 1); }
+        fun feeder() {
+            peer.write("ab");
+            task.receive();
+            peer.close();
+            task.send(me, 1);
+        }
+        feederTask = task.spawn(feeder);
+        task.spawn(reader);
+        task.receive();
+        var eof = conn.read_some(5);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "got"), "ab");
+    EXPECT_EQ(globalString(vm, "eof"), "");
+}
+
+// A line longer than one chunk leaves bytes in the input buffer. read_some
+// returns them first, in order, and a stream of 10000 bytes comes back whole
+// across calls.
+TEST_F(SocketParkTest, ReadSomeTakesBufferedBytesFirstAndLosesNone) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        fun rep(t, n) {
+            var r = ""; var i = 0;
+            while (i < n) { r = r + t; i = i + 1; }
+            return r;
+        }
+        peer.write(rep("x", 5000) + "\nabcdef" + rep("y", 10000));
+        peer.close();
+        var line = conn.readline();
+        var head = conn.read_some(3);
+        var total = 0;
+        var chunk = conn.read_some(100000);
+        while (len(chunk) > 0) { total = total + len(chunk); chunk = conn.read_some(100000); }
+        var lineLen = len(line);
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "lineLen"), "5000");
+    EXPECT_EQ(globalString(vm, "head"), "abc");
+    EXPECT_EQ(globalString(vm, "total"), "10003");
+}
+
 // The end of the stream: readline gives nil, read gives "", read_bytes gives
 // the bytes that came, and readlines gives the lines. Each call waits for the
 // close of the peer.

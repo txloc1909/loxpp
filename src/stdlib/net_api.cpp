@@ -75,7 +75,8 @@ static bool asPort(const Value& v, long minPort, int& out) {
 }
 
 // Validate a byte-count argument. `n` must be a non-negative integer Number.
-static bool asByteCount(const Value& v, const char* method, size_t& out) {
+static bool asByteCount(const Value& v, const char* method, size_t& out,
+                        double minimum = 0) {
     if (!is<Number>(v)) {
         std::string msg =
             std::string(method) + "() byte count must be a number.";
@@ -83,11 +84,11 @@ static bool asByteCount(const Value& v, const char* method, size_t& out) {
         return false;
     }
     double raw = as<Number>(v);
-    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < 0 ||
+    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < minimum ||
         raw > static_cast<double>(INT_MAX)) {
-        std::string msg =
-            std::string(method) +
-            "() byte count must be an integer in range 0 to 2147483647.";
+        std::string msg = std::string(method) +
+                          "() byte count must be an integer in range " +
+                          (minimum > 0 ? "1" : "0") + " to 2147483647.";
         nativeRuntimeError(msg.c_str());
         return false;
     }
@@ -472,6 +473,30 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
     setDone(out, std::move(io.buf));
 }
 
+// Returns the bytes that are there and does not wait for more. The input
+// buffer goes first, so the result does not depend on what an earlier readline
+// left in it. The descriptor is read once, and only when the buffer is empty.
+static void stepReadSome(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+    if (!s->inbuf.empty()) {
+        setDone(out, takeInput(s, std::min(s->inbuf.size(), io.want)));
+        return;
+    }
+    std::string buf;
+    switch (appendRead(s->fd, buf, std::min(io.want, kReadChunk), io.method,
+                       out.faultMessage)) {
+    case Fill::Data:
+    case Fill::Eof:
+        setDone(out, std::move(buf));
+        return;
+    case Fill::Block:
+        out.kind = IoOutcome::Kind::Wait;
+        return;
+    case Fill::Failed:
+        setFault(out, kNetworkError, std::move(out.faultMessage));
+        return;
+    }
+}
+
 static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
     // The scan resumes at `noNewlineLen`, not at the front: a line that
     // arrives in small pieces would otherwise be scanned again in full at
@@ -669,6 +694,9 @@ static void step(ParkedIo& io, IoOutcome& out) {
     case IoOp::READ_BYTES:
         stepReadBytes(s, io, out);
         return;
+    case IoOp::READ_SOME:
+        stepReadSome(s, io, out);
+        return;
     case IoOp::READLINE:
         stepReadline(s, io, out);
         return;
@@ -851,6 +879,23 @@ static Value socketReadBytesNative(int /*argc*/, Value* args) {
     io.op = IoOp::READ_BYTES;
     io.target = s;
     io.method = "read_bytes";
+    io.want = n;
+    return runIo(std::move(io));
+}
+
+static Value socketReadSomeNative(int /*argc*/, Value* args) {
+    ObjSocket* s = checkSocketRead(args, "read_some");
+    if (s == nullptr) {
+        return from<Nil>(Nil{});
+    }
+    size_t n = 0;
+    if (!asByteCount(args[0], "read_some", n, 1)) {
+        return from<Nil>(Nil{});
+    }
+    ParkedIo io;
+    io.op = IoOp::READ_SOME;
+    io.target = s;
+    io.method = "read_some";
     io.want = n;
     return runIo(std::move(io));
 }
@@ -1119,6 +1164,7 @@ NetClasses registerNetAPI(StdlibRegistrar& reg) {
     reg.mm().pushTempRoot(socket);
     reg.addMethod(socket, "read", socketReadNative, 0);
     reg.addMethod(socket, "read_bytes", socketReadBytesNative, 1);
+    reg.addMethod(socket, "read_some", socketReadSomeNative, 1);
     reg.addMethod(socket, "readline", socketReadlineNative, 0);
     reg.addMethod(socket, "readlines", socketReadlinesNative, 0);
     reg.addMethod(socket, "write", socketWriteNative, 1);

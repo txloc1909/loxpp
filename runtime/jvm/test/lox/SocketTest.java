@@ -266,6 +266,49 @@ public final class SocketTest {
         bc.close();
         bs.close();
 
+        // read_some(n): returns what is there, up to n, in order, then "".
+        LoxServer ss = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket sc = LoxSocket.connect("127.0.0.1", (int)ss.port());
+        sc.write("one\ntwo");
+        sc.closeWrite();
+        LoxSocket speer = (LoxSocket)ss.accept();
+        checkEquals("one", speer.readline(), "readline before read_some");
+        checkEquals("tw", speer.readSomeArg(Double.valueOf(2)),
+                    "read_some(2) returns the buffered bytes first");
+        checkEquals("o", speer.readSomeArg(Double.valueOf(100)),
+                    "read_some(100) returns the rest, not more");
+        checkEquals("", speer.readSomeArg(Double.valueOf(1)),
+                    "read_some returns \"\" at EOF");
+        checkThrows(() -> speer.readSomeArg(Double.valueOf(0)), LoxError.class,
+                    "read_some(0) is fatal");
+        speer.close();
+        sc.close();
+        ss.close();
+
+        // read_some returns what arrived while the peer stays open. A call that
+        // waits for n bytes never returns here, so a watchdog ends the run.
+        LoxServer ws = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket wc = LoxSocket.connect("127.0.0.1", (int)ws.port());
+        wc.write("ab");
+        LoxSocket wpeer = (LoxSocket)ws.accept();
+        Thread watchdog = new Thread(() -> {
+            try {
+                Thread.sleep(20_000);
+            } catch (InterruptedException e) {
+                return;
+            }
+            System.err.println("FAIL: read_some waited for n bytes");
+            Runtime.getRuntime().halt(1);
+        });
+        watchdog.setDaemon(true);
+        watchdog.start();
+        checkEquals("ab", wpeer.readSomeArg(Double.valueOf(100)),
+                    "read_some(100) returns the 2 bytes that arrived");
+        watchdog.interrupt();
+        wpeer.close();
+        wc.close();
+        ws.close();
+
         // A bad count is fatal, and the closed-stream check precedes it.
         LoxServer is = LoxServer.listen("127.0.0.1", 0);
         LoxSocket ic = LoxSocket.connect("127.0.0.1", (int)is.port());
