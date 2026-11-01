@@ -3765,8 +3765,9 @@ class Interpreter {
     // --- tasks and workers (spec/04-semantics.md, Workers and Tasks) -------
 
     // pendingDefers, stringifyDepth, nativeDepth, currentCo, and the two
-    // overflow flags belong to the running task. The flags (returnFlag, breakFlag, continueFlag,
-    // throwFlag) need no save: each is false at every suspend point.
+    // overflow flags belong to the running task. The flags (returnFlag,
+    // breakFlag, continueFlag, throwFlag) need no save: each is false at every
+    // suspend point.
     parkTask(t) {
         t.savedDefers         = this.pendingDefers;
         t.savedStringifyDepth = this.stringifyDepth;

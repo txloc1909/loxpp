@@ -32,12 +32,14 @@ This check has these parts.
 
 3. The fields `nativeDepth`, `stringifyDepth`, `overflowUnwinding` and
    `overflowDeferNest` are non-zero only in a frame that native reaches from
-   C++, where the bootstrap now blocks and never parks. A case for one of them
+   C++, where the bootstrap blocks and never parks. A case for one of them
    is a `parking` case: it runs with the mutation `force_park`, which makes
-   the bootstrap park there again, as a control that must match native, and
+   the bootstrap park there, as a control that must match native, and
    then with the restore line also removed, which must differ. A program of
    such a case waits for a line that a process outside the program sends, so
    native can run it to the end.
+   The `stringifyDepth` case shows a depth limit that is implementation-defined,
+   so it compares with the control run of the bootstrap, not with native.
 
 4. Two cases pin the block itself: with `force_park`, a task of the same
    worker runs during the wait, and the output changes.
@@ -132,7 +134,7 @@ MUTATIONS = {
         "            this.restoreHostSuspendState(saved);\n",
         "            result = site.hostBody(this, args);\n        } catch (e) {\n",
     ),
-    # The bootstrap parks again where the task cannot suspend.
+    # The bootstrap parks where the task cannot suspend.
     "force_park": (
         "        return this.nativeDepth == 0;\n",
         "        return true;\n",
@@ -825,7 +827,7 @@ def main() -> int:
                 failures.append(
                     f"{case.name} ({case.covers}): the mutation {case.mutation!r} "
                     "changes nothing this check can see, so the bootstrap may drop "
-                    "that part of the state again without a failure"
+                    "that part of the state without a failure"
                 )
 
     if failures:
