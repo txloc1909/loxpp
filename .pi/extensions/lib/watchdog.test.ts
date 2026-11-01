@@ -318,7 +318,10 @@ test("every script builder carries the watchdog", () => {
   // Every site, not only the ones with a name: no line the builders write may
   // use a guarded command without `command` before it. This is the check the
   // named needles cannot give, because one prefix removed from a helper leaves
-  // another site's prefix in the text.
+  // another site's prefix in the text. Its limits: a word inside a quoted
+  // payload, an `eval` string, and a command named by a variable are not seen,
+  // and a payload word after a space would be flagged; no builder does any of
+  // those today.
   const guarded = ["ps", "tr", "head", "sleep", "kill", "printf", "wait", "cd", "["];
   for (const [label, script] of [
     ["the watched run script", watched],
@@ -335,6 +338,13 @@ test("every script builder carries the watchdog", () => {
           assert.ok(/(^|[\s$(])command\s+$/.test(before), `${label} uses \`${word}\` without command: ${line.trim()}`);
         }
       }
+    }
+    // The gate's removal is the wrapper's own command, and its binary is
+    // quoted, so the word scan cannot see the prefix. Every removal must go
+    // through `command`.
+    for (const line of script.split("\n")) {
+      if (!line.includes("rm -f --time 0")) continue;
+      assert.ok(/command\s+\S+\s+rm -f --time 0/.test(line), `${label} removes a container without command: ${line.trim()}`);
     }
   }
   // The close call and the entry directory belong to the watched run only, and
@@ -497,13 +507,18 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
 
 /**
  * Start a run whose shell has the given functions exported first, the way a
- * parent shell can hand them to pi. bash is the interpreter on purpose: dash
- * does not import exported functions, so this shape is reachable only where the
- * shell is bash. The run must work either way.
+ * parent shell can hand them to pi. The run keeps the shell it has in
+ * production, `/bin/sh`; the comment in the body says what that imports.
  */
 function shadowedRun(scriptPath: string, args: string[], shadow: string[]): ChildProcess {
-  const script = [...shadow, 'exec bash "$0" "$@"'].join("\n");
-  return spawn("bash", ["-c", script, scriptPath, ...args], {
+  // The script starts as `/bin/sh` in production too, so the test uses that
+  // shell: where it is bash, bash runs in POSIX mode, imports a function for a
+  // regular builtin and refuses one for a special builtin, exactly as it does
+  // for a real run. Where `/bin/sh` is dash, no function is imported and the
+  // hostile definitions have no effect, so the test passes without proving
+  // anything; `sh -c 'type -t command'` in the shell says which case a host is.
+  const script = [...shadow, 'exec /bin/sh "$0" "$@"'].join("\n");
+  return spawn("/bin/sh", ["-c", script, scriptPath, ...args], {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, KITTY_WINDOW_ID: "42" },
@@ -617,8 +632,9 @@ processTest("a shadowed command does not turn the watch off", async (left) => {
     });
     const parent = standInParent();
     // A `command` function shadows the builtin every other guard depends on.
-    // The script clears it with `unset -f command`, which cannot be shadowed:
-    // `unset` is a POSIX special builtin and bash does not import one.
+    // The script clears it with `unset -f command`, and that line cannot be
+    // shadowed: in POSIX mode bash does not import a function for a special
+    // builtin, and `unset` is one.
     const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("command", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
