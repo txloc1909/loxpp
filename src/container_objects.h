@@ -505,6 +505,7 @@ enum class IoOp : std::uint8_t {
     ACCEPT,
     READ,
     READ_BYTES,
+    READ_SOME,
     READLINE,
     READLINES,
     WRITE,
@@ -522,7 +523,8 @@ struct ParkedIo {
     Obj* target{nullptr};
     // The name of the call in a fault message. A string literal.
     const char* method{""};
-    // read_bytes: the count asked for, and the bytes taken so far.
+    // read_bytes and read_some: the count asked for, and the bytes taken so
+    // far.
     std::size_t want{0};
     std::string buf;
     // write and writeline: the program's String (GC-tracked through the task,

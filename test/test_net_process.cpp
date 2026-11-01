@@ -393,6 +393,33 @@ TEST(NetProcessTest, SocketReadBytesBadCountFatal) {
               InterpretResult::RUNTIME_ERROR);
 }
 
+TEST(NetProcessTest, SocketReadSomeBadCountFatal) {
+    for (const char* bad : {"0", "-1", "1.5", "\"x\"", "nil", "2147483648"}) {
+        VMTestHarness h;
+        std::string src = "var l = listen(\"127.0.0.1\", 0); "
+                          "var c = connect(\"127.0.0.1\", l.port()); "
+                          "c.read_some(" +
+                          std::string(bad) + ");";
+        EXPECT_EQ(h.run(src.c_str()), InterpretResult::RUNTIME_ERROR) << bad;
+    }
+}
+
+TEST(NetProcessTest, SocketReadSomeOnClosedIsCatchable) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.close(); "
+                    "var k = \"\"; "
+                    "try { c.read_some(1); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "SocketClosedError");
+}
+
+TEST(NetProcessTest, ReadlineLeavesTheRestForReadSome) {
+    expectReadAfterReadline("s.read_some(100)", "(rest == \"two\\nthree\")");
+}
+
 TEST(NetProcessTest, SocketReadBytesOnClosedIsCatchable) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
