@@ -1,0 +1,20 @@
+// A "_" followed by "(" or "{" is the head of a constructor pattern, not the
+// wildcard, so a constructor named "_" is the structural sub-pattern of an
+// @-binding: the arm tests the constructor and binds the whole subject and
+// the fields (spec/02-syntax.md, armPat and subPat; issue #762).
+enum E { _(x) B }
+
+print match E._(7) {
+    case p @ E._(y) => str(y) + "/" + str(match p { case E._(z) => z case E.B => 0 })
+    case _ => "wild"
+};
+print match E._(3) {
+    case p @ E._{x} => str(x) + "/" + str(match p { case E._(z) => z case E.B => 0 })
+    case _ => "wild"
+};
+print match E.B() { case p @ E._(y) => str(y) case _ => "other" };
+
+// STATUS: ok
+// CHECK: 7/7
+// CHECK: 3/3
+// CHECK: other

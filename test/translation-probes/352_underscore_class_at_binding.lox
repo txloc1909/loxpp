@@ -1,0 +1,17 @@
+// A "_" followed by "{" is the head of a class pattern, not the wildcard, so
+// a class named "_" is the structural sub-pattern of an @-binding: the arm
+// tests the class and binds both the whole subject and the named field
+// (spec/02-syntax.md, armPat and subPat; issue #762).
+class _ {
+    init(a, b) {
+        this.a = a;
+        this.b = b;
+    }
+}
+
+print match _(1, 2) { case p @ _{b} => str(p.a) + "/" + str(b) case _ => "wild" };
+print match 99 { case p @ _{b} => str(b) case _ => "wild" };
+
+// STATUS: ok
+// CHECK: 1/2
+// CHECK: wild

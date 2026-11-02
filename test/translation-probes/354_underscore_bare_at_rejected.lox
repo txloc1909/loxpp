@@ -1,0 +1,14 @@
+// A bare "_" is the wildcard even when a class named "_" is declared earlier
+// in the source, so a declared name never makes it a structural sub-pattern
+// of an @-binding: the sub-pattern must be a structural pattern
+// (spec/02-syntax.md, armPat and subPat; spec/04-semantics.md, @-bindings;
+// issue #762).
+class _ {}
+enum E { _(x) }
+
+print "never";
+var a = match _() { case p @ _ => 1 case _ => 0 };
+var b = match E._(7) { case p @ _ => 1 case _ => 0 };
+
+// STATUS: error
+// STATIC-ERROR
