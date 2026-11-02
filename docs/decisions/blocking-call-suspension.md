@@ -1,7 +1,9 @@
 # Network calls and `sleep` suspend only their own task
 
 **Status:** accepted. The owner approved it in #711 (2026-10-26). Mission #711
-shipped it on 2026-10-26 (see "Shipped").
+shipped it on 2026-10-26 (see "Shipped"). On 2026-11-03,
+`docs/decisions/concurrency-semantics-grounding.md` replaced F4 (by its D2) and the
+outcome of #932 (by its D3). The text below marks each place.
 **Tracking:** #711. The DAG and the node body drafts are there.
 
 ## Owner decisions
@@ -14,7 +16,7 @@ The review on #711 found five blockers. The owner decided the open forks on
 | F1: scope | Calls on the network and `sleep` suspend only their task. `input()`, `run()`, and the Process calls continue to block the worker. |
 | F2: contexts where a task cannot suspend | A blocking call in such a context blocks the worker, as it does today. It does not raise. |
 | F3: name resolution in `connect` | The worker blocks while `connect` resolves a host name. The TCP connect suspends. |
-| F4: the bootstrap interpreter | It keeps its one-thread form. `spec/README.md`, Conformance, makes scheduling implementation-defined for every implementation, so a blocking call may block every worker there. |
+| F4: the bootstrap interpreter | Replaced by D2 of `concurrency-semantics-grounding.md`: the bootstrap conforms to the whole spec, and a call of class `suspends` lets the other tasks of its worker run there. The text of 2026-10-19 was: "It keeps its one-thread form. `spec/README.md`, Conformance, makes scheduling implementation-defined for every implementation, so a blocking call may block every worker there." |
 | Socket faults | A socket fault becomes catchable. This is a prerequisite, #726, not a node of this mission. |
 | Close while parked | Follows the socket-fault rule: the parked call raises the fault of a call on a closed socket. |
 | A `for`-in over a Map that another task changes | The fault stays fatal. The spec warns about it (see "Constraints", C1). |
@@ -67,7 +69,7 @@ The proposal is bound by these controls in `VISION.md`.
   socket-fault prerequisite makes this true for sockets. Without it, a server
   with many connections ends at the first fault of one connection.
 - **The backends**: the native VM decides; the JVM is a semantic oracle; the
-  bootstrap keeps its one-thread form (`spec/README.md`, Conformance); QBE owes what the current
+  bootstrap conforms to the whole spec (D2 of `concurrency-semantics-grounding.md`); QBE owes what the current
   experiment needs.
 - **Distribution**: the poller stays behind the Linux platform boundary.
 
@@ -127,9 +129,9 @@ Two workarounds are also closed.
 
 Coroutines are stackful, so a readiness primitive with a timeout would let a
 Lox++ library do this work. This proposal does not add one: the spec reserved
-invisible suspension, and it keeps the surface unchanged. The cost is that the
-bootstrap interpreter cannot implement the change; scheduling is
-implementation-defined (`spec/README.md`, Conformance), so it does not have to.
+invisible suspension, and it keeps the surface unchanged. The bootstrap
+interpreter implements the change with one host task for each wait (D2 of
+`concurrency-semantics-grounding.md`).
 
 ## Prerequisites
 
@@ -367,9 +369,8 @@ constraints on every node, and the spec states C1, C6 and C7.
 This does not change. The spec never promised that a blocking call keeps the
 other tasks off its worker: the table lists each blocking call as a suspend
 point, and the spec reserves the change in these words: "a later version can
-let other tasks of the worker run while the call waits". The rule that
-scheduling is implementation-defined (`spec/README.md`, Conformance) already
-means a portable program cannot depend on it. A program that kept shared state
+let other tasks of the worker run while the call waits". Before this
+decision a portable program could not depend on it either. A program that kept shared state
 consistent across a network call by this effect will see other tasks run
 during the wait. A program that needs a critical section across a wait puts
 the shared state in one task, which the other tasks reach with messages.
@@ -380,7 +381,7 @@ the shared state in one task, which the other tasks reach with messages.
 |---|---|---|
 | Native VM | The whole model: poller, park and resume, readiness registry, socket transport, liveness, teardown, the contexts rule. | The reference implementation. |
 | JVM | Oracle parity: a task that waits in a call of the first class lets the other tasks of its worker run, in the same order. | The handoff in `runtime/jvm/src/lox/LoxWorker.java` stops the worker; it needs a park and resume path in the scheduler. |
-| Bootstrap interpreter | Its one-thread form: `sleep` blocks every worker. The `sleep` probes (260, 279, 282) do not bind it, because scheduling is implementation-defined; a bootstrap-only probe checks its choice. Probe 285 is not exempt: #984 fixed the defect that exempted it. Probes 95 and 96 are exempt because CPU-bound work blocks all workers, so they time out. The other same-worker probes bind it. | `spec/README.md`, Conformance; `test/translation-probes/bootstrap-only/`. |
+| Bootstrap interpreter | At this mission: its one-thread form, in which `sleep` blocks every worker. D2 of `concurrency-semantics-grounding.md` replaced that form: the `sleep` probes (260, 279, 282) now bind it. Probe 285 is not exempt: #984 fixed the defect that exempted it. Probes 95 and 96 are exempt because CPU-bound work blocks all workers, so they time out. The other same-worker probes bind it. | `spec/README.md`, Conformance; `test/translation-probes/bootstrap-only/`. |
 | QBE | Runs the same probes. It links the native runtime. Check the coroutine mode and its C frames; #723 also covers a native-entry defect on QBE. | `src/backend/qbe_emitter.cpp`. |
 | Spec | The two-class rule, the markers, the tables, the contexts rule, the Scheduling rule, the `connect` exception, C1, the probes. | `spec/04-semantics.md`, `spec/05-stdlib.md`. |
 | LSP docs | The text of the nine calls says "suspends the task until". No signature changes. | `src/lsp/stdlib_docs.cpp`. |
@@ -488,7 +489,8 @@ The shared probes land with the spec node:
 - a close while a task is parked raises the closed-socket fault in that task;
 - C1: a `for`-in over a Map that another task changes ends with the fatal
   fault;
-- a bootstrap-only probe for the one-thread exception.
+- a bootstrap-only probe for the one-thread exception (removed by D2 of
+  `concurrency-semantics-grounding.md`).
 
 Each probe carries `STATUS`, `TIMEOUT`, and `CHECK` lines in the existing
 form, so the probe runner reads it.
@@ -538,7 +540,8 @@ The spec's reservation is the authorization; the decision must quote it.
 
 There is no syntax change, no new global, and no new method. The JVM's output
 changes on the same-worker probes; its expected-failure file lists them until
-the JVM node lands. The bootstrap keeps its one-thread exception.
+the JVM node lands. The bootstrap kept its one-thread exception until D2 of
+`concurrency-semantics-grounding.md` removed it.
 
 No program in the repository makes a blocking call in a context where the task
 cannot suspend, and no program has a second task on a worker that does
@@ -641,19 +644,19 @@ issue, as `AGENTS.md` says.
 |---|---|---|
 | #937 | Socket timeouts, with the two-minute `connect` to a dead host | Non-goal |
 | #938 | `Socket.read_some` | Non-goal |
-| #939 | Sendable sockets | Non-goal |
+| #939 | Sendable sockets | Non-goal. Closed as not planned on 2026-11-01 |
 | #940 | UDP sockets | Non-goal |
 | #941 | Unix-domain sockets | Non-goal |
 | #631 | Suspending FFI calls (the FFI design holds this) | Non-goal |
-| #942 | Fair mode | Rejected alternative |
-| #943 | A catchable fault for a Map that changes size during `for`-in | Owner decision, constraint C1 |
-| #944 | `input()` suspends only its task | Owner decision F1 (N8) |
-| #945 | Process calls and `run()` suspend only their task | Owner decision F1 (N8, N9) |
-| #946 | A resolver thread for `connect` | Owner decision F3 |
+| #942 | Fair mode | Rejected alternative. Closed as not planned on 2026-11-01 |
+| #943 | A catchable fault for a Map that changes size during `for`-in | Owner decision, constraint C1. The owner kept the fault fatal |
+| #944 | `input()` suspends only its task | Owner decision F1 (N8). Closed as not planned on 2026-11-01 |
+| #945 | Process calls and `run()` suspend only their task | Owner decision F1 (N8, N9). Closed as not planned on 2026-11-01 |
+| #946 | A resolver thread for `connect` | Owner decision F3. Closed as not planned on 2026-11-01 |
 | #919, #930 | `tools/check_net_faults.py` misses a fatal exit and counts a commented-out fault | Reviews of #906 and #929 |
 | #923, #924, #925 | Cost of the task switch, the poll bound of a sleeper, a test that hangs | Review of #922 |
 | #931 | The JVM `connect` tries only the first address | Review of #929 |
-| #932 | Must writes of two tasks to one Socket keep their bytes together | Review of #933 |
+| #932 | Must writes of two tasks to one Socket keep their bytes together | Review of #933. Replaced by D3 of `concurrency-semantics-grounding.md`: a second waiting writer raises a fault |
 | #935 | A timing test of `test_worker` fails under load | Review of #929 |
 | #947 | Peak memory of `readlines` on one very long line | Review of #926 |
 | #948 | JVM `LoxPoller`: two mutations that no check catches | Review of #927 |
