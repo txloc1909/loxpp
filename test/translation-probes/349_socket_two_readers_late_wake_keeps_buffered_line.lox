@@ -1,0 +1,45 @@
+// Two tasks wait in readline() on one Socket. The peer, on its own worker,
+// sends "a\nb\n" and later "c\n". The task that gets "a" computes for longer
+// than the gap between the two writes and then ends, so the other task wakes
+// after "c\n" has arrived. That task gets "b" and then "c": the line "b" is not
+// lost when more bytes are there at its wake (spec/05-stdlib.md, Socket: the
+// bytes of all results, in order, are the bytes of the stream). Which task gets
+// "a" is not specified, so the probe checks the pair of results.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: results are a and b,c: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nb\n");
+    sleep(0.1);
+    c.write("c\n");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun reader() {
+    var x = s.readline();
+    if (x == "a") {
+        var end = clock() + 0.15;
+        while (clock() < end) { }
+        task.send(me, "a");
+        return;
+    }
+    task.send(me, str(x) + "," + str(s.readline()));
+}
+task.spawn(reader);
+task.spawn(reader);
+var r1 = "";
+var r2 = "";
+try {
+    r1 = task.receive_within(3);
+    r2 = task.receive_within(3);
+} catch (e) {
+    // The limit passed: the result stays missing.
+}
+task.send(w, "done");
+print "results are a and b,c: " + str((r1 == "a" and r2 == "b,c") or (r1 == "b,c" and r2 == "a"));

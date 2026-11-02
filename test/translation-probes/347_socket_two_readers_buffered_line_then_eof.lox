@@ -1,0 +1,29 @@
+// Two tasks wait in readline() on one Socket. The peer sends two lines in one
+// write and then closes its write side. Each task gets one line: the bytes that
+// the first task to wake reads are not lost to the other task, and the other
+// task does not see an end of stream while a line remains
+// (spec/05-stdlib.md, Socket). Which task gets which line is not specified, so
+// the probe checks the pair of results.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: results are a and b: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nb\n");
+    sleep(0.1);
+    c.close_write();
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun reader() { task.send(me, str(s.readline())); }
+task.spawn(reader);
+task.spawn(reader);
+var r1 = task.receive();
+var r2 = task.receive();
+task.send(w, "done");
+print "results are a and b: " + str((r1 == "a" and r2 == "b") or (r1 == "b" and r2 == "a"));

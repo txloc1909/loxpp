@@ -1,0 +1,90 @@
+// Four tasks read one Socket until the end of the stream: two with read_some
+// and two with read_bytes. The peer, on its own worker, writes 200000 bytes in
+// pieces and then closes its write side. No byte is lost or repeated, so the
+// four counts together are 200000 (spec/05-stdlib.md, Socket: the bytes of all
+// results, in order, are the bytes of the stream). Which task reads which byte
+// is not specified, so the probe checks the sum and the count of the
+// character "x", which the peer puts at known places. The
+// read_some readers compute and sleep between calls, so a task that wakes from
+// its wait can find bytes that another task left unread, and more bytes behind
+// them.
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: received 4 counts
+// CHECK: total bytes 200000
+// CHECK: total x 2000
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    var piece = "";
+    var k = 0;
+    while (k < 99) { piece = piece + "."; k = k + 1; }
+    piece = piece + "x";
+    var sent = 0;
+    while (sent < 200000) {
+        c.write(piece);
+        c.write(piece);
+        sent = sent + 200;
+        if (sent % 1000 == 0) { sleep(0.0005); }
+    }
+    c.close_write();
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun tally(text, counts) {
+    counts[0] = counts[0] + len(text);
+    var i = 0;
+    while (i < len(text)) {
+        if (text[i] == "x") { counts[1] = counts[1] + 1; }
+        i = i + 1;
+    }
+}
+fun some_reader() {
+    var counts = [0, 0];
+    var text = s.read_some(200);
+    while (len(text) > 0) {
+        tally(text, counts);
+        // More bytes arrive while this task computes, and the other tasks
+        // run only when it sleeps.
+        var end = clock() + 0.002;
+        while (clock() < end) { }
+        sleep(0.001);
+        text = s.read_some(200);
+    }
+    task.send(me, counts[0] + 1000000 * counts[1]);
+}
+fun bytes_reader() {
+    var counts = [0, 0];
+    var text = s.read_bytes(777);
+    while (len(text) > 0) {
+        tally(text, counts);
+        text = s.read_bytes(777);
+    }
+    task.send(me, counts[0] + 1000000 * counts[1]);
+}
+task.spawn(some_reader);
+task.spawn(bytes_reader);
+task.spawn(some_reader);
+task.spawn(bytes_reader);
+// A reader sends its byte count plus 1000000 times its count of "x".
+var n = 0;
+var sum = 0;
+var i = 0;
+while (i < 4) {
+    try {
+        sum = sum + task.receive_within(20);
+        n = n + 1;
+    } catch (e) {
+        // The limit passed: the count stays missing.
+    }
+    i = i + 1;
+}
+var total = sum % 1000000;
+var xs = (sum - total) / 1000000;
+task.send(w, "done");
+print "received " + str(n) + " counts";
+print "total bytes " + str(total);
+print "total x " + str(xs);
