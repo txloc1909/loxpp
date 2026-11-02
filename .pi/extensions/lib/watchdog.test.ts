@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { buildRunScript, closeWindowArgv } from "../subagent/kitty.ts";
 import { buildPrintScript } from "../subagent/print.ts";
 import { buildGateScript, gateRunArgv } from "./gate-run.ts";
+import { startTimeOf } from "./parent-identity.ts";
 import { PS_PROBE, shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 /** Fast enough for a test, and still several real poll cycles. */
@@ -102,6 +103,17 @@ async function killParent(parent: ChildProcess): Promise<void> {
   parent.kill("SIGKILL");
   // Wait for the exit, so nothing answers `kill -0` for a zombie afterwards.
   await exited;
+}
+
+/**
+ * The two arguments a run script takes: the parent pid, and the parent's start
+ * time, which production reads with `parentStartTime` while the parent is
+ * certainly alive.
+ */
+function parentArgs(parent: ChildProcess): string[] {
+  const pid = parent.pid;
+  assert.ok(pid !== undefined, "the stand-in parent has a pid");
+  return [String(pid), startTimeOf(pid)];
 }
 
 /**
@@ -282,10 +294,12 @@ test("every module in the extensions tree that starts a process is accounted for
     .map((file) => path.relative(root, file).split(path.sep).join("/"))
     .sort();
   // Each entry names what watches pi for it:
+  //   lib/parent-identity.ts  one `ps -o lstart=` call, which reads pi's own
+  //                        start time and returns at once
   //   modes.ts             the gate wrapper in lib/gate-run.ts
   //   subagent/print.ts    the unattended wrapper it builds
   //   subagent/window.ts   the run script kitty runs (kitten calls are short)
-  assert.deepEqual(starters, ["modes.ts", "subagent/print.ts", "subagent/window.ts"], "a module that starts a process needs a watchdog decision");
+  assert.deepEqual(starters, ["lib/parent-identity.ts", "modes.ts", "subagent/print.ts", "subagent/window.ts"], "a module that starts a process needs a watchdog decision");
 });
 
 test("every script builder carries the watchdog", () => {
@@ -311,6 +325,11 @@ test("every script builder carries the watchdog", () => {
   ]) {
     assert.ok(script.includes(WATCHDOG_MARKER), `${name} watches the parent`);
     assert.ok(script.includes(PS_PROBE), `${name} asks ps whether it can answer at all`);
+    // The state check alone cannot tell the parent from a process that took its
+    // pid, so every builder must carry the identity comparison too.
+    for (const needle of ["parent_start=${2:-}", "process_start() {", 'parent_gone() {', 'pid_gone "$parent_pid" && return 0']) {
+      assert.ok(script.includes(needle), `${name} carries ${needle}, so a reused pid reads as a dead parent`);
+    }
     for (const needle of ["command tr", "command head", "command sleep", "command kill", "command printf", "command [", "command wait", "unset -f command"]) {
       assert.ok(script.includes(needle), `${name} runs \`${needle}\` through command, so no function shadows it`);
     }
@@ -366,7 +385,7 @@ processTest("a watched run ends its child and closes its window when the parent 
     const parent = standInParent();
     // Detached, as kitty starts a window's command: the script leads its own
     // process group, so a group signal cannot reach this test process.
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
@@ -394,6 +413,87 @@ processTest("a watched run ends its child and closes its window when the parent 
   });
 });
 
+processTest("a parent pid that another process holds does not keep the run alive", async (left) => {
+  await withTempDir(async (dir) => {
+    const kitten = await fakeKitten(dir);
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten,
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    const parent = standInParent();
+    const start = startTimeOf(parent.pid!);
+    assert.notEqual(start, "", "ps can read the stand-in parent");
+
+    // The kernel hands a dead process's number to a new one, and the new owner's
+    // `S` state is what a state-only watch reads as a live parent: the wrapper
+    // then polls for as long as the stranger lives. A `ps` that answers with
+    // another process's start time for the parent pid is what the reuse looks
+    // like to the watch, and the stand-in parent keeps answering `kill -0`
+    // throughout, so nothing but the identity check can end this run.
+    const other = "Mon Jan  1 00:00:00 2001";
+    const bin = path.join(dir, "bin");
+    await fs.promises.mkdir(bin);
+    await fs.promises.writeFile(
+      path.join(bin, "ps"),
+      [
+        "#!/bin/sh",
+        'case "$*" in',
+        `  *"-o lstart= -p ${parent.pid}"*) printf '%s\\n' ${shellQuote(other)}; exit 0 ;;`,
+        "esac",
+        'exec /bin/ps "$@"',
+        "",
+      ].join("\n"),
+      { mode: 0o700 },
+    );
+
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid), start], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await waitFor("the child to end", () => !alive(childPid), left());
+      assert.equal(alive(parent.pid!), true, "the run ended while the pid it watched still answered");
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a run started without a parent start time still ends when the parent dies", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    const parent = standInParent();
+    // A caller whose `ps` could not read the parent passes the pid alone. The
+    // state check is then the only evidence, which is what the watch had before
+    // the identity arrived: a dead parent still ends the run.
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
 processTest("a child that ignores SIGTERM is killed after the grace", async (left) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
@@ -406,7 +506,7 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
     });
 
     const parent = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
@@ -451,7 +551,7 @@ processTest("a ps that cannot read pid 1 still lets the run end", async (left) =
     );
 
     const parent = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
@@ -478,7 +578,7 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
     });
 
     const parent = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
@@ -555,7 +655,7 @@ processTest(
     // A `tr` that prints nothing leaves `process_state` empty for every pid, so
     // `pid_gone` answers "gone" for all of them and the watcher exits at its
     // first poll: the run then outlives the parent.
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("tr", ":"));
+    const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("tr", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -582,7 +682,7 @@ processTest(
     const parent = standInParent();
     // A `head` that prints nothing makes `ps` read as unable to answer, which
     // the fallback takes as "leave the run alone".
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("head", ":"));
+    const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("head", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -609,7 +709,7 @@ processTest(
     const parent = standInParent();
     // A `sleep` that blocks forever stops the poll, so the watcher never sees
     // the dead parent.
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("sleep", "command sleep 60"));
+    const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("sleep", "command sleep 60"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -636,7 +736,7 @@ processTest(
     const parent = standInParent();
     // A `printf` that prints nothing would leave the exit file empty, and the
     // parent reads that file as the run's result.
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("printf", ":"));
+    const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("printf", ":"));
     try {
       await waitFor("the script to end", () => script.exitCode !== null || script.signalCode !== null, left());
       assert.equal((await fs.promises.readFile(exitPath, "utf8")).trim(), "7", "the child's code reached the file");
@@ -664,7 +764,7 @@ processTest(
     // The script clears it with `unset -f command`, and that line cannot be
     // shadowed: in POSIX mode bash does not import a function for a special
     // builtin, and `unset` is one.
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], oneShadow("command", ":"));
+    const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("command", ":"));
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -693,7 +793,7 @@ processTest(
     // `[` decides every test in the watcher, `wait` holds the script at the
     // child, and `cd` puts the child where the caller asked. bash imports a
     // function for each of the three.
-    const script = shadowedRun(scriptPath, [String(parent.pid!)], [
+    const script = shadowedRun(scriptPath, parentArgs(parent), [
       "[() { return 1; }",
       "wait() { return 0; }",
       "cd() { return 0; }",
@@ -762,7 +862,7 @@ processTest(
     // The wrapper leads its own group, so `leads_group` decides whether the
     // signal reaches the grandchild. A `[` that answers 1 makes it read "not
     // leading" and signal the child alone.
-    const wrapper = shadowedRun(wrapperPath, [String(parent.pid!)], oneShadow("[", "return 1"));
+    const wrapper = shadowedRun(wrapperPath, parentArgs(parent), oneShadow("[", "return 1"));
     try {
       const childPid = await readPid(childPidFile, left());
       const grandchildPid = await readPid(grandchildPidFile, left());
@@ -789,7 +889,7 @@ processTest("a run that ends on its own leaves its held window alone when the pa
     });
 
     const parent = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
@@ -824,7 +924,7 @@ processTest("the unattended wrapper never signals a group it does not lead", asy
     // signal would reach the test runner. The bystander makes that visible.
     const parent = standInParent();
     const bystander = standInParent();
-    const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(parent.pid)], { stdio: "ignore" });
+    const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", ...parentArgs(parent)], { stdio: "ignore" });
     try {
       const childPid = await readPid(childPidFile, left());
       await killParent(parent);
@@ -860,7 +960,7 @@ processTest("a ps that cannot answer does not make a live parent look dead", asy
     await fs.promises.writeFile(path.join(bin, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
 
     const parent = standInParent();
-    const script = spawn("/bin/sh", [scriptPath, String(parent.pid)], {
+    const script = spawn("/bin/sh", [scriptPath, ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
@@ -950,7 +1050,7 @@ processTest("an unattended wrapper ends its child and its grandchild when the pa
 
     const parent = standInParent();
     // Detached, as print.ts spawns it: the wrapper leads its own process group.
-    const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(parent.pid)], {
+    const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", ...parentArgs(parent)], {
       detached: true,
       stdio: "ignore",
     });

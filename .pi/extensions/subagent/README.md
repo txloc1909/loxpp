@@ -162,9 +162,13 @@ session that started it, and every shutdown path stops its jobs.
 A `SIGKILL` of pi runs no handler in pi, so no shutdown path runs and the child
 would keep its window with nobody to report to. The run script watches pi
 instead. It polls pi's pid and reads that process's state, because `kill -0`
-also answers for a zombie that nobody has reaped yet. When the pid is gone, the
-watcher signals the child, waits, kills it, and closes the window. The close
-call names the socket, and the script learns its own window id from
+also answers for a zombie that nobody has reaped yet. A state alone does not
+name the process, though: the kernel hands a dead process's number to a new one,
+and the new owner's state would read as a live parent for as long as it lives.
+So the parent also passes its own start time, read while it is certainly alive,
+and the watcher treats a different start time as a dead parent. When the parent
+is gone, the watcher signals the child, waits, kills it, and closes the window.
+The close call names the socket, and the script learns its own window id from
 `KITTY_WINDOW_ID`.
 
 kitty runs a window's command under `kitten run-shell`, so the script shares
@@ -178,7 +182,13 @@ close.
 
 The watcher kills only on evidence: when `ps` cannot answer for any pid, it
 cannot tell a live parent from a dead one, so it leaves the run alone. That is
-the behaviour before this watch existed. The check asks `ps` to list any pid,
+the behaviour before this watch existed. The same rule covers the start time: a
+caller that could not read the parent's start time passes the pid alone, and the
+state check is then all the evidence there is. The start time has one-second
+resolution, so a pid reused inside that same second still reads as the parent;
+a pid is reused only after the whole number space turns over (about 45 minutes
+on a host that moves 7 640 pids in 5 s), which always lands in a later second.
+The check asks `ps` to list any pid,
 and not about one chosen pid: a script that was signalled alone no longer
 exists, so asking about the script makes every pid read as live and the watcher
 polls forever, and pid 1 is readable only by its owner on a `hidepid` mount, so

@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./gate-run.ts";
+import { startTimeOf } from "./parent-identity.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 const WATCH = { pollS: 0.05, graceS: 0.3 };
@@ -229,7 +230,9 @@ const readOr = async (file: string, fallback = ""): Promise<string> => {
 const calls = async (b: Box): Promise<string[]> => (await readOr(b.log)).trim().split("\n").filter(Boolean);
 
 function wrapper(b: Box, parentPid: number): ChildProcess {
-  const proc = spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid)], {
+  // The two arguments production passes: the pid, and its start time, which
+  // makes a pid the kernel handed to another process read as a dead parent.
+  const proc = spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid), startTimeOf(parentPid)], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: b.env,
@@ -273,7 +276,7 @@ test("the gate argv names the container and the wrapper removes it", () => {
   assert.deepEqual(argv.slice(-3), ["bash", "-lc", "make"]);
 
   const script = buildGateScript({ argv, name });
-  for (const needle of [WATCHDOG_MARKER, "parent_pid=${1:-}", `rm -f --time 0 '${name}'`, "trap 'abort' TERM INT HUP", 'exit "$status"']) {
+  for (const needle of [WATCHDOG_MARKER, "parent_pid=${1:-}", "parent_start=${2:-}", 'parent_gone() {', `rm -f --time 0 '${name}'`, "trap 'abort' TERM INT HUP", 'exit "$status"']) {
     assert.ok(script.includes(needle), `the wrapper contains ${needle}`);
   }
 });

@@ -9,7 +9,9 @@
  * Three call sites share this text: the script kitty runs in a watched window,
  * the wrapper `print.ts` spawns for an unattended run, and the wrapper
  * `gate-run.ts` builds for a gate container. Each script receives the parent
- * pid as its first argument, because kitty starts it from its own environment.
+ * pid as its first argument, because kitty starts it from its own environment,
+ * and the parent's start time as its second, which `parent-identity.ts` reads
+ * while the parent is certainly alive.
  *
  * Pure string helpers only, so the tests load this module directly.
  */
@@ -43,10 +45,17 @@ export function clearShadowedCommand(): string[] {
   return ["unset -f command 2>/dev/null"];
 }
 
-/** The first argument is the parent pid. Without it nothing can watch. */
+/**
+ * The first argument is the parent pid. Without it nothing can watch. The second
+ * is the parent's start time, which tells the parent apart from a later process
+ * the kernel handed the same pid. An empty second argument is allowed: it means
+ * the caller could not read one, and the state check below is then all the
+ * evidence there is.
+ */
 export function parentPidLines(): string[] {
   return [
     "parent_pid=${1:-}",
+    "parent_start=${2:-}",
     'if command [ -z "$parent_pid" ]; then',
     "  command printf '%s\\n' 'loxpp: the run script needs the parent process id' >&2",
     "  exit 1",
@@ -78,6 +87,13 @@ export function parentPidLines(): string[] {
  * The watch also assumes that pi and this script share a PID namespace. A `ps`
  * that cannot see pi would report it gone.
  *
+ * A state alone answers "some process holds this pid", and the kernel hands a
+ * dead process's number to a new one, so the parent's state can be the state of
+ * a stranger. `parent_gone`, which the watcher polls, compares the parent's
+ * start time against the one the caller recorded, and a different start time is
+ * a dead parent. Without a recorded start time it falls back to the state check
+ * alone, which is what it watched before the identity was passed in.
+ *
  * A shell function inherited from whatever started pi cannot change what the
  * watch does. Every command it runs goes through `command`: a `tr` that prints
  * nothing makes every pid read as gone, a `head` that prints nothing makes `ps`
@@ -108,6 +124,13 @@ export function watchdogFunctions(): string[] {
     `  command ps -o stat= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
     "}",
     "",
+    // LC_ALL=C is set here and in parent-identity.ts, so both sides of the
+    // comparison carry the same month and day names, and the whitespace is
+    // removed on both sides because `ps` pads the field.
+    "process_start() {",
+    `  LC_ALL=C command ps -o lstart= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
+    "}",
+    "",
     "pid_gone() {",
     '  pid_state=$(process_state "$1")',
     '  if command [ -n "$pid_state" ]; then',
@@ -116,6 +139,20 @@ export function watchdogFunctions(): string[] {
     "  fi",
     `  command [ -n "$(${PS_PROBE} | command head -n 1)" ] || return 1`,
     "  return 0",
+    "}",
+    "",
+    "# The parent's own watch: a pid that answers may belong to a different",
+    "# process that the kernel handed the number after the parent died, and its",
+    "# state is the one `pid_gone` would read as a live parent.",
+    "parent_gone() {",
+    '  pid_gone "$parent_pid" && return 0',
+    '  command [ -n "$parent_start" ] || return 1',
+    '  parent_now=$(process_start "$parent_pid")',
+    // An empty start time is not evidence of a different process: it means `ps`
+    // read the pid's state but not its start time, so the run is left alone.
+    '  command [ -n "$parent_now" ] || return 1',
+    '  command [ "$parent_now" = "$parent_start" ] || return 0',
+    "  return 1",
     "}",
     "",
     "# A group signal must reach the commands the child started, and it must not",
@@ -200,7 +237,7 @@ export function watchdogLines(opts: WatchOptions = {}): string[] {
     "  # window then stays. The parent ending first is what this watch is for.",
     "  while :; do",
     '    pid_gone "$child" && exit 0',
-    '    pid_gone "$parent_pid" && break',
+    '    parent_gone && break',
     `    command sleep ${poll}`,
     "  done",
     '  pid_gone "$child" && exit 0',
