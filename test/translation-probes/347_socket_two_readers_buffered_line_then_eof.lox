@@ -1,29 +1,49 @@
-// Two tasks wait in readline() on one Socket. The peer sends two lines in one
-// write and then closes its write side. Each task gets one line: the bytes that
-// the first task to wake reads are not lost to the other task, and the other
-// task does not see an end of stream while a line remains
-// (spec/05-stdlib.md, Socket). Which task gets which line is not specified, so
-// the probe checks the pair of results.
+// Two tasks call readline() on one Socket. The peer sends two lines in one
+// write and then closes its write side. Issue #1047 found that the bytes that
+// one task read could be lost to the other, and that the other task could see
+// an end of stream while a line remained. Under the rule of one call per side
+// (spec/04-semantics.md, The Task Machine, Sides), the second reader does not
+// wait: `first` waits with no bytes to read and holds the read side, so the
+// call of `second` raises BusyError. The peer writes only after that. `first`
+// then reads both lines, and the end of stream comes after the last line
+// (spec/05-stdlib.md, Socket).
 // STATUS: ok
-// TIMEOUT: 20
-// CHECK: results are a and b: true
+// TIMEOUT: 30
+// CHECK: second: BusyError
+// CHECK: first: a, b, nil
 fun peer(main) {
     var srv = listen("127.0.0.1", 0);
     task.send(main, srv.port());
     var c = srv.accept();
-    sleep(0.2);
+    task.receive();
     c.write("a\nb\n");
-    sleep(0.1);
     c.close_write();
     task.receive();
 }
 var me = task.self();
 var w = task.spawn_worker(peer, me);
 var s = connect("127.0.0.1", task.receive());
-fun reader() { task.send(me, str(s.readline())); }
-task.spawn(reader);
-task.spawn(reader);
-var r1 = task.receive();
-var r2 = task.receive();
+fun first() {
+    var x = s.readline();
+    var y = s.readline();
+    task.send(me, "first: " + str(x) + ", " + str(y) + ", " + str(s.readline()));
+}
+fun second() {
+    try {
+        s.readline();
+        task.send(me, "second: no fault");
+    } catch (e) {
+        task.send(me, "second: " + e.kind);
+    }
+    task.send(w, "write");
+}
+task.spawn(first);
+task.spawn(second);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
 task.send(w, "done");
-print "results are a and b: " + str((r1 == "a" and r2 == "b") or (r1 == "b" and r2 == "a"));

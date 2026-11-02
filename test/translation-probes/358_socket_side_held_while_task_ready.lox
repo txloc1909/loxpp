@@ -1,0 +1,41 @@
+// A call holds its side from its first wait until it returns or raises, also
+// after its wait has ended while its task is ready (spec/04-semantics.md, The
+// Task Machine, Sides, rule 1). `first` waits in readline(). `feeder` sends a
+// line, so the wait of `first` can end, and then yields: a task switch, where
+// the worker can see that the wait ended and put `first` in the run queue.
+// `reader` was in the run queue before `first`, so it runs first, and calls
+// read_some(4) while the line is there. The call raises BusyError, whether or
+// not the worker has seen the end of the wait yet, and `first` gets the whole
+// line. This is the shape of issue #1054, where the second call took the
+// bytes and the first call waited for ever.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: reader: BusyError
+// CHECK: first: line
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun first() { task.send(me, "first: " + str(conn.readline())); }
+fun feeder() {
+    peer.writeline("line");
+    yield;
+}
+fun reader() {
+    try {
+        var x = conn.read_some(4);
+        task.send(me, "reader: no fault, got " + x);
+    } catch (e) {
+        task.send(me, "reader: " + e.kind);
+    }
+}
+task.spawn(first);
+task.spawn(feeder);
+task.spawn(reader);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

@@ -1,39 +1,49 @@
-// Two tasks wait in readline() on one Socket. The peer sends two lines in one
-// write and keeps the connection open. Each task gets one line: a task that
-// wakes finds the bytes that the first task to wake read, and does not wait
-// again for bytes that never come (spec/05-stdlib.md, Socket). An
-// implementation that parks the second task again leaves it without its line,
-// and the limit of receive_within ends the wait. Which task gets which line is
-// not specified, so the probe checks the pair of results.
+// Two tasks call readline() on one Socket. The peer sends two lines in one
+// write and keeps the connection open. Issue #1047 found that a task could
+// wait again for bytes that never come while its line was in the buffer.
+// Under the rule of one call per side (spec/04-semantics.md, The Task
+// Machine, Sides), the second reader does not wait: `first` waits with no
+// bytes to read and holds the read side, so the call of `second` raises
+// BusyError. The peer writes only after that. `first` then reads the first
+// line, and its second readline() finds the second line in the buffer and does
+// not wait for more bytes (spec/05-stdlib.md, Socket). The main task collects
+// the results with a limit, so a call that waits again ends with a result
+// missing and does not hang.
 // STATUS: ok
-// TIMEOUT: 20
-// CHECK: received 2 results
-// CHECK: results are a and b: true
+// TIMEOUT: 30
+// CHECK: second: BusyError
+// CHECK: first: a, b
 fun peer(main) {
     var srv = listen("127.0.0.1", 0);
     task.send(main, srv.port());
     var c = srv.accept();
-    sleep(0.2);
+    task.receive();
     c.write("a\nb\n");
     task.receive();
 }
 var me = task.self();
 var w = task.spawn_worker(peer, me);
 var s = connect("127.0.0.1", task.receive());
-fun reader() { task.send(me, str(s.readline())); }
-task.spawn(reader);
-task.spawn(reader);
-var got = [];
-var i = 0;
-while (i < 2) {
+fun first() {
+    var x = s.readline();
+    task.send(me, "first: " + str(x) + ", " + str(s.readline()));
+}
+fun second() {
     try {
-        got.append(task.receive_within(3));
+        s.readline();
+        task.send(me, "second: no fault");
     } catch (e) {
-        // The limit passed: the result stays missing.
+        task.send(me, "second: " + e.kind);
     }
-    i = i + 1;
+    task.send(w, "write");
+}
+task.spawn(first);
+task.spawn(second);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
 }
 task.send(w, "done");
-print "received " + str(len(got)) + " results";
-var ok = len(got) == 2 and ((got[0] == "a" and got[1] == "b") or (got[0] == "b" and got[1] == "a"));
-print "results are a and b: " + str(ok);

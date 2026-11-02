@@ -1,0 +1,38 @@
+// The accept side of a Server holds at most one call (spec/04-semantics.md,
+// The Task Machine, Sides). `first` waits in accept() with no connection to
+// take, so its call holds the accept side. `second`, a task of the same
+// worker, then calls accept() on the same Server. That call raises a catchable
+// BusyError at once and takes no connection. `second` then connects, and
+// `first` accepts that connection.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: second: BusyError
+// CHECK: first: accepted
+var srv = listen("127.0.0.1", 0);
+var me = task.self();
+fun first() {
+    var c = srv.accept();
+    task.send(me, "first: accepted");
+    c.close();
+}
+fun second() {
+    try {
+        srv.accept();
+        task.send(me, "second: no fault");
+    } catch (e) {
+        task.send(me, "second: " + e.kind);
+    }
+    var c = connect("127.0.0.1", srv.port());
+    task.receive();
+    c.close();
+}
+task.spawn(first);
+var s = task.spawn(second);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
+task.send(s, "done");

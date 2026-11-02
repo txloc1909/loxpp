@@ -1,13 +1,15 @@
 // Four tasks read one Socket until the end of the stream: two with read_some
 // and two with read_bytes. The peer, on its own worker, writes 200000 bytes in
-// pieces and then closes its write side. No byte is lost or repeated, so the
-// four counts together are 200000 (spec/05-stdlib.md, Socket: the bytes of all
-// results, in order, are the bytes of the stream). Which task reads which byte
-// is not specified, so the probe checks the sum and the count of the
-// character "x", which the peer puts at known places. The
-// read_some readers compute and sleep between calls, so a task that wakes from
-// its wait can find bytes that another task left unread, and more bytes behind
-// them.
+// pieces and then closes its write side. Issue #1047 checked that no byte is
+// lost or repeated. Under the rule of one call per side (spec/04-semantics.md,
+// The Task Machine, Sides), a call made while the call of another task holds
+// the read side raises BusyError and takes no byte. Each reader catches that
+// fault, sleeps, and calls again; a reader whose call returns holds nothing.
+// So the four counts together are 200000 (spec/05-stdlib.md, Socket: the bytes
+// of all results, in order, are the bytes of the stream). Which task reads
+// which byte, and how often a call raises BusyError, depend on the network,
+// so the probe checks the sum and the count of the character "x", which the
+// peer puts at known places.
 // STATUS: ok
 // TIMEOUT: 60
 // CHECK: received 4 counts
@@ -42,29 +44,39 @@ fun tally(text, counts) {
         i = i + 1;
     }
 }
-fun some_reader() {
+// Calls read_some(200) when `some` is true, and read_bytes(777) otherwise.
+// Returns nil when another task holds the read side.
+fun read_once(some) {
+    try {
+        if (some) return s.read_some(200);
+        return s.read_bytes(777);
+    } catch (e) {
+        if (e.kind != "BusyError") throw e;
+        return nil;
+    }
+}
+fun reader(some) {
     var counts = [0, 0];
-    var text = s.read_some(200);
-    while (len(text) > 0) {
-        tally(text, counts);
-        // More bytes arrive while this task computes, and the other tasks
-        // run only when it sleeps.
-        var end = clock() + 0.002;
-        while (clock() < end) { }
-        sleep(0.001);
-        text = s.read_some(200);
+    while (true) {
+        var text = read_once(some);
+        if (text == nil) {
+            sleep(0.001);
+        } else if (len(text) == 0) {
+            break;
+        } else {
+            tally(text, counts);
+            if (some) {
+                // More bytes arrive while this task computes.
+                var end = clock() + 0.002;
+                while (clock() < end) { }
+                sleep(0.001);
+            }
+        }
     }
     task.send(me, counts[0] + 1000000 * counts[1]);
 }
-fun bytes_reader() {
-    var counts = [0, 0];
-    var text = s.read_bytes(777);
-    while (len(text) > 0) {
-        tally(text, counts);
-        text = s.read_bytes(777);
-    }
-    task.send(me, counts[0] + 1000000 * counts[1]);
-}
+fun some_reader() { reader(true); }
+fun bytes_reader() { reader(false); }
 task.spawn(some_reader);
 task.spawn(bytes_reader);
 task.spawn(some_reader);
