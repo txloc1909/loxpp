@@ -29,6 +29,7 @@ import argparse
 import ctypes
 import ctypes.util
 import os
+import signal
 import struct
 import sys
 from pathlib import Path
@@ -145,7 +146,11 @@ def attempt(command: list[str], core: int | None) -> tuple[int, int]:
             os.close(error_read)
             if core is not None:
                 os.sched_setaffinity(0, {core})
-            os.read(read_end, 1)
+            # Only the byte this tool writes starts the command. End of file
+            # means that the parent died before it could count anything, and
+            # running the command then would leave a stray process behind.
+            if os.read(read_end, 1) != b"x":
+                os._exit(127)
             os.close(read_end)
             try:
                 os.execv(command[0], command)
@@ -157,7 +162,17 @@ def attempt(command: list[str], core: int | None) -> tuple[int, int]:
         os._exit(127)
     os.close(read_end)
     os.close(error_write)
-    fd = perf_event_open(pid)
+    try:
+        fd = perf_event_open(pid)
+    except BaseException:
+        # Nothing will write the byte, so end the child here: closing the pipe
+        # would let it run the command with no event, and leaving it blocked
+        # would orphan it.
+        os.close(write_end)
+        os.close(error_read)
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        raise
     try:
         ioctl(fd, IOC_RESET)
         ioctl(fd, IOC_ENABLE)
