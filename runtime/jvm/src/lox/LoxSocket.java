@@ -50,6 +50,9 @@ public final class LoxSocket {
     /**
      * Refills the empty buffer. False at the end of the stream. A task that
      * finds no bytes waits here; a close during the wait raises in checkOpen.
+     * Tasks that wait on one Socket share the buffer, so a task that wakes
+     * looks at the buffer first: another task may have filled it already, and
+     * a read into it would lose those bytes.
      */
     private boolean fill(String method) {
         if (eof) {
@@ -57,6 +60,12 @@ public final class LoxSocket {
         }
         for (;;) {
             checkOpen(method);
+            if (pos < lim) {
+                return true;
+            }
+            if (eof) {
+                return false;
+            }
             window.clear();
             int n;
             try {

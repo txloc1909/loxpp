@@ -1,0 +1,39 @@
+// Two tasks wait in readline() on one Socket. The peer sends two lines in one
+// write and keeps the connection open. Each task gets one line: a task that
+// wakes finds the bytes that the first task to wake read, and does not wait
+// again for bytes that never come (spec/05-stdlib.md, Socket). An
+// implementation that parks the second task again leaves it without its line,
+// and the limit of receive_within ends the wait. Which task gets which line is
+// not specified, so the probe checks the pair of results.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: received 2 results
+// CHECK: results are a and b: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nb\n");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun reader() { task.send(me, str(s.readline())); }
+task.spawn(reader);
+task.spawn(reader);
+var got = [];
+var i = 0;
+while (i < 2) {
+    try {
+        got.append(task.receive_within(3));
+    } catch (e) {
+        // The limit passed: the result stays missing.
+    }
+    i = i + 1;
+}
+task.send(w, "done");
+print "received " + str(len(got)) + " results";
+var ok = len(got) == 2 and ((got[0] == "a" and got[1] == "b") or (got[0] == "b" and got[1] == "a"));
+print "results are a and b: " + str(ok);

@@ -1,0 +1,58 @@
+// Three tasks wait on one Socket, each in one call: two in read_some(2) and one
+// in read_bytes(2). The peer sends "abcdef" in one write and keeps the
+// connection open. Every byte goes to exactly one task: read_some returns at
+// most 2 bytes, read_bytes returns exactly 2 bytes, and no task waits for
+// bytes that are already there (spec/05-stdlib.md, Socket). The six bytes
+// arrive together, so the three results are "ab", "cd" and "ef" in one order or
+// another. The probe checks the set of results, not which task gets which.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: received 3 results
+// CHECK: total length 6
+// CHECK: none empty true
+// CHECK: pieces ab, cd, ef once each true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("abcdef");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun some1() { task.send(me, s.read_some(2)); }
+fun some2() { task.send(me, s.read_some(2)); }
+fun exact() { task.send(me, s.read_bytes(2)); }
+task.spawn(some1);
+task.spawn(some2);
+task.spawn(exact);
+var got = [];
+var i = 0;
+while (i < 3) {
+    try {
+        got.append(task.receive_within(3));
+    } catch (e) {
+        // The limit passed: the result stays missing.
+    }
+    i = i + 1;
+}
+task.send(w, "done");
+print "received " + str(len(got)) + " results";
+var total = 0;
+var none_empty = true;
+var seen = [];
+for (var r in got) {
+    total = total + len(r);
+    if (len(r) == 0) { none_empty = false; }
+    seen.append(r);
+}
+print "total length " + str(total);
+print "none empty " + str(none_empty);
+fun once(piece) {
+    var n = 0;
+    for (var x in seen) { if (x == piece) { n = n + 1; } }
+    return n == 1;
+}
+print "pieces ab, cd, ef once each " + str(once("ab") and once("cd") and once("ef"));
