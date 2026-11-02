@@ -1849,10 +1849,12 @@ again, and its limit, when it has one, keeps its start. A call that blocks
 the worker makes no move: its task stays `running`, and the worker is
 `blocked` until the call returns.
 
-A `message` move from a send on the same worker happens at the send. The
-worker sees the other `message`, `limit` and `wait-end` events at points that
-[Scheduling](#scheduling) describes, and gives the order in which their tasks
-join the run queue.
+A `message` move from a send on the same worker happens at the send. A
+`wait-end` move that a close by a task of the same worker causes (Sides, rule
+4) happens at the close: the woken task joins the back of the run queue when
+`close()` or `close_write()` is called. [Scheduling](#scheduling) describes
+when the worker sees the other `message`, `limit` and `wait-end` events, and
+the order in which their tasks join the run queue.
 
 **The state that belongs to a task.** Each item below belongs to one task. A
 step of another task does not read it and does not change it. When the task
@@ -1862,6 +1864,7 @@ suspended.
 | Task-owned state | What it holds |
 |---|---|
 | the mailbox | the messages that wait for a receive |
+| the current task | the handle of the task, which `task.self()` returns while the task runs |
 | the call frames | each frame of the task, which includes the frames of each coroutine that the task resumed and that has not returned |
 | the deferred calls | the pending deferred calls of each frame |
 | the handlers | the `try` statements whose `tryBlock` is running in the frames of the task |
@@ -1897,7 +1900,9 @@ A side holds at most one call:
    and that call fails as a call on a closed Socket or Server does
    (§05-stdlib, Socket methods).
 5. A call of class suspends that blocks the worker holds no side: no other
-   task of the worker runs while it waits.
+   task of the worker runs while it waits. Rule 2 still applies to it: on a
+   side that a call of another task holds, it raises `BusyError` at the call
+   and does not wait.
 6. A call on a side that is closed fails as a call on a closed Socket or
    Server does (§05-stdlib, Socket methods), also while a call of another
    task still holds that side after a close ended its wait. A side is closed
@@ -1998,8 +2003,12 @@ of its worker from running. A program gives such a task a worker of its own.
 
 The runtime calls some Lox++ code and needs its result before it continues. A
 task cannot suspend inside such a call. A call of class suspends in one of
-these contexts blocks the worker, as a call of class blocks does. It raises no
-fault, and the result does not depend on the state of the network.
+these contexts blocks the worker, as a call of class blocks does. The context
+adds no fault: the call raises no fault because it cannot suspend, and the
+result does not depend on the state of the network. The rules of the sides
+still apply: on a side that a call of another task holds, the call raises
+`BusyError` at the call (see [The Task Machine](#the-task-machine), Sides,
+rules 2 and 5).
 
 | Context | The runtime calls Lox++ code for |
 |---|---|
@@ -2043,10 +2052,19 @@ out, in the order of their deadlines. One group holds all of them: a sleep
 that has expired, a limit of a receive that has passed, and a limit of a
 `connect_within` that has passed.
 
+A message from a task of another worker is an event outside the worker. The
+worker sees it at points that the implementation chooses, and at the latest
+when the worker has no task that is ready to run. Where its task joins the run
+queue, relative to the tasks whose wait or limit the worker sees at the same
+point, is not defined. A send on the same worker, and a close by a task of the
+same worker, are not such events: their moves happen at the call (see [The
+Task Machine](#the-task-machine)).
+
 The order in which the tasks of one worker run is therefore defined, and it
-binds every implementation, with one limit: an event outside the program
+binds every implementation, with two limits: an event outside the program
 decides when a wait ends, and so which tasks are in the run queue when a task
-suspends. The order of steps on
+suspends; and the place of a message from another worker among the tasks that
+the worker sees at the same point is not defined. The order of steps on
 different workers is not defined either, except where messages order them.
 
 ### Ending

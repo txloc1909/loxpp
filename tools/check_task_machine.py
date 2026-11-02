@@ -11,6 +11,13 @@ The rules:
   - Each task state but `ended` has a move to a state that is not `ended`, so
     a task in it can continue, and each task state can be reached from a new
     task by the moves.
+  - The task states, the worker states and the moves are pinned in both
+    directions: TASK_STATES, WORKER_STATES and MOVES name each row, so a row
+    removed from the spec fails, and so does a row that this script does not
+    know. A row added to the machine is a change of the machine, and it
+    changes this script in the same pull request.
+  - Each move has the From and To states that MOVES gives it, and a move whose
+    To state is `ready` names a place in the run queue (not `—`).
   - The table of task-owned state has a row for each item in REQUIRED_OWNED.
     These are the items that a park overwrote in a named bug class
     (docs/decisions/concurrency-semantics-grounding.md, "Constraints from
@@ -32,8 +39,25 @@ from spec_tables import SpecError, code, report, section, spec_path, table
 
 NEW_TASK = "—"
 ENDED = "ended"
+TASK_STATES = ("ready", "running", "receiving", "waiting", "ended")
+WORKER_STATES = ("active", "blocked", "idle", "finished")
+# move -> (From states, To state)
+MOVES = {
+    "spawn": ({NEW_TASK}, "ready"),
+    "spawn-worker": ({NEW_TASK}, "ready"),
+    "run": ({"ready"}, "running"),
+    "yield": ({"running"}, "ready"),
+    "receive": ({"running"}, "receiving"),
+    "message": ({"receiving"}, "ready"),
+    "limit": ({"receiving"}, "ready"),
+    "wait": ({"running"}, "waiting"),
+    "wait-end": ({"waiting"}, "ready"),
+    "end": ({"running"}, "ended"),
+    "abandon": ({"ready", "receiving", "waiting"}, "ended"),
+}
 REQUIRED_OWNED = (
     "the mailbox",
+    "the current task",
     "the call frames",
     "the deferred calls",
     "the handlers",
@@ -51,6 +75,16 @@ def spans(cell: str) -> list[str]:
     if not found:
         raise SpecError(f"cell names no state: {cell!r}")
     return found
+
+
+def pin(kind: str, found: list[str], known: tuple[str, ...], problems: list[str]) -> None:
+    """A row that the spec lacks, or that this script does not know, fails."""
+    for name in known:
+        if name not in found:
+            problems.append(f"the spec has no {kind} {name!r}")
+    for name in found:
+        if name not in known:
+            problems.append(f"{kind} {name!r} is not one this script knows; a change of the machine changes this script too")
 
 
 def main() -> None:
@@ -88,6 +122,14 @@ def main() -> None:
         problems.append(f"the task state table has no row {ENDED!r}")
     if not worker_rows:
         problems.append("the worker state table has no rows")
+    pin("task state", states, TASK_STATES, problems)
+    worker_states: list[str] = []
+    for row in worker_rows:
+        try:
+            worker_states.append(code(row["Worker state"]))
+        except SpecError as exc:
+            problems.append(f"worker state table: {exc}")
+    pin("worker state", worker_states, WORKER_STATES, problems)
 
     moves: list[str] = []
     edges: set[tuple[str, str]] = set()
@@ -111,9 +153,19 @@ def main() -> None:
                 problems.append(f"move {move!r} names {state!r}, which is not a task state")
         if NEW_TASK in tos:
             problems.append(f"move {move!r} has {NEW_TASK!r} as its To state")
+        if move in MOVES:
+            want_from, want_to = MOVES[move]
+            if set(froms) != want_from or tos != [want_to]:
+                problems.append(
+                    f"move {move!r} goes {sorted(froms)} -> {tos}, the machine says "
+                    f"{sorted(want_from)} -> [{want_to!r}]"
+                )
+        if tos == ["ready"] and row["Run queue"].strip() in ("", "—"):
+            problems.append(f"move {move!r} makes a task ready but names no place in the run queue")
         sources.update(s for s in froms if s != NEW_TASK)
         targets.update(tos)
         edges.update((f, t) for f in froms for t in tos)
+    pin("move", moves, tuple(MOVES), problems)
     if not any(NEW_TASK in spans(row["From"]) for row in move_rows if "`" in row["From"]):
         problems.append("no move makes a new task")
     for state in states:
