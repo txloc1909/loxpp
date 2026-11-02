@@ -2,8 +2,14 @@
 // which reads the whole stream. B finds the stream empty at its end of stream
 // and gets nil. The probe pins the case where no byte is left for the waiting
 // task: it must not return a line, and it must not hang.
+// The CHECK line does not bind the bootstrap interpreter. It runs every worker
+// on one host thread, so a blocking read of the first task keeps the other
+// task from running (spec/README.md, Conformance: scheduling is
+// implementation-defined). The probe on the NOT-BINDING line checks the
+// bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 20
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: a gets two lines and b gets nil: true
 fun peer(main) {
     var srv = listen("127.0.0.1", 0);

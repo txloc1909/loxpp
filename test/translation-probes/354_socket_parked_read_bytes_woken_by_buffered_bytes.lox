@@ -2,8 +2,14 @@
 // which reads the whole write of the peer. The three bytes after the first
 // line stay in the buffer of the Socket and the descriptor has no new bytes.
 // B must get them. The probe checks the pair of results.
+// The CHECK line does not bind the bootstrap interpreter. It runs every worker
+// on one host thread, so a blocking read of the first task keeps the other
+// task from running (spec/README.md, Conformance: scheduling is
+// implementation-defined). The probe on the NOT-BINDING line checks the
+// bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 20
+// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: results are a and bcd: true
 fun peer(main) {
     var srv = listen("127.0.0.1", 0);
