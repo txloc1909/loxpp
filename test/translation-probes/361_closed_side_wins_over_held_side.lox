@@ -1,0 +1,62 @@
+// A call on a closed side fails as a call on a closed value does, also while a
+// call of another task still holds that side (spec/04-semantics.md, The Task
+// Machine, Sides, rule 6). `reader` waits in readline() and holds the read
+// side of `conn`; `acceptor` waits in accept() and holds the accept side of
+// `idle`. `closer` closes both, which ends both waits. The woken calls still
+// hold their sides, because their tasks have not run yet. `closer` then calls
+// readline() and accept() itself. Both raise SocketClosedError, not
+// BusyError. The woken calls then raise SocketClosedError in their own tasks,
+// in the order in which they began to wait.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: closer read: SocketClosedError
+// CHECK: closer accept: SocketClosedError
+// CHECK: reader: SocketClosedError
+// CHECK: acceptor: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var idle = listen("127.0.0.1", 0);
+var me = task.self();
+fun reader() {
+    try {
+        conn.readline();
+        task.send(me, "reader: no fault");
+    } catch (e) {
+        task.send(me, "reader: " + e.kind);
+    }
+}
+fun acceptor() {
+    try {
+        idle.accept();
+        task.send(me, "acceptor: no fault");
+    } catch (e) {
+        task.send(me, "acceptor: " + e.kind);
+    }
+}
+fun closer() {
+    conn.close();
+    idle.close();
+    try {
+        conn.readline();
+        task.send(me, "closer read: no fault");
+    } catch (e) {
+        task.send(me, "closer read: " + e.kind);
+    }
+    try {
+        idle.accept();
+        task.send(me, "closer accept: no fault");
+    } catch (e) {
+        task.send(me, "closer accept: " + e.kind);
+    }
+}
+task.spawn(reader);
+task.spawn(acceptor);
+task.spawn(closer);
+for (var i = 0; i < 4; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

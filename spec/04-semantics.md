@@ -1887,9 +1887,9 @@ A side holds at most one call:
 1. A call **holds** its side from its first wait until it returns or raises.
    This includes the time after its wait ends, while its task is `ready`. A
    call that does not wait never holds its side.
-2. A call on a side that a call of another task holds raises `BusyError`. It
-   raises at the call, before it reads, writes, or accepts anything, also
-   when it could return at once.
+2. A call on a side that a call of another task holds raises `BusyError`,
+   unless rule 6 applies. It raises at the call, before it reads, writes, or
+   accepts anything, also when it could return at once.
 3. A call on the other side of the same Socket does not raise. One task can
    read a Socket while another task writes it.
 4. `close()` and `close_write()` do not wait, so they hold no side. A close
@@ -1898,6 +1898,11 @@ A side holds at most one call:
    (§05-stdlib, Socket methods).
 5. A call of class suspends that blocks the worker holds no side: no other
    task of the worker runs while it waits.
+6. A call on a side that is closed fails as a call on a closed Socket or
+   Server does (§05-stdlib, Socket methods), also while a call of another
+   task still holds that side after a close ended its wait. A side is closed
+   after `close()` of its value, and the write side of a Socket also after
+   `close_write()`. `BusyError` applies only to a side that is not closed.
 
 Whether a call finds its side held can depend on when an event of the
 network happens. A program that makes calls on one side from two tasks is

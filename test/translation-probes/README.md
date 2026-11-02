@@ -376,6 +376,7 @@ each has an off-the-shelf solution.
 | `358_socket_side_held_while_task_ready` | a call on the read side raises `BusyError` after the line of the waiting call arrived, whether or not its task is ready yet (Sides, rule 1; D3; the shape of issue #1054) — a spec probe | none (spec probe) |
 | `359_socket_call_that_does_not_wait_holds_nothing` | two tasks read one Socket in turn with calls that do not wait: neither raises, because a call that does not wait holds no side (Sides, rule 1; D3) — a spec probe | none (spec probe) |
 | `360_socket_busy_while_buffered_line_waits` | the program of issue #1054: task A computes while the bytes of waiting task B arrive, then calls `readline` and raises `BusyError`; B gets its line (Sides; D3) — a spec probe | none (spec probe) |
+| `361_closed_side_wins_over_held_side` | after a close by another task, a `readline` and an `accept` on the closed values raise `SocketClosedError`, not `BusyError`, while the woken calls still hold their sides; the woken calls then raise `SocketClosedError` (spec/04-semantics.md, The Task Machine, Sides, rule 6; D3) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |
 | `322_receive_where_sees_the_mailbox` | `task.pending()` in `want` counts the whole mailbox, and a message that `want` sends to its own task is tested in the same call — a spec probe | none (spec probe) |
@@ -482,7 +483,7 @@ The probes `260` to `267`, `278` to `282`, and `284` to `286` are the
 probes of the rule that a call which waits for the network or for time suspends only its task
 (`docs/decisions/blocking-call-suspension.md`). They bind every implementation, the bootstrap
 interpreter too (`docs/decisions/concurrency-semantics-grounding.md`, D2), so none of them
-carries a `NOT-BINDING` line. The probes `347` to `360` are the probes of the rule of one call
+carries a `NOT-BINDING` line. The probes `347` to `361` are the probes of the rule of one call
 per side of a Socket or a Server (spec/04-semantics.md, The Task Machine, Sides; D3 of the same
 decision). A consumer that does not pass one of these probes yet lists it in its file.
 An absent file is an empty list, so a consumer with no gap needs no
