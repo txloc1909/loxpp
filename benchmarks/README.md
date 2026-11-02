@@ -98,7 +98,7 @@ and prints the median user plus system CPU time and the ns per task switch.
 and the size of a suspended coroutine.
 
 CPU time is too noisy to show a change of a few instructions per switch.
-`tools/count_instructions.py -- core N -- <command>` counts the instructions a
+`tools/count_instructions.py --core N -- <command>` counts the instructions a
 run executes, with `perf_event_open`, because the dev image has no `perf` and
 no `valgrind`. One run of the program is several attempts, and the largest
 count wins: the kernel sometimes takes a counting event off the CPU, and the
