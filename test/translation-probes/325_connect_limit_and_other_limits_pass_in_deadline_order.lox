@@ -7,12 +7,8 @@
 // busy-loops 0.9 seconds, a lower bound, so every wait has ended when main
 // suspends. The tasks run in the order of the deadlines. The start of the
 // tasks differs by far less than the 0.1 seconds between two deadlines.
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined).
 // STATUS: ok
 // TIMEOUT: 60
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: b woke
 // CHECK: d woke
 // CHECK: a NetworkError
