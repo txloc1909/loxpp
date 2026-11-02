@@ -444,7 +444,8 @@ idle detects this with one atomic count and ends the program with
 Per worker, one run queue, first in first out, no priorities. A task runs
 until it suspends. A blocking call blocks its worker, every task on it, and
 nothing else; the stdlib says which calls block. Asynchronous I/O inside a
-worker is the first follow-up on this seam, not part of this decision.
+worker is not part of this decision. `blocking-call-suspension.md` added it
+for the network and `sleep`.
 
 **The suspend points are the default set, and a fair mode is reserved.** The
 spec's table of suspend points, `yield`, `receive` on an empty mailbox, and
@@ -497,7 +498,7 @@ the tables of a session exist once.
 | Native VM | The whole model. | Workers are `Runtime` instances on threads; tasks are the coroutines of #523; copy and mailbox are runtime code. No concurrent GC. |
 | QBE | Code generation only; it links the native runtime. | A program that names `task` compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). *Cost note:* the 6 ns is the planning estimate. Mission #595 measured about 12 ns per call above the floor for a program that names `task`, on a different host. The #601 checkpoint (the tax program within 10 percent of its recorded figure) held on that host, so the decision stands. |
 | JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker, which means the static runtime state becomes per instance; tasks and coroutines stay virtual threads, and the runtime raises the carrier pool from the processor count to the largest value a `ForkJoinPool` accepts, so a suspended task costs no host thread and a computing task gets a carrier (the constraint under "Constraints from named bug classes"); copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
-| Bootstrap interpreter | Conforms to the spec (`spec/README.md`, Conformance). | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or a coroutine on one thread, which `spec/README.md`, Conformance, allows because scheduling is implementation-defined. Parallel speed-up is not observable output, so the second form conforms. |
+| Bootstrap interpreter | Conforms to the spec (`spec/README.md`, Conformance). | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or a coroutine on one thread, which `spec/README.md`, Conformance, allows because whether workers run at the same time is implementation-defined. Parallel speed-up is not observable output, so the second form conforms. |
 
 ### Re-score of criteria 2 and 5 under the backend roles
 
