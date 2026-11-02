@@ -1,0 +1,55 @@
+// `break` and `continue` out of a try body, inside a method and inside a task
+// (spec/04-semantics.md, try Statement). The loop in a method has a try in the
+// body that leaves by `break`; the loop in a task leaves its try by
+// `continue`. A throw after each loop reaches the handler outside the loop.
+// STATUS: ok
+// CHECK: method break 2
+// CHECK: method continue 3
+// CHECK: method caught after
+// CHECK: task 2 caught after
+// CHECK: end
+class Counter {
+    init() { this.n = 0; }
+    stopAt(limit) {
+        while (true) {
+            try { this.n = this.n + 1; if (this.n == limit) { break; } } catch (e) { print "bad"; }
+        }
+        return this.n;
+    }
+    skipOdd(limit) {
+        var evens = 0;
+        for (var i = 0; i < limit; i = i + 1) {
+            try { if (i % 2 == 1) { continue; } evens = evens + 1; } catch (e) { print "bad"; }
+        }
+        return evens;
+    }
+    after() {
+        try {
+            while (true) { try { break; } catch (e) { print "bad"; } }
+            throw "after";
+        } catch (e) { return "caught " + e; }
+    }
+}
+var c = Counter();
+print "method break " + str(c.stopAt(2));
+print "method continue " + str(c.skipOdd(5));
+print "method " + c.after();
+
+var me = task.self();
+fun body() {
+    var seen = 0;
+    var i = 0;
+    while (i < 4) {
+        i = i + 1;
+        try { if (i == 2) { continue; } seen = seen + 1; if (i == 3) { break; } } catch (e) { print "bad"; }
+    }
+    var msg = "";
+    try {
+        while (true) { try { break; } catch (e) { print "bad"; } }
+        throw "after";
+    } catch (e) { msg = "caught " + e; }
+    task.send(me, str(seen) + " " + msg);
+}
+task.spawn(body);
+print "task " + task.receive();
+print "end";

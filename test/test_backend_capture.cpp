@@ -2009,3 +2009,45 @@ TEST(CaptureAnalysisTest, TryBodyAndCatchBodyClosuresShareOneOuterCapture) {
         << "shared is declared in outer's own top-level scope, so its cell "
         << "closes with the frame, not an explicit CLOSE_UPVALUE";
 }
+
+// A `break` out of the try body emits a POP_HANDLER ahead of the body's THROW
+// in byte order. The THROW still reaches this try's catch block, so a capture
+// first made in the try body, after that POP_HANDLER, is already open in the
+// catch body and its closure must reuse the cell: one live range, not two.
+TEST(CaptureAnalysisTest, ThrowAfterBreakPopStillReachesItsOwnCatchBlock) {
+    Compiled c = compileAndAnalyze(R"(
+        fun outer() {
+          var shared = 1;
+          var skip = false;
+          var fromTry = nil;
+          var fromCatch = nil;
+          while (true) {
+            try {
+              if (skip) { break; }
+              fun inTry() { return shared; }
+              fromTry = inTry;
+              throw "boom";
+            } catch (e) {
+              fun inCatch() { return shared; }
+              fromCatch = inCatch;
+              break;
+            }
+          }
+          print fromTry();
+          print fromCatch();
+        }
+        outer();
+    )",
+                                   "throw_after_break_pop_catch_attribution");
+    const DecodedFunction* outer = findByName(c.tree, "outer");
+    const DecodedFunction* inTry = findByName(c.tree, "inTry");
+    ASSERT_NE(outer, nullptr);
+    ASSERT_NE(inTry, nullptr);
+    const FunctionCaptureInfo& inTryInfo = infoFor(c.captures, inTry->id);
+    ASSERT_FALSE(inTryInfo.ownUpvalues.empty());
+    int slot = inTryInfo.ownUpvalues.at(0).index;
+    const FunctionCaptureInfo& info = infoFor(c.captures, outer->id);
+    const std::vector<CaptureLiveRange>& ranges = rangesFor(info, slot);
+    ASSERT_EQ(ranges.size(), 1U);
+    EXPECT_EQ(ranges[0].capturingClosureOffsets.size(), 2U);
+}

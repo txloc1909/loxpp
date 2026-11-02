@@ -1,0 +1,91 @@
+// A try statement completes the same way as its body: when the body leaves
+// by `break`, the loop ends and no handler stays open (spec/04-semantics.md,
+// try Statement). Each case below leaves a try body by `break`: in a while, a
+// for and a for-in loop, a try inside an if, a try nested in a try, a loop
+// inside a catch block, and a defer in the function around the try. After
+// each loop a throw must reach the handler that is outside the loop, not a
+// stale record of the try that `break` left.
+// STATUS: ok
+// CHECK: while done
+// CHECK: for done 0
+// CHECK: for-in done 10
+// CHECK: if done
+// CHECK: nested done
+// CHECK: nested after throw
+// CHECK: catch loop done
+// CHECK: outer caught after-while
+// CHECK: after defer fn outer caught
+// CHECK: deferred inner
+// CHECK: throw before break caught 1
+// CHECK: inner catch wins
+// CHECK: end
+
+while (true) { try { break; } catch (e) { print "bad"; } }
+print "while done";
+
+for (var i = 0; i < 3; i = i + 1) { try { break; } catch (e) { print "bad"; } }
+print "for done 0";
+
+var seen = 0;
+for (var x in [10, 20, 30]) { try { seen = x; break; } catch (e) { print "bad"; } }
+print "for-in done " + str(seen);
+
+var n = 0;
+while (n < 5) {
+    n = n + 1;
+    if (n == 2) {
+        try { break; } catch (e) { print "bad"; }
+    }
+}
+print "if done";
+
+while (true) {
+    try {
+        try { break; } catch (e) { print "bad inner"; }
+    } catch (e) { print "bad outer"; }
+}
+print "nested done";
+try {
+    while (true) { try { try { break; } catch (e) { } } catch (e) { } }
+    throw "after-nested";
+} catch (e) { print "nested after throw"; }
+
+try { throw "x"; } catch (e) {
+    while (true) { try { break; } catch (e2) { print "bad"; } }
+    print "catch loop done";
+}
+
+try {
+    while (true) { try { break; } catch (e) { print "bad"; } }
+    throw "after-while";
+} catch (e) { print "outer caught " + e; }
+
+fun note(s) { print s; }
+fun withDefer() {
+    defer note("deferred inner");
+    while (true) { try { break; } catch (e) { print "bad"; } }
+    try { throw "outer"; } catch (e) { print "after defer fn outer caught"; }
+}
+withDefer();
+
+var count = 0;
+while (true) {
+    try {
+        count = count + 1;
+        if (count == 1) { throw "first"; }
+        break;
+    } catch (e) { print "throw before break caught " + str(count); }
+}
+
+// A throw in an inner try must reach the inner catch, also when the outer try
+// body has a break path before the inner try (a JVM exception table lists the
+// inner region first).
+var go = false;
+while (true) {
+    try {
+        if (go) { break; }
+        try { throw "inner"; } catch (e) { print "inner catch wins"; }
+        break;
+    } catch (e) { print "bad outer " + e; }
+}
+print "end";

@@ -358,6 +358,9 @@ each has an off-the-shelf solution.
 | `337_socket_read_some_nil_fatal` | `read_some(nil)` halts, before any wait (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `338_socket_read_some_too_large_fatal` | `read_some(2147483648)` halts, before any wait (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `339_socket_read_some_no_argument_fatal` | `read_some()` with no argument halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
+| `344_break_continue_out_of_try_in_method_and_task` | `break` and `continue` out of a try body, in a method and in a task; the handler stack stays balanced (spec/04-semantics.md, try Statement; issue #1046) — a spec probe | none (spec probe) |
+| `343_continue_out_of_try_body` | `continue` out of a try body in while, for and for-in loops, a try in an if, nested tries, a loop in a catch block and a defer; the compiler emits one POP_HANDLER per leaving path, so a region has several (issue #1046) — a spec probe | none (spec probe) |
+| `342_break_out_of_try_body` | `break` out of a try body in the same shapes as 343; JVM and QBE rejected it before the pairing of POP_HANDLER with PUSH_HANDLER followed the path and not the byte order (issue #1046) — a spec probe | none (spec probe) |
 | `341_socket_read_some_large_payload` | 200000 bytes written by a peer task come back whole, in order, through `read_some` calls that ask for the missing count; no assumption on the length of one result (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |

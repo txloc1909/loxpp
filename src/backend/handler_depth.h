@@ -48,6 +48,12 @@ struct HandlerDepthAnalysis {
     // fallible op at this offset must branch to when the runtime reports
     // the fault resolved at this function's own frame.
     std::vector<int> activeHandler;
+
+    // For a reached POP_HANDLER, the index of the PUSH_HANDLER whose record
+    // it closes: the innermost active one on the path to it. -1 for every
+    // other instruction. One PUSH_HANDLER can have several POP_HANDLERs (one
+    // per break or continue that leaves its body, one on normal completion).
+    std::vector<int> closes;
 };
 
 // Analyzes one function's own chunk. Does not recurse into nested
@@ -55,7 +61,7 @@ struct HandlerDepthAnalysis {
 //
 // Throws std::runtime_error when two incoming edges disagree on depth, when
 // a POP_HANDLER drives the depth below zero, or when a POP_HANDLER has no
-// matching PUSH_HANDLER. A disagreement means the compiler emitted an
+// matching PUSH_HANDLER on a path. A disagreement means the compiler emitted an
 // unbalanced cleanup on some path; the input program is trusted to be
 // compiler-correct.
 HandlerDepthAnalysis analyzeHandlerDepth(const DecodedFunction& fn);

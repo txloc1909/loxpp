@@ -38,6 +38,7 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
     out.before.assign(ins.size(), 0);
     out.after.assign(ins.size(), 0);
     out.reached.assign(ins.size(), false);
+    out.closes.assign(ins.size(), -1);
     if (ins.empty()) {
         return out;
     }
@@ -70,26 +71,6 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
             int catchIdx = targetIndex(ins[i].offset, ins[i].jumpTarget);
             isCatchEntry[static_cast<size_t>(catchIdx)] = true;
             pushToCatch[i] = catchIdx;
-        }
-    }
-
-    // Structural LIFO pairing: a POP_HANDLER closes the nearest open
-    // PUSH_HANDLER in program order (abstract_stack.cpp). Names no region
-    // of its own, so reachability cannot pair them instead.
-    {
-        std::vector<int> open;
-        for (size_t i = 0; i < ins.size(); i++) {
-            if (ins[i].op == Op::PUSH_HANDLER) {
-                open.push_back(static_cast<int>(i));
-            } else if (ins[i].op == Op::POP_HANDLER) {
-                if (open.empty()) {
-                    throw std::runtime_error(
-                        "handler_depth: POP_HANDLER at offset " +
-                        std::to_string(ins[i].offset) +
-                        " has no matching PUSH_HANDLER");
-                }
-                open.pop_back();
-            }
         }
     }
 
@@ -135,30 +116,6 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
         }
     }
 
-    // matchingPush[popIdx]: the PUSH_HANDLER a given POP_HANDLER closes,
-    // from the same structural LIFO pairing validated above. Unlike the
-    // depth count, identifying which record closes cannot come from a plain
-    // byte-order scan alone (a catch block's own bytes sit BETWEEN its own
-    // PUSH_HANDLER and POP_HANDLER — "POP_HANDLER belongs only to the
-    // normal-completion path", compiler.cpp — so a byte-order-only reading
-    // would wrongly see the catch body as still "inside" its own handler's
-    // region). This pairing only NAMES which push a pop closes; activeHandler
-    // itself is still derived below through the same CFG worklist `before`
-    // already uses, so a catch block's own lower depth is handled the same
-    // way `before`/`after` already handle it (maybeSeedCatch).
-    std::vector<int> matchingPush(ins.size(), -1);
-    {
-        std::vector<int> open;
-        for (size_t i = 0; i < ins.size(); i++) {
-            if (ins[i].op == Op::PUSH_HANDLER) {
-                open.push_back(static_cast<int>(i));
-            } else if (ins[i].op == Op::POP_HANDLER) {
-                matchingPush[i] = open.back();
-                open.pop_back();
-            }
-        }
-    }
-
     // activeHandlerBefore[i]: the index of the innermost active PUSH_HANDLER
     // immediately before instruction i runs, threaded through the SAME
     // worklist as `before` (depth) — see HandlerDepthAnalysis::activeHandler
@@ -169,9 +126,8 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
     // available (p's own processing step below), so by the time any
     // POP_HANDLER matching p is processed, parentOf[p] is already resolved:
     // that POP_HANDLER is only reachable via a path that already ran
-    // through p (matchingPush's own structural pairing), and p's own
-    // successors — the only way to reach it — are not visited until AFTER
-    // p's own processing step sets parentOf[p].
+    // through p, and p's own successors — the only way to reach it — are not
+    // visited until AFTER p's own processing step sets parentOf[p].
     std::vector<int> activeHandlerBefore(ins.size(), -1);
     std::vector<int> parentOf(ins.size(), -1);
 
@@ -227,7 +183,19 @@ analyzeHandlerDepthIns(const std::vector<DecodedInstruction>& ins,
             afterActiveHandler = idx;
             maybeSeedCatch(idx, worklist);
         } else if (ins[u].op == Op::POP_HANDLER) {
-            afterActiveHandler = parentOf[static_cast<size_t>(matchingPush[u])];
+            // A POP_HANDLER closes the innermost record active on the path
+            // that reaches it. Program order cannot name it: a break or
+            // continue out of a try body emits a POP_HANDLER ahead of the
+            // body's end, so one PUSH_HANDLER has several POP_HANDLERs.
+            int closed = activeHandlerBefore[u];
+            if (closed < 0) {
+                throw std::runtime_error(
+                    "handler_depth: POP_HANDLER at offset " +
+                    std::to_string(ins[u].offset) +
+                    " has no matching PUSH_HANDLER in " + functionId);
+            }
+            out.closes[u] = closed;
+            afterActiveHandler = parentOf[static_cast<size_t>(closed)];
         }
         for (int succ : successors[u]) {
             setBefore(succ, after, afterActiveHandler, worklist);

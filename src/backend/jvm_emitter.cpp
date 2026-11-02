@@ -340,16 +340,9 @@ struct Emitter {
     // stack and needs to be unwrapped to get the Lox value.
     std::unordered_set<int> handlerEntryOffsets;
 
-    // Tracks the currently active protected region (between PUSH_HANDLER and
-    // POP_HANDLER). startBytecodeOffset is the byte offset in the emitted
-    // bytecode where the protected region starts.
-    struct ActiveRegion {
-        int startBytecodeOffset{0};
-        int pushHandlerInstrOffset{0};
-    };
-    std::vector<ActiveRegion> activeRegions;
-
-    // All exception table entries collected during emission.
+    // All exception table entries collected during emission. Region entries
+    // are in PUSH_HANDLER program order until emitBody ends, which then
+    // reverses them so an inner region precedes the region around it.
     std::vector<ExceptionEntry> exceptionTable;
 
     // Maps from handler entry offset to the PUSH_HANDLER's offset that
@@ -357,19 +350,6 @@ struct Emitter {
     // before the handler's own label. A handler entry offset can appear at
     // most once (each PUSH_HANDLER declares one target).
     std::unordered_map<int, int> regionEndLabelsByHandlerOffset;
-
-    // POP_HANDLER offsets whose own PUSH_HANDLER was reached (from
-    // analysis.handlerEntries — see HandlerEntryContract::popHandlerOffset).
-    // emitBody's reachability gate reads this instead of a blanket
-    // "always run POP_HANDLER" bypass: a POP_HANDLER's own raw reached bit
-    // is unreliable (the CFG walk marks it unreached whenever the try body's
-    // last statement is terminal — see PUSH_HANDLER's own emitter note),
-    // but whether its *paired* PUSH_HANDLER ran is exactly what decides
-    // whether this region needs closing. A POP_HANDLER absent from this set
-    // belongs to a genuinely dead try/catch (its PUSH_HANDLER never ran
-    // either) and must be skipped, not forced — forcing it would pop
-    // e.activeRegions against a region that was never pushed.
-    std::unordered_set<int> popHandlerOffsetsWithReachedPush;
 
     // Defer catch-all handler: label at the start of the function body
     // (after prologue) and the handler code label for catching exceptions
@@ -1767,10 +1747,14 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     // static call with no arguments and a void return: net stack effect 0.
     e.b.emit("invokestatic lox/LoxOps/enterHandler()V", 0);
 
-    // Record the region information for emission of .catch directive later.
-    Emitter::ActiveRegion region;
-    region.pushHandlerInstrOffset = in.offset;
-    e.activeRegions.push_back(region);
+    // One exception table entry per PUSH_HANDLER. A POP_HANDLER cannot make
+    // it: a break or continue out of the body adds POP_HANDLERs, so a region
+    // can have many or, when no path completes the body, none that run.
+    ExceptionEntry entry;
+    entry.handlerLabel = it->second;
+    entry.regionStartLabel = regionStartLabel;
+    entry.regionEndLabel = "try_" + std::to_string(in.offset) + "_end";
+    e.exceptionTable.push_back(entry);
 
     // Record that the region end label needs to be emitted at the handler
     // entry offset (the target of this PUSH_HANDLER). This ensures the
@@ -1779,47 +1763,13 @@ void emitPushHandler(Emitter& e, const DecodedInstruction& in) {
     e.regionEndLabelsByHandlerOffset[in.jumpTarget] = in.offset;
 }
 
-// POP_HANDLER: End a try/catch protected region and create an exception
-// table entry. The region end label is emitted when the handler entry is
-// encountered (in emitBody), not here, to ensure it is placed before the
-// handler code starts, not after.
-void emitPopHandler(Emitter& e, const DecodedInstruction& in) {
-    if (e.activeRegions.empty()) {
-        throw std::runtime_error(
-            "jvm_emitter: POP_HANDLER without matching PUSH_HANDLER");
-    }
-
-    // Normal (non-exceptional) exit from the region PUSH_HANDLER opened —
-    // see LoxOps.exitHandler's own comment for the exceptional-exit
-    // counterpart, emitted at the handler-entry site in emitBody instead
-    // (this position's own translation never runs on that path).
+// POP_HANDLER: Normal (non-exceptional) exit from the innermost region —
+// see LoxOps.exitHandler's own comment for the exceptional-exit counterpart,
+// emitted at the handler-entry site in emitBody instead (this position's own
+// translation never runs on that path). The region's exception table entry
+// comes from its PUSH_HANDLER.
+void emitPopHandler(Emitter& e) {
     e.b.emit("invokestatic lox/LoxOps/exitHandler()V", 0);
-
-    Emitter::ActiveRegion region = e.activeRegions.back();
-    e.activeRegions.pop_back();
-
-    // Look up the handler label.
-    auto it = e.handlerLabelsByOffset.find(region.pushHandlerInstrOffset);
-    if (it == e.handlerLabelsByOffset.end()) {
-        throw std::runtime_error("jvm_emitter: handler label not found");
-    }
-
-    // Create an exception table entry using the synthetic labels. The region
-    // end label is generated from the same PUSH_HANDLER offset as the start
-    // label, which ensures they are consistent.
-    ExceptionEntry entry;
-    entry.startInstrOffset = 0; // Unused when using labels
-    entry.endInstrOffset = 0;   // Unused when using labels
-    entry.handlerLabel = it->second;
-
-    std::string startLabel =
-        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_start";
-    std::string regionEndLabel =
-        "try_" + std::to_string(region.pushHandlerInstrOffset) + "_end";
-    entry.regionStartLabel = startLabel;
-    entry.regionEndLabel = regionEndLabel;
-
-    e.exceptionTable.push_back(entry);
 }
 
 // THROW: Raise an exception. The value on the stack is wrapped in a LoxError
@@ -2075,12 +2025,6 @@ Emitter buildEmitter(const DecodedFunction& fn,
     for (const InvisibleVarSite& site : analysis.invisibleVars) {
         e.invisibleVarsByOffset[site.offset].push_back(site.slot);
     }
-    // analysis.handlerEntries only contains regions whose PUSH_HANDLER was
-    // reached (analyzeStack skips dead try blocks there) — see
-    // popHandlerOffsetsWithReachedPush's own comment.
-    for (const HandlerEntryContract& entry : analysis.handlerEntries) {
-        e.popHandlerOffsetsWithReachedPush.insert(entry.popHandlerOffset);
-    }
     // Which of this chunk's OWN local slots ever back an Object[1] cell —
     // every slot some reachable CLOSURE in this chunk captures
     // (capture_analysis.h). Membership only; see ensureCapturedCell's own
@@ -2330,22 +2274,7 @@ void emitBody(Emitter& e, bool isScript,
 
     for (std::size_t i = 0; i < n;) {
         const DecodedInstruction& in = ins[i];
-        // POP_HANDLER marks the end of a try region and must be processed
-        // whenever its own PUSH_HANDLER ran, even if POP_HANDLER's own raw
-        // offset is unreachable (the try body's last statement was terminal
-        // — THROW or RETURN — so nothing falls through into it). The region
-        // boundary is a structural constraint tied to its PUSH_HANDLER, not
-        // to this offset's own control-flow reachability: forcing every
-        // POP_HANDLER unconditionally would also run one whose PUSH_HANDLER
-        // never ran (a genuinely dead try/catch, e.g. one physically placed
-        // after another handler's own terminal body), popping
-        // e.activeRegions against a region that was never pushed. Skip other
-        // unreachable instructions normally (e.g. endCompiler()'s trailing
-        // NIL;RETURN).
-        bool isReachablePopHandler =
-            in.op == Op::POP_HANDLER &&
-            e.popHandlerOffsetsWithReachedPush.contains(in.offset);
-        if (!e.reached(i) && !isReachablePopHandler) {
+        if (!e.reached(i)) {
             i++;
             continue;
         }
@@ -2613,7 +2542,7 @@ void emitBody(Emitter& e, bool isScript,
             emitPushHandler(e, in);
             break;
         case Op::POP_HANDLER:
-            emitPopHandler(e, in);
+            emitPopHandler(e);
             break;
         case Op::THROW:
             emitThrow(e);
@@ -2643,6 +2572,9 @@ void emitBody(Emitter& e, bool isScript,
         i = finishInstruction(e, i, in, consumedFollowingPop,
                               consumedFollowingJumpTable);
     }
+    // JVM takes the first matching entry. Entries are in PUSH_HANDLER program
+    // order, and a nested region always has the later PUSH_HANDLER.
+    std::reverse(e.exceptionTable.begin(), e.exceptionTable.end());
 }
 
 // Generate the .catch directives for exception table entries.

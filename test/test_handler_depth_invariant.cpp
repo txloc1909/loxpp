@@ -124,6 +124,34 @@ TEST(HandlerDepthTest, BalancedTryCatchDepths) {
     EXPECT_EQ(a.before[6], 0);
 }
 
+TEST(HandlerDepthTest, BreakOutOfNestedTryPairsPopsByPath) {
+    // The shape of `while (c) { try { try { if (c) break; } catch {} }
+    // catch {} }`: the break path closes both records at once, ahead of the
+    // pops of normal completion in byte order.
+    std::vector<DecodedInstruction> ins = {
+        makeIns(0, Op::PUSH_HANDLER, 8),  // outer, catch at 8
+        makeIns(1, Op::PUSH_HANDLER, 7),  // inner, catch at 7
+        makeIns(2, Op::JUMP_IF_FALSE, 6), // if (c)
+        makeIns(3, Op::POP_HANDLER),      // break: closes inner
+        makeIns(4, Op::POP_HANDLER),      // break: closes outer
+        makeIns(5, Op::JUMP, 12),         // out of the loop
+        makeIns(6, Op::JUMP, 10),         // normal end of the inner body
+        makeIns(7, Op::NIL),              // inner catch
+        makeIns(8, Op::NIL),              // outer catch
+        makeIns(9, Op::JUMP, 12),
+        makeIns(10, Op::POP_HANDLER), // normal: closes inner
+        makeIns(11, Op::POP_HANDLER), // normal: closes outer
+        makeIns(12, Op::NIL),
+    };
+    HandlerDepthAnalysis a = analyzeHandlerDepthIns(ins, "break-nested");
+    EXPECT_EQ(a.closes[3], 1);
+    EXPECT_EQ(a.closes[4], 0);
+    EXPECT_EQ(a.closes[10], 1);
+    EXPECT_EQ(a.closes[11], 0);
+    EXPECT_EQ(a.closes[0], -1);
+    EXPECT_EQ(a.before[12], 0);
+}
+
 TEST(HandlerDepthTest, OrphanPopThrows) {
     std::vector<DecodedInstruction> ins = {
         makeIns(0, Op::NIL),
@@ -245,6 +273,36 @@ TEST(HandlerDepthTest, OuterTrySurvivesInnerCatchBreak) {
         } catch (e2) { log = log + "outer:" + e2 + ";"; }
     )",
         "inner;outer:outer-test;");
+}
+
+TEST(HandlerDepthTest, BreakFromTryBodyMatchesStaticDepths) {
+    checkTraceMatchesStatic(
+        R"(
+        var log = "";
+        try {
+            for (var i = 0; i < 3; i = i + 1) {
+                try { try { log = log + "body;"; break; } catch (a) { } } catch (b) { }
+            }
+            throw "outer-test";
+        } catch (e) { log = log + "outer:" + e + ";"; }
+    )",
+        "body;outer:outer-test;");
+}
+
+TEST(HandlerDepthTest, ContinueFromTryBodyMatchesStaticDepths) {
+    checkTraceMatchesStatic(
+        R"(
+        var log = "";
+        var i = 0;
+        try {
+            while (i < 2) {
+                i = i + 1;
+                try { try { log = log + "body;"; continue; } catch (a) { } } catch (b) { }
+            }
+            throw "outer-test";
+        } catch (e) { log = log + "outer:" + e + ";"; }
+    )",
+        "body;body;outer:outer-test;");
 }
 
 TEST(HandlerDepthTest, RunsOverEveryProbeWithNoInconsistency) {
