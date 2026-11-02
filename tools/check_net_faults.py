@@ -2,7 +2,9 @@
 """Checks the fault sites of the Socket and Server natives.
 
 spec/05-stdlib.md says which Socket and Server faults are catchable and
-which halt the program. This script lists every place in the native and the
+which halt the program. The catchable kinds are `NetworkError`,
+`SocketClosedError`, and `BusyError` (spec/04-semantics.md, The Task Machine,
+Sides); a site that names another kind fails. This script lists every place in the native and the
 JVM sources that raises a fault for a socket, and fails when a place is not
 in the table below, or when a table entry has no place. So a new fault site
 cannot be fatal by accident, and a catchable one cannot go back to fatal.
@@ -83,6 +85,7 @@ SERVER = REPO_ROOT / "runtime" / "jvm" / "src" / "lox" / "LoxServer.java"
 
 NETWORK = "NetworkError"
 CLOSED = "SocketClosedError"
+BUSY = "BusyError"
 HALT = "halt"
 
 # (function, kind or HALT) -> number of sites.
@@ -270,7 +273,7 @@ def native_sites(text: str) -> tuple[Counter | None, list[str]]:
                 elif not re.fullmatch(r"k\w+", arg.group(1)):
                     problems.append(f"line {number}: a fault kind that is not a constant: {arg.group(1)}")
                 else:
-                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(arg.group(1))
+                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED, "kBusyError": BUSY}.get(arg.group(1))
                     if kind is None:
                         problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
                     else:
@@ -328,7 +331,7 @@ def java_sites(text: str) -> tuple[Counter | None, list[str]]:
             sites[(method, HALT)] += 1
         m = re.search(r'makeError\("(\w+)"', window)
         if m and "LoxOps.makeError" in line:
-            if m.group(1) not in (NETWORK, CLOSED):
+            if m.group(1) not in (NETWORK, CLOSED, BUSY):
                 problems.append(f"line {number}: makeError names an unknown kind {m.group(1)}")
             else:
                 sites[(method, m.group(1))] += 1
@@ -393,6 +396,10 @@ def self_test(native: str, socket: str) -> int:
         ("java: System.exit after a line break", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System\n        .exit(1); }\n", True), True),
         ("java: a bare exit( from a static import", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { exit(1); }\n", True), True),
         ("java: a fatal word inside a string is not a fatal exit", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return "System.exit and throw"; }\n', True), False),
+        ("native: a kBusyError site is a BusyError site", native_sites, {**NATIVE_SITES, ("socketReadlineNative", BUSY): 1}, inject(native, read_fn, '    raiseNet(kBusyError, "x");\n'), False),
+        ("native: a BusyError site that the table lacks", native_sites, NATIVE_SITES, inject(native, read_fn, '    raiseNet(kBusyError, "x");\n'), True),
+        ("java: a BusyError makeError is a BusyError site", java_sites, {**SOCKET_SITES, ("checkOpen", BUSY): 1}, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), False),
+        ("java: a BusyError site that the table lacks", java_sites, SOCKET_SITES, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), True),
         ("java: a text block", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return """\n        "\n        """; }\n', True), True),
     ]
     failed = False
