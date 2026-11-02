@@ -379,6 +379,8 @@ each has an off-the-shelf solution.
 | `361_closed_side_wins_over_held_side` | after a close by another task, a `readline` and an `accept` on the closed values raise `SocketClosedError`, not `BusyError`, while the woken calls still hold their sides; the woken calls then raise `SocketClosedError` (spec/04-semantics.md, The Task Machine, Sides, rule 6; D3) — a spec probe | none (spec probe) |
 | `362_busy_in_context_where_task_cannot_suspend` | a `read_some` inside `__str__`, where the task cannot suspend, on a side that another task holds raises `BusyError` and takes no byte (Contexts where a task cannot suspend; Sides, rules 2 and 5; D3) — a spec probe | none (spec probe) |
 | `363_close_ends_wait_at_the_close` | a close by a task of the same worker ends the wait at the close: the woken reader joins the run queue before the closer, which yields after the close (The Task Machine; spec/05-stdlib.md, Socket methods) — a spec probe | none (spec probe) |
+| `364_close_write_keeps_reader_waiting` | a `close_write()` by another task does not end the wait of a reader: the reader keeps waiting and gets the line of the peer (Sides, rule 4; spec/05-stdlib.md, `s.close_write()`) — a spec probe | none (spec probe) |
+| `365_close_write_ends_writer_wait` | a `close_write()` by another task ends the wait of a writer of a large string, which raises `SocketClosedError`, and the woken writer joins the run queue at the close, before the closer that yields (Sides, rule 4; spec/05-stdlib.md, `s.close_write()`) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |
 | `322_receive_where_sees_the_mailbox` | `task.pending()` in `want` counts the whole mailbox, and a message that `want` sends to its own task is tested in the same call — a spec probe | none (spec probe) |
@@ -485,7 +487,7 @@ The probes `260` to `267`, `278` to `282`, and `284` to `286` are the
 probes of the rule that a call which waits for the network or for time suspends only its task
 (`docs/decisions/blocking-call-suspension.md`). They bind every implementation, the bootstrap
 interpreter too (`docs/decisions/concurrency-semantics-grounding.md`, D2), so none of them
-carries a `NOT-BINDING` line. The probes `347` to `363` are the probes of the rule of one call
+carries a `NOT-BINDING` line. The probes `347` to `365` are the probes of the rule of one call
 per side of a Socket or a Server (spec/04-semantics.md, The Task Machine, Sides; D3 of the same
 decision). A consumer that does not pass one of these probes yet lists it in its file.
 These probes make calls on one side of a Socket or a Server from two tasks, so they are not

@@ -696,7 +696,11 @@ Writes `text` followed by one newline. `text` must be a String.
 
 Closes the Socket's write direction only, which sends an end-of-file to the
 peer. Reading stays possible. A second call, and a call after `close()`, do
-nothing.
+nothing. If a task of the same worker waits in `write` or `writeline` on the
+Socket, the call wakes it, and its call raises a catchable
+`SocketClosedError`, as a write after `close_write()` does. The woken task
+joins the back of the run queue when `close_write()` is called. A task that
+waits in a read of the Socket keeps waiting.
 
 **Arity:** 0  
 **Returns:** Nil

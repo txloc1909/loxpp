@@ -1851,8 +1851,8 @@ the worker makes no move: its task stays `running`, and the worker is
 
 A `message` move from a send on the same worker happens at the send. A
 `wait-end` move that a close by a task of the same worker causes (Sides, rule
-4) happens at the close: the woken task joins the back of the run queue when
-`close()` or `close_write()` is called. [Scheduling](#scheduling) describes
+4) happens at the close: the task whose wait the close ends joins the back of
+the run queue when that `close()` or `close_write()` is called. [Scheduling](#scheduling) describes
 when the worker sees the other `message`, `limit` and `wait-end` events, and
 the order in which their tasks join the run queue.
 
@@ -1895,9 +1895,12 @@ A side holds at most one call:
    accepts anything, also when it could return at once.
 3. A call on the other side of the same Socket does not raise. One task can
    read a Socket while another task writes it.
-4. `close()` and `close_write()` do not wait, so they hold no side. A close
-   by another task ends the wait of the call that holds a side of the value,
-   and that call fails as a call on a closed Socket or Server does
+4. `close()` and `close_write()` do not wait, so they hold no side. A
+   `close()` by another task ends the wait of the call that holds each side
+   of its value. A `close_write()` by another task ends only the wait of the
+   call that holds the write side of its Socket: a call that holds the read
+   side keeps waiting, and it still gets the bytes of the peer. A call whose
+   wait a close ends fails as a call on a closed Socket or Server does
    (§05-stdlib, Socket methods).
 5. A call of class suspends that blocks the worker holds no side: no other
    task of the worker runs while it waits. Rule 2 still applies to it: on a

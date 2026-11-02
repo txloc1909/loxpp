@@ -16,6 +16,9 @@ The rules:
     removed from the spec fails, and so does a row that this script does not
     know. A row added to the machine is a change of the machine, and it
     changes this script in the same pull request.
+  - The Event cell of each move holds the words that MOVE_EVENTS gives it, so
+    a move cannot change its event (for example from class suspends to class
+    blocks) without a change here.
   - Each move has the From and To states that MOVES gives it, and a move whose
     To state is `ready` names a place in the run queue (not `—`).
   - The table of task-owned state has a row for each item in REQUIRED_OWNED.
@@ -54,6 +57,20 @@ MOVES = {
     "wait-end": ({"waiting"}, "ready"),
     "end": ({"running"}, "ended"),
     "abandon": ({"ready", "receiving", "waiting"}, "ended"),
+}
+# move -> words that its Event cell must hold
+MOVE_EVENTS = {
+    "spawn": ("`task.spawn(fn)`",),
+    "spawn-worker": ("`task.spawn_worker(fn, msg)`",),
+    "run": ("run queue is not empty",),
+    "yield": ("`yield`", "outside every coroutine"),
+    "receive": ("receive", "can suspend"),
+    "message": ("message arrives",),
+    "limit": ("limit", "receive"),
+    "wait": ("class suspends", "can suspend"),
+    "wait-end": ("its event happens", "closes", "limit passes"),
+    "end": ("returns", "uncaught throw", "halting fault"),
+    "abandon": ("the program ends",),
 }
 REQUIRED_OWNED = (
     "the mailbox",
@@ -160,6 +177,9 @@ def main() -> None:
                     f"move {move!r} goes {sorted(froms)} -> {tos}, the machine says "
                     f"{sorted(want_from)} -> [{want_to!r}]"
                 )
+        for word in MOVE_EVENTS.get(move, ()):
+            if word not in row["Event"]:
+                problems.append(f"the event of move {move!r} does not say {word!r}")
         if tos == ["ready"] and row["Run queue"].strip() in ("", "—"):
             problems.append(f"move {move!r} makes a task ready but names no place in the run queue")
         sources.update(s for s in froms if s != NEW_TASK)

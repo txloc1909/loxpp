@@ -11,3 +11,4 @@
 358_socket_side_held_while_task_ready.lox no BusyError: a call on a side whose holder is ready does not raise (D3 rule 1, #1058)
 360_socket_busy_while_buffered_line_waits.lox no BusyError: the program of #1054 takes the line of the waiting call (D3, #1058)
 362_busy_in_context_where_task_cannot_suspend.lox no BusyError: a call where the task cannot suspend reads the bytes of a held side (D3 rule 5, #1058)
+365_close_write_ends_writer_wait.lox the writer that close_write() wakes joins the run queue after the closer yields, not at the close (#1058)
