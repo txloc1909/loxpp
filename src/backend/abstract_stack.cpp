@@ -42,32 +42,6 @@ struct LocalCfg {
     std::vector<std::pair<int, int>> handlerLinks;
 };
 
-// Pairs each PUSH_HANDLER with the POP_HANDLER that closes its own protected
-// region, by a LIFO scan over program order. This is a purely structural
-// property of well-nested try/catch codegen — independent of reachability —
-// because POP_HANDLER carries no operand naming its own PUSH_HANDLER
-// (chunk.h); nothing else in the chunk records this pairing.
-std::unordered_map<int, int>
-matchPushHandlersToPopHandlers(const std::vector<DecodedInstruction>& ins) {
-    std::unordered_map<int, int> pushIdxToPopIdx;
-    std::vector<int> openPushIdx;
-    for (size_t i = 0; i < ins.size(); i++) {
-        if (ins[i].op == Op::PUSH_HANDLER) {
-            openPushIdx.push_back(static_cast<int>(i));
-        } else if (ins[i].op == Op::POP_HANDLER) {
-            if (openPushIdx.empty()) {
-                throw std::runtime_error(
-                    "abstract_stack: POP_HANDLER at offset " +
-                    std::to_string(ins[i].offset) +
-                    " has no matching PUSH_HANDLER");
-            }
-            pushIdxToPopIdx[openPushIdx.back()] = static_cast<int>(i);
-            openPushIdx.pop_back();
-        }
-    }
-    return pushIdxToPopIdx;
-}
-
 // Collects every PUSH_HANDLER's catch-target instruction index and populates
 // the isHandlerEntryInstr set and handlerLinks list. Called before adding any
 // edges so addEdge can refuse edges to handler-entry instructions (referee's
@@ -637,29 +611,16 @@ void walkForPersistence(int fromIndex, int slot,
 std::vector<HandlerEntryContract> buildHandlerEntryContracts(
     const std::vector<DecodedInstruction>& ins, const LocalCfg& cfg,
     const std::vector<bool>& reached, const std::vector<StackState>& before) {
-    std::unordered_map<int, int> pushIdxToPopIdx =
-        matchPushHandlersToPopHandlers(ins);
     std::vector<HandlerEntryContract> entries;
     entries.reserve(cfg.handlerLinks.size());
     for (const auto& [pushIdx, catchIdx] : cfg.handlerLinks) {
         if (!reached[static_cast<size_t>(pushIdx)]) {
             continue; // dead try block — see handlerEntrySeeds
         }
-        // A real compiled try statement always emits a matching POP_HANDLER
-        // (it is how the region gets closed at all) — the lookup only
-        // misses on a hand-built test chunk that omits one deliberately
-        // (e.g. an empty-protected-region probe with no need to exercise
-        // emission). -1 signals "no POP_HANDLER in this chunk" rather than
-        // asserting one must exist, so those pipeline-level probes keep
-        // working unchanged.
-        auto popIt = pushIdxToPopIdx.find(pushIdx);
-        int popOffset = popIt != pushIdxToPopIdx.end()
-                            ? ins[static_cast<size_t>(popIt->second)].offset
-                            : -1;
-        entries.push_back({ins[static_cast<size_t>(pushIdx)].offset,
-                           ins[static_cast<size_t>(catchIdx)].offset,
-                           before[static_cast<size_t>(catchIdx)].operandDepth(),
-                           popOffset});
+        entries.push_back(
+            {ins[static_cast<size_t>(pushIdx)].offset,
+             ins[static_cast<size_t>(catchIdx)].offset,
+             before[static_cast<size_t>(catchIdx)].operandDepth()});
     }
     return entries;
 }
@@ -1191,9 +1152,7 @@ void validateNoInvisibleVarGaps(
 // round is not seeded at all, which is correct: the whole try/catch it opens
 // is genuinely dead code (e.g. every path into it already returned or
 // threw), and the emitter must skip its region entirely rather than
-// fabricate one — see jvm_emitter.cpp's emitBody, which gates a POP_HANDLER
-// on whether *its own* PUSH_HANDLER was reached (HandlerEntryContract::
-// popHandlerOffset), not on a blanket "always run".
+// fabricate one.
 //
 // Shared between analyzeStack's pass 1 (declaredSlotsAt null, trackLocals
 // false — see runFixpoint's own comment on the two passes) and pass 2

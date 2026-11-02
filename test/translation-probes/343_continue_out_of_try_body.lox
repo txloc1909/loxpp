@@ -1,0 +1,94 @@
+// `continue` out of a try body ends the body and starts the next turn of the
+// loop (spec/04-semantics.md, try Statement), in a while, a for and a for-in
+// loop, in a try nested in an if, in a try nested in a try, with a loop in the
+// catch block, and with a defer in the function. No handler may stay open:
+// the throw after each loop reaches the handler outside it.
+// STATUS: ok
+// CHECK: while 4
+// CHECK: for 2
+// CHECK: for-in 40
+// CHECK: if 4
+// CHECK: nested 3
+// CHECK: nested after throw
+// CHECK: catch loop 2
+// CHECK: outer caught after-loop
+// CHECK: fn after defer fn outer caught
+// CHECK: deferred
+// CHECK: throw then continue 3 1
+// CHECK: end
+
+var i = 0;
+var sum = 0;
+while (i < 3) {
+    i = i + 1;
+    try { if (i == 2) { continue; } sum = sum + i; } catch (e) { print "bad"; }
+}
+print "while " + str(sum);
+
+var f = 0;
+for (var j = 0; j < 3; j = j + 1) {
+    try { if (j == 1) { continue; } f = f + j; } catch (e) { print "bad"; }
+}
+print "for " + str(f);
+
+var parts = 0;
+for (var x in [10, 20, 30]) {
+    try { if (x == 20) { continue; } parts = parts + x; } catch (e) { print "bad"; }
+}
+print "for-in " + str(parts);
+
+var k = 0;
+while (k < 4) {
+    k = k + 1;
+    if (k > 0) {
+        try { continue; } catch (e) { print "bad"; }
+    }
+}
+print "if " + str(k);
+
+var m = 0;
+while (m < 3) {
+    m = m + 1;
+    try {
+        try { continue; } catch (e) { print "bad inner"; }
+    } catch (e) { print "bad outer"; }
+}
+print "nested " + str(m);
+try {
+    var q = 0;
+    while (q < 2) { q = q + 1; try { try { continue; } catch (e) { } } catch (e) { } }
+    throw "after-nested";
+} catch (e) { print "nested after throw"; }
+
+try { throw "x"; } catch (e) {
+    var c = 0;
+    while (c < 2) { c = c + 1; try { continue; } catch (e2) { print "bad"; } }
+    print "catch loop " + str(c);
+}
+
+try {
+    var r = 0;
+    while (r < 2) { r = r + 1; try { continue; } catch (e) { print "bad"; } }
+    throw "after-loop";
+} catch (e) { print "outer caught " + e; }
+
+fun note(s) { print s; }
+fun withDefer() {
+    defer note("deferred");
+    var d = 0;
+    while (d < 2) { d = d + 1; try { continue; } catch (e) { print "bad"; } }
+    try { throw "outer"; } catch (e) { print "fn after defer fn outer caught"; }
+}
+withDefer();
+
+var t = 0;
+var caught = 0;
+while (t < 3) {
+    t = t + 1;
+    try {
+        if (t == 1) { throw "first"; }
+        continue;
+    } catch (e) { caught = caught + 1; }
+}
+print "throw then continue " + str(t) + " " + str(caught);
+print "end";

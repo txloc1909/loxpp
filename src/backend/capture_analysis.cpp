@@ -1,6 +1,7 @@
 #include "capture_analysis.h"
 #include "cfg.h"
 #include "exec_objects.h"
+#include "handler_depth.h"
 
 #include <algorithm>
 #include <deque>
@@ -355,15 +356,13 @@ struct HandlerSeedPoints {
 // programs), and that capture is exactly as "already open" for catch's own
 // purposes as one that predates the try entirely.
 //
-// Structural, independent of reachability — exactly like Pass 0's own
-// trySeedHandlerEntries and abstract_stack.cpp's
-// matchPushHandlersToPopHandlers — a LIFO scan over program order, since
-// POP_HANDLER carries no operand naming its own PUSH_HANDLER (chunk.h). A
-// THROW with no open PUSH_HANDLER at all (propagates past this function
-// entirely) gets no entry.
+// `pushOffsetOfThrow` names, for each reached THROW, the PUSH_HANDLER that
+// handler_depth.h finds active on the path to it. A THROW with no active
+// PUSH_HANDLER (propagates past this function entirely) gets no entry.
 HandlerSeedPoints
 buildHandlerSeedPoints(const Cfg& cfg,
-                       const std::unordered_map<int, int>& heightBefore) {
+                       const std::unordered_map<int, int>& heightBefore,
+                       const std::unordered_map<int, int>& pushOffsetOfThrow) {
     HandlerSeedPoints seeds;
     for (const HandlerEntry& he : cfg.handlerEntries) {
         seeds.catchBlockByPushOffset[he.pushHandlerOffset] = he.catchBlock;
@@ -381,19 +380,15 @@ buildHandlerSeedPoints(const Cfg& cfg,
         }
     }
 
-    std::vector<int> openCatchBlocks;
     for (const BasicBlock& block : cfg.blocks) {
         for (const DecodedInstruction& in : block.instructions) {
-            if (in.op == Op::PUSH_HANDLER) {
-                openCatchBlocks.push_back(
-                    seeds.catchBlockByPushOffset.at(in.offset));
-            } else if (in.op == Op::POP_HANDLER) {
-                if (!openCatchBlocks.empty()) {
-                    openCatchBlocks.pop_back();
-                }
-            } else if (in.op == Op::THROW && !openCatchBlocks.empty()) {
+            if (in.op != Op::THROW) {
+                continue;
+            }
+            auto it = pushOffsetOfThrow.find(in.offset);
+            if (it != pushOffsetOfThrow.end()) {
                 seeds.catchBlockByThrowOffset[in.offset] =
-                    openCatchBlocks.back();
+                    seeds.catchBlockByPushOffset.at(it->second);
             }
         }
     }
@@ -524,9 +519,10 @@ struct DataflowResult {
     std::vector<uint8_t> reachable;
 };
 
-DataflowResult runDataflow(const Cfg& cfg,
-                           const std::unordered_map<int, int>& heightBefore,
-                           OriginUnionFind& aliases) {
+DataflowResult
+runDataflow(const Cfg& cfg, const std::unordered_map<int, int>& heightBefore,
+            const std::unordered_map<int, int>& pushOffsetOfThrow,
+            OriginUnionFind& aliases) {
     size_t n = cfg.blocks.size();
     DataflowResult result;
     result.entryState.resize(n);
@@ -535,7 +531,8 @@ DataflowResult runDataflow(const Cfg& cfg,
     std::vector<uint8_t> exitComputed(n, 0);
     std::deque<int> worklist;
 
-    HandlerSeedPoints seedPoints = buildHandlerSeedPoints(cfg, heightBefore);
+    HandlerSeedPoints seedPoints =
+        buildHandlerSeedPoints(cfg, heightBefore, pushOffsetOfThrow);
 
     if (n > 0) {
         result.reachable[0] = 1; // block 0 is the chunk's entry
@@ -886,8 +883,23 @@ void analyzeOneChunk(const DecodedFunction& node, CaptureAnalysis& out) {
     std::unordered_map<int, int> heightBefore =
         computeFrameHeightsForCfg(cfg, entryHeight, node.id);
 
+    // A THROW's catch block is the one of the innermost handler active on
+    // the path to it (handler_depth.h), not of the nearest earlier
+    // PUSH_HANDLER left open in byte order.
+    HandlerDepthAnalysis handlerDepth = analyzeHandlerDepth(node);
+    std::unordered_map<int, int> pushOffsetOfThrow;
+    for (size_t i = 0; i < node.instructions.size(); i++) {
+        int active = handlerDepth.activeHandler[i];
+        if (node.instructions[i].op == Op::THROW && handlerDepth.reached[i] &&
+            active >= 0) {
+            pushOffsetOfThrow[node.instructions[i].offset] =
+                node.instructions[static_cast<size_t>(active)].offset;
+        }
+    }
+
     OriginUnionFind aliases;
-    DataflowResult dataflow = runDataflow(cfg, heightBefore, aliases);
+    DataflowResult dataflow =
+        runDataflow(cfg, heightBefore, pushOffsetOfThrow, aliases);
 
     FunctionCaptureInfo info;
     info.id = node.id;
