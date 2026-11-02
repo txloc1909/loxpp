@@ -186,8 +186,27 @@ asking about pid 1 turns the watch off for every other user. The watch also
 assumes that pi and the run script see one PID namespace. A `ps` that cannot see
 pi reads pi as gone.
 
-The watcher stops at the end of a normal run, so it never closes a window that
-`hold` keeps open.
+The watcher stops at the end of a normal run, so it does not close a window that
+`hold` keeps open. One race remains: a run that ends by itself in the same
+instant that pi dies can still close a held window, because the script's `wait`
+returns and the watcher decides the parent is gone within about one
+process-state read of each other. Issue #1039 tracks whether that race must be
+removed.
+
+A shell function inherited from whatever started pi cannot change what the
+watch does. Every command it runs goes through `command`: a `tr` that prints
+nothing makes every pid read as gone, a `head` that prints nothing makes `ps`
+read as unable to answer, a `sleep` that blocks stops the poll, a `printf` that
+prints nothing loses the exit code, and `[`, `wait`, `cd` and `kill` change the
+run in their own ways. A function named `command` would shadow the builtin every
+guard depends on, so each script clears it first with `unset -f command`. That
+line cannot be shadowed where these scripts run: they start as `/bin/sh`, and
+bash in that mode, or with `--posix`, refuses to import a function for a POSIX
+special builtin (plain `bash` would import it). The names the script uses for structure
+(`:`, `trap`, `set`, `exec`, `exit`, `return`, `shift`, `eval`, `.`, `break`,
+`continue`, `export`, `readonly`, `times`) are special builtins too, so no
+function for them can arrive from the parent, and dash rejects most of those
+names as function names and imports no exported functions at all.
 
 ## How an unattended run works
 
