@@ -91,9 +91,10 @@ first.
 
 Every backend conforms to the same spec. The spec binds what a program can
 observe: its output, its exit status, the faults it raises, and which faults
-it can catch. It does not bind error messages, and it leaves limits and
-scheduling to each implementation. So a backend does not copy the error paths
-of the native VM, and a new backend is free to experiment.
+it can catch. It does not bind error messages, and it leaves limits, and
+whether workers run at the same time, to each implementation. So a backend
+does not copy the error paths of the native VM, and a new backend is free to
+experiment.
 
 The JVM backend is never shipped: the JVM already has many languages.
 

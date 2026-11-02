@@ -69,9 +69,10 @@ These rules stay open:
 - the order of the steps of different workers, except where messages order
   them.
 
-`VISION.md` changes, and only the owner changes it. The proposed text for the
-sentence in "The backends" is: "It does not bind error messages, and it leaves
-limits, and whether workers run at the same time, to each implementation."
+The owner changed the sentence of `VISION.md`, "The backends", in the pull
+request that adds this file. It now reads: "It does not bind error messages,
+and it leaves limits, and whether workers run at the same time, to each
+implementation."
 
 ## D2: the bootstrap interpreter conforms
 
@@ -181,8 +182,13 @@ The follow-ups that the owner closed as not planned on 2026-11-01 stay closed:
 
 ## What this decision replaces
 
-- F4 of `blocking-call-suspension.md`.
-- The outcome of #932, and its text in `spec/05-stdlib.md`.
+- F4 of `blocking-call-suspension.md`. That file stays accepted for every
+  other fork, and it marks each place that F4 changed.
+- The outcome of #932, and its text in `spec/05-stdlib.md`. The spec text
+  changes with the D3 rule.
+- The reason that `concurrency-model-decision.md` gave for a one-thread
+  bootstrap: whether workers run at the same time is implementation-defined,
+  not scheduling.
 
 ## Constraints from named bug classes
 
