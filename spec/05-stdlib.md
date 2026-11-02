@@ -600,10 +600,12 @@ implementation; a portable program does not depend on it. A failed write does
 not change what a later read returns. A wrong argument type is a runtime error
 that halts the program.
 
-When two tasks write to one Socket at the same time, the bytes of one call
-can mix with the bytes of the other, and the language does not say which call
-sends first. A program that needs whole messages uses one writer task for the
-Socket.
+A Socket has a read side and a write side. A call that waits holds its side
+until it returns, and a call on a side that a call of another task holds
+raises a catchable `BusyError` (see [§04-semantics, The Task
+Machine](04-semantics.md#the-task-machine), Sides). One task can read a Socket
+while another task writes it. A program that shares one side among tasks
+gives that side to one task, which the other tasks reach with messages.
 
 A call that reads or writes suspends its task while it waits (see [Blocking
 calls](#blocking-calls)). A task of the same worker can call `close()` on a
@@ -719,7 +721,9 @@ Waits for the next inbound connection, and returns it as a new Socket. Calling
 failure of the accept itself raises a catchable `NetworkError`. The call
 suspends its task while it waits. If a task of the same worker calls `close()`
 on the Server during the wait, the waiting call raises a catchable
-`SocketClosedError`.
+`SocketClosedError`. A call while a call of another task holds the accept side
+raises a catchable `BusyError` (see [§04-semantics, The Task
+Machine](04-semantics.md#the-task-machine), Sides).
 
 **Arity:** 0  
 **Returns:** Socket  
@@ -979,7 +983,7 @@ Points](04-semantics.md#suspend-points)). The calls have two classes, and the
 - A call of class **blocks** waits for standard input or for another process.
   It blocks the worker that makes it, every task on that worker, and nothing
   else on an implementation that runs workers at the same time (see
-  [Conformance](README.md#conformance), Scheduling). The section of the call
+  [Conformance](README.md#conformance), Parallel workers). The section of the call
   says `**Blocks:** yes`.
 
 A call of class suspends blocks the worker, and does not suspend, in two
