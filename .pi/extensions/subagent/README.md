@@ -184,7 +184,10 @@ The watcher kills only on evidence: when `ps` cannot answer for any pid, it
 cannot tell a live parent from a dead one, so it leaves the run alone. That is
 the behaviour before this watch existed. The same rule covers the start time: a
 caller that could not read the parent's start time passes the pid alone, and the
-state check is then all the evidence there is. The start time has one-second
+state check is then all the evidence there is. Both sides of the comparison set
+`LC_ALL=C` and `TZ=UTC`, because kitty forwards a short list of environment keys
+and a `TZ` that reaches pi need not reach the window's script; a token in one
+zone and a reading in another would end a live run. The start time has one-second
 resolution, so a pid reused inside that same second still reads as the parent;
 a pid is reused only after the whole number space turns over (about 45 minutes
 on a host that moves 7 640 pids in 5 s), which always lands in a later second.

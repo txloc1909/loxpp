@@ -124,11 +124,13 @@ export function watchdogFunctions(): string[] {
     `  command ps -o stat= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
     "}",
     "",
-    // LC_ALL=C is set here and in parent-identity.ts, so both sides of the
-    // comparison carry the same month and day names, and the whitespace is
-    // removed on both sides because `ps` pads the field.
+    // LC_ALL=C and TZ=UTC are set here and in parent-identity.ts, so both sides
+    // of the comparison carry the same month and day names in the same zone: the
+    // wrapper's environment is not pi's, and a `TZ` that reaches pi need not
+    // reach the window's script. The whitespace is removed on both sides because
+    // `ps` pads the field.
     "process_start() {",
-    `  LC_ALL=C command ps -o lstart= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
+    `  LC_ALL=C TZ=UTC command ps -o lstart= -p "$1" 2>/dev/null | command tr -d '[:space:]'`,
     "}",
     "",
     "pid_gone() {",

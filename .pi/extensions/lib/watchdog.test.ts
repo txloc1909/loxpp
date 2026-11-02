@@ -117,6 +117,32 @@ function parentArgs(parent: ChildProcess): string[] {
 }
 
 /**
+ * The raw `ps` answer for one pid under one time zone, normalized as both sides
+ * of the watch normalize it.
+ */
+function rawStart(pid: number, tz: string): string {
+  const out = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", TZ: tz },
+  }).stdout;
+  return out.replace(/\s+/g, "");
+}
+
+/**
+ * A time zone that prints a different start time than the `TZ=UTC` both sides
+ * use, or undefined when this host's zone database offers none. A run started in
+ * such a zone is the test of the token's zone: a token that carried the caller's
+ * zone would read a live parent as dead.
+ */
+function differingZone(pid: number): string | undefined {
+  const utc = rawStart(pid, "UTC");
+  for (const zone of ["Asia/Tokyo", "America/Los_Angeles", "Pacific/Kiritimati"]) {
+    if (rawStart(pid, zone) !== utc) return zone;
+  }
+  return undefined;
+}
+
+/**
  * Wait for a spawned process to end by itself, so its last write has landed.
  * The listener goes on before the check: an `exit` that lands between a check
  * and the attach is never replayed, and a helper that removes a flake must not
@@ -458,6 +484,45 @@ processTest("a parent pid that another process holds does not keep the run alive
       const childPid = await readPid(childPidFile, left());
       await waitFor("the child to end", () => !alive(childPid), left());
       assert.equal(alive(parent.pid!), true, "the run ended while the pid it watched still answered");
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a parent token read in another time zone still names the same process", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    const parent = standInParent();
+    const start = startTimeOf(parent.pid!);
+    assert.notEqual(start, "", "ps can read the stand-in parent");
+    // kitty forwards a short list of environment keys, so a `TZ` that reaches
+    // pi need not reach the window's script. `ps -o lstart=` answers in local
+    // time, so both sides of the comparison set TZ=UTC; without that, a zone
+    // difference reads a live parent as dead. A host whose zone database cannot
+    // print a different answer cannot show the difference, and this test would
+    // prove nothing.
+    const zone = differingZone(parent.pid!);
+    if (zone === undefined) return;
+
+    const script = spawn("/bin/sh", [scriptPath, String(parent.pid), start], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, TZ: zone, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const childPid = await readPid(childPidFile, left());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(alive(childPid), true, `the run outlives its parent in ${zone}`);
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
       parent.kill("SIGKILL");
       await stopRun(script, left());

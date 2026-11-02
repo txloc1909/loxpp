@@ -187,7 +187,9 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.equal(argv.at(-2), String(process.pid), "the run script watches this process");
     // The start time as the second argument is what keeps a later process that
     // took this pid from reading as a live parent.
-    assert.equal(argv.at(-1), startTimeOf(process.pid), "the run script compares this process's start time");
+    const start = startTimeOf(process.pid);
+    assert.notEqual(start, "", "ps reads this process's start time, so the comparison is not two empty tokens");
+    assert.equal(argv.at(-1), start, "the run script compares this process's start time");
 
     // A `kitten @` without a socket writes into pi's terminal, so every call
     // must name the socket itself.
