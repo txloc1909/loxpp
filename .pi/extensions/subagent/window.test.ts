@@ -362,8 +362,22 @@ test("a watched child keeps the terminal and writes its own events", async () =>
   });
 });
 
-/** Poll until the fake kitten has recorded the launch, then parse it. */
+test("a wait for a file with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // Without the guard a NaN limit makes `until` NaN, so the loop never ends.
+  const missing = path.join(os.tmpdir(), "loxpp-no-such-file");
+  await assert.rejects(() => waitForFile(missing, (text) => text, Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitForFile(missing, (text) => text, 0), /needs a finite limit, and got 0/);
+});
+
+/**
+ * Poll until the fake kitten has recorded the launch, then parse it. The limit
+ * stays optional because one bound serves the file's only wait. The guard is
+ * needed all the same, because `node --test` strips types without checking
+ * them: a call site that passes a limit that is not finite must fail here, not
+ * poll until an outer timeout.
+ */
 async function waitForFile<T>(file: string, parse: (text: string) => T, timeoutMs = 3000): Promise<T> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${file} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     try {

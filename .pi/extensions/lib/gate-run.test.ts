@@ -204,7 +204,9 @@ function alive(pid: number): boolean {
  *
  * A new test file copies `watchdog.test.ts`: its limit is required at every
  * call site, so each wait says what it bounds. Keep the default only where one
- * bound serves the whole file, as it does here.
+ * bound serves the whole file, as it does here, and keep the guard either way:
+ * every wait helper under `.pi/extensions` fails at once on a limit that is not
+ * finite.
  */
 async function waitFor(what: string, check: () => Promise<boolean> | boolean, timeoutMs = TIMEOUT_MS): Promise<void> {
   assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${what} needs a finite limit, and got ${timeoutMs}`);
