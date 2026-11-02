@@ -4,9 +4,10 @@
 // four counts together are 200000 (spec/05-stdlib.md, Socket: the bytes of all
 // results, in order, are the bytes of the stream). Which task reads which byte
 // is not specified, so the probe checks the sum and the count of the
-// character "x", which the peer puts at known places. The read_some
-// readers sleep between calls, so a task that wakes from its wait can find bytes
-// that another task left unread.
+// character "x", which the peer puts at known places. The
+// read_some readers compute and sleep between calls, so a task that wakes from
+// its wait can find bytes that another task left unread, and more bytes behind
+// them.
 // STATUS: ok
 // TIMEOUT: 60
 // CHECK: received 4 counts
@@ -25,7 +26,7 @@ fun peer(main) {
         c.write(piece);
         c.write(piece);
         sent = sent + 200;
-        if (sent % 4000 == 0) { sleep(0.002); }
+        if (sent % 1000 == 0) { sleep(0.0005); }
     }
     c.close_write();
     task.receive();
@@ -43,11 +44,15 @@ fun tally(text, counts) {
 }
 fun some_reader() {
     var counts = [0, 0];
-    var text = s.read_some(1000);
+    var text = s.read_some(200);
     while (len(text) > 0) {
         tally(text, counts);
-        sleep(0.003);
-        text = s.read_some(1000);
+        // More bytes arrive while this task computes, and the other tasks
+        // run only when it sleeps.
+        var end = clock() + 0.002;
+        while (clock() < end) { }
+        sleep(0.001);
+        text = s.read_some(200);
     }
     task.send(me, counts[0] + 1000000 * counts[1]);
 }
