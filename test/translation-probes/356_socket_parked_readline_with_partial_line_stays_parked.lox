@@ -1,0 +1,34 @@
+// Task B waits in readline() on a Socket. Task A runs and calls readline(),
+// which reads the write of the peer. The bytes "yy" after the first line hold
+// no newline. B wakes, finds no full line, and waits again. The peer then sends
+// "z\n", and B gets "yyz": the bytes are not lost and B does not return early.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: results are x and yyz: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("x\nyy");
+    sleep(0.8);
+    c.write("z\n");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun spin(secs) {
+    var end = clock() + secs;
+    while (clock() < end) { }
+}
+fun b() { task.send(me, str(s.readline())); }
+fun a() { spin(0.5); task.send(me, str(s.readline())); }
+task.spawn(b);
+task.spawn(a);
+var r0 = "timeout";
+try { r0 = task.receive_within(3); } catch (e) { }
+var r1 = "timeout";
+try { r1 = task.receive_within(3); } catch (e) { }
+task.send(w, "done");
+print "results are x and yyz: " + str((r0 == "x" and r1 == "yyz") or (r0 == "yyz" and r1 == "x"));

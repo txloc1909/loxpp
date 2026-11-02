@@ -115,6 +115,10 @@ struct ObjSocket : public Obj {
     // The bytes that readline has searched for a newline, counted so a test
     // can see the cost of a line that arrives in pieces.
     size_t scannedBytes = 0;
+    // Counts every change to `inbuf`. A call that changes the buffer and
+    // leaves bytes in it wakes the tasks parked to read this socket, because
+    // those bytes raise no event on the descriptor.
+    size_t inputEpoch = 0;
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;

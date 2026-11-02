@@ -123,6 +123,40 @@ final class LoxPoller {
         }
     }
 
+    /**
+     * Removes the waits on {@code channel} for reading and appends the tasks,
+     * in registration order. The channel stays open for other waits.
+     */
+    void takeReaders(SelectableChannel channel, List<LoxTask> out) {
+        int remaining = 0;
+        for (Iterator<Wait> it = fdWaits.iterator(); it.hasNext();) {
+            Wait w = it.next();
+            if (w.channel != channel) {
+                continue;
+            }
+            if ((w.interest & SelectionKey.OP_READ) != 0) {
+                out.add(w.task);
+                it.remove();
+            } else {
+                remaining |= w.interest;
+            }
+        }
+        SelectionKey key = channel.keyFor(selector);
+        if (key == null || !key.isValid()) {
+            return;
+        }
+        if (remaining == 0) {
+            // The program may never close the channel, and the selector must
+            // not keep it.
+            key.cancel();
+            if (fdWaits.isEmpty()) {
+                selectNow();
+            }
+        } else {
+            key.interestOps(remaining);
+        }
+    }
+
     /** Looks once, never sleeps. */
     void selectNow() {
         try {

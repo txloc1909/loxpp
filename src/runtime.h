@@ -458,6 +458,8 @@ class Runtime {
     // tasks that were parked on it in the order their calls began to wait.
     // They stay PARKED: the caller ends each wait with failPark.
     void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
+    // The tasks parked in a call on `target`, in the order their calls began.
+    void parkedTasksOn(const Obj* target, std::vector<ObjTask*>& tasks) const;
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.
     void defineNative(const char* name, NativeFn fn, int arity);

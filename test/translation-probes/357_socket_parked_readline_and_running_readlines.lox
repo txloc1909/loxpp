@@ -1,0 +1,33 @@
+// Task B waits in readline() on a Socket. Task A runs and calls readlines(),
+// which reads the whole stream. B finds the stream empty at its end of stream
+// and gets nil. The probe pins the case where no byte is left for the waiting
+// task: it must not return a line, and it must not hang.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: a gets two lines and b gets nil: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nb\n");
+    c.close();
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun spin(secs) {
+    var end = clock() + secs;
+    while (clock() < end) { }
+}
+fun b() { task.send(me, "B:" + str(s.readline())); }
+fun a() { spin(0.5); task.send(me, "A:" + str(s.readlines())); }
+task.spawn(b);
+task.spawn(a);
+var r0 = "timeout";
+try { r0 = task.receive_within(3); } catch (e) { }
+var r1 = "timeout";
+try { r1 = task.receive_within(3); } catch (e) { }
+task.send(w, "done");
+print "a gets two lines and b gets nil: " + str((r0 == "A:[a, b]" and r1 == "B:nil") or (r0 == "B:nil" and r1 == "A:[a, b]"));

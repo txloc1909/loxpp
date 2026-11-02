@@ -391,6 +391,7 @@ static Fill appendRead(int fd, std::string& buf, size_t want,
 // Move the first `n` bytes of the input buffer out as a result, and keep the
 // tail. The prefix is moved, not copied, so a long line exists once.
 static std::string takeInput(ObjSocket* s, size_t n) {
+    ++s->inputEpoch;
     s->noNewlineLen = s->noNewlineLen > n ? s->noNewlineLen - n : 0;
     std::string tail(s->inbuf, n);
     std::string out = std::move(s->inbuf);
@@ -401,11 +402,17 @@ static std::string takeInput(ObjSocket* s, size_t n) {
 
 // Drop the first byte of the input buffer, which is the newline that ended a
 // line.
-static void dropFirstInput(ObjSocket* s) { s->inbuf.erase(0, 1); }
+static void dropFirstInput(ObjSocket* s) {
+    ++s->inputEpoch;
+    s->inbuf.erase(0, 1);
+}
 
 // Append one read chunk to the input buffer.
 static Fill fillInput(ObjSocket* s, const char* method, IoOutcome& out) {
     Fill f = appendRead(s->fd, s->inbuf, kReadChunk, method, out.faultMessage);
+    if (f == Fill::Data) {
+        ++s->inputEpoch;
+    }
     if (f == Fill::Failed) {
         setFault(out, kNetworkError, std::move(out.faultMessage));
     }
@@ -466,6 +473,7 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
             // Keep what arrived, so a later read does not lose it.
             io.buf.append(s->inbuf);
             s->inbuf = std::move(io.buf);
+            ++s->inputEpoch;
             setFault(out, kNetworkError, std::move(out.faultMessage));
             return;
         }
@@ -788,12 +796,48 @@ static bool waitFd(int fd, short events, std::string& err) {
     return waitFd(fd, events, err, false, {}, timedOut);
 }
 
+static void resumeIo(Runtime& rt, ObjTask* task, bool fired);
+
+static bool isReadOp(IoOp op) {
+    return op == IoOp::READ || op == IoOp::READLINES ||
+           op == IoOp::READ_BYTES || op == IoOp::READ_SOME ||
+           op == IoOp::READLINE;
+}
+
+// Bytes in the input buffer raise no event on the descriptor, so a task parked
+// to read `s` cannot learn of them from the poller. Rule: a read step that
+// changed the buffer (`epoch` is the count before the step) and left bytes in
+// it makes every task parked to read `s` run its step again, in the order the
+// calls began. A step that changes nothing wakes no one, so a woken task that
+// finds nothing to serve parks again and the chain of wakes ends. Each wake
+// that continues the chain follows a change to the buffer, and the bytes of a
+// stream are finite.
+static void wakeParkedReaders(ObjSocket* s, size_t epoch) {
+    if (s->inputEpoch == epoch || s->inbuf.empty() || s->fd < 0) {
+        return;
+    }
+    Runtime* rt = getActiveRuntime();
+    std::vector<ObjTask*> parked;
+    rt->parkedTasksOn(s, parked);
+    for (ObjTask* task : parked) {
+        if (task->state == TaskState::PARKED && isReadOp(task->io.op) &&
+            task->io.target == s) {
+            resumeIo(*rt, task, false);
+        }
+    }
+}
+
 // Runs a call to its end, or to the point where the task parks.
 static Value runIo(ParkedIo io) {
     Runtime* rt = getActiveRuntime();
     for (;;) {
         IoOutcome out;
+        const bool reads = isReadOp(io.op);
+        const size_t epoch = reads ? asObjSocket(io.target)->inputEpoch : 0;
         step(io, out);
+        if (reads) {
+            wakeParkedReaders(asObjSocket(io.target), epoch);
+        }
         switch (out.kind) {
         case IoOutcome::Kind::Done:
             return finish(io, out);
@@ -829,7 +873,11 @@ static Value runIo(ParkedIo io) {
 
 static void pumpWriters(ObjSocket* s);
 
-void resumeParkedIo(Runtime& rt, ObjTask* task) {
+void resumeParkedIo(Runtime& rt, ObjTask* task) { resumeIo(rt, task, true); }
+
+// `fired` is false for a task woken by a change to the input buffer: the
+// poller still holds its wait, so a step that must wait again keeps it.
+static void resumeIo(Runtime& rt, ObjTask* task, bool fired) {
     ParkedIo& io = task->io;
     if (io.op == IoOp::WRITE) {
         // The pump finishes this call too when its turn and the room allow.
@@ -840,17 +888,26 @@ void resumeParkedIo(Runtime& rt, ObjTask* task) {
         return;
     }
     IoOutcome out;
+    ObjSocket* readSocket = isReadOp(io.op) ? asObjSocket(io.target) : nullptr;
+    const size_t epoch = readSocket != nullptr ? readSocket->inputEpoch : 0;
     step(io, out);
     switch (out.kind) {
     case IoOutcome::Kind::Done:
         rt.completePark(task, finish(io, out));
-        return;
+        break;
     case IoOutcome::Kind::Fault:
         rt.failPark(task, out.faultKind, out.faultMessage.c_str());
-        return;
+        break;
     case IoOutcome::Kind::Wait:
-        rt.rearmPark(task, descriptorOf(io));
-        return;
+        if (fired) {
+            rt.rearmPark(task, descriptorOf(io));
+        }
+        break;
+    }
+    // After the task is finished or parked again: a woken reader must not
+    // find this task half done.
+    if (readSocket != nullptr) {
+        wakeParkedReaders(readSocket, epoch);
     }
 }
 

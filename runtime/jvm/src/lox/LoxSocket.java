@@ -32,6 +32,19 @@ public final class LoxSocket {
         this.channel = channel;
     }
 
+    /**
+     * Called as a read call returns. Bytes left in the buffer raise no event
+     * on the channel, so a task parked to read this Socket would wait for ever
+     * for bytes that are there. It wakes the tasks and they look at the
+     * buffer. A task that finds the buffer empty parks again, and a call that
+     * leaves no bytes wakes no one, so the wakes end.
+     */
+    private void serveParkedReaders() {
+        if (pos < lim && channel != null) {
+            LoxWorker.wakeReaders(channel);
+        }
+    }
+
     private void checkOpen(String method) {
         if (channel == null) {
             throw LoxOps.makeError("SocketClosedError",
@@ -115,6 +128,7 @@ public final class LoxSocket {
             got.write(buf, pos, take);
             pos += take;
         }
+        serveParkedReaders();
         return new String(got.toByteArray(), LoxRuntime.CHARSET);
     }
 
@@ -167,6 +181,7 @@ public final class LoxSocket {
         int take = Math.min(lim - pos, n);
         String out = new String(buf, pos, take, LoxRuntime.CHARSET);
         pos += take;
+        serveParkedReaders();
         return out;
     }
 
@@ -179,7 +194,9 @@ public final class LoxSocket {
     public Object readline() {
         checkOpen("readline");
         LoxWorker.beginWaitingCall();
-        return readLineOfCall();
+        Object line = readLineOfCall();
+        serveParkedReaders();
+        return line;
     }
 
     private Object readLineOfCall() {

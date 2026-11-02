@@ -1,0 +1,35 @@
+// Task B waits in readline() on a Socket. Bytes arrive while task A runs, not
+// parked. A calls readline() and reads both lines from the descriptor in one
+// read, and returns the first. The second line stays in the buffer of the
+// Socket and the descriptor has no new bytes, but B must get it: a task never
+// waits for a line that the buffer holds (spec/05-stdlib.md, Socket: a byte
+// that an earlier call left unread is returned first). Which task gets "a" is
+// not specified, so the probe checks the pair of results.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: results are a and b: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nb\n");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun spin(secs) {
+    var end = clock() + secs;
+    while (clock() < end) { }
+}
+fun b() { task.send(me, str(s.readline())); }
+fun a() { spin(0.5); task.send(me, str(s.readline())); }
+task.spawn(b);
+task.spawn(a);
+var r0 = "timeout";
+try { r0 = task.receive_within(3); } catch (e) { }
+var r1 = "timeout";
+try { r1 = task.receive_within(3); } catch (e) { }
+task.send(w, "done");
+print "results are a and b: " + str((r0 == "a" and r1 == "b") or (r0 == "b" and r1 == "a"));

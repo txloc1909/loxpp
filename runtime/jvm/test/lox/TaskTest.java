@@ -43,6 +43,7 @@ public final class TaskTest {
         checkSleepUnderACallbackBlocksTheWorker();
         checkCloseWakesAParkedAccept();
         checkTwoReadersShareBufferedBytes();
+        checkRunningReadLeavesBytesForParkedReaders();
         checkSendWakesAPollingWorker();
         checkReadyChannelNobodyWaitsOnDoesNotSpin();
         checkWritableChannelNobodyWaitsOnDoesNotSpin();
@@ -336,6 +337,30 @@ public final class TaskTest {
         boolean ab = "a".equals(lines[0]) && "b".equals(lines[1]);
         boolean ba = "b".equals(lines[0]) && "a".equals(lines[1]);
         check(ab || ba, "each of two parked readers gets one buffered line");
+        closeAndReap(pair);
+        server.close();
+    }
+
+    // A task parks in a read, and the running task then reads the bytes that
+    // arrived and leaves some in the buffer. The channel has no new bytes, so
+    // only the call that leaves them can wake the parked task.
+    private static void checkRunningReadLeavesBytesForParkedReaders() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] pair = connectedPair(server);
+        Object[] got = new Object[3];
+        task("spawn", fn("some", () -> got[0] = pair[1].readSome(1)));
+        task("spawn", fn("bytes", () -> got[1] = pair[1].readBytes(2)));
+        LoxOps.yield(null);
+        pair[0].write("a\nbcd");
+        long end = System.nanoTime() + 100_000_000L;
+        while (System.nanoTime() < end) {
+            // The task keeps the worker, so the parked tasks cannot run.
+        }
+        got[2] = pair[1].readline();
+        sleepSeconds(0.1);
+        checkEquals("a", got[2], "the running task reads the first line");
+        checkEquals("b", got[0], "a parked read_some gets a buffered byte");
+        checkEquals("cd", got[1], "a parked read_bytes gets the buffered bytes");
         closeAndReap(pair);
         server.close();
     }

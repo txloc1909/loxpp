@@ -1,0 +1,36 @@
+// Two tasks wait in read_some(1) on a Socket. Task A runs and calls readline(),
+// which reads the whole write of the peer. The two bytes "bc" after the first
+// line stay in the buffer of the Socket and the descriptor has no new bytes.
+// Each waiting task takes one byte in turn. Which of them gets "b" is not
+// specified, so the probe sorts the three results.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: results are a, b and c: true
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    sleep(0.2);
+    c.write("a\nbc");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun spin(secs) {
+    var end = clock() + secs;
+    while (clock() < end) { }
+}
+fun b() { task.send(me, str(s.read_some(1))); }
+fun a() { spin(0.5); task.send(me, str(s.readline())); }
+task.spawn(b);
+task.spawn(b);
+task.spawn(a);
+var r0 = "timeout";
+try { r0 = task.receive_within(3); } catch (e) { }
+var r1 = "timeout";
+try { r1 = task.receive_within(3); } catch (e) { }
+var r2 = "timeout";
+try { r2 = task.receive_within(3); } catch (e) { }
+task.send(w, "done");
+print "results are a, b and c: " + str((r0 == "a" or r1 == "a" or r2 == "a") and (r0 == "b" or r1 == "b" or r2 == "b") and (r0 == "c" or r1 == "c" or r2 == "c"));

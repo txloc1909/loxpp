@@ -620,6 +620,28 @@ final class LoxWorker {
         }
     }
 
+    /**
+     * Bytes that a call left in the buffer of a Socket raise no event on the
+     * channel. This wakes every task parked to read {@code channel}, in the
+     * order of their calls, and each looks at the buffer again.
+     */
+    static void wakeReaders(SelectableChannel channel) {
+        LoxWorker worker = current();
+        LOCK.lock();
+        try {
+            if (worker.poller == null || !worker.poller.hasWaits()) {
+                return;
+            }
+            ArrayList<LoxTask> woken = new ArrayList<>();
+            worker.poller.takeReaders(channel, woken);
+            for (LoxTask t : woken) {
+                worker.makeReady(t);
+            }
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
     private void parkOnChannel(SelectableChannel channel, int interest,
                                boolean timed, long deadlineNanos) {
         LoxTask self = current;

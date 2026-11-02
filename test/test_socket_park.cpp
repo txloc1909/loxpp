@@ -1761,3 +1761,79 @@ TEST_F(SocketParkTest, ATaskHeldOnlyByTheWriterQueueSurvivesACollection) {
     EXPECT_EQ(mm.bytesAllocated, withSocket);
     mm.popTempRoot();
 }
+
+// A task parks in readline, and the running task then reads both lines in one
+// read and leaves the second in the buffer. The descriptor has no new bytes,
+// so only the call that leaves the line can wake the parked task.
+TEST_F(SocketParkTest, ARunningReadlineWakesAParkedReaderForTheBufferedLine) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var gotB = "none";
+        fun reader() { gotB = conn.readline(); task.send(me, 1); }
+        task.spawn(reader);
+        sleep(0.05);
+        peer.write("a\nb\n");
+        var end = clock() + 0.1;
+        while (clock() < end) { }
+        var gotA = conn.readline();
+        var woke = "timeout";
+        try { woke = task.receive_within(2); } catch (e) { }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "gotA"), "a");
+    EXPECT_EQ(globalString(vm, "woke"), "1");
+    EXPECT_EQ(globalString(vm, "gotB"), "b");
+}
+
+// Two parked readers and a running readline: the readers take the buffered
+// bytes in the order their calls began.
+TEST_F(SocketParkTest, ParkedReadersTakeBufferedBytesInTurn) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var gotS = "none";
+        var gotN = "none";
+        fun some() { gotS = conn.read_some(1); task.send(me, 1); }
+        fun bytes() { gotN = conn.read_bytes(2); task.send(me, 1); }
+        task.spawn(some);
+        task.spawn(bytes);
+        sleep(0.05);
+        peer.write("a\nbcd");
+        var end = clock() + 0.1;
+        while (clock() < end) { }
+        var gotA = conn.readline();
+        var woke = 0;
+        try { task.receive_within(2); woke = woke + 1; } catch (e) { }
+        try { task.receive_within(2); woke = woke + 1; } catch (e) { }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "gotA"), "a");
+    EXPECT_EQ(globalString(vm, "woke"), "2");
+    EXPECT_EQ(globalString(vm, "gotS"), "b");
+    EXPECT_EQ(globalString(vm, "gotN"), "cd");
+}
+
+// A reader that wakes for bytes that hold no full line parks again. It does
+// not return early, and it takes the rest of the line when that arrives.
+TEST_F(SocketParkTest, AWokenReaderWithAPartialLineParksAgain) {
+    VM vm;
+    ASSERT_EQ(run(vm, R"(
+        var gotB = "none";
+        fun reader() { gotB = conn.readline(); task.send(me, 1); }
+        task.spawn(reader);
+        sleep(0.05);
+        peer.write("x\nyy");
+        var end = clock() + 0.1;
+        while (clock() < end) { }
+        var gotA = conn.readline();
+        var early = "none";
+        try { early = task.receive_within(0.2); } catch (e) { }
+        peer.write("z\n");
+        var woke = "timeout";
+        try { woke = task.receive_within(2); } catch (e) { }
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(vm, "gotA"), "x");
+    EXPECT_EQ(globalString(vm, "early"), "none");
+    EXPECT_EQ(globalString(vm, "woke"), "1");
+    EXPECT_EQ(globalString(vm, "gotB"), "yyz");
+}

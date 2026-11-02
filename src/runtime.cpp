@@ -1205,6 +1205,19 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
     }
 }
 
+void Runtime::parkedTasksOn(const Obj* target,
+                            std::vector<ObjTask*>& tasks) const {
+    for (const auto& [token, task] : m_parkedTasks) {
+        if (task->io.target == target) {
+            tasks.push_back(task);
+        }
+    }
+    std::sort(tasks.begin(), tasks.end(),
+              [](const ObjTask* a, const ObjTask* b) {
+                  return a->parkToken < b->parkToken;
+              });
+}
+
 void Runtime::unparkTask(ObjTask* task) {
     if (task->state != TaskState::PARKED) {
         return;
