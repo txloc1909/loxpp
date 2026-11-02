@@ -43,16 +43,17 @@
 // frame depth minus one (computed once in the prologue), so
 // Runtime::OpResult::Resumed means exactly "the throw resolved at MY OWN
 // frame": the emitter jumps to the statically active catch block for that
-// call site (handler_depth.h's activeHandler — a purely lexical property,
-// since PUSH_HANDLER/POP_HANDLER always bracket byte-order-nested, matching
-// the compiler's own emission). Any other outcome (OpResult::Stop, or
-// Resumed with no statically active handler) propagates kRtThrow to this
-// function's own caller, which performs the identical check against ITS OWN
-// frame depth — this bubbles a throw back up the physical C call stack one
-// compiled frame at a time, with no extra bookkeeping beyond the status
-// code itself. RUN_DEFERS never attempts a local catch even when it could
-// (Catchability::Propagate): the compiler emits it only immediately before
-// RETURN, after this frame's own try/catch regions are already lexically
+// call site (handler_depth.h's activeHandler — the innermost record open on
+// the path to the call site; a break or continue out of a try body adds a
+// POP_HANDLER ahead of the body end, so one PUSH_HANDLER can have several
+// POP_HANDLERs and byte order does not name the pairing). Any other outcome
+// (OpResult::Stop, or Resumed with no statically active handler) propagates
+// kRtThrow to this function's own caller, which performs the identical check
+// against ITS OWN frame depth — this bubbles a throw back up the physical C
+// call stack one compiled frame at a time, with no extra bookkeeping beyond the
+// status code itself. RUN_DEFERS never attempts a local catch even when it
+// could (Catchability::Propagate): the compiler emits it only immediately
+// before RETURN, after this frame's own try/catch regions are already lexically
 // closed, so any handler that resolves a deferred call's own throw belongs
 // to an ancestor.
 //

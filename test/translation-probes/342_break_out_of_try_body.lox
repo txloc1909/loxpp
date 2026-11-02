@@ -17,6 +17,7 @@
 // CHECK: after defer fn outer caught
 // CHECK: deferred inner
 // CHECK: throw before break caught 1
+// CHECK: inner catch wins
 // CHECK: end
 
 while (true) { try { break; } catch (e) { print "bad"; } }
@@ -74,5 +75,17 @@ while (true) {
         if (count == 1) { throw "first"; }
         break;
     } catch (e) { print "throw before break caught " + str(count); }
+}
+
+// A throw in an inner try must reach the inner catch, also when the outer try
+// body has a break path before the inner try (a JVM exception table lists the
+// inner region first).
+var go = false;
+while (true) {
+    try {
+        if (go) { break; }
+        try { throw "inner"; } catch (e) { print "inner catch wins"; }
+        break;
+    } catch (e) { print "bad outer " + e; }
 }
 print "end";
