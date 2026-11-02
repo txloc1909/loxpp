@@ -373,10 +373,12 @@ each has an off-the-shelf solution.
 | `355_socket_reader_and_writer_tasks` | one task waits in `readline` and another waits in `write` on the same Socket: neither raises, because they hold the two sides (Sides, rule 3; D3) — a spec probe | none (spec probe) |
 | `356_socket_close_frees_held_side` | a close by another task ends the wait of the call that holds the read side with `SocketClosedError`; the close raises nothing, and a later call raises `SocketClosedError`, not `BusyError` (Sides, rule 4; D3) — a spec probe | none (spec probe) |
 | `357_socket_buffered_bytes_still_busy` | a `read_some(1)` on a held read side raises `BusyError` also when a byte is in the buffer of the Socket, and the waiting `readline` gets every byte (Sides, rule 2; D3) — a spec probe | none (spec probe) |
-| `358_socket_side_held_while_task_ready` | a call on the read side raises `BusyError` after the line of the waiting call arrived, whether or not its task is ready yet (Sides, rule 1; D3; the shape of issue #1054) — a spec probe | none (spec probe) |
+| `358_socket_side_held_while_task_ready` | two waits end together and join in the order of their waits; the first task to run calls `read_some` on the side that the second task holds while it is ready: `BusyError`, and the holder gets its line; an implementation that frees a side at the end of its wait fails (Sides, rule 1; D3; the shape of issue #1054) — a spec probe | none (spec probe) |
 | `359_socket_call_that_does_not_wait_holds_nothing` | two tasks read one Socket in turn with calls that do not wait: neither raises, because a call that does not wait holds no side (Sides, rule 1; D3) — a spec probe | none (spec probe) |
 | `360_socket_busy_while_buffered_line_waits` | the program of issue #1054: task A computes while the bytes of waiting task B arrive, then calls `readline` and raises `BusyError`; B gets its line (Sides; D3) — a spec probe | none (spec probe) |
 | `361_closed_side_wins_over_held_side` | after a close by another task, a `readline` and an `accept` on the closed values raise `SocketClosedError`, not `BusyError`, while the woken calls still hold their sides; the woken calls then raise `SocketClosedError` (spec/04-semantics.md, The Task Machine, Sides, rule 6; D3) — a spec probe | none (spec probe) |
+| `362_busy_in_context_where_task_cannot_suspend` | a `read_some` inside `__str__`, where the task cannot suspend, on a side that another task holds raises `BusyError` and takes no byte (Contexts where a task cannot suspend; Sides, rules 2 and 5; D3) — a spec probe | none (spec probe) |
+| `363_close_ends_wait_at_the_close` | a close by a task of the same worker ends the wait at the close: the woken reader joins the run queue before the closer, which yields after the close (The Task Machine; spec/05-stdlib.md, Socket methods) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |
 | `322_receive_where_sees_the_mailbox` | `task.pending()` in `want` counts the whole mailbox, and a message that `want` sends to its own task is tested in the same call — a spec probe | none (spec probe) |
@@ -483,9 +485,13 @@ The probes `260` to `267`, `278` to `282`, and `284` to `286` are the
 probes of the rule that a call which waits for the network or for time suspends only its task
 (`docs/decisions/blocking-call-suspension.md`). They bind every implementation, the bootstrap
 interpreter too (`docs/decisions/concurrency-semantics-grounding.md`, D2), so none of them
-carries a `NOT-BINDING` line. The probes `347` to `361` are the probes of the rule of one call
+carries a `NOT-BINDING` line. The probes `347` to `363` are the probes of the rule of one call
 per side of a Socket or a Server (spec/04-semantics.md, The Task Machine, Sides; D3 of the same
 decision). A consumer that does not pass one of these probes yet lists it in its file.
+These probes make calls on one side of a Socket or a Server from two tasks, so they are not
+portable programs (spec/README.md, Conformance). They still bind: each one arranges its tasks
+so that the rules of the sides and the moves of the machine decide its output, and its header
+names any premise of the local host that it needs.
 An absent file is an empty list, so a consumer with no gap needs no
 file, and a node that finds a gap creates the file it needs. The spec-probe
 steps of `.github/workflows/ci.yml` for native, the bootstrap interpreter, JVM, and QBE already pass

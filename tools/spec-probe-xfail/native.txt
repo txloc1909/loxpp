@@ -8,5 +8,6 @@
 354_server_second_acceptor_busy.lox no BusyError: a second accept() waits on a held side (D3, #1058)
 356_socket_close_frees_held_side.lox no BusyError: a second reader waits on a held side (D3, #1058)
 357_socket_buffered_bytes_still_busy.lox no BusyError: a call on a held side returns buffered bytes (D3 rule 2, #1058)
-358_socket_side_held_while_task_ready.lox no BusyError: a call takes the bytes of a call whose wait ended (D3 rule 1, #1058)
+358_socket_side_held_while_task_ready.lox no BusyError: a call on a side whose holder is ready does not raise (D3 rule 1, #1058)
 360_socket_busy_while_buffered_line_waits.lox no BusyError: the program of #1054 takes the line of the waiting call (D3, #1058)
+362_busy_in_context_where_task_cannot_suspend.lox no BusyError: a call where the task cannot suspend reads the bytes of a held side (D3 rule 5, #1058)
