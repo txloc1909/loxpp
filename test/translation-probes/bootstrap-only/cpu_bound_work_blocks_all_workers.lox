@@ -1,6 +1,6 @@
 // The bootstrap interpreter runs every worker on one host thread, so a task
 // runs alone among the tasks of every worker (spec/README.md, Conformance:
-// scheduling is implementation-defined). Probes
+// whether workers run at the same time is implementation-defined). Probes
 // 95_cpu_bound_task_across_workers and
 // 96_cpu_bound_coroutine_across_workers do not bind the bootstrap, and this
 // probe checks the bootstrap's own choice in their place.

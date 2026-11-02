@@ -17,8 +17,9 @@ of lines between workers. It fails when:
 
 A line that mixes the text of two workers has the wrong form, so the check
 fails on it. The bootstrap interpreter runs every worker on one host thread
-(spec/README.md, Conformance: scheduling is implementation-defined), so its lines cannot
-mix, but the rule binds it too, and the check runs on it the same way.
+(spec/README.md, Conformance: whether workers run at the same time is
+implementation-defined), so its lines cannot mix, but the rule binds it too,
+and the check runs on it the same way.
 
 Usage:
     tools/check_print_lines.py <runner> [--program PATH] [--timeout SECONDS]
