@@ -270,6 +270,36 @@ TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
     EXPECT_EQ(globalString(rig.vm(), "got"), "outer caught outer");
 }
 
+// A handler that catches the fault and then resumes a coroutine raises
+// nothing else: the fault is consumed before it is raised, so the resume of
+// the inner coroutine inside the handler does not find it still pending.
+TEST_F(ParkTest, AHandlerThatResumesACoroutineAfterTheFaultRaisesNothingElse) {
+    ParkRig rig([](Runtime& rt, ObjTask* task) {
+        rt.failPark(task, "SocketClosedError", "the wait failed");
+    });
+    ASSERT_EQ(rig.vm().interpret(R"(
+        var log = "";
+        var me = task.self();
+        fun inner() { log = log + "inner;"; }
+        fun t() {
+            try {
+                park_far();
+            } catch (e) {
+                log = log + "caught " + e.kind + ";";
+                var c = coroutine.create(inner);
+                c.resume();
+                log = log + "after;";
+            }
+            task.send(me, "done");
+        }
+        task.spawn(t);
+        task.receive();
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(globalString(rig.vm(), "log"),
+              "caught SocketClosedError;inner;after;");
+}
+
 // The pending value is the result of the parked call, through a generator
 // that holds the call, and under collection: the value is a new string that
 // only the task refers to.

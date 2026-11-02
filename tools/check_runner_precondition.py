@@ -89,6 +89,8 @@ TOOLS = (
          + ["--native", r[0], "--jvm", r[1], "--bootstrap", r[2], "--only", "arithmetic_type_error"]),
     Tool("check_file_durability.sh", 1,
          lambda r: ["bash", str(TOOLS_DIR / "check_file_durability.sh"), r[0]]),
+    Tool("count_instructions.py", 1,
+         lambda r: py("count_instructions.py") + ["--", r[0]]),
 )
 
 EXTERNAL = {

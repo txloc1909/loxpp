@@ -834,7 +834,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             wake = retrySelectiveReceive(entry);
         }
         if (wake == WakeResult::Run) {
-            loopOk = (innermost && m_resumeFault.pending)
+            loopOk = (innermost && m_faultTask != nullptr)
                          ? raiseResumeFault(entry)
                          : runNestedLoop(entry);
         } else if (wake == WakeResult::Fatal) {
@@ -1070,9 +1070,13 @@ void Runtime::suspendForTaskSwitch(ObjIterator* iter) {
 }
 
 bool Runtime::raiseResumeFault(int entry) {
-    std::string kind = std::move(m_resumeFault.kind);
-    std::string message = std::move(m_resumeFault.message);
-    m_resumeFault = ResumeFault{};
+    ObjTask* task = m_faultTask;
+    std::string kind = std::move(task->faultKind);
+    std::string message = std::move(task->faultMessage);
+    // The fault is consumed before it is raised: code that a handler runs can
+    // reach a suspend point, and the task switch after it must not raise the
+    // same fault again.
+    m_faultTask = nullptr;
     // The native that made the call returned when the task parked, so the
     // value that the resume put on the stack is not a result: a handler
     // truncates the stack, and the other outcomes reset it.
@@ -1550,13 +1554,15 @@ bool Runtime::resumeTask(ObjTask* task) {
             received = task->mailbox.front();
             task->mailbox.pop_front();
         } else if (task->hasPendingFault) {
-            m_resumeFault = ResumeFault{true, std::move(task->faultKind),
-                                        std::move(task->faultMessage)};
+            // The flag is cleared here, and only failPark sets it, with the
+            // kind and the message. A fault that nothing raises therefore
+            // leaves nothing behind for a later resume to read.
             task->hasPendingFault = false;
+            m_faultTask = task;
         } else {
             received = task->pendingValue;
+            task->pendingValue = Value{};
         }
-        task->pendingValue = Value{};
         task->receiving = false;
         push(received);
         argCount = 1;
@@ -1576,11 +1582,8 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_reentrantOutcome = savedOutcome;
     m_currentTask = nullptr;
     // A fault the resumed coroutine did not raise must not reach the next
-    // resume. The reset is conditional because it builds and moves two
-    // strings, which a task switch that raised no fault should not pay for.
-    if (m_resumeFault.pending) {
-        m_resumeFault = ResumeFault{};
-    }
+    // resume.
+    m_faultTask = nullptr;
 
     if (!ok) {
         endTaskOrLine(task);
@@ -1644,7 +1647,7 @@ void Runtime::endTasks() {
     m_parkedTasks.clear();
     m_parkTimers.clear();
     m_parkRequest = ParkRequest{};
-    m_resumeFault = ResumeFault{};
+    m_faultTask = nullptr;
     m_liveTasks = 0;
     m_currentTask = nullptr;
     m_taskSwitchPending = false;
