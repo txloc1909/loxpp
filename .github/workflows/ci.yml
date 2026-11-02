@@ -75,6 +75,7 @@ jobs:
           tools/check_suspend_points.py
           tools/check_blocking_calls.py
           tools/check_blocking_decision_tables.py
+          tools/check_task_machine.py
 
       # The fault sites of the Socket and Server natives, native and JVM: each
       # one is a catchable fault of a named kind or an argument fault that
