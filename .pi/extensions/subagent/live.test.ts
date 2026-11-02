@@ -154,7 +154,20 @@ function windowByTitle(listing: string, marker: string): string | null {
   return null;
 }
 
+test("a wait for a window with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // No kitty is needed: the guard runs before the first listing.
+  await assert.rejects(() => waitForWindow("loxpp-no-such-marker", Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitForWindow("loxpp-no-such-marker", 0), /needs a finite limit, and got 0/);
+});
+
+/**
+ * The limit stays optional because one bound serves both waits. The guard is
+ * needed all the same, because `node --test` strips types without checking
+ * them: a call site that passes a limit that is not finite must fail here, not
+ * report a window that never appeared.
+ */
 async function waitForWindow(marker: string, timeoutMs = 5000): Promise<string> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for a window titled with ${marker} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     const listing = await listWindows();

@@ -131,7 +131,14 @@ function alive(pid: number): boolean {
   }
 }
 
+/**
+ * The limit stays optional because one bound serves both waits. The guard is
+ * needed all the same, because `node --test` strips types without checking
+ * them: a call site that passes a limit that is not finite must fail here, not
+ * wait forever.
+ */
 async function waitFor(what: string, check: () => boolean, timeoutMs = 8000): Promise<void> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${what} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     if (check()) return;
@@ -139,6 +146,12 @@ async function waitFor(what: string, check: () => boolean, timeoutMs = 8000): Pr
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+test("a wait with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // Without the guard a NaN limit makes `until` NaN, so the loop never ends.
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, 0), /needs a finite limit, and got 0/);
+});
 
 test("a run ends its child when the parent pi process is killed", { timeout: 20000 }, async () => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "loxpp-subagent-watchdog-"));

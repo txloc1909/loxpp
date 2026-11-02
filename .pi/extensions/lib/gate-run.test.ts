@@ -193,7 +193,23 @@ function alive(pid: number): boolean {
   }
 }
 
+/**
+ * The limit stays optional here, unlike in `watchdog.test.ts` and
+ * `subagent/index.test.ts`: one bound serves every wait in this file, so a call
+ * site that omits the limit still waits no longer than the file means it to.
+ *
+ * The guard is needed all the same, because `node --test` strips types without
+ * checking them: a call site that passes a limit that is not finite must fail
+ * here, not wait forever.
+ *
+ * A new test file copies `watchdog.test.ts`: its limit is required at every
+ * call site, so each wait says what it bounds. Keep the default only where one
+ * bound serves the whole file, as it does here, and keep the guard either way:
+ * every wait helper under `.pi/extensions` fails at once on a limit that is not
+ * finite.
+ */
 async function waitFor(what: string, check: () => Promise<boolean> | boolean, timeoutMs = TIMEOUT_MS): Promise<void> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${what} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     if (await check()) return;
@@ -411,6 +427,13 @@ test("an abort still ends the run when the removal fails", { timeout: 20000 }, a
       await done;
     }
   });
+});
+
+test("a wait with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // Without the guard a NaN limit makes `until` NaN, so the loop never ends and
+  // this test times out instead of failing by name.
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, 0), /needs a finite limit, and got 0/);
 });
 
 test("a failed gate names its container", () => {
