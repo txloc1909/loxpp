@@ -205,6 +205,20 @@ def measure(command: list[str], core: int | None, attempts: int) -> tuple[int, i
     return best
 
 
+def count_at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text} is not 1 or more")
+    return value
+
+
+def nanoseconds_at_least_zero(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"{text} is not 0 or more")
+    return value
+
+
 def median(values: list[int]) -> int:
     ordered = sorted(values)
     mid = len(ordered) // 2
@@ -218,16 +232,18 @@ def main() -> int:
         description="Count the user-space instructions a command runs."
     )
     parser.add_argument("--core", type=int, default=None, help="pin to this core")
-    parser.add_argument("--runs", type=int, default=1, help="number of runs")
+    parser.add_argument(
+        "--runs", type=count_at_least_one, default=1, help="number of runs"
+    )
     parser.add_argument(
         "--attempts",
-        type=int,
+        type=count_at_least_one,
         default=15,
         help="attempts per run; the largest count wins (default 15)",
     )
     parser.add_argument(
         "--max-lost",
-        type=int,
+        type=nanoseconds_at_least_zero,
         default=50_000,
         help="nanoseconds the best attempt may spend off the CPU (default 50000)",
     )
