@@ -137,10 +137,14 @@ class Emitter {
                 m_maxHeight = std::max({m_maxHeight, analysis.before[i].height,
                                         analysis.after[i].height});
             }
-            // Coroutine mode: pre-collect every resume point's offset so the
-            // prologue can dispatch on rt_resume_state before the body is
-            // emitted. The offset doubles as the state id.
-            if (options.coroutineMode && isResumePoint(fn.instructions[i].op)) {
+            // Coroutine mode: pre-collect every reached resume point's offset
+            // so the prologue can dispatch on rt_resume_state before the body
+            // is emitted. The offset doubles as the state id. An unreached
+            // resume point gets no state: emitBlock emits no code, and so no
+            // continuation label, for an unreached block, and no frame can
+            // suspend at an instruction that never runs.
+            if (options.coroutineMode && analysis.reached[i] &&
+                isResumePoint(fn.instructions[i].op)) {
                 m_resumeStates.push_back(fn.instructions[i].offset);
             }
         }
@@ -176,8 +180,13 @@ class Emitter {
             // catch block, so handleThrow can redirect the frame there and the
             // prologue can re-enter it. The state id is in its own number
             // space (kCatchStateBase) because a catch block can start at the
-            // same offset as a resume point.
-            if (m_options.coroutineMode) {
+            // same offset as a resume point. The catch block of a dead try
+            // is unreached (its PUSH_HANDLER never runs, so no handler names
+            // the state), and it gets no state for the reason an unreached
+            // resume point gets none.
+            if (m_options.coroutineMode &&
+                leaderReached(
+                    cfg.blocks[static_cast<std::size_t>(he.catchBlock)])) {
                 int state = kCatchStateBase + he.catchBlock;
                 m_pushOffsetToCatchState[he.pushHandlerOffset] = state;
                 m_catchStateByBlock[he.catchBlock] = state;
@@ -248,9 +257,9 @@ class Emitter {
     // comment on RtCompiledFn explains why). Empty until emitStackCheck
     // runs; every other emission happens after it (run()'s own order).
     std::string m_stopTemp;
-    // Coroutine mode: every resume point's bytecode offset (the state id),
-    // in instruction order. Populated by the constructor; the prologue
-    // dispatches on rt_resume_state over this list.
+    // Coroutine mode: every reached resume point's bytecode offset (the
+    // state id), in instruction order, then the reached catch states.
+    // The prologue dispatches on rt_resume_state over this list.
     std::vector<int> m_resumeStates;
 
     std::string newTemp() { return "%t" + std::to_string(m_tempCounter++); }
@@ -1414,8 +1423,8 @@ class Emitter {
         m_body << "@" << block.label << "\n";
         // Coroutine mode: a catch block is also a resume point. handleThrow
         // stores its state, and the prologue re-enters the frame here with the
-        // thrown value already at the handler's checkpoint. Emit the label
-        // even for an unreached block, so the prologue's jnz target exists.
+        // thrown value already at the handler's checkpoint. Only a reached
+        // catch block has a state (run()), so the label precedes its body.
         if (m_options.coroutineMode) {
             auto it = m_catchStateByBlock.find(blockIndex);
             if (it != m_catchStateByBlock.end()) {

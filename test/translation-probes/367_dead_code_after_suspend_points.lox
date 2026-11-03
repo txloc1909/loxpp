@@ -1,0 +1,143 @@
+// Dead code is legal: only an unreachable match arm is a static error
+// (spec/04-semantics.md, match Expression; spec/README.md, Conformance: an
+// implementation accepts every other program). Each case below puts a form
+// that can suspend a task or a coroutine (a yield, a receive, a spawn, a
+// resume, a call through defer, a match) in dead code after a return, a
+// throw, a break or a continue, in a function and at the top level, and in a
+// dead try statement. An implementation must compile the program and run it:
+// none of the dead forms runs. The program of issue #1048 is the first case.
+// STATUS: ok
+// CHECK: 1
+// CHECK: return receive
+// CHECK: return receive_within
+// CHECK: return receive_where
+// CHECK: return receive_where_within
+// CHECK: return spawn
+// CHECK: return resume
+// CHECK: return defer
+// CHECK: return match
+// CHECK: return try
+// CHECK: throw caught x
+// CHECK: break 0
+// CHECK: continue 3
+// CHECK: top throw caught y
+// CHECK: top break
+// CHECK: top continue 2
+// CHECK: end
+
+enum E { A(x) B }
+
+fun g() { print "g ran"; }
+fun d() { print "d ran"; }
+fun want(m) { return true; }
+
+fun f() { return 1; yield; }
+print f();
+
+fun fReceive() { return "return receive"; task.receive(); }
+print fReceive();
+
+fun fWithin() { return "return receive_within"; task.receive_within(0); }
+print fWithin();
+
+fun fWhere() { return "return receive_where"; task.receive_where(want); }
+print fWhere();
+
+fun fWhereWithin() {
+    return "return receive_where_within";
+    task.receive_where_within(want, 0);
+}
+print fWhereWithin();
+
+fun fSpawn() { return "return spawn"; task.spawn(g); }
+print fSpawn();
+
+fun fResume() { return "return resume"; coroutine.create(g).resume(); }
+print fResume();
+
+fun fDefer() { return "return defer"; defer d(); }
+print fDefer();
+
+fun fMatch(v) {
+    return "return match";
+    print match v { case E.A(x) => x case E.B => 0 };
+}
+print fMatch(E.B);
+
+fun fTry() {
+    return "return try";
+    try { yield; task.receive(); } catch (e) { yield; task.receive(); }
+}
+print fTry();
+
+fun fThrow() {
+    try {
+        throw "x";
+        yield;
+        task.receive();
+        task.spawn(g);
+        coroutine.create(g).resume();
+    } catch (e) {
+        return "throw caught " + e;
+    }
+}
+print fThrow();
+
+fun fBreak() {
+    var i = 0;
+    while (true) {
+        break;
+        yield;
+        task.receive();
+        task.spawn(g);
+        coroutine.create(g).resume();
+        i = i + 1;
+    }
+    return "break " + str(i);
+}
+print fBreak();
+
+fun fContinue() {
+    var n = 0;
+    for (var i = 0; i < 3; i = i + 1) {
+        n = n + 1;
+        continue;
+        yield;
+        task.receive();
+        task.spawn(g);
+        coroutine.create(g).resume();
+        print match E.B { case E.A(x) => x case E.B => 0 };
+    }
+    return "continue " + str(n);
+}
+print fContinue();
+
+try {
+    throw "y";
+    task.receive();
+    task.receive_within(0);
+    task.spawn(g);
+    coroutine.create(g).resume();
+} catch (e) {
+    print "top throw caught " + e;
+}
+
+while (true) {
+    break;
+    task.receive();
+    task.spawn(g);
+    coroutine.create(g).resume();
+}
+print "top break";
+
+var k = 0;
+for (var i = 0; i < 2; i = i + 1) {
+    k = k + 1;
+    continue;
+    task.receive();
+    task.spawn(g);
+    coroutine.create(g).resume();
+}
+print "top continue " + str(k);
+
+print "end";
