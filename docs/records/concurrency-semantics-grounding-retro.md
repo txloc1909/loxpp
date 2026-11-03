@@ -46,11 +46,11 @@ A round is one reviewer comment with a verdict.
 | #1079 (N4) | 1 | 0 | None. Two non-blocking items, filed as #1080 and #1081 |
 | #1082 (N6) | 1 | 0 | None. Four non-blocking items: #1086, two with no action, and the decision table that this change updates |
 | #1083 (N5) | 1 | 0 | None. One non-blocking item, filed as #1084 |
-| #1088 (N7) | 1 when this record was written; the answer to it is this record's last change | 2 | The order question (F1). The playbook still told an agent to use `git stash` (F2) |
+| #1088 (N7) | 2 when this record was written; the answer to round 2 is this record's last change | 3 | The order question (F1). The playbook still told an agent to use `git stash` (F2). The F1 fix kept a branch that raised `TimeoutError` where the task cannot suspend (F3) |
 
 Every blocking finding of the code nodes was at N2. After N2, each code node
 passed in one round. The close node, #1088, had two blocking findings in its
-first round.
+first round and one in its second.
 
 ## What worked
 
@@ -160,7 +160,7 @@ break a rule. The review of #1082 checked that argument.
 
 The review of #1082 found that native and the JVM order two tasks
 differently: a task whose limit passed with a message that it did not
-select, and a task that got its message. The first tip of #1088 said that the
+select, and a task that got its message. The first version of #1088 said that the
 order is not bound, because Scheduling lets a worker see a passed limit at
 points that the implementation chooses.
 
@@ -177,6 +177,15 @@ The orchestrator ruled on #1065 that the order is bound. #1088 adds probe
 The first program (both limits pass before any send) stays open, for another
 reason than the one first given: the worker can see both limits before the
 sends.
+
+Round 2 of the review (F3) found that the F1 fix kept a branch of
+`awaitMessage` that raised `TimeoutError` where the task cannot suspend. Rule
+6 of `task.receive_within` says that the limit does not change that rule, and
+the new sentence of rule 4 says that `TimeoutError` needs the `limit` move.
+Native, QBE and the bootstrap raise `YieldAcrossNativeError`. The JVM now does
+too, and probe 370 holds it. With the old branch, probe 370 fails 5 of 5 runs
+on the JVM. The fix rewrote the function for one rule and did not check its
+other branch against the same rule.
 
 The cause is the class that rule 6 of "Plans for a language change" now
 names. Rule 4 of `task.receive_within` ("tested before the limit counts")

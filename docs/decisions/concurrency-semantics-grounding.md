@@ -245,7 +245,7 @@ node. The nodes merged from 2026-11-02 to 2026-11-03. The retrospective is
 | N4 | #1062 | #1079 | JVM: `LoxSide` for each side, closed before busy, and a `close_write()` that wakes a waiting writer at the call. The multi-waiter path of `LoxPoller` is removed |
 | N6 | #1064 | #1082 | Bootstrap: `sleep` suspends; one record per task (`InterpTask`); `SelectTimer` and `BlockingSleeper` are removed; D3 is delegated to the host, with an argument rule by rule; probe 366 |
 | N5 | #1063 | #1083 | QBE: an unreached suspend point gets no resume state; probe 367. Also closes #1048 |
-| N7 | #1065 | this change | The differential gate tells a rejection from a halt; probe 368 (Sides rule 6 on the write side, #1080); probe 369, one sentence in rule 4 of `task.receive_within`, and the JVM fix for the order of a passed limit; the close of the mission |
+| N7 | #1065 | this change | The differential gate tells a rejection from a halt; probe 368 (Sides rule 6 on the write side, #1080); probe 369, one sentence in rule 4 of `task.receive_within`, and the JVM fix for the order of a passed limit; probe 370 and the JVM fix for a passed limit where the task cannot suspend; the close of the mission |
 
 Every expected-failure list under `tools/spec-probe-xfail/` is empty at close:
 the directory holds only `.gitkeep`.
@@ -263,6 +263,7 @@ the directory holds only `.gitkeep`.
 | The bootstrap may delegate D3 to the host, with an argument for each rule and a probe or a check where the mapping could break a rule | #1064 |
 | N7 takes #1080 and the JVM order question of the review of #1082 | #1065 |
 | The order of a passed limit is bound: a receive that selects no message makes the `receive` move again, and the passed limit is seen as a `limit` move that joins the back of the run queue | #1065 |
+| A receive that must suspend where its task cannot raises `YieldAcrossNativeError`, also when its limit has passed: `TimeoutError` needs the `limit` move, which such a call cannot make | #1065 |
 
 ### The order of a passed limit and a message on one worker
 
@@ -304,7 +305,7 @@ whether the program is rejected, and what it does when it runs. CI runs it
 over `test/translation-probes/` for the JVM ("JVM differential suite -
 probes"), for QBE (`tools/check_qbe_probes.sh`, "Check QBE probes (S7)"), and
 for the bootstrap ("Bootstrap differential suite - spec probes"). The mission
-probes are 260, 277, 279, 282, 323, 325 and 347 to 369.
+probes are 260, 277, 279, 282, 323, 325 and 347 to 370.
 
 When native halts, the gate accepted any other stdout that is a prefix of
 native's. An empty stdout is a prefix of every stdout, so a consumer that
@@ -321,10 +322,10 @@ list:
 
 | Consumer | `check_spec_probes.py` | `diff_runtimes.py` against native |
 |---|---|---|
-| Native | 294 pass, 0 fail | — |
-| JVM | 294 pass, 0 fail | 397 matched, 0 diverged |
-| QBE | 294 pass, 0 fail | 373 matched, 0 diverged (`test/translation-probes/`) |
-| Bootstrap | 292 pass, 0 fail, 2 exempt | 292 matched, 0 diverged, 2 exempt |
+| Native | 295 pass, 0 fail | — |
+| JVM | 295 pass, 0 fail | 398 matched, 0 diverged |
+| QBE | 295 pass, 0 fail | 374 matched, 0 diverged (`test/translation-probes/`) |
+| Bootstrap | 293 pass, 0 fail, 2 exempt | 293 matched, 0 diverged, 2 exempt |
 
 ### Bug classes that the mission found
 
@@ -335,6 +336,7 @@ written here during the mission (rule 4 of "Plans for a language change").
 | Class | Found in | Layer | Constraint |
 |---|---|---|---|
 | The spec decides one case in two ways | #1070, findings F2, F3 and F6; #1088, F1 (rule 4 of `task.receive_within` and The Task Machine) | The spec text | Each new rule is checked against every section that decides the same case |
+| A fix keeps a branch that the rule it applies makes wrong | #1088, F3: the JVM raised `TimeoutError` where the task cannot suspend, and rule 6 of `task.receive_within` says `YieldAcrossNativeError` | The receive of each backend (`LoxWorker.awaitMessage` on the JVM) | A fix checks every branch of the function it rewrites against the rule, the paths where the task cannot suspend included |
 | A check script passes when one row of its table is removed | #1070, finding F1 | The table check scripts | A script pins the names of each table in both directions and fails on a removed row |
 | A probe passes on an implementation that breaks the rule it is for | #1070, finding F5 (probe 358) | The shared probes | A probe forces the case that its rule names; a mutation of that rule fails it |
 | A rule that names several sides has a probe for only some of them | #1079 (rule 6 on the write side) | The shared probes | A rule gets a probe line for each side or value that it names (probe 368) |
