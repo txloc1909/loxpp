@@ -1,0 +1,40 @@
+// A call that does not wait never holds its side, and a call that has returned
+// holds it no more (spec/04-semantics.md, The Task Machine, Sides, rule 1). So
+// two tasks can read one Socket in turn, when no call waits. The peer sends
+// three lines in one write, and the main task reads the first line, so the
+// other two are there. `t1` reads a line, which returns at once, and yields.
+// `t2` then reads a line from the same Socket, and raises nothing. The probe
+// assumes that the bytes of one write on the local host are there together
+// when the main task reads its line.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: main: a
+// CHECK: t2: c
+// CHECK: t1: b
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+peer.write("a\nb\nc\n");
+print "main: " + conn.readline();
+fun t1() {
+    var x = conn.readline();
+    yield;
+    task.send(me, "t1: " + x);
+}
+fun t2() {
+    try {
+        task.send(me, "t2: " + conn.readline());
+    } catch (e) {
+        task.send(me, "t2: " + e.kind);
+    }
+}
+task.spawn(t1);
+task.spawn(t2);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

@@ -1,0 +1,65 @@
+// The read side and the write side of a Socket are two sides
+// (spec/04-semantics.md, The Task Machine, Sides, rule 3). `reader` waits in
+// readline(), so its call holds the read side. `writer`, a task of the same
+// worker, then calls write() with a string larger than the buffers of a
+// connection, so its call waits and holds the write side. Neither call raises:
+// one task can read a Socket while another task writes it. The main task
+// yields first, so both calls wait before it runs again. It then
+// sends a line to `reader` and reads the whole string of `writer`. The results
+// are printed in a fixed order, not in the order in which they arrive. The
+// probe assumes, as probe 266 does, that the buffers of a connection on the
+// local host hold less than 32 MB together.
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: reader: pong
+// CHECK: writer: no fault
+// CHECK: read all: true
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+var big = "x";
+for (var i = 0; i < 25; i = i + 1) big = big + big;
+var want = len(big);
+fun reader() {
+    try {
+        task.send(me, "reader: " + str(conn.readline()));
+    } catch (e) {
+        task.send(me, "reader: " + e.kind);
+    }
+}
+fun writer() {
+    try {
+        conn.write(big);
+        task.send(me, "writer: no fault");
+    } catch (e) {
+        task.send(me, "writer: " + e.kind);
+    }
+}
+task.spawn(reader);
+task.spawn(writer);
+// The main task lets `reader` and `writer` run first, so that both calls wait.
+yield;
+peer.writeline("pong");
+var total = 0;
+while (total < want) {
+    var n = want - total;
+    if (n > 1048576) n = 1048576;
+    var chunk = peer.read_bytes(n);
+    if (chunk == "") break;
+    total = total + len(chunk);
+}
+var reader_result = "reader: missing";
+var writer_result = "writer: missing";
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        var m = task.receive_within(3);
+        if (m[0] == "r") reader_result = m;
+        else writer_result = m;
+    } catch (e) {
+        // The limit passed: the result stays missing.
+    }
+}
+print reader_result;
+print writer_result;
+print "read all: " + str(total == want);

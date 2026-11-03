@@ -1,15 +1,16 @@
-// The bootstrap interpreter runs every worker on one host thread, so a
-// blocking call that is a sleep blocks every worker (spec/README.md,
-// Conformance: scheduling is implementation-defined). This probe checks the
-// bootstrap's own choice: a sleep on a worker also blocks the main task.
+// The bootstrap interpreter runs every worker on one host thread, so a call
+// of class blocks blocks every worker (spec/README.md, Conformance, Parallel
+// workers). This probe checks the bootstrap's own choice: a `run` on a worker
+// also blocks the main task. The call is of class blocks, and not a sleep: a
+// sleep is of class suspends, and it lets the other tasks run.
 //
-// The worker wakes the main task with a send, then sleeps. Under the
-// one-thread form the main task cannot run before the sleep ends, so the
-// first receive returns only after the sleep. An implementation that blocks
-// only the worker of the call returns from the receive at once.
+// The worker wakes the main task with a send, then waits for a process that
+// sleeps. Under the one-thread form the main task cannot run before the
+// process ends, so the first receive returns only after it. An implementation
+// that blocks only the worker of the call returns from the receive at once.
 fun sleeper(main) {
     task.send(main, "awake");
-    sleep(1);
+    run("sh", ["-c", "sleep 1"]);
     task.send(main, "slept");
 }
 

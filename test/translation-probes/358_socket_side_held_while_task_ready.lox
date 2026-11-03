@@ -1,0 +1,51 @@
+// A call holds its side from its first wait until it returns or raises, also
+// after its wait has ended while its task is ready (spec/04-semantics.md, The
+// Task Machine, Sides, rule 1). `reader` waits in readline() on a second
+// connection, and then `first` waits in readline() on `conn`. `feeder` sends a
+// line to each of the two connections and then computes for 0.5 seconds with
+// no suspend point, and ends. The worker then has no task that is ready to run,
+// so it sees the end of both waits at that point (Scheduling), and both tasks
+// join the run queue in the order in which their calls began to wait:
+// `reader`, then `first`. `reader` gets its line and then calls read_some(4)
+// on `conn`, while the line of `first` is there and `first` is ready, not
+// waiting. The call raises BusyError and takes nothing, and `first` gets its
+// whole line. An implementation that frees a side when the wait ends gives the
+// bytes to `reader` instead. The probe assumes that the bytes of a write on
+// the local host arrive within the 0.5 seconds. This is the shape of issue
+// #1054.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: reader: other, BusyError
+// CHECK: first: line
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var peer2 = connect("127.0.0.1", srv.port());
+var conn2 = srv.accept();
+var me = task.self();
+fun reader() {
+    var x = conn2.readline();
+    try {
+        var y = conn.read_some(4);
+        task.send(me, "reader: " + x + ", no fault, got " + y);
+    } catch (e) {
+        task.send(me, "reader: " + x + ", " + e.kind);
+    }
+}
+fun first() { task.send(me, "first: " + str(conn.readline())); }
+fun feeder() {
+    peer2.writeline("other");
+    peer.writeline("line");
+    var end = clock() + 0.5;
+    while (clock() < end) { }
+}
+task.spawn(reader);
+task.spawn(first);
+task.spawn(feeder);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

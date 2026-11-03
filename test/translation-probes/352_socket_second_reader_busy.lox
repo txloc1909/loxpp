@@ -1,0 +1,34 @@
+// A side of a Socket holds at most one call (spec/04-semantics.md, The Task
+// Machine, Sides). `first` waits in readline() with no bytes to read, so its
+// call holds the read side. `second`, a task of the same worker, then calls
+// readline() on the same Socket. That call raises a catchable BusyError at
+// once and reads nothing. `second` then sends the line, and `first` gets it.
+// The main task collects the results with a limit, so an implementation that
+// lets `second` wait too ends with the results missing and does not hang.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: second: BusyError
+// CHECK: first: line
+var srv = listen("127.0.0.1", 0);
+var out = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun first() { task.send(me, "first: " + str(conn.readline())); }
+fun second() {
+    try {
+        conn.readline();
+        task.send(me, "second: no fault");
+    } catch (e) {
+        task.send(me, "second: " + e.kind);
+    }
+    out.writeline("line");
+}
+task.spawn(first);
+task.spawn(second);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

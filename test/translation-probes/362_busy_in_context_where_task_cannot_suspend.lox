@@ -1,0 +1,42 @@
+// A call of class suspends where the task cannot suspend blocks the worker,
+// and the context adds no fault. The rules of the sides still apply
+// (spec/04-semantics.md, Contexts where a task cannot suspend; The Task
+// Machine, Sides, rules 2 and 5). `holder` waits in readline() and holds the
+// read side. `other`, a task of the same worker, sends "ab" and then calls
+// read_some(1) inside `__str__`, where it cannot suspend. The call raises
+// BusyError at the call and takes no byte. Without the rule, the call takes the
+// bytes of `holder`, or it blocks a worker whose holder task can never run.
+// `other` then sends "c" and an end of line, and `holder` gets "abc".
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: ctx: BusyError
+// CHECK: holder: abc
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+class Probe {
+    __str__() {
+        try {
+            return "ctx read " + str(conn.read_some(1));
+        } catch (e) {
+            return "ctx: " + e.kind;
+        }
+    }
+}
+fun holder() { task.send(me, "holder: " + str(conn.readline())); }
+fun other() {
+    peer.write("ab");
+    var s = str(Probe());
+    task.send(me, s);
+    peer.writeline("c");
+}
+task.spawn(holder);
+task.spawn(other);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

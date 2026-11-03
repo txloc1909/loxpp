@@ -1801,6 +1801,121 @@ until a call selects them.
 `task.pending()` returns the number of messages in the mailbox of the
 current task. A task can read only the length of its own mailbox.
 
+### The Task Machine
+
+This section states the states of a task and of a worker, the moves between
+them, the state that belongs to each task, and the sides of the values that
+a call can wait on. The sections after it use these terms.
+
+**The states of a task.** A task is in exactly one of these states:
+
+| Task state | Meaning |
+|---|---|
+| `ready` | The task is in the run queue of its worker. |
+| `running` | The task runs. A worker has at most one `running` task. |
+| `receiving` | The task waits in a receive for a message, and it is not in the run queue. |
+| `waiting` | The task waits in a call of class suspends for the end of its wait, and it is not in the run queue. |
+| `ended` | The task has ended. It never runs again. |
+
+**The states of a worker.** A worker is in exactly one of these states:
+
+| Worker state | Meaning |
+|---|---|
+| `active` | A task of the worker is `running`, and its call does not block the worker. |
+| `blocked` | The `running` task makes a call that blocks the worker. No task of the worker runs until the call returns. |
+| `idle` | No task of the worker is `running` or `ready`. The worker waits for a message, for the end of a wait, or for a limit. |
+| `finished` | Every task of the worker is `ended`. |
+
+**The moves.** A task changes state only by a move in this table. `—` in the
+`From` column means a new task.
+
+| Move | Event | From | To | Run queue |
+|---|---|---|---|---|
+| `spawn` | `task.spawn(fn)` | `—` | `ready` | joins the back |
+| `spawn-worker` | `task.spawn_worker(fn, msg)` | `—` | `ready` | the first task of the new worker |
+| `run` | the worker has no `running` task and its run queue is not empty | `ready` | `running` | leaves the head |
+| `yield` | a `yield` outside every coroutine that the task resumed | `running` | `ready` | joins the back |
+| `receive` | a receive that finds no message to take, where the task can suspend | `running` | `receiving` | — |
+| `message` | a message arrives in the mailbox of a `receiving` task | `receiving` | `ready` | joins the back |
+| `limit` | the limit of a receive passes | `receiving` | `ready` | joins the back |
+| `wait` | a call of class suspends whose wait is not over at the call, where the task can suspend | `running` | `waiting` | — |
+| `wait-end` | the wait of a `waiting` task ends: its event happens, a task closes the value it waits on, or its limit passes | `waiting` | `ready` | joins the back |
+| `end` | the function of the task returns, or the task ends by an uncaught throw or a halting fault | `running` | `ended` | — |
+| `abandon` | the program ends | `ready`, `receiving`, `waiting` | `ended` | leaves |
+
+A receive with a condition that the task runs again after a `message` move
+tests the new messages. If none is selected, it makes the `receive` move
+again, and its limit, when it has one, keeps its start. A call that blocks
+the worker makes no move: its task stays `running`, and the worker is
+`blocked` until the call returns.
+
+A `message` move from a send on the same worker happens at the send. A
+`wait-end` move that a close by a task of the same worker causes (Sides, rule
+4) happens at the close: the task whose wait the close ends joins the back of
+the run queue when that `close()` or `close_write()` is called. [Scheduling](#scheduling) describes
+when the worker sees the other `message`, `limit` and `wait-end` events, and
+the order in which their tasks join the run queue.
+
+**The state that belongs to a task.** Each item below belongs to one task. A
+step of another task does not read it and does not change it. When the task
+runs again after a suspend point, each item is as it was when the task
+suspended.
+
+| Task-owned state | What it holds |
+|---|---|
+| the mailbox | the messages that wait for a receive |
+| the current task | the handle of the task, which `task.self()` returns while the task runs |
+| the call frames | each frame of the task, which includes the frames of each coroutine that the task resumed and that has not returned |
+| the deferred calls | the pending deferred calls of each frame |
+| the handlers | the `try` statements whose `tryBlock` is running in the frames of the task |
+| the current coroutine | the coroutine that the task resumed last and that has not suspended or returned, or none |
+| the contexts | the [contexts where the task cannot suspend](#contexts-where-a-task-cannot-suspend) that are active in its frames |
+| the overflow unwind | whether a `StackOverflowError` of the task is unwinding, so that a second one is a halting fault |
+| the waiting call | the call in which the task is `receiving` or `waiting`, its side, its limit, and its place in the order of ready waits |
+
+The global variables and the values of a worker belong to the worker, and
+every task of the worker shares them.
+
+**Sides.** A Socket and a Server have **sides**. A call of class suspends on
+a value waits on one side of that value:
+
+| Side | Calls |
+|---|---|
+| Socket read | `Socket.read()`, `Socket.read_bytes(n)`, `Socket.read_some(n)`, `Socket.readline()`, `Socket.readlines()` |
+| Socket write | `Socket.write(text)`, `Socket.writeline(text)` |
+| Server accept | `Server.accept()` |
+
+A side holds at most one call:
+
+1. A call **holds** its side from its first wait until it returns or raises.
+   This includes the time after its wait ends, while its task is `ready`. A
+   call that does not wait never holds its side.
+2. A call on a side that a call of another task holds raises `BusyError`,
+   unless rule 6 applies. It raises at the call, before it reads, writes, or
+   accepts anything, also when it could return at once.
+3. A call on the other side of the same Socket does not raise. One task can
+   read a Socket while another task writes it.
+4. `close()` and `close_write()` do not wait, so they hold no side. A
+   `close()` by another task ends the wait of the call that holds each side
+   of its value. A `close_write()` by another task ends only the wait of the
+   call that holds the write side of its Socket: a call that holds the read
+   side keeps waiting, and it still gets the bytes of the peer. A call whose
+   wait a close ends fails as a call on a closed Socket or Server does
+   (§05-stdlib, Socket methods).
+5. A call of class suspends that blocks the worker holds no side: no other
+   task of the worker runs while it waits. Rule 2 still applies to it: on a
+   side that a call of another task holds, it raises `BusyError` at the call
+   and does not wait.
+6. A call on a side that is closed fails as a call on a closed Socket or
+   Server does (§05-stdlib, Socket methods), also while a call of another
+   task still holds that side after a close ended its wait. A side is closed
+   after `close()` of its value, and the write side of a Socket also after
+   `close_write()`. `BusyError` applies only to a side that is not closed.
+
+Whether a call finds its side held can depend on when an event of the
+network happens. A program that makes calls on one side from two tasks is
+therefore not portable. The fault makes such a program fail at the call.
+
 ### Suspend Points
 
 A task runs alone on its worker from one suspend point to the next: no
@@ -1864,7 +1979,7 @@ gives.
   `input()`, `run`, and the Process calls. It blocks the worker that makes it:
   no task on that worker runs until the call returns. Tasks on other workers
   keep running, on an implementation that runs workers at the same time (see
-  [Conformance](README.md#conformance), Scheduling).
+  [Conformance](README.md#conformance), Parallel workers).
 
 A call of class suspends blocks the worker in two cases: where the task cannot
 suspend (see [Contexts where a task cannot
@@ -1891,8 +2006,12 @@ of its worker from running. A program gives such a task a worker of its own.
 
 The runtime calls some Lox++ code and needs its result before it continues. A
 task cannot suspend inside such a call. A call of class suspends in one of
-these contexts blocks the worker, as a call of class blocks does. It raises no
-fault, and the result does not depend on the state of the network.
+these contexts blocks the worker, as a call of class blocks does. The context
+adds no fault: the call raises no fault because it cannot suspend, and the
+result does not depend on the state of the network. The rules of the sides
+still apply: on a side that a call of another task holds, the call raises
+`BusyError` at the call (see [The Task Machine](#the-task-machine), Sides,
+rules 2 and 5).
 
 | Context | The runtime calls Lox++ code for |
 |---|---|
@@ -1921,32 +2040,34 @@ class suspends has a way: it waits in place.
 ### Scheduling
 
 Each worker has one run queue of tasks that are ready to run. The queue is
-first in, first out, and it has no priorities.
+first in, first out, and it has no priorities. A task joins and leaves it
+only by the moves of [The Task Machine](#the-task-machine). The main task
+follows the same moves. When the running task suspends or ends, the task at
+the head of the run queue runs next.
 
-1. A new task that `task.spawn` makes joins the back of the run queue.
-2. A task that suspends at a `yield` joins the back of the run queue. The
-   main task follows the same rule.
-3. A task that suspends in `task.receive()` leaves the run queue. When a
-   message arrives in its mailbox, it joins the back of the run queue. A task
-   that suspends in a receive with a limit or a condition follows the same
-   rule, and it also joins the back of the run queue when its limit passes.
-4. A task that suspends in a call that waits for the network or for time
-   leaves the run queue. When its wait ends, it joins the back of the run
-   queue.
-5. When the running task suspends or ends, the task at the head of the run
-   queue runs next.
-
-When several waits have ended by the time the worker has no task that is
-ready to run, the tasks join the run queue in this order: first the tasks
+A worker sees the end of a wait, and a limit that has passed, at points that
+the implementation chooses, and at the latest when the worker has no task
+that is ready to run. When it sees several at one point, the tasks join the
+run queue in this order: first the tasks
 whose wait is for a connection, a Socket, or a Server and has ended, in the
 order in which their calls began to wait, then the tasks whose time has run
 out, in the order of their deadlines. One group holds all of them: a sleep
 that has expired, a limit of a receive that has passed, and a limit of a
 `connect_within` that has passed.
 
-The order in which the tasks of one worker run is therefore defined, with one
-limit: an event outside the program decides when a wait ends, and so which
-tasks are in the run queue when a task suspends. The order of steps on
+A message from a task of another worker is an event outside the worker. The
+worker sees it at points that the implementation chooses, and at the latest
+when the worker has no task that is ready to run. Where its task joins the run
+queue, relative to the tasks whose wait or limit the worker sees at the same
+point, is not defined. A send on the same worker, and a close by a task of the
+same worker, are not such events: their moves happen at the call (see [The
+Task Machine](#the-task-machine)).
+
+The order in which the tasks of one worker run is therefore defined, and it
+binds every implementation, with two limits: an event outside the program
+decides when a wait ends, and so which tasks are in the run queue when a task
+suspends; and the place of a message from another worker among the tasks that
+the worker sees at the same point is not defined. The order of steps on
 different workers is not defined either, except where messages order them.
 
 ### Ending
@@ -1996,6 +2117,7 @@ or in a receive with a limit.
 | `DeadTaskError` | `task.send(t, msg)`, where the task `t` has ended, which includes a task whose worker has ended | yes |
 | `YieldAcrossNativeError` | `task.receive()` on an empty mailbox while a native callback is between the start of the task and the receive, or while a deferred call runs; a receive with a limit or a condition that must suspend in the same places; any receive in the `want` function of `task.receive_where` or `task.receive_where_within` | yes |
 | `TimeoutError` | `task.receive_within(seconds)` or `task.receive_where_within(want, seconds)`, where the limit passes and no message is selected | yes |
+| `BusyError` | a call of class suspends on a side of a Socket or a Server that a call of another task holds (see [The Task Machine](#the-task-machine), Sides) | yes |
 | `DeadlockError` | the main task waits in `task.receive()` or in `task.receive_where(want)`, with no limit, and no task can run again | no |
 
 A catchable fault in this table is delivered to a `catch` block as an

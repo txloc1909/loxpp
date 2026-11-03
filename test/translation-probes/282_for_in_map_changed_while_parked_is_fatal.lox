@@ -2,13 +2,8 @@
 // changes the Map. The next iterator step of the waiting task then halts the
 // program, as for a change made in the loop body (spec/04-semantics.md, `for`-in
 // Statement, Mutation during iteration). The output before the fault binds.
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined). The probe on the
-// NOT-BINDING line checks the bootstrap's own choice in its place.
 // STATUS: error
 // TIMEOUT: 10
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: iterating a
 // CHECK: adder ran
 var m = {"a": 1};

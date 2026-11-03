@@ -1,0 +1,34 @@
+// A close by a task of the same worker ends the wait of the call that holds a
+// side at the close: the woken task joins the back of the run queue when
+// close() is called (spec/04-semantics.md, The Task Machine; spec/05-stdlib.md,
+// Socket methods). `reader` waits in readline(). `closer` calls close() and
+// then yields, so it joins the run queue after `reader`. `reader` runs first,
+// and its call raises SocketClosedError. No event outside the program takes
+// part, so the order binds.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: reader woke: SocketClosedError
+// CHECK: closer after yield
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun reader() {
+    try {
+        conn.readline();
+        print "reader: no fault";
+    } catch (e) {
+        print "reader woke: " + e.kind;
+    }
+    task.send(me, 1);
+}
+fun closer() {
+    conn.close();
+    yield;
+    print "closer after yield";
+    task.send(me, 1);
+}
+task.spawn(reader);
+task.spawn(closer);
+task.receive();
+task.receive();

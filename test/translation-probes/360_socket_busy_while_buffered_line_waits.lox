@@ -1,0 +1,44 @@
+// The program of issue #1054, with the D3 rule (spec/04-semantics.md, The Task
+// Machine, Sides). Task B waits in readline() on a Socket, so its call holds
+// the read side. Task A tells the peer to write two lines, computes while the
+// bytes arrive, and then calls readline() on the same Socket. B holds the side,
+// whether its wait has ended or not, so the call of A raises BusyError and
+// takes no byte. B then gets the first line. Before the rule, A took both
+// lines from the channel, and B waited for ever for bytes that were already
+// in the buffer. The order of the results is the order of the sends: A sends
+// before it suspends, and B runs only after that.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: [A:BusyError, B:a]
+fun peer(main) {
+    var srv = listen("127.0.0.1", 0);
+    task.send(main, srv.port());
+    var c = srv.accept();
+    task.receive();
+    c.write("a\nb\n");
+    task.receive();
+}
+var me = task.self();
+var w = task.spawn_worker(peer, me);
+var s = connect("127.0.0.1", task.receive());
+fun b() { task.send(me, "B:" + str(s.readline())); }
+fun a() {
+    task.send(w, "write");
+    var end = clock() + 0.5;
+    while (clock() < end) { }
+    try {
+        task.send(me, "A:" + str(s.readline()));
+    } catch (e) {
+        task.send(me, "A:" + e.kind);
+    }
+}
+task.spawn(b);
+task.spawn(a);
+var got = [];
+var i = 0;
+while (i < 2) {
+    try { got.append(task.receive_within(3)); } catch (e) { got.append("timeout"); }
+    i = i + 1;
+}
+task.send(w, "done");
+print got;

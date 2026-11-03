@@ -1,0 +1,55 @@
+// A side of a Socket holds at most one call (spec/04-semantics.md, The Task
+// Machine, Sides). `first` calls write() with a string larger than the buffers
+// of a connection while nothing reads the peer, so the call waits for room and
+// holds the write side. `second`, a task of the same worker, then calls
+// writeline() on the same Socket. That call raises a catchable BusyError at
+// once and writes nothing: the main task then reads exactly the bytes of
+// `first`, and no more come. The probe assumes, as probe 266 does, that the
+// buffers of a connection on the local host hold less than 32 MB together.
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: second: BusyError
+// CHECK: read all: true
+// CHECK: first: wrote
+// CHECK: nothing more: true
+var srv = listen("127.0.0.1", 0);
+var out = connect("127.0.0.1", srv.port());
+var inp = srv.accept();
+var me = task.self();
+var big = "x";
+for (var i = 0; i < 25; i = i + 1) big = big + big;
+var want = len(big);
+fun first() {
+    out.write(big);
+    task.send(me, "first: wrote");
+}
+fun second() {
+    try {
+        out.writeline("y");
+        task.send(me, "second: no fault");
+    } catch (e) {
+        task.send(me, "second: " + e.kind);
+    }
+}
+task.spawn(first);
+task.spawn(second);
+fun collect() {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
+collect();
+var total = 0;
+while (total < want) {
+    var n = want - total;
+    if (n > 1048576) n = 1048576;
+    var chunk = inp.read_bytes(n);
+    if (chunk == "") break;
+    total = total + len(chunk);
+}
+print "read all: " + str(total == want);
+collect();
+out.close();
+print "nothing more: " + str(inp.read() == "");
