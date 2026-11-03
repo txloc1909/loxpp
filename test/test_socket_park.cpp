@@ -1195,6 +1195,11 @@ TEST_F(SocketParkTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
+        // The reset comes after the write began, so the writer waits for it.
+        // A delay from the accept alone can pass while the program still
+        // builds its text, and then no call waits.
+        struct pollfd first = {fd, POLLIN, 0};
+        poll(&first, 1, 10000);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         struct linger lg = {1, 0};
         setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
