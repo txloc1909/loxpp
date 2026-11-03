@@ -168,9 +168,9 @@ std::string rawDelimiter(const std::string& source) {
 // the src/ include tree. rt_capi.cpp static_asserts the runtime side of that
 // layout; an end-to-end CI step compiles and runs the harness to prove it.
 // `declarations`: the compiled root of the declarations-only compile, which
-// a worker runs. Only a program that names `task` has one, and only that
-// program runs its main task on the scheduler (rt_run_tasks): any other
-// program has one task, so a task switch there finds no other task.
+// a worker runs. Only a program with a reached name of `task` has one, and
+// only that program runs its main task on the scheduler (rt_run_tasks): any
+// other program has one task, so a task switch there finds no other task.
 std::string buildHarness(const std::string& source,
                          const std::vector<CompiledFunction>& fns,
                          const std::optional<CompiledFunction>& declarations) {

@@ -23,6 +23,11 @@ repeat the whole-program rule:
 The way out the notes name: a `may-suspend` effect analysis, carried on
 explicit exports.
 
+**Since #1084** the rule reads the reached instructions: a `yield` no path
+reaches no longer turns the mode on, so this snapshot overstates the cost of
+dead code only. The whole-program rule itself stands, and so does this
+tension.
+
 ### T2 — Everything is "a library", but there is no way to share one
 The capability test (`expressiveness-roadmap.md`) sends FP, JSON, sets, etc.
 to user-space libraries and calls modules "organizational, not expressive".

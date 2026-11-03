@@ -496,7 +496,7 @@ the tables of a session exist once.
 | Backend | What it owes | Feasibility |
 |---|---|---|
 | Native VM | The whole model. | Workers are `Runtime` instances on threads; tasks are the coroutines of #523; copy and mailbox are runtime code. No concurrent GC. |
-| QBE | Code generation only; it links the native runtime. | A program that names `task` compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). *Cost note:* the 6 ns is the planning estimate. Mission #595 measured about 12 ns per call above the floor for a program that names `task`, on a different host. The #601 checkpoint (the tax program within 10 percent of its recorded figure) held on that host, so the decision stands. |
+| QBE | Code generation only; it links the native runtime. | A program with a reached `yield` or a reached name of `task` compiles in coroutine mode and pays about 6 ns per call. Accepted for an experiment. The whole-program rule stays a stopgap (design-tensions T1). *Cost note:* the 6 ns is the planning estimate. Mission #595 measured about 12 ns per call above the floor for a program with a reached name of `task`, on a different host. The #601 checkpoint (the tax program within 10 percent of its recorded figure) held on that host, so the decision stands. |
 | JVM | The model as a semantic oracle: observable output must match. | One runtime instance per worker, which means the static runtime state becomes per instance; tasks and coroutines stay virtual threads, and the runtime raises the carrier pool from the processor count to the largest value a `ForkJoinPool` accepts, so a suspended task costs no host thread and a computing task gets a carrier (the constraint under "Constraints from named bug classes"); copy by the same rules. Host threads give it nothing extra, because it is not shipped. |
 | Bootstrap interpreter | Conforms to the spec (`spec/README.md`, Conformance). | Tasks are host coroutines, as today. A worker is a host worker that runs a second interpreter over the same source, or a coroutine on one thread, which `spec/README.md`, Conformance, allows because whether workers run at the same time is implementation-defined. Parallel speed-up is not observable output, so the second form conforms. |
 
@@ -612,8 +612,9 @@ program with tasks and no `yield` was compiled without resume points.
 suspension": a reached `YIELD`, or a reached name of the global `task`,
 through which alone a program reaches the task natives (`coroutines.md`,
 "Change record: the mode follows the reached instructions", #1084). A program
-that names `task` runs its main task on the scheduler, as native does. A
-program that does not has one task, so a `yield` outside every coroutine finds
+with a reached name of `task` runs its main task on the scheduler, as native
+does. A program with no reached name has one task, so a `yield` outside every
+coroutine finds
 no other task and continues with `nil`, and its main task needs no driver. *Shared layer:*
 `qbe::needsCoroutineMode` and `qbe::treeUsesTasks`
 (`src/backend/qbe_emitter.h`), the one test that the front end and
@@ -690,7 +691,8 @@ It runs on the spec probes, the examples, and `test/compile-errors/`, for
 the bootstrap, the JVM, and QBE. `tools/check_print_lines.py` checks on all
 four consumers that the print lines of two workers never mix.
 
-**A measured cost.** A QBE program that names `task` runs every task in the
+**A measured cost.** A QBE program with a reached name of `task` runs every
+task in the
 coroutine driver. With one `task.self()` line, `coroutine_mode_tax.lox` costs
 about 12 ns per call over the floor (#621), not the "about 6 ns" of the QBE
 row above, which holds for a program with no task.
