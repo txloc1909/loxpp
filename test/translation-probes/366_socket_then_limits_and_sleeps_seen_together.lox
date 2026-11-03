@@ -1,0 +1,44 @@
+// When a worker sees several waits end at one point, the tasks join the run
+// queue in this order: first the tasks whose wait for a Socket has ended, then
+// the tasks whose time has run out, in the order of their deadlines, as one
+// group of sleeps and limits of receives (spec/04-semantics.md, Scheduling).
+// The four tasks begin to wait together: a reader of a Socket, the limits 0.3
+// and 0.1 of two receives, and a sleep of 0.2. Main then writes the line of the
+// reader and busy-loops 0.6 seconds, a lower bound, so every wait has ended
+// when main suspends. The limit 0.1 comes before the sleep 0.2, although the
+// sleep began to wait first: an implementation that wakes a receive at its
+// limit by one more step than a sleep puts it after the sleep.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: reader got line
+// CHECK: limit 0.1
+// CHECK: sleep 0.2
+// CHECK: limit 0.3
+var me = task.self();
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+fun limited(seconds) {
+    try {
+        task.receive_within(seconds);
+    } catch (e) {
+        print "limit " + str(seconds);
+    }
+    task.send(me, "done");
+}
+fun late() { limited(0.3); }
+fun sleeper() { sleep(0.2); print "sleep 0.2"; task.send(me, "done"); }
+fun early() { limited(0.1); }
+fun reader() { print "reader got " + conn.readline(); task.send(me, "done"); }
+task.spawn(late);
+task.spawn(sleeper);
+task.spawn(early);
+task.spawn(reader);
+yield;
+peer.writeline("line");
+var t0 = clock();
+while (clock() - t0 < 0.6) { }
+task.receive();
+task.receive();
+task.receive();
+task.receive();

@@ -1,6 +1,0 @@
-# Spec probes that the bootstrap interpreter does not pass yet: file name, then the reason.
-260_sleep_suspends_one_task.lox sleep() blocks the worker, not only its task (D2, #1058)
-279_sleepers_wake_in_deadline_order.lox sleep() blocks the worker, not only its task (D2, #1058)
-282_for_in_map_changed_while_parked_is_fatal.lox sleep() blocks the worker, not only its task (D2, #1058)
-323_sleep_and_limits_pass_in_deadline_order.lox sleep() blocks the worker, not only its task (D2, #1058)
-351_socket_four_readers_large_stream_total.lox sleep() blocks the worker, so a reader that gets BusyError and sleeps never lets the holder run (D2, #1058)
