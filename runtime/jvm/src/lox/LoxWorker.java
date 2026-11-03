@@ -165,6 +165,7 @@ final class LoxWorker {
                        target.limitedWait) {
                 // A message ends the wait of a receive_* call with a limit.
                 target.worker.poller.cancelTimer(target);
+                target.messageEndedWait = true;
                 target.worker.makeReady(target);
             }
         } finally {
@@ -226,12 +227,17 @@ final class LoxWorker {
         long deadline =
             limited ? System.nanoTime() + Math.min(limitNanos, 1L << 60) : 0;
         int scanned = 0;
+        boolean limitMoved = false;
         for (;;) {
             Object candidate;
             LOCK.lock();
             try {
                 if (scanned >= self.pending()) {
-                    awaitMessage(self, canSuspend, limited, deadline);
+                    if (limitMoved) {
+                        throw LoxOps.makeError("TimeoutError",
+                                               "The limit of the receive passed.");
+                    }
+                    limitMoved = awaitMessage(self, canSuspend, limited, deadline);
                     continue;
                 }
                 if (want == null) {
@@ -265,29 +271,34 @@ final class LoxWorker {
     }
 
     // Caller holds LOCK. Returns when the task ran again after a wait, so the
-    // caller tests the mailbox again. The limit raises only here, when no
-    // message is there to test.
-    private void awaitMessage(LoxTask self, boolean canSuspend,
-                              boolean limited, long deadline) {
-        if (limited && deadline - System.nanoTime() <= 0) {
-            throw LoxOps.makeError("TimeoutError",
-                                   "The limit of the receive passed.");
-        }
+    // caller tests the mailbox again first (a message that came with the
+    // limit wins). True when the `limit` move ended the wait: the caller
+    // raises TimeoutError if it then selects no message. A call whose limit
+    // passed still waits here, so the limit move puts its task at the back of
+    // the run queue (spec/04-semantics.md, The Task Machine).
+    private boolean awaitMessage(LoxTask self, boolean canSuspend,
+                                 boolean limited, long deadline) {
         if (!canSuspend) {
+            if (limited && deadline - System.nanoTime() <= 0) {
+                throw LoxOps.makeError("TimeoutError",
+                                       "The limit of the receive passed.");
+            }
             throw LoxOps.makeError("YieldAcrossNativeError",
                                    "Cannot receive across a native callback.");
         }
         if (!limited) {
             suspend(self, LoxTask.State.WAITING);
-            return;
+            return false;
         }
         ensurePoller().addTimer(self, deadline);
         self.limitedWait = true;
+        self.messageEndedWait = false;
         try {
             suspend(self, LoxTask.State.PARKED);
         } finally {
             self.limitedWait = false;
         }
+        return !self.messageEndedWait;
     }
 
     int pending() {

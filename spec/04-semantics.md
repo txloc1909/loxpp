@@ -1752,7 +1752,12 @@ Each has a fixed number of arguments.
    raises `TimeoutError`, and the mailbox is unchanged. A message that is in
    the mailbox when the task runs again is tested before the limit counts: a
    message that arrives as the limit passes is not lost. It is returned if it
-   is selected, and it stays in the mailbox if it is not.
+   is selected, and it stays in the mailbox if it is not. This order does not
+   let the call skip a move: a call that tests the messages and selects none
+   makes the `receive` move again (see [The Task Machine](#the-task-machine)),
+   also when its limit has passed, and it raises `TimeoutError` only when its
+   task runs again after the `limit` move, which joins the back of the run
+   queue.
 5. A task that waits in one of these calls is not deadlocked while it has a
    limit: its limit can pass (see [Deadlock](#deadlock)).
 6. If the call must suspend while a native callback is between the start of

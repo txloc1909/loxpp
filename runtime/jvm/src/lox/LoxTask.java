@@ -40,6 +40,9 @@ public final class LoxTask {
     // True while the task waits in a receive_* call that has a limit: a send
     // must take its timer away (see LoxWorker.send).
     boolean limitedWait;
+    // Set by a send that ends such a wait. False when the task runs again
+    // means that the `limit` move ended the wait.
+    boolean messageEndedWait;
 
     // The number of the first wait of the call that the task is in (see
     // LoxPoller.addFd); 0 before the first wait of a call.
