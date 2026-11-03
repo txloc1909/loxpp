@@ -449,10 +449,10 @@ class Runtime {
     void completePark(ObjTask* task, Value value);
     void failPark(ObjTask* task, const char* kind, const char* msg);
     // Waits again for the descriptor of a PARKED task whose wait was reported
-    // but whose call is not done (the data was taken by another task, or only
-    // part of the call is done). The task keeps its place as a parked task and
-    // its call state; a refused registration fails the call with a
-    // NetworkError.
+    // but whose call is not done (only part of the call is done, or the
+    // descriptor had nothing for the call after all). The task keeps its place
+    // as a parked task and its call state; a refused registration fails the
+    // call with a NetworkError.
     void rearmPark(ObjTask* task, int fd);
     // Removes every wait on `fd` before the caller closes it, and appends the
     // tasks that were parked on it in the order their calls began to wait.
