@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, test } from "node:test";
 import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./gate-run.ts";
+import { startTimeOf } from "./parent-identity.ts";
 import { shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 
 const WATCH = { pollS: 0.05, graceS: 0.3 };
@@ -193,7 +194,23 @@ function alive(pid: number): boolean {
   }
 }
 
+/**
+ * The limit stays optional here, unlike in `watchdog.test.ts` and
+ * `subagent/index.test.ts`: one bound serves every wait in this file, so a call
+ * site that omits the limit still waits no longer than the file means it to.
+ *
+ * The guard is needed all the same, because `node --test` strips types without
+ * checking them: a call site that passes a limit that is not finite must fail
+ * here, not wait forever.
+ *
+ * A new test file copies `watchdog.test.ts`: its limit is required at every
+ * call site, so each wait says what it bounds. Keep the default only where one
+ * bound serves the whole file, as it does here, and keep the guard either way:
+ * every wait helper under `.pi/extensions` fails at once on a limit that is not
+ * finite.
+ */
 async function waitFor(what: string, check: () => Promise<boolean> | boolean, timeoutMs = TIMEOUT_MS): Promise<void> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${what} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     if (await check()) return;
@@ -213,7 +230,9 @@ const readOr = async (file: string, fallback = ""): Promise<string> => {
 const calls = async (b: Box): Promise<string[]> => (await readOr(b.log)).trim().split("\n").filter(Boolean);
 
 function wrapper(b: Box, parentPid: number): ChildProcess {
-  const proc = spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid)], {
+  // The two arguments production passes: the pid, and its start time, which
+  // makes a pid the kernel handed to another process read as a dead parent.
+  const proc = spawn("/bin/sh", ["-c", b.script, "loxpp-gate", String(parentPid), startTimeOf(parentPid)], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: b.env,
@@ -257,7 +276,7 @@ test("the gate argv names the container and the wrapper removes it", () => {
   assert.deepEqual(argv.slice(-3), ["bash", "-lc", "make"]);
 
   const script = buildGateScript({ argv, name });
-  for (const needle of [WATCHDOG_MARKER, "parent_pid=${1:-}", `rm -f --time 0 '${name}'`, "trap 'abort' TERM INT HUP", 'exit "$status"']) {
+  for (const needle of [WATCHDOG_MARKER, "parent_pid=${1:-}", "parent_start=${2:-}", 'parent_gone() {', `rm -f --time 0 '${name}'`, "trap 'abort' TERM INT HUP", 'exit "$status"']) {
     assert.ok(script.includes(needle), `the wrapper contains ${needle}`);
   }
 });
@@ -411,6 +430,13 @@ test("an abort still ends the run when the removal fails", { timeout: 20000 }, a
       await done;
     }
   });
+});
+
+test("a wait with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // Without the guard a NaN limit makes `until` NaN, so the loop never ends and
+  // this test times out instead of failing by name.
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitFor("a probe that never holds", () => false, 0), /needs a finite limit, and got 0/);
 });
 
 test("a failed gate names its container", () => {

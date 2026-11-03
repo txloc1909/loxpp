@@ -50,6 +50,7 @@ import {
   type PolicyState,
 } from "./lib/mode-policy.ts";
 import { buildGateScript, gateContainerName, gateFailureNote, gateRunArgv } from "./lib/gate-run.ts";
+import { parentStartTime } from "./lib/parent-identity.ts";
 import { GATE_SCOPES, gatePlan, type GateScope } from "./lib/gate-scopes.ts";
 
 // Human opt-in switch. false (default) keeps the /goal approval gate; true hands
@@ -275,7 +276,9 @@ async function runGate(
   // no handler here, and the container would otherwise keep building with
   // nobody to read the result (#1016).
   const wrapper = buildGateScript({ argv: gateRunArgv({ image, cwd: absCwd, name, script }), name });
-  const r = await runArgv(["/bin/sh", "-c", wrapper, "loxpp-gate", String(process.pid)], absCwd, signal);
+  // The wrapper's second argument is pi's start time, so a pid that the kernel
+  // handed to another process after pi died cannot read as a live parent.
+  const r = await runArgv(["/bin/sh", "-c", wrapper, "loxpp-gate", String(process.pid), parentStartTime()], absCwd, signal);
   const output = tail(r.output, GATE_OUTPUT_CAP);
   // A failed gate names its container, so a run that is still stuck is one
   // command away from removal.

@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventStream, type StreamState } from "./stream.ts";
+import { parentStartTime } from "../lib/parent-identity.ts";
 import {
   clearShadowedCommand,
   parentPidLines,
@@ -78,7 +79,8 @@ export interface PrintScriptSpec {
  * The script that starts an unattended child. `spawn` runs this script, not pi,
  * because a `SIGKILL` of this process runs no handler and would leave the child
  * with its own process group and pipes to nobody. The wrapper watches the
- * parent pid and ends the child when it is gone.
+ * parent pid and the parent's start time, and ends the child when that parent
+ * is gone.
  *
  * The child needs no terminal, so it gets `/dev/null`, and it keeps the pipes
  * of this script for stdout and stderr. The script exits with the child's code,
@@ -128,7 +130,7 @@ export function runPrintChild(opts: PrintRunOptions): Promise<PrintRunResult> {
       watchPollS: opts.watchPollS,
       watchGraceS: opts.watchGraceS,
     });
-    const child = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(process.pid)], {
+    const child = spawn("/bin/sh", ["-c", script, "loxpp-subagent", String(process.pid), parentStartTime()], {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["ignore", "pipe", "pipe"],

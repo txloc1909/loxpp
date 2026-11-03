@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { checkRemoteControl, runInKittyWindow } from "./window.ts";
+import { startTimeOf } from "../lib/parent-identity.ts";
 import { finalOutput } from "./stream.ts";
 
 const FAKE_KITTEN = `#!/usr/bin/env node
@@ -182,8 +183,13 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.ok(argv.includes("--cwd=" + cwd));
     assert.ok(argv.includes("--dont-take-focus"));
     assert.equal(argv.includes("--hold"), false);
-    assert.match(String(argv.at(-2)), /[/\\]run\.sh$/, "kitty runs the script the extension wrote");
-    assert.equal(argv.at(-1), String(process.pid), "the run script watches this process");
+    assert.match(String(argv.at(-3)), /[/\\]run\.sh$/, "kitty runs the script the extension wrote");
+    assert.equal(argv.at(-2), String(process.pid), "the run script watches this process");
+    // The start time as the second argument is what keeps a later process that
+    // took this pid from reading as a live parent.
+    const start = startTimeOf(process.pid);
+    assert.notEqual(start, "", "ps reads this process's start time, so the comparison is not two empty tokens");
+    assert.equal(argv.at(-1), start, "the run script compares this process's start time");
 
     // A `kitten @` without a socket writes into pi's terminal, so every call
     // must name the socket itself.
@@ -362,8 +368,22 @@ test("a watched child keeps the terminal and writes its own events", async () =>
   });
 });
 
-/** Poll until the fake kitten has recorded the launch, then parse it. */
+test("a wait for a file with no finite limit fails at once", { timeout: 5000 }, async () => {
+  // Without the guard a NaN limit makes `until` NaN, so the loop never ends.
+  const missing = path.join(os.tmpdir(), "loxpp-no-such-file");
+  await assert.rejects(() => waitForFile(missing, (text) => text, Number.NaN), /needs a finite limit, and got NaN/);
+  await assert.rejects(() => waitForFile(missing, (text) => text, 0), /needs a finite limit, and got 0/);
+});
+
+/**
+ * Poll until the fake kitten has recorded the launch, then parse it. The limit
+ * stays optional because one bound serves the file's only wait. The guard is
+ * needed all the same, because `node --test` strips types without checking
+ * them: a call site that passes a limit that is not finite must fail here, not
+ * poll until an outer timeout.
+ */
 async function waitForFile<T>(file: string, parse: (text: string) => T, timeoutMs = 3000): Promise<T> {
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${file} needs a finite limit, and got ${timeoutMs}`);
   const until = Date.now() + timeoutMs;
   for (;;) {
     try {
