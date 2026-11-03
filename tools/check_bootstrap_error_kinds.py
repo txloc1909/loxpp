@@ -138,6 +138,7 @@ EXPECTED_CALLS = [
     ('EmptyListError', '"Cannot pop from an empty list."', RECORDED),
     ('NetworkError', 'e.message', JUDGED),
     ('SocketClosedError', 'e.message', JUDGED),
+    ('BusyError', 'e.message', JUDGED),
     ('SendError', '"Value of type " + reflectTypeName(msg) + " is not a message."', JUDGED),
     ('DeadTaskError', '"Cannot send to a task that has ended."', JUDGED),
     ('YieldAcrossNativeError', '"Cannot receive across a native callback."', JUDGED),

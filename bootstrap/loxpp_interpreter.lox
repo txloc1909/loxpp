@@ -3248,9 +3248,12 @@ class InterpFileMethod {
     toString() { return "<native fn>"; }
 }
 
-// The host raises a catchable NetworkError or SocketClosedError for a socket
-// fault. The interpreter delivers it to the interpreted program's catch with
-// the same kind; any other fault of the host passes through.
+// The host raises a catchable NetworkError, SocketClosedError or BusyError
+// for a socket fault. The interpreter delivers it to the interpreted program's
+// catch with the same kind; any other fault of the host passes through. Each
+// interpreted task makes its host calls from a host task of its own, so a
+// host call that holds a side of a host Socket stands for the interpreted call
+// that holds that side, and the host BusyError is the interpreted one.
 fun hostNetFault(interp, e) {
     if (e.kind == "NetworkError") {
         interp.setError("NetworkError", e.message, 0);
@@ -3258,6 +3261,10 @@ fun hostNetFault(interp, e) {
     }
     if (e.kind == "SocketClosedError") {
         interp.setError("SocketClosedError", e.message, 0);
+        return nil;
+    }
+    if (e.kind == "BusyError") {
+        interp.setError("BusyError", e.message, 0);
         return nil;
     }
     throw e;

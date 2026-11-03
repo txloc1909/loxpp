@@ -14,7 +14,6 @@
 #include <memory>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -37,6 +36,9 @@ static thread_local ObjClass* s_serverClass = nullptr;
 // argument fault keeps nativeRuntimeError.
 static const char* const kNetworkError = "NetworkError";
 static const char* const kSocketClosedError = "SocketClosedError";
+static const char* const kBusyError = "BusyError";
+static const char* const kWriteAfterCloseWrite =
+    "Cannot write to a socket after close_write().";
 
 static void raiseNet(const char* kind, const std::string& msg) {
     getActiveRuntime()->raiseFromNative(kind, msg.c_str());
@@ -294,10 +296,72 @@ static Value listenNative(int /*argc*/, Value* argv) {
     return Value{static_cast<Obj*>(server)};
 }
 
+// The sides of a Socket and a Server (spec/04-semantics.md, The Task Machine,
+// Sides). A call of a side holds it from its first wait until its task runs
+// again, and the task record says so: ObjTask::io names the call for exactly
+// that time. A side has no state of its own beyond the pointer that finds the
+// holder.
+enum class Side : unsigned char { None, Read, Write, Accept };
+
+static Side sideOf(IoOp op) {
+    switch (op) {
+    case IoOp::READ:
+    case IoOp::READ_BYTES:
+    case IoOp::READ_SOME:
+    case IoOp::READLINE:
+    case IoOp::READLINES:
+        return Side::Read;
+    case IoOp::WRITE:
+        return Side::Write;
+    case IoOp::ACCEPT:
+        return Side::Accept;
+    case IoOp::CONNECT:
+    case IoOp::NONE:
+        return Side::None;
+    }
+    return Side::None;
+}
+
+static bool holds(const ObjTask* task, const Obj* target, Side side) {
+    return task != nullptr && task->io.target == target &&
+           sideOf(task->io.op) == side;
+}
+
+// The slot that finds the holder of the side that `io` waits on, or null for
+// a call that has no side (connect).
+static ObjTask** holderSlot(const ParkedIo& io) {
+    switch (sideOf(io.op)) {
+    case Side::Read:
+        return &asObjSocket(io.target)->readHolder;
+    case Side::Write:
+        return &asObjSocket(io.target)->writeHolder;
+    case Side::Accept:
+        return &asObjServer(io.target)->acceptHolder;
+    case Side::None:
+        break;
+    }
+    return nullptr;
+}
+
+// Raises BusyError when a call of another task holds the side. The running
+// task holds no side: its waiting call ended when it ran again. The check
+// comes after the check for a closed value, because a closed side fails as a
+// closed value does even while a woken call still holds it (rule 6).
+static bool sideFree(ObjTask*& holder, const Obj* target, Side side,
+                     const char* method, const char* where) {
+    if (!holds(holder, target, side)) {
+        holder = nullptr;
+        return true;
+    }
+    raiseNet(kBusyError, std::string("Cannot call '") + method + "': a call " +
+                             "of another task waits on the " + where + ".");
+    return false;
+}
+
 // The socket method natives read their receiver at args[-1], like the File
 // methods do. A read on a closed socket and a write after close_write() raise
 // SocketClosedError, matching spec/05-stdlib.md's Socket section.
-static ObjSocket* checkSocketRead(Value* args, const char* method) {
+static ObjSocket* openSocket(Value* args, const char* method) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd < 0) {
         raiseNet(kSocketClosedError, closedMessage(method, "socket"));
@@ -306,14 +370,25 @@ static ObjSocket* checkSocketRead(Value* args, const char* method) {
     return s;
 }
 
+static ObjSocket* checkSocketRead(Value* args, const char* method) {
+    ObjSocket* s = openSocket(args, method);
+    if (s == nullptr ||
+        !sideFree(s->readHolder, s, Side::Read, method, "read side")) {
+        return nullptr;
+    }
+    return s;
+}
+
 static ObjSocket* checkSocketWrite(Value* args, const char* method) {
-    ObjSocket* s = checkSocketRead(args, method);
+    ObjSocket* s = openSocket(args, method);
     if (s == nullptr) {
         return nullptr;
     }
     if (s->writeClosed) {
-        raiseNet(kSocketClosedError,
-                 "Cannot write to a socket after close_write().");
+        raiseNet(kSocketClosedError, kWriteAfterCloseWrite);
+        return nullptr;
+    }
+    if (!sideFree(s->writeHolder, s, Side::Write, method, "write side")) {
         return nullptr;
     }
     return s;
@@ -501,9 +576,8 @@ static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
     // The scan resumes at `noNewlineLen`, not at the front: a line that
     // arrives in small pieces would otherwise be scanned again in full at
     // each wake-up, and the total cost would grow with the square of the line
-    // length. Another task that waits on the same socket can take bytes from
-    // the front while this call is parked, which is why the offset lives in
-    // the socket and every removal lowers it.
+    // length. The offset describes the input buffer, which outlives the call,
+    // so it lives in the socket and every removal lowers it.
     for (;;) {
         s->scannedBytes += s->inbuf.size() - s->noNewlineLen;
         size_t nl = s->inbuf.find('\n', s->noNewlineLen);
@@ -666,6 +740,8 @@ static void stepConnect(ConnectState& c, IoOutcome& out) {
                  "': " + std::strerror(c.lastErrno));
 }
 
+static void stepWrite(int fd, ParkedIo& io, IoOutcome& out);
+
 static void step(ParkedIo& io, IoOutcome& out) {
     if (io.op == IoOp::CONNECT) {
         stepConnect(*io.connect, out);
@@ -700,8 +776,10 @@ static void step(ParkedIo& io, IoOutcome& out) {
     case IoOp::READLINE:
         stepReadline(s, io, out);
         return;
-    case IoOp::ACCEPT:
     case IoOp::WRITE:
+        stepWrite(s->fd, io, out);
+        return;
+    case IoOp::ACCEPT:
     case IoOp::CONNECT:
     case IoOp::NONE:
         return;
@@ -805,17 +883,23 @@ static Value runIo(ParkedIo io) {
         }
         // The task leaves the run queue; the poller reports the descriptor and
         // resumeParkedIo goes on. The record moves to the task, because this
-        // frame is gone by then. A task that cannot suspend waits here.
+        // frame is gone by then, and the call holds its side from here. A
+        // task that cannot suspend waits here and holds no side: no other
+        // task of the worker runs meanwhile.
         const int fd = descriptorOf(io);
-        const bool connecting = io.op == IoOp::CONNECT;
+        const bool writes = io.op == IoOp::CONNECT || io.op == IoOp::WRITE;
         if (rt->parkCurrentTask(
-                connecting ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
-            rt->currentTask()->io = std::move(io);
+                writes ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
+            ObjTask* task = rt->currentTask();
+            if (ObjTask** slot = holderSlot(io)) {
+                *slot = task;
+            }
+            task->io = std::move(io);
             return from<Nil>(Nil{});
         }
         std::string err;
         bool timedOut = false;
-        if (!waitFd(fd, connecting ? POLLOUT : POLLIN, err, io.hasDeadline,
+        if (!waitFd(fd, writes ? POLLOUT : POLLIN, err, io.hasDeadline,
                     io.deadline, timedOut)) {
             raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
             return from<Nil>(Nil{});
@@ -827,18 +911,8 @@ static Value runIo(ParkedIo io) {
     }
 }
 
-static void pumpWriters(ObjSocket* s);
-
 void resumeParkedIo(Runtime& rt, ObjTask* task) {
     ParkedIo& io = task->io;
-    if (io.op == IoOp::WRITE) {
-        // The pump finishes this call too when its turn and the room allow.
-        pumpWriters(asObjSocket(io.target));
-        if (task->state == TaskState::PARKED) {
-            rt.rearmPark(task, descriptorOf(io));
-        }
-        return;
-    }
     IoOutcome out;
     step(io, out);
     switch (out.kind) {
@@ -970,74 +1044,6 @@ static void stepWrite(int fd, ParkedIo& io, IoOutcome& out) {
     out.kind = IoOutcome::Kind::Done;
 }
 
-// A queue entry is live when its task still waits in a write on this socket.
-static bool liveWriter(const ObjTask* task, const ObjSocket* s) {
-    return task->state == TaskState::PARKED && task->io.op == IoOp::WRITE &&
-           task->io.target == s;
-}
-
-// Sends for the parked writers in the order their calls began, and ends the
-// calls that finish. It stops at the first writer that must wait for room, so
-// a later writer never sends before an earlier one is done. Any task may call
-// it: the one that was woken, or one that blocks its worker and cannot wait
-// for the queue to move on its own.
-static void pumpWriters(ObjSocket* s) {
-    Runtime* rt = getActiveRuntime();
-    while (s->hasWriters()) {
-        ObjTask* task = s->frontWriter();
-        if (!liveWriter(task, s)) {
-            s->popWriter();
-            continue;
-        }
-        IoOutcome out;
-        stepWrite(s->fd, task->io, out);
-        if (out.kind == IoOutcome::Kind::Wait) {
-            return;
-        }
-        s->popWriter();
-        if (out.kind == IoOutcome::Kind::Fault) {
-            rt->failPark(task, out.faultKind, out.faultMessage.c_str());
-        } else {
-            rt->completePark(task, from<Nil>(Nil{}));
-        }
-    }
-}
-
-// Runs a write call to its end, or to the point where the task parks. A call
-// that finds a writer ahead of it waits behind that writer, also when the
-// descriptor has room.
-static Value runWrite(ObjSocket* s, ParkedIo io) {
-    Runtime* rt = getActiveRuntime();
-    if (asObjString(io.text)->chars.empty() && !io.newline) {
-        return from<Nil>(Nil{});
-    }
-    for (;;) {
-        pumpWriters(s);
-        if (!s->hasWriters()) {
-            IoOutcome out;
-            stepWrite(s->fd, io, out);
-            if (out.kind == IoOutcome::Kind::Done) {
-                return from<Nil>(Nil{});
-            }
-            if (out.kind == IoOutcome::Kind::Fault) {
-                raiseNet(out.faultKind, out.faultMessage);
-                return from<Nil>(Nil{});
-            }
-        }
-        if (rt->parkCurrentTask(ParkReason::FD_WRITE, s->fd)) {
-            ObjTask* task = rt->currentTask();
-            task->io = std::move(io);
-            s->pushWriter(task);
-            return from<Nil>(Nil{});
-        }
-        std::string err;
-        if (!waitFd(s->fd, POLLOUT, err)) {
-            raiseNet(kNetworkError, std::string(io.method) + "(): " + err);
-            return from<Nil>(Nil{});
-        }
-    }
-}
-
 static Value socketWriteCall(Value* args, const char* method, bool newline) {
     ObjSocket* s = checkSocketWrite(args, method);
     if (s == nullptr) {
@@ -1055,7 +1061,7 @@ static Value socketWriteCall(Value* args, const char* method, bool newline) {
     io.method = method;
     io.text = as<Obj*>(args[0]);
     io.newline = newline;
-    return runWrite(s, std::move(io));
+    return runIo(std::move(io));
 }
 
 static Value socketWriteNative(int /*argc*/, Value* args) {
@@ -1069,16 +1075,13 @@ static Value socketWritelineNative(int /*argc*/, Value* args) {
 static Value socketCloseWriteNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0 && !s->writeClosed) {
-        // A write that waits cannot finish after this, so it fails now, in the
-        // order the calls began, as a write after close_write() does.
-        Runtime* rt = getActiveRuntime();
-        std::deque<ObjTask*> pending = s->takeWriters();
+        // A write that waits cannot finish after this, so it fails now, as a
+        // write after close_write() does. Only the write side's wait ends: a
+        // read that waits on the same descriptor keeps its wait.
         s->writeClosed = true;
-        for (ObjTask* task : pending) {
-            if (liveWriter(task, s)) {
-                rt->failPark(task, kSocketClosedError,
-                             "Cannot write to a socket after close_write().");
-            }
+        if (ObjTask* task = s->writeHolder; holds(task, s, Side::Write)) {
+            getActiveRuntime()->failPark(task, kSocketClosedError,
+                                         kWriteAfterCloseWrite);
         }
         shutdown(s->fd, SHUT_WR);
     }
@@ -1109,9 +1112,6 @@ void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
     }
     int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
                                           : asObjSocket(task->io.target)->fd;
-    if (task->io.op != IoOp::ACCEPT) {
-        asObjSocket(task->io.target)->clearWriters();
-    }
     if (fd < 0) {
         return;
     }
@@ -1124,7 +1124,6 @@ void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
 static Value socketCloseNative(int /*argc*/, Value* args) {
     ObjSocket* s = asObjSocket(as<Obj*>(args[-1]));
     if (s->fd >= 0) {
-        s->clearWriters();
         closeDescriptor(s->fd, "socket");
     }
     return from<Nil>(Nil{});
@@ -1134,6 +1133,9 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
     ObjServer* s = asObjServer(as<Obj*>(args[-1]));
     if (s->fd < 0) {
         raiseNet(kSocketClosedError, closedMessage("accept", "server"));
+        return from<Nil>(Nil{});
+    }
+    if (!sideFree(s->acceptHolder, s, Side::Accept, "accept", "accept side")) {
         return from<Nil>(Nil{});
     }
     ParkedIo io;

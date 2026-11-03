@@ -58,9 +58,18 @@ void setEpollCtlFailHook(const EpollCtlFailHook* hook) {
     s_epollCtlFailHook = hook;
 }
 
+std::uint32_t Poller::FdEntry::wanted() const {
+    return (read != 0 ? eventBit(Interest::Read) : 0U) |
+           (write != 0 ? eventBit(Interest::Write) : 0U);
+}
+
 Poller::Token Poller::waitFd(int fd, Interest interest, Token again) {
     FdEntry& entry = m_fds[fd];
-    const bool fresh = entry.waits.empty();
+    const bool fresh = entry.read == 0 && entry.write == 0;
+    if (entry.slot(interest) != 0) {
+        errno = EBUSY;
+        return 0;
+    }
     const std::uint32_t oldMask = entry.mask;
     const std::uint32_t mask = oldMask | eventBit(interest);
     if (fresh || mask != oldMask) {
@@ -83,12 +92,7 @@ Poller::Token Poller::waitFd(int fd, Interest interest, Token again) {
     }
     entry.mask = mask;
     const Token token = again != 0 ? again : m_nextToken++;
-    // Tokens grow with the first wait of a call, so this keeps registration
-    // order for a call that waits again.
-    entry.waits.insert(
-        std::upper_bound(entry.waits.begin(), entry.waits.end(), token,
-                         [](Token t, const FdWait& w) { return t < w.token; }),
-        {token, interest});
+    entry.slot(interest) = token;
     m_tokenFd.emplace(token, fd);
     return token;
 }
@@ -118,22 +122,21 @@ void Poller::dropFdWait(int fd, Token token) {
         return;
     }
     FdEntry& entry = found->second;
-    entry.waits.erase(
-        std::remove_if(entry.waits.begin(), entry.waits.end(),
-                       [&](const FdWait& w) { return w.token == token; }),
-        entry.waits.end());
+    if (entry.read == token) {
+        entry.read = 0;
+    }
+    if (entry.write == token) {
+        entry.write = 0;
+    }
     m_tokenFd.erase(token);
-    if (entry.waits.empty()) {
+    if (entry.read == 0 && entry.write == 0) {
         // EBADF and ENOENT: the caller closed the descriptor first. Nothing
         // is left to remove, so the failure is the same as the success.
         ::epoll_ctl(m_epoll, EPOLL_CTL_DEL, fd, nullptr);
         m_fds.erase(found);
         return;
     }
-    std::uint32_t mask = 0;
-    for (const FdWait& w : entry.waits) {
-        mask |= eventBit(w.interest);
-    }
+    const std::uint32_t mask = entry.wanted();
     if (mask != entry.mask) {
         epoll_event ev{};
         ev.events = mask;
@@ -161,9 +164,17 @@ void Poller::cancelFd(int fd, std::vector<Token>& cancelled) {
     if (found == m_fds.end()) {
         return;
     }
-    for (const FdWait& w : found->second.waits) {
-        cancelled.push_back(w.token);
-        m_tokenFd.erase(w.token);
+    const FdEntry& entry = found->second;
+    Token first = entry.read;
+    Token second = entry.write;
+    if (second != 0 && (first == 0 || second < first)) {
+        std::swap(first, second);
+    }
+    for (Token token : {first, second}) {
+        if (token != 0) {
+            cancelled.push_back(token);
+            m_tokenFd.erase(token);
+        }
     }
     ::epoll_ctl(m_epoll, EPOLL_CTL_DEL, fd, nullptr);
     m_fds.erase(found);
@@ -199,9 +210,12 @@ void Poller::collectFdWaits(const epoll_event& ev,
     // An error or a hangup is ready for every interest: the call that waits
     // reads or writes and sees the error itself.
     const bool failed = (ev.events & (EPOLLERR | EPOLLHUP)) != 0;
-    for (const FdWait& w : found->second.waits) {
-        if (failed || (ev.events & eventBit(w.interest)) != 0) {
-            fired.push_back(w.token);
+    const FdEntry& entry = found->second;
+    for (Interest interest : {Interest::Read, Interest::Write}) {
+        const Token token =
+            interest == Interest::Read ? entry.read : entry.write;
+        if (token != 0 && (failed || (ev.events & eventBit(interest)) != 0)) {
+            fired.push_back(token);
         }
     }
 }

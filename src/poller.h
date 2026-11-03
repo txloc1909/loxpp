@@ -43,6 +43,9 @@ class Poller {
     // and one-shot: the record is removed when it is reported. Returns 0, with
     // errno set, when epoll refuses the descriptor (a regular file, for one).
     // The caller must call cancelFd() before it closes `fd`.
+    // A descriptor has at most one wait for each interest, because a side of
+    // a Socket or a Server holds at most one call (spec/04-semantics.md, The
+    // Task Machine, Sides): a second one returns 0 with errno set to EBUSY.
     // With `again` set to the token of a wait that was reported, the new wait
     // takes that token, and so keeps the place of the first wait in every
     // order this class reports. A call that waits more than once uses it.
@@ -56,7 +59,7 @@ class Poller {
     // Removes a wait that was not reported. False when it is not there.
     bool cancel(Token token);
     // Removes every wait on `fd` and appends their tokens to `cancelled`, in
-    // registration order. Call it before closing `fd`: epoll keeps its
+    // token order. Call it before closing `fd`: epoll keeps its
     // reference to the open file description after close, and the number can
     // be given to a new descriptor.
     void cancelFd(int fd, std::vector<Token>& cancelled);
@@ -81,13 +84,15 @@ class Poller {
     void wake() const;
 
   private:
-    struct FdWait {
-        Token token;
-        Interest interest;
-    };
+    // The wait of each interest on one descriptor; 0 is no wait.
     struct FdEntry {
-        std::vector<FdWait> waits; // in registration order
-        std::uint32_t mask{0};     // the events registered with epoll
+        Token read{0};
+        Token write{0};
+        std::uint32_t mask{0}; // the events registered with epoll
+        Token& slot(Interest interest) {
+            return interest == Interest::Read ? read : write;
+        }
+        [[nodiscard]] std::uint32_t wanted() const;
     };
 
     void dropFdWait(int fd, Token token);

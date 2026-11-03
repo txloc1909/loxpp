@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -159,16 +160,36 @@ TEST(PollerTest, AWaitThatTakesAnOldTokenKeepsItsPlace) {
     EXPECT_EQ(ready, (std::vector<Poller::Token>{ta, tb}));
 }
 
+// The read wait and the write wait of one descriptor: cancelFd hands them
+// back in token order, so a close ends the earlier call first even when that
+// call waited again after the later one began.
 TEST(PollerTest, AWaitThatTakesAnOldTokenKeepsItsPlaceOnOneDescriptor) {
     Poller poller;
     Pipe p;
     const auto first = poller.waitFd(p.wr, Poller::Interest::Write);
-    const auto second = poller.waitFd(p.wr, Poller::Interest::Write);
+    const auto second = poller.waitFd(p.wr, Poller::Interest::Read);
     ASSERT_TRUE(poller.cancel(first));
     ASSERT_EQ(poller.waitFd(p.wr, Poller::Interest::Write, first), first);
     std::vector<Poller::Token> cancelled;
     poller.cancelFd(p.wr, cancelled);
     EXPECT_EQ(cancelled, (std::vector<Poller::Token>{first, second}));
+}
+
+// A descriptor has at most one wait for each interest, as a side of a Socket
+// holds at most one call. A second one is refused and leaves the first alone.
+TEST(PollerTest, ASecondWaitOfOneInterestOnOneDescriptorIsRefused) {
+    Poller poller;
+    Pipe p;
+    const auto first = poller.waitFd(p.rd, Poller::Interest::Read);
+    ASSERT_NE(first, 0U);
+    errno = 0;
+    EXPECT_EQ(poller.waitFd(p.rd, Poller::Interest::Read), 0U);
+    EXPECT_EQ(errno, EBUSY);
+    p.put();
+    std::vector<Poller::Token> ready;
+    poller.wait(ready);
+    EXPECT_EQ(ready, (std::vector<Poller::Token>{first}));
+    EXPECT_FALSE(poller.hasWaits());
 }
 
 TEST(PollerTest, WriteInterestAndReadInterestOnOneDescriptor) {
