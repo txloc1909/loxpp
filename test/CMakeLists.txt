@@ -463,6 +463,17 @@ if(LOXPP_PYTHON3)
     # skip instead of a false red.
     set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
 
+    # tools/diff_runtimes.py compares both phases (AGENTS.md, "Plans for a
+    # language change", rule 5): a stub runner that rejects a program native
+    # runs or halts, accepts one native rejects, or prints other output must
+    # fail the comparison. A trace build cannot pass a stdout comparison, so
+    # the checker exits 125 there.
+    add_test(NAME DiffRuntimesPhases
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_phases.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(DiffRuntimesPhases PROPERTIES SKIP_RETURN_CODE 125)
+
     # Issue #907: a tool that spawns a runner from its command line refuses a
     # runner that does not exist or cannot start with exit 2, not with a
     # traceback or with the code for a failed case. The checker runs each tool
