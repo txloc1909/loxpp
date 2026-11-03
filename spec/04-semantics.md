@@ -2090,8 +2090,10 @@ run. In a session the end of a line is not the end of the program, and the
 main task does not end with it: see [A Session](#a-session).
 
 When the program ends, a task that waits in a call of class suspends is
-abandoned like any other task. The runtime closes the Sockets and Servers that
-such a task waits on, because no deferred call will.
+abandoned like any other task. In a session, the end of a line abandons such a
+task too, when `task.spawn` made it on the main worker (see [A
+Session](#a-session), item 4). In both cases the runtime closes the Sockets
+and Servers that such a task waits on, because no deferred call will.
 
 A call of `exit(code)` in any task ends the program at once, with that exit
 code. A throw that no `try` statement in its task catches is uncaught: it
