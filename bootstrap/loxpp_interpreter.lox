@@ -2378,11 +2378,11 @@ class LoxFunction {
             interp.setError("ArityError", "Expected " + str(this.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }
-        var savedDefers = interp.pendingDefers;
-        var savedStringifyDepth = interp.stringifyDepth;
-        var savedNativeDepth = interp.nativeDepth;
-        var savedTryDepth = interp.tryDepth;
-        interp.pendingDefers = [];
+        var savedDefers = interp.currentTask.pendingDefers;
+        var savedStringifyDepth = interp.currentTask.stringifyDepth;
+        var savedNativeDepth = interp.currentTask.nativeDepth;
+        var savedTryDepth = interp.currentTask.tryDepth;
+        interp.currentTask.pendingDefers = [];
         var returnVal = nil;
         var nextArgs = args;
         // A self tail call reuses this frame (spec/04-semantics.md, "Self
@@ -2408,7 +2408,7 @@ class LoxFunction {
             if (stepArgs != nil) {
                 nextArgs = stepArgs;
                 returnVal = nil;
-                interp.pendingDefers = [];
+                interp.currentTask.pendingDefers = [];
                 tailStep = true;
             }
         }
@@ -2438,11 +2438,11 @@ class LoxFunction {
             // Native takes the fatal path here and skips every pending
             // deferred call, this call's own included (spec, "Fatal Runtime
             // Errors" and "Call stack overflow's fatal fast path").
-            if (interp.tryDepth == 0) interp.fatalError("Stack overflow.");
+            if (interp.currentTask.tryDepth == 0) interp.fatalError("Stack overflow.");
             // A second overflow while the first one still unwinds is fatal
             // too, with the same skipped defers (spec, "Runtime Errors").
-            if (interp.overflowUnwinding) interp.fatalError("Stack overflow.");
-            interp.overflowUnwinding = true;
+            if (interp.currentTask.overflowUnwinding) interp.fatalError("Stack overflow.");
+            interp.currentTask.overflowUnwinding = true;
             // pendingDefers needs no repair: this try's own scope holds only
             // THIS call's own accumulated defers at the moment of the fault
             // -- the overflow is native refusing to enter the NEXT frame, so
@@ -2458,15 +2458,15 @@ class LoxFunction {
             // so the statement whose own evaluation just overflowed cannot
             // have set them already, but nothing enforces that as an
             // invariant of this file.
-            interp.stringifyDepth = savedStringifyDepth;
-            interp.nativeDepth    = savedNativeDepth;
-            interp.tryDepth       = savedTryDepth;
+            interp.currentTask.stringifyDepth = savedStringifyDepth;
+            interp.currentTask.nativeDepth    = savedNativeDepth;
+            interp.currentTask.tryDepth       = savedTryDepth;
             interp.returnFlag     = false;
             interp.returnValue    = nil;
             interp.setError("StackOverflowError", "Stack overflow.", 0);
         }
-        var funcDefers = interp.pendingDefers;
-        interp.pendingDefers = savedDefers;
+        var funcDefers = interp.currentTask.pendingDefers;
+        interp.currentTask.pendingDefers = savedDefers;
         // Capture the return value from this function's own execution, before defers run.
         // This prevents nested defer calls from consuming the outer function's return state.
         var returnVal = nil;
@@ -2494,12 +2494,12 @@ class LoxFunction {
                     var savedValue = interp.thrownValue;
                     interp.throwFlag = false;
                     interp.thrownValue = nil;
-                    interp.nativeDepth = interp.nativeDepth + 1;
-                    var unwindingOverflow = interp.overflowUnwinding;
-                    if (unwindingOverflow) interp.overflowDeferNest = interp.overflowDeferNest + 1;
+                    interp.currentTask.nativeDepth = interp.currentTask.nativeDepth + 1;
+                    var unwindingOverflow = interp.currentTask.overflowUnwinding;
+                    if (unwindingOverflow) interp.currentTask.overflowDeferNest = interp.currentTask.overflowDeferNest + 1;
                     callee.call(interp, defer_args);
-                    if (unwindingOverflow) interp.overflowDeferNest = interp.overflowDeferNest - 1;
-                    interp.nativeDepth = interp.nativeDepth - 1;
+                    if (unwindingOverflow) interp.currentTask.overflowDeferNest = interp.currentTask.overflowDeferNest - 1;
+                    interp.currentTask.nativeDepth = interp.currentTask.nativeDepth - 1;
                     if (!interp.throwFlag) {
                         interp.throwFlag = savedThrow;
                         interp.thrownValue = savedValue;
@@ -2640,15 +2640,6 @@ fun reflectTypeName(v) {
     return "Unknown";
 }
 
-// The interpreted program runs as host tasks, and a host sleep() that can
-// suspend would let the other interpreted tasks run. The bootstrap keeps its
-// one-thread form: a sleep blocks every task (spec/README.md, Conformance).
-// The host cannot suspend a task inside the __str__ that str() calls, so the
-// sleep happens there and blocks the host worker.
-class BlockingSleeper {
-    init(seconds) { this.seconds = seconds; }
-    __str__() { sleep(this.seconds); return ""; }
-}
 // Runs a host call of class `suspends` inside the __str__ that str() calls,
 // where the host cannot suspend a task, so the call blocks the worker
 // (spec/05-stdlib.md, "Blocking calls"). A fault is kept and thrown again
@@ -2672,10 +2663,6 @@ class BlockedCall {
         return "";
     }
 }
-fun blockingSleep(seconds) {
-    str(BlockingSleeper(seconds));
-    return nil;
-}
 
 // The calls of class `suspends` in spec/05-stdlib.md, "Blocking calls", that
 // this file reaches through a host native, by the qualified name that table
@@ -2683,12 +2670,9 @@ fun blockingSleep(seconds) {
 // the host runs the other interpreted tasks while it waits, and blocks the
 // worker where it cannot. Every site runs it through
 // Interpreter.callSuspending, which does both.
-//
-// `sleep` is absent because blockingSleep above blocks this one-thread
-// implementation instead of suspending (spec/README.md, Conformance), so no
-// other task runs during it and no per-task state needs saving.
 // tools/check_bootstrap_suspend_calls.py holds this list to the spec table.
 fun isSuspendingHostCall(name) {
+    if (name == "sleep") return true;
     if (name == "connect" or name == "connect_within") return true;
     if (name == "Socket.read" or name == "Socket.read_bytes" or
         name == "Socket.read_some" or name == "Socket.readline" or
@@ -2820,9 +2804,9 @@ fun reflectCallMethod(interp, args) {
         // of a field closure binds slot 0 to the closure, not the instance).
         if (!viaField) callee = callee.bind(instance);
         // Native runs the target from C++ here, so a yield cannot cross it.
-        interp.nativeDepth = interp.nativeDepth + 1;
+        interp.currentTask.nativeDepth = interp.currentTask.nativeDepth + 1;
         var result = callee.call(interp, forwarded);
-        interp.nativeDepth = interp.nativeDepth - 1;
+        interp.currentTask.nativeDepth = interp.currentTask.nativeDepth - 1;
         return result;
     }
     if (tag != "native" and tag != "mathfn" and tag != "mapmethod" and
@@ -2861,10 +2845,8 @@ class LoxNative {
         this.name   = name;
         this.loxTag = "native";
     }
-    // `connect` is the one host native of this class that this file runs
-    // through the park path: `sleep` is classed `suspends` too, but
-    // blockingSleep blocks this one thread instead, so isSuspendingHostCall
-    // leaves it out.
+    // `sleep`, `connect` and `connect_within` are the host natives of class
+    // `suspends` that this class dispatches.
     call(interp, args) {
         if (!isSuspendingHostCall(this.name)) return this.dispatch(interp, args);
         return interp.callSuspending(this, args);
@@ -2938,7 +2920,7 @@ class LoxNative {
         if (this.name == "env") return env(args[0]);
         if (this.name == "exit") return exit(args[0]);
         if (this.name == "time") return time();
-        if (this.name == "sleep") return blockingSleep(args[0]);
+        if (this.name == "sleep") return sleep(args[0]);
         if (this.name == "exists") return exists(args[0]);
         if (this.name == "is_dir") return is_dir(args[0]);
         if (this.name == "is_file") return is_file(args[0]);
@@ -3419,10 +3401,10 @@ class InterpCoroutine {
         this.fn          = fn;
         this.state       = "suspended";
         this.started     = false;
-        // interp.nativeDepth when this coroutine was last resumed. A yield is
+        // interp.currentTask.nativeDepth when this coroutine was last resumed. A yield is
         // legal only while the depth has not grown past it.
         this.resumeDepth = 0;
-        // interp.tryDepth when this coroutine was last resumed: the try
+        // interp.currentTask.tryDepth when this coroutine was last resumed: the try
         // blocks of the resumer, which stay active under the coroutine's own.
         this.resumeTryDepth = 0;
         this.loxTag      = "coroutine";
@@ -3434,15 +3416,15 @@ class InterpCoroutine {
     run(argList) {
         var fn = this.fn;
         if (!isNativeCallable(fn)) return fn.call(this.interp, argList);
-        this.interp.nativeDepth = this.interp.nativeDepth + 1;
+        this.interp.currentTask.nativeDepth = this.interp.currentTask.nativeDepth + 1;
         var result = nil;
         try {
             result = fn.call(this.interp, argList);
         } catch (e) {
-            this.interp.nativeDepth = this.interp.nativeDepth - 1;
+            this.interp.currentTask.nativeDepth = this.interp.currentTask.nativeDepth - 1;
             throw e;
         }
-        this.interp.nativeDepth = this.interp.nativeDepth - 1;
+        this.interp.currentTask.nativeDepth = this.interp.currentTask.nativeDepth - 1;
         return result;
     }
 
@@ -3517,13 +3499,37 @@ class InterpTask {
         // declaration to call, and the message of task.spawn_worker.
         this.entryBody = nil;
         this.startArg  = nil;
-        // The interpreter state of this task while another task runs.
-        this.savedDefers         = nil;
-        this.savedStringifyDepth = 0;
-        this.savedNativeDepth    = 0;
-        this.savedCo             = nil;
-        this.savedOverflowUnwinding = false;
-        this.savedOverflowDeferNest = 0;
+        // The interpreter state that belongs to this task (spec/04-semantics.md,
+        // The Task Machine, the task-owned state table). The interpreter reads
+        // and writes it only through Interpreter.currentTask, so a park and a
+        // resume copy none of it. tools/check_bootstrap_park_state.py moves
+        // each field out of this record in turn and shows the leak.
+        // The pending deferred calls of each frame.
+        this.pendingDefers = [];
+        // The depth of stringify(), for its limit.
+        this.stringifyDepth = 0;
+        // Depth of target code entered through a call native would make from
+        // C++ (__str__, __hash__/__eq__ during a map operation, a deferred
+        // call, a native entry). A yield cannot cross such a frame on native,
+        // so it must not here, and the task cannot suspend while it is not 0.
+        this.nativeDepth = 0;
+        // Number of try blocks that are executing in this task, the
+        // resumer's under a running coroutine's own. A target-level stack
+        // overflow is fatal, and skips every pending deferred call, only
+        // when this is 0.
+        this.tryDepth = 0;
+        // The Lox++ coroutine now executing, or nil outside every coroutine
+        // that this task resumed.
+        this.currentCo = nil;
+        // True from the moment a StackOverflowError becomes a flag-based
+        // error until a try statement outside every deferred call of that
+        // unwind catches the throw in flight. A second overflow while it is
+        // true is fatal. overflowDeferNest counts the deferred calls that
+        // the unwind is running: a try inside one of them must not end it,
+        // as native's m_unwindingStackOverflow stays set for the whole
+        // handler search.
+        this.overflowUnwinding = false;
+        this.overflowDeferNest = 0;
         this.loxTag    = "task";
     }
 
@@ -3559,22 +3565,61 @@ class InterpTask {
     toString() { return "<task>"; }
 }
 
-// The limit of a receive_* call: sleeps in a host task of its own, so the
-// other host tasks run, then sends its number to the waiting host task. The
-// waiting task may have ended by then.
-class SelectTimer {
-    init(host, seconds, gen) {
-        this.host = host;
-        this.seconds = seconds;
-        this.gen = gen;
+// The host `want` of one receive_* call (Interpreter.taskReceiveSelective).
+// The host calls test once for each wake in the host mailbox of the task, in
+// the host task of the receiving task, where the host task cannot suspend. It
+// tests each interpreted message once, in order, and returns true when the
+// call ends: a message is selected, `want` throws, or the call must suspend
+// where the task cannot. Otherwise the task waits again.
+class ReceiveSelection {
+    init(interp, t, hasWant, want, limited) {
+        this.interp  = interp;
+        this.t       = t;
+        this.hasWant = hasWant;
+        this.want    = want;
+        this.limited = limited;
+        this.scanned = 0;
+        this.result  = nil;
     }
 
-    run() {
-        sleep(this.seconds);
-        try {
-            task.send(this.host, this.gen);
-        } catch (e) {
+    test(wake) {
+        var interp = this.interp;
+        var t = this.t;
+        interp.resumeTask(t);
+        if (t.waiting) {
+            // The wake of a send. The sender counted the task as ready again
+            // when the wait has no limit.
+            t.waiting = false;
         }
+        while (this.scanned < t.pending()) {
+            if (!this.hasWant) {
+                this.result = t.take();
+                return true;
+            }
+            var msg = t.mailbox[t.head + this.scanned];
+            interp.selectDepth = interp.selectDepth + 1;
+            interp.currentTask.nativeDepth = interp.currentTask.nativeDepth + 1;
+            var verdict = this.want.call(interp, [msg]);
+            interp.currentTask.nativeDepth = interp.currentTask.nativeDepth - 1;
+            interp.selectDepth = interp.selectDepth - 1;
+            if (interp.throwFlag) return true;
+            if (interp.isTruthy(verdict)) {
+                this.result = t.takeAt(this.scanned);
+                return true;
+            }
+            this.scanned = this.scanned + 1;
+        }
+        if (interp.currentTask.nativeDepth > 0) {
+            interp.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
+            return true;
+        }
+        t.waiting = true;
+        t.limited = this.limited;
+        if (!this.limited) {
+            interp.readyTasks = interp.readyTasks - 1;
+            interp.checkDeadlock();
+        }
+        return false;
     }
 }
 
@@ -3680,56 +3725,38 @@ class Interpreter {
         // pattern binds by name, so the match reads the field index from
         // here.
         this.enumCtorFields = {};
-        this.globals       = Environment(nil);
+        // The flags below are false, and selectDepth is 0, at every point
+        // where a task can suspend: each is set only for the extent of one
+        // statement, expression, or `want` call that ends before the next
+        // suspend point, or inside a context where the task cannot suspend.
+        // So no other task can see them, and they stay here, not in the task
+        // record.
         this.returnFlag    = false;
         this.returnValue   = nil;
         this.breakFlag     = false;
         this.continueFlag  = false;
         this.throwFlag     = false;
         this.thrownValue   = nil;
-        this.pendingDefers = [];
-        this.stringifyDepth = 0;
-        // The Lox++ coroutine now executing, or nil outside every coroutine
-        // that the running task resumed.
-        this.currentCo = nil;
-        // Depth of target code entered through a call native would make from
-        // C++ (__str__, __hash__/__eq__ during a map operation, a deferred
-        // call). A yield cannot cross such a frame on native, so it must not
-        // here.
-        this.nativeDepth = 0;
         // Greater than 0 while a `want` function of a receive_where call runs.
         this.selectDepth = 0;
-        // The number of the last receive_* call that made a timer.
-        this.selectGen = 0;
-        // Number of try blocks that are executing in the running task, the
-        // resumer's under a running coroutine's own. A target-level stack
-        // overflow is fatal, and skips every pending deferred call, only
-        // when this is 0.
-        this.tryDepth = 0;
-        // True from the moment a StackOverflowError becomes a flag-based
-        // error until a try statement outside every deferred call of that
-        // unwind catches the throw in flight. A second overflow while it is
-        // true is fatal. overflowDeferNest counts the deferred calls that
-        // the unwind is running: a try inside one of them must not end it,
-        // as native's m_unwindingStackOverflow stays set for the whole
-        // handler search.
-        this.overflowUnwinding = false;
-        this.overflowDeferNest = 0;
         // High-water mark of stringifyDepth, for tools/check_bootstrap_stack_overflow.py
         // only: it never decreases, so a probe can tell "the run actually
         // recursed into stringify() before the fault" from "stringifyDepth
         // reads 0 because stringify() never started" -- both look the same
         // in the plain restore check below.
         this.maxStringifyDepthSeen = 0;
-        this.defineStdlib(this.globals);
         // The top-level statements of the program, which a new worker reads
         // for its declarations.
         this.programStmts = [];
+        var globals = Environment(nil);
+        this.defineStdlib(globals);
         // The running task, and the main task, which runs the top-level code.
-        this.mainTask    = InterpTask(this, InterpWorker(this.globals));
+        // All the state that belongs to a task is in its InterpTask, so a
+        // switch of tasks sets only currentTask.
+        this.mainTask    = InterpTask(this, InterpWorker(globals));
         this.currentTask = this.mainTask;
-        // The tasks that are running or ready to run, on every worker. With
-        // one host thread, no task is in a blocking call while one runs, so
+        // The tasks that are running or ready to run, on every worker. A
+        // task that waits in a call of class suspends counts as running, so
         // the main task waiting with this at 0 is a deadlock.
         this.readyTasks  = 1;
     }
@@ -3771,18 +3798,15 @@ class Interpreter {
 
     // --- tasks and workers (spec/04-semantics.md, Workers and Tasks) -------
 
-    // pendingDefers, stringifyDepth, nativeDepth, currentCo, and the two
-    // overflow flags belong to the running task. The flags (returnFlag,
-    // breakFlag, continueFlag, throwFlag) need no save: each is false at every
-    // suspend point.
-    parkTask(t) {
-        t.savedDefers         = this.pendingDefers;
-        t.savedStringifyDepth = this.stringifyDepth;
-        t.savedNativeDepth    = this.nativeDepth;
-        t.savedTryDepth       = this.tryDepth;
-        t.savedCo             = this.currentCo;
-        t.savedOverflowUnwinding = this.overflowUnwinding;
-        t.savedOverflowDeferNest = this.overflowDeferNest;
+    // Each interpreted task is one host task, and every host task runs this
+    // one Interpreter. A host task that suspends (a host receive, a host
+    // yield, a host call of class suspends) gives the host thread to the
+    // other host tasks, and each of them sets currentTask to its own task.
+    // So the host task that runs again sets currentTask back to the task it
+    // holds in its own frame. The state of the task is in that task's record,
+    // so this is the whole switch: a park and a resume copy nothing.
+    resumeTask(t) {
+        this.currentTask = t;
     }
 
     // True when the running task can suspend here. A suspend of the task
@@ -3792,12 +3816,13 @@ class Interpreter {
     // differs: it stops at its own coroutine, so evalYield compares against
     // that coroutine's resumeDepth.
     canSuspend() {
-        return this.nativeDepth == 0;
+        return this.currentTask.nativeDepth == 0;
     }
 
     // The one path of every host call of class `suspends` in
-    // isSuspendingHostCall: a call where the task can suspend parks the host
-    // task, and a call where it cannot blocks the worker.
+    // isSuspendingHostCall: a call where the task can suspend runs the host
+    // call in this host task, which the host suspends while the call waits,
+    // and a call where the task cannot suspend blocks the worker.
     callSuspending(site, args) {
         if (!this.canSuspend()) {
             var blocked = BlockedCall(site, this, args);
@@ -3805,53 +3830,16 @@ class Interpreter {
             if (blocked.failed) throw blocked.fault;
             return blocked.result;
         }
-        var saved = this.saveHostSuspendState();
+        var t = this.currentTask;
         var result = nil;
         try {
             result = site.hostBody(this, args);
         } catch (e) {
-            this.restoreHostSuspendState(saved);
+            this.resumeTask(t);
             throw e;
         }
-        this.restoreHostSuspendState(saved);
+        this.resumeTask(t);
         return result;
-    }
-
-    // A call of class `suspends` (spec/05-stdlib.md, "Blocking calls") parks
-    // this host task. The host then runs the other interpreted tasks on its one
-    // thread, and each of them overwrites the per-task state below as it runs,
-    // so nothing puts this task's own back when its native call returns: that
-    // return lands in the caller of this method, not in parkTask's caller.
-    // The caller therefore keeps the saved list in its own frame, which belongs
-    // to this host task and so survives the park.
-    saveHostSuspendState() {
-        return [this.currentTask, this.globals, this.pendingDefers,
-                this.stringifyDepth, this.nativeDepth, this.tryDepth,
-                this.currentCo, this.overflowUnwinding, this.overflowDeferNest];
-    }
-
-    restoreHostSuspendState(saved) {
-        this.currentTask    = saved[0];
-        this.globals        = saved[1];
-        this.pendingDefers  = saved[2];
-        this.stringifyDepth = saved[3];
-        this.nativeDepth    = saved[4];
-        this.tryDepth       = saved[5];
-        this.currentCo      = saved[6];
-        this.overflowUnwinding = saved[7];
-        this.overflowDeferNest = saved[8];
-    }
-
-    unparkTask(t) {
-        this.currentTask    = t;
-        this.globals        = t.worker.globals;
-        this.pendingDefers  = t.savedDefers;
-        this.stringifyDepth = t.savedStringifyDepth;
-        this.nativeDepth    = t.savedNativeDepth;
-        this.tryDepth       = t.savedTryDepth;
-        this.currentCo      = t.savedCo;
-        this.overflowUnwinding = t.savedOverflowUnwinding;
-        this.overflowDeferNest = t.savedOverflowDeferNest;
     }
 
     checkDeadlock() {
@@ -3866,9 +3854,8 @@ class Interpreter {
     yieldTask() {
         if (this.readyTasks <= 1) return;
         var t = this.currentTask;
-        this.parkTask(t);
         yield nil;
-        this.unparkTask(t);
+        this.resumeTask(t);
     }
 
     setSendError(msg) {
@@ -3938,7 +3925,7 @@ class Interpreter {
         var t = this.currentTask;
         if (this.selectDepth > 0) return this.receiveInWant();
         if (t.pending() > 0) return t.take();
-        if (this.nativeDepth > 0) {
+        if (this.currentTask.nativeDepth > 0) {
             this.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
             return nil;
         }
@@ -3946,24 +3933,14 @@ class Interpreter {
         t.waiting = true;
         this.readyTasks = this.readyTasks - 1;
         this.checkDeadlock();
-        this.parkTask(t);
-        this.awaitWake(0);
-        this.unparkTask(t);
+        task.receive();
+        this.resumeTask(t);
         return t.take();
     }
 
     receiveInWant() {
         this.setError("YieldAcrossNativeError", "Cannot receive in a function that receive_where calls.", 0);
         return nil;
-    }
-
-    // Waits on the host mailbox for the wake of a send (true), or for the
-    // tick of the timer `gen`. The tick of an earlier call is not for this
-    // wait, and is dropped. Returns what ended the wait.
-    awaitWake(gen) {
-        var tok = task.receive();
-        while (tok != true and tok != gen) tok = task.receive();
-        return tok;
     }
 
     // The argument checks of task.receive_within, task.receive_where, and
@@ -3986,75 +3963,49 @@ class Interpreter {
         return this.taskReceiveSelective(hasWant, limited, want, seconds);
     }
 
-    // The receive_* calls (spec/04-semantics.md, task.receive_within): test
-    // each message once, in order, and wait for more when none matches. A
-    // limit is a host task that sleeps and then sends its number to this
-    // task. A message that is in the mailbox when the task runs again is
-    // tested before the limit counts.
+    // The receive_* calls (spec/04-semantics.md, task.receive_within). The
+    // host's own receive_where or receive_where_within waits, with a host
+    // `want` (ReceiveSelection.test) that tests the interpreted mailbox. A
+    // send to a waiting task puts one wake in its host mailbox, so the host
+    // calls the test each time the task runs again after a message arrived.
+    // The host keeps the limit for the whole call and puts the task in the
+    // run queue at the place the host order gives a limit (spec/04-semantics.md,
+    // Scheduling), so the interpreted order of ready waits is the host order,
+    // with no extra host task between them. A self-sent wake makes the host
+    // run the first test inside the call, so the limit starts before it.
     taskReceiveSelective(hasWant, limited, want, seconds) {
         if (this.selectDepth > 0) return this.receiveInWant();
         var t = this.currentTask;
-        var scanned = 0;
+        if (t.host == nil) t.host = task.self();
+        var sel = ReceiveSelection(this, t, hasWant, want, limited);
+        task.send(t.host, true);
         var timedOut = false;
-        var gen = 0;
-        while (true) {
-            while (scanned < t.pending()) {
-                if (!hasWant) return t.take();
-                var msg = t.mailbox[t.head + scanned];
-                this.selectDepth = this.selectDepth + 1;
-                this.nativeDepth = this.nativeDepth + 1;
-                var verdict = want.call(this, [msg]);
-                this.nativeDepth = this.nativeDepth - 1;
-                this.selectDepth = this.selectDepth - 1;
-                if (this.throwFlag) return nil;
-                if (this.isTruthy(verdict)) return t.takeAt(scanned);
-                scanned = scanned + 1;
-            }
-            if (timedOut) {
-                this.setError("TimeoutError", "The limit of the receive passed.", 0);
-                return nil;
-            }
-            if (this.nativeDepth > 0) {
-                this.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
-                return nil;
-            }
-            if (t.host == nil) t.host = task.self();
-            if (limited and gen == 0) {
-                this.selectGen = this.selectGen + 1;
-                gen = this.selectGen;
-                task.spawn(SelectTimer(t.host, seconds, gen).run);
-            }
-            t.waiting = true;
-            t.limited = limited;
-            if (!limited) {
-                this.readyTasks = this.readyTasks - 1;
-                this.checkDeadlock();
-            }
-            this.parkTask(t);
-            var tok = this.awaitWake(gen);
-            if (tok != true) {
-                timedOut = true;
-                // A send that came after the tick has put its wake in the
-                // host mailbox already, and the wake is not for a later wait.
-                if (t.waiting) t.waiting = false;
-                else task.receive();
-            }
-            this.unparkTask(t);
-            t.limited = false;
+        try {
+            if (limited) task.receive_where_within(sel.test, seconds);
+            else task.receive_where(sel.test);
+        } catch (e) {
+            // The host raises at the limit without a call of the test when no
+            // wake came, so this is the one return that the test did not
+            // switch back.
+            this.resumeTask(t);
+            if (e.kind != "TimeoutError") throw e;
+            timedOut = true;
         }
+        // The wakes that the test did not select stay in the host mailbox.
+        // No send adds one now, because the task no longer waits.
+        t.waiting = false;
+        t.limited = false;
+        while (task.pending() > 0) task.receive();
+        if (timedOut) {
+            this.setError("TimeoutError", "The limit of the receive passed.", 0);
+            return nil;
+        }
+        return sel.result;
     }
 
     // The body of every host task but the main one.
     runTask(t) {
-        this.currentTask    = t;
-        this.globals        = t.worker.globals;
-        this.pendingDefers  = [];
-        this.stringifyDepth = 0;
-        this.nativeDepth    = 0;
-        this.tryDepth       = 0;
-        this.currentCo      = nil;
-        this.overflowUnwinding = false;
-        this.overflowDeferNest = 0;
+        this.resumeTask(t);
         var fn = t.fn;
         var args = [];
         if (t.entryBody != nil) {
@@ -4066,14 +4017,14 @@ class Interpreter {
         // rather than park a task that has no interpreted frame to resume
         // (spec/04-semantics.md, task.receive step 3).
         var nativeEntry = isNativeCallable(fn);
-        if (nativeEntry) this.nativeDepth = this.nativeDepth + 1;
+        if (nativeEntry) this.currentTask.nativeDepth = this.currentTask.nativeDepth + 1;
         try {
             if (!this.throwFlag) fn.call(this, args);
         } catch (e) {
-            if (nativeEntry) this.nativeDepth = this.nativeDepth - 1;
+            if (nativeEntry) this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
             throw e;
         }
-        if (nativeEntry) this.nativeDepth = this.nativeDepth - 1;
+        if (nativeEntry) this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
         if (this.throwFlag) {
             this.reportUncaught();
             exit(70);
@@ -4094,10 +4045,10 @@ class Interpreter {
         while (i < len(this.programStmts)) {
             var s = this.programStmts[i];
             if (this.isWorkerDecl(s)) {
-                this.execStmt(s, this.globals);
+                this.execStmt(s, this.currentTask.worker.globals);
                 if (this.throwFlag) return nil;
                 var name = this.funDeclName(s, entryBody);
-                if (name != nil) entry = this.globals.values[name];
+                if (name != nil) entry = this.currentTask.worker.globals.values[name];
             }
             i = i + 1;
         }
@@ -4156,7 +4107,7 @@ class Interpreter {
     // fatal fast path"). With one active, the caller raises the catchable
     // ArityError instead.
     fatalIfNoTry(msg) {
-        if (this.tryDepth == 0) this.fatalError(msg);
+        if (this.currentTask.tryDepth == 0) this.fatalError(msg);
     }
 
     isValidMapKey(v) {
@@ -4192,9 +4143,9 @@ class Interpreter {
             return key;
         }
         var hash = this.findDunder(key, "__hash__");
-        this.nativeDepth = this.nativeDepth + 1;
+        this.currentTask.nativeDepth = this.currentTask.nativeDepth + 1;
         var r = hash.bind(key).call(this, []);
-        this.nativeDepth = this.nativeDepth - 1;
+        this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
         if (this.throwFlag) return nil;
         if (!isNumberValue(r)) {
             this.setError("OperatorResultTypeError", "Operator method must return a Number.", 0);
@@ -4214,9 +4165,9 @@ class Interpreter {
     keyEquals(stored, lookup) {
         var m = this.findDunder(stored, "__eq__");
         if (m != nil) {
-            this.nativeDepth = this.nativeDepth + 1;
+            this.currentTask.nativeDepth = this.currentTask.nativeDepth + 1;
             var b = m.bind(stored).call(this, [lookup]);
-            this.nativeDepth = this.nativeDepth - 1;
+            this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
             if (this.throwFlag) return false;
             if (b != true and b != false) {
                 this.setError("OperatorResultTypeError", "Operator method must return a Boolean.", 0);
@@ -4388,7 +4339,7 @@ class Interpreter {
         this.programStmts = stmts;
         var i = 0;
         while (i < len(stmts)) {
-            this.execStmt(stmts[i], this.globals);
+            this.execStmt(stmts[i], this.currentTask.worker.globals);
             if (this.returnFlag or this.throwFlag) {
                 if (this.throwFlag) {
                     this.runPendingDefers();
@@ -4758,10 +4709,10 @@ class Interpreter {
         }
         // Outside every coroutine the running task resumed, the yield
         // suspends the task itself, which started with nativeDepth 0.
-        var co = this.currentCo;
+        var co = this.currentTask.currentCo;
         var baseDepth = 0;
         if (co != nil) baseDepth = co.resumeDepth;
-        if (this.nativeDepth > baseDepth) {
+        if (this.currentTask.nativeDepth > baseDepth) {
             this.setError("YieldAcrossNativeError", "Cannot yield across a native callback.", line);
             return nil;
         }
@@ -4772,15 +4723,15 @@ class Interpreter {
         // pendingDefers and stringifyDepth belong to the running call, not to
         // the interpreter as a whole: the resumer overwrites them while this
         // coroutine is suspended, so put this coroutine's own back on resume.
-        var savedDefers = this.pendingDefers;
-        var savedStringifyDepth = this.stringifyDepth;
+        var savedDefers = this.currentTask.pendingDefers;
+        var savedStringifyDepth = this.currentTask.stringifyDepth;
         // The try blocks of this coroutine alone: the resumer's are not on
         // its stack while it is suspended, and the next resumer's replace them.
-        var ownTryDepth = this.tryDepth - co.resumeTryDepth;
+        var ownTryDepth = this.currentTask.tryDepth - co.resumeTryDepth;
         var received = yield v;
-        this.pendingDefers = savedDefers;
-        this.stringifyDepth = savedStringifyDepth;
-        this.tryDepth = co.resumeTryDepth + ownTryDepth;
+        this.currentTask.pendingDefers = savedDefers;
+        this.currentTask.stringifyDepth = savedStringifyDepth;
+        this.currentTask.tryDepth = co.resumeTryDepth + ownTryDepth;
         return received;
     }
 
@@ -4808,15 +4759,15 @@ class Interpreter {
             this.setError("ArityError", "Expected " + str(co.fn.arity()) + " arguments but got " + str(len(args)) + ".", 0);
             return nil;
         }
-        var parent = this.currentCo;
+        var parent = this.currentTask.currentCo;
         if (parent != nil) parent.state = "normal";
         co.state = "running";
-        this.currentCo = co;
-        co.resumeDepth = this.nativeDepth;
-        co.resumeTryDepth = this.tryDepth;
-        var savedDefers = this.pendingDefers;
-        var savedStringifyDepth = this.stringifyDepth;
-        var savedTryDepth = this.tryDepth;
+        this.currentTask.currentCo = co;
+        co.resumeDepth = this.currentTask.nativeDepth;
+        co.resumeTryDepth = this.currentTask.tryDepth;
+        var savedDefers = this.currentTask.pendingDefers;
+        var savedStringifyDepth = this.currentTask.stringifyDepth;
+        var savedTryDepth = this.currentTask.tryDepth;
         var result = nil;
         try {
             if (co.started) {
@@ -4835,10 +4786,10 @@ class Interpreter {
     }
 
     finishResume(co, parent, savedDefers, savedStringifyDepth, savedTryDepth) {
-        this.pendingDefers = savedDefers;
-        this.stringifyDepth = savedStringifyDepth;
-        this.tryDepth = savedTryDepth;
-        this.currentCo = parent;
+        this.currentTask.pendingDefers = savedDefers;
+        this.currentTask.stringifyDepth = savedStringifyDepth;
+        this.currentTask.tryDepth = savedTryDepth;
+        this.currentTask.currentCo = parent;
         if (parent != nil) parent.state = "running";
         if (co.host.status() == "dead") {
             co.state = "dead";
@@ -5021,8 +4972,8 @@ class Interpreter {
         // A global may be rebound at any time, so the name must still hold
         // the running function. List membership compares the two values
         // directly, which is the identity test native's own guard makes.
-        if (!this.globals.values.has(fn.name)) return nil;
-        if (!(this.globals.values[fn.name] in [fn])) return nil;
+        if (!this.currentTask.worker.globals.values.has(fn.name)) return nil;
+        if (!(this.currentTask.worker.globals.values[fn.name] in [fn])) return nil;
         return cand[2];
     }
 
@@ -5060,11 +5011,11 @@ class Interpreter {
     }
 
     execTry(tryBlock, catchVar, catchBlock, env) {
-        this.tryDepth = this.tryDepth + 1;
+        this.currentTask.tryDepth = this.currentTask.tryDepth + 1;
         this.execStmt(tryBlock, env);
-        this.tryDepth = this.tryDepth - 1;
+        this.currentTask.tryDepth = this.currentTask.tryDepth - 1;
         if (this.throwFlag) {
-            if (this.overflowDeferNest == 0) this.overflowUnwinding = false;
+            if (this.currentTask.overflowDeferNest == 0) this.currentTask.overflowUnwinding = false;
             this.throwFlag = false;
             var caughtVal = this.thrownValue;
             this.thrownValue = nil;
@@ -5092,14 +5043,14 @@ class Interpreter {
             args.append(arg);
             i = i + 1;
         }
-        if (this.pendingDefers == nil) this.pendingDefers = [];
-        this.pendingDefers.append([callee, args]);
+        if (this.currentTask.pendingDefers == nil) this.currentTask.pendingDefers = [];
+        this.currentTask.pendingDefers.append([callee, args]);
     }
 
     runPendingDefers() {
-        var i = len(this.pendingDefers) - 1;
+        var i = len(this.currentTask.pendingDefers) - 1;
         while (i >= 0) {
-            var defer_item = this.pendingDefers[i];
+            var defer_item = this.currentTask.pendingDefers[i];
             var callee = defer_item[0];
             var args = defer_item[1];
             var tag = loxTag(callee);
@@ -5121,16 +5072,16 @@ class Interpreter {
             var savedValue = this.thrownValue;
             this.throwFlag = false;
             this.thrownValue = nil;
-            this.nativeDepth = this.nativeDepth + 1;
+            this.currentTask.nativeDepth = this.currentTask.nativeDepth + 1;
             callee.call(this, args);
-            this.nativeDepth = this.nativeDepth - 1;
+            this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
             if (!this.throwFlag) {
                 this.throwFlag = savedThrow;
                 this.thrownValue = savedValue;
             }
             i = i - 1;
         }
-        this.pendingDefers = [];
+        this.currentTask.pendingDefers = [];
     }
 
     evalExpr(expr, env) {
@@ -5164,11 +5115,11 @@ class Interpreter {
         if (this.locals.has(id)) {
             return env.getAt(this.locals[id], name);
         }
-        if (!(name in this.globals)) {
+        if (!(name in this.currentTask.worker.globals)) {
             this.setError("UndefinedVariableError", "Undefined variable.", line);
             return nil;
         }
-        return this.globals[name];
+        return this.currentTask.worker.globals[name];
     }
 
     evalVariable(id, name, line, env) {
@@ -5181,7 +5132,7 @@ class Interpreter {
         if (this.locals.has(id)) {
             env.assignAt(this.locals[id], name, val);
         } else {
-            if (!this.globals.envAssign(name, val)) {
+            if (!this.currentTask.worker.globals.envAssign(name, val)) {
                 this.setError("UndefinedVariableError", "Undefined variable.", line);
                 return nil;
             }
@@ -5996,9 +5947,9 @@ class Interpreter {
         if (val == false) return "false";
         if (isLoxStr(val)) return val;
         if (isNumberOrIntValue(val)) return str(val);
-        this.stringifyDepth = this.stringifyDepth + 1;
-        if (this.stringifyDepth > this.maxStringifyDepthSeen) {
-            this.maxStringifyDepthSeen = this.stringifyDepth;
+        this.currentTask.stringifyDepth = this.currentTask.stringifyDepth + 1;
+        if (this.currentTask.stringifyDepth > this.maxStringifyDepthSeen) {
+            this.maxStringifyDepthSeen = this.currentTask.stringifyDepth;
         }
         // Best-effort only, not an architectural guarantee: each nesting
         // level here costs 2 native-VM call frames (this method plus
@@ -6009,7 +5960,7 @@ class Interpreter {
         // native's own "Stack overflow." can win the race before this
         // counter ever reaches 100. 100 catches every ordinary call depth;
         // it cannot catch every case. See docs/reference/bootstrap-stack-depth.md.
-        if (this.stringifyDepth > 100) {
+        if (this.currentTask.stringifyDepth > 100) {
             this.fatalError("Value nesting is too deep.");
             return "...";
         }
@@ -6033,21 +5984,21 @@ class Interpreter {
             // m_stringifyStatus enforces, so a later element's __str__ side
             // effects do not run.
             if (this.throwFlag) {
-                this.stringifyDepth = this.stringifyDepth - 1;
+                this.currentTask.stringifyDepth = this.currentTask.stringifyDepth - 1;
                 return "...";
             }
             var m = this.findDunder(val, "__str__");
             if (m != nil) {
-                this.nativeDepth = this.nativeDepth + 1;
+                this.currentTask.nativeDepth = this.currentTask.nativeDepth + 1;
                 result = m.bind(val).call(this, []);
-                this.nativeDepth = this.nativeDepth - 1;
+                this.currentTask.nativeDepth = this.currentTask.nativeDepth - 1;
                 if (this.throwFlag) {
-                    this.stringifyDepth = this.stringifyDepth - 1;
+                    this.currentTask.stringifyDepth = this.currentTask.stringifyDepth - 1;
                     return "...";
                 }
                 result = this.validateString(result, 0);
                 if (this.throwFlag) {
-                    this.stringifyDepth = this.stringifyDepth - 1;
+                    this.currentTask.stringifyDepth = this.currentTask.stringifyDepth - 1;
                     return "...";
                 }
             } else {
@@ -6056,7 +6007,7 @@ class Interpreter {
         } else {
             result = val.toString();
         }
-        this.stringifyDepth = this.stringifyDepth - 1;
+        this.currentTask.stringifyDepth = this.currentTask.stringifyDepth - 1;
         return result;
     }
 
@@ -6200,7 +6151,7 @@ class Interpreter {
             case Pattern.CtorPat{cname, subpats, named, line, enum_name} => this.matchCtor(cname, enum_name, subpats, named, subject, bindings)
             case Pattern.ListPat{elems, rest_name} => this.matchListPat(elems, rest_name, subject, bindings)
             case Pattern.AtPat{at_name, subpat}    => this.matchAtPat(at_name, subpat, subject, bindings)
-            case Pattern.ClassPat{cname}           => this.isInstanceOfClass(subject, this.globals[cname])
+            case Pattern.ClassPat{cname}           => this.isInstanceOfClass(subject, this.currentTask.worker.globals[cname])
             case Pattern.TagPat{cname, enum_name}  => this.matchTag(cname, enum_name, subject)
         };
     }
@@ -6256,7 +6207,7 @@ class Interpreter {
             return true;
         }
         if (stag == "instance") {
-            if (!this.isInstanceOfClass(subject, this.globals[cname])) return false;
+            if (!this.isInstanceOfClass(subject, this.currentTask.worker.globals[cname])) return false;
             return this.matchClassPat(subpats, subject, bindings);
         }
         return false;
@@ -6430,13 +6381,13 @@ try {
 // program run afterward in the same process -- so this cannot be checked
 // by reading a single example's own output.
 if (interpreter != nil and env("LOXPP_BOOTSTRAP_CHECK_STATE") == "1") {
-    print "__BOOTSTRAP_STATE__ defers=" + str(len(interpreter.pendingDefers)) +
-          " stringifyDepth=" + str(interpreter.stringifyDepth) +
+    print "__BOOTSTRAP_STATE__ defers=" + str(len(interpreter.currentTask.pendingDefers)) +
+          " stringifyDepth=" + str(interpreter.currentTask.stringifyDepth) +
           " returnFlag=" + str(interpreter.returnFlag) +
           " breakFlag=" + str(interpreter.breakFlag) +
           " continueFlag=" + str(interpreter.continueFlag) +
           " throwFlag=" + str(interpreter.throwFlag) +
           " maxStringifyDepthSeen=" + str(interpreter.maxStringifyDepthSeen) +
-          " overflowUnwinding=" + str(interpreter.overflowUnwinding) +
-          " overflowDeferNest=" + str(interpreter.overflowDeferNest);
+          " overflowUnwinding=" + str(interpreter.currentTask.overflowUnwinding) +
+          " overflowDeferNest=" + str(interpreter.currentTask.overflowDeferNest);
 }

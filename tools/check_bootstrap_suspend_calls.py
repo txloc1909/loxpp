@@ -1,32 +1,34 @@
 #!/usr/bin/env python3
 """Checks that the bootstrap interpreter wraps every `suspends` call.
 
-A call of class `suspends` (spec/05-stdlib.md, "Blocking calls") parks its host
-task. The host then runs the other interpreted tasks on its one thread, and
-every one of them overwrites the interpreter's per-task state as it runs:
-`pendingDefers`, `currentTask`, `globals`, `stringifyDepth`, `nativeDepth`,
-`tryDepth`, and `currentCo`. Nothing puts that state back when the parked task
-resumes, because the native call returns into the caller's own Lox frame, not
-into parkTask's caller. So bootstrap/loxpp_interpreter.lox runs every such call
-through Interpreter.saveHostSuspendState/restoreHostSuspendState, and the set of
-calls that take that path is the list in `isSuspendingHostCall`.
+A call of class `suspends` (spec/05-stdlib.md, "Blocking calls") suspends its
+host task where the interpreted task can suspend. The host then runs the other
+interpreted tasks on its one thread, and each of them sets
+`Interpreter.currentTask`, the record that holds all of a task's state, to its
+own task. Where the task cannot suspend (spec/04-semantics.md, "Contexts where
+a task cannot suspend"), the call must block the worker instead. So
+bootstrap/loxpp_interpreter.lox runs every such call through
+Interpreter.callSuspending, which does both: it blocks the worker through
+BlockedCall, or it sets `currentTask` back to the waiting task when the host
+call returns or raises. The set of calls that take that path is the list in
+`isSuspendingHostCall`.
 
 This script holds that list to the spec table, in both directions:
 
-- every `suspends` row is on the list, or carries a reason in EXEMPTIONS here;
+- every `suspends` row is on the list;
 - every name on the list is a `suspends` row, so an entry cannot outlive the
   table row it was written for;
 - no `blocks` row is on the list: a blocking call runs no other task, so it
-  has no per-task state to save.
+  needs no switch back.
 
 It also checks the other half: each class that can dispatch a call of class
 `suspends` must hold its negation guard in its own `call`, as written, so a
 guard that is deleted or that loses its `!` cannot leave a call unwrapped while
-the list still names it. Those classes are `LoxNative` (for `connect`),
-`InterpSocketMethod` and `InterpServerMethod`; a class that cannot dispatch
-such a call, `InterpFileMethod` and `InterpProcessMethod` among them, needs no
-guard. This half is static, so it covers `connect` without a program that makes
-a handshake wait.
+the list still names it. Those classes are `LoxNative` (for `sleep`, `connect`
+and `connect_within`), `InterpSocketMethod` and `InterpServerMethod`; a class
+that cannot dispatch such a call, `InterpFileMethod` and `InterpProcessMethod`
+among them, needs no guard. This half is static, so it covers `connect`
+without a program that makes a handshake wait.
 
 A missing entry is the defect that lost a task's deferred call when the task
 resumed after a socket park (issue #984).
@@ -42,14 +44,6 @@ from pathlib import Path
 from spec_tables import REPO_ROOT, SpecError, code, report, section, spec_path, table
 
 DEFAULT_INTERPRETER = REPO_ROOT / "bootstrap" / "loxpp_interpreter.lox"
-
-# A `suspends` call that the bootstrap does not wrap, with the reason it needs
-# no saved state. `sleep` blocks this one-thread implementation instead of
-# suspending (spec/README.md, Conformance), so no other interpreted task runs
-# while it waits.
-EXEMPTIONS = {
-    "sleep": "blocks this one-thread implementation instead of suspending",
-}
 
 CALL = re.compile(r"^(?:(\w+)\.)?(\w+)\(")
 LIST_FN = re.compile(r"^fun isSuspendingHostCall\(name\) \{\n(.*?)^\}", re.S | re.M)
@@ -101,7 +95,7 @@ def unwrapped_dispatch_sites(text: str) -> list[str]:
         if guard not in method.group(1):
             problems.append(
                 f"class {cls}'s call does not hold the guard {guard!r}, so a call "
-                "it dispatches can park without saving the per-task state"
+                "it dispatches can park without the switch back to its task"
             )
     return problems
 
@@ -135,15 +129,11 @@ def main() -> None:
 
     for name, cls in classes.items():
         if cls == "suspends":
-            if name in EXEMPTIONS:
-                if name in wrapped:
-                    problems.append(
-                        f"{name!r} is exempt from the wrapper list, but the list names it"
-                    )
-            elif name not in wrapped:
+            if name not in wrapped:
                 problems.append(
                     f"{name!r} is a `suspends` call, but isSuspendingHostCall does not "
-                    "name it, so a task that waits in it loses its per-task state"
+                    "name it, so a task that waits in it runs on as another task, or "
+                    "suspends where it must block the worker"
                 )
         elif name in wrapped:
             problems.append(
@@ -157,17 +147,13 @@ def main() -> None:
                 f"isSuspendingHostCall names {name!r}, which has no row in the table"
             )
 
-    for name in EXEMPTIONS:
-        if name not in classes:
-            problems.append(f"the exemption for {name!r} outlived its table row")
-
     problems.extend(unwrapped_dispatch_sites(interpreter_text))
 
     report(
         "check_bootstrap_suspend_calls.py",
         problems,
         f"{len(classes)} blocking calls; every `suspends` call is wrapped "
-        f"({len(wrapped)} wrapped, {len(EXEMPTIONS)} exempt), and all "
+        f"({len(wrapped)} wrapped), and all "
         f"{len(DISPATCH_GUARDS)} dispatch sites hold their guard",
     )
 
