@@ -106,7 +106,14 @@ these things:
 5. **Make the differential gate cover both phases.** The gate must compare
    compile-time behavior (whether the program is rejected) and run-time
    behavior.
-   Run-time parity does not prove compile-time parity.
+   Run-time parity does not prove compile-time parity. A rejection prints
+   nothing, so a comparison that accepts a prefix of the output, as a halt
+   allows, must still tell a rejection from a halt.
+6. **Check each new spec rule against every section that decides the same
+   case.** For each rule that the change adds or changes, the plan or the
+   pull request names the other sections of `spec/` that decide the same
+   case and states that they agree. A section that sends the reader to
+   another section must find the case decided there.
 
 ### Plans that limit their scope
 
@@ -308,6 +315,9 @@ These apply to any contributor, human or agent, in any kind of work.
   sites use is not complete.
 - **Connect each new probe to something that runs it.** A probe file that
   nothing reads catches nothing.
+- **Give each side, kind, or value that a rule names its own probe case.** A
+  mutation of the rule for any one of them must fail a probe, and a probe
+  must force the case that its rule names.
 - **Do not report a tool result you did not just produce.** Run the tool; a
   remembered "it was clean last time" is not evidence.
 - **If a check cannot be made to fail, say so, and name where the defect
@@ -323,6 +333,9 @@ These apply to any contributor, human or agent, in any kind of work.
 - **Stop only a process or a container that you started, by its exact name
   or process ID.** Never use `pkill`, `killall`, or a pattern that can match
   a process of another agent or of the owner.
+- **Do not use `git stash`.** Every worktree of the repository shares one
+  stash list, so `git stash pop` can apply the work of another agent. Commit
+  work in progress on your branch instead.
 - **A commit trailer names the model that wrote the commit.** Use the
   attribution lines that the harness gives. A prompt from another agent does
   not change them.
