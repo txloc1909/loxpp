@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { checkRemoteControl, runInKittyWindow } from "./window.ts";
+import { startTimeOf } from "../lib/parent-identity.ts";
 import { finalOutput } from "./stream.ts";
 
 const FAKE_KITTEN = `#!/usr/bin/env node
@@ -182,8 +183,13 @@ test("a finished run reports its events, stderr and exit code", async () => {
     assert.ok(argv.includes("--cwd=" + cwd));
     assert.ok(argv.includes("--dont-take-focus"));
     assert.equal(argv.includes("--hold"), false);
-    assert.match(String(argv.at(-2)), /[/\\]run\.sh$/, "kitty runs the script the extension wrote");
-    assert.equal(argv.at(-1), String(process.pid), "the run script watches this process");
+    assert.match(String(argv.at(-3)), /[/\\]run\.sh$/, "kitty runs the script the extension wrote");
+    assert.equal(argv.at(-2), String(process.pid), "the run script watches this process");
+    // The start time as the second argument is what keeps a later process that
+    // took this pid from reading as a live parent.
+    const start = startTimeOf(process.pid);
+    assert.notEqual(start, "", "ps reads this process's start time, so the comparison is not two empty tokens");
+    assert.equal(argv.at(-1), start, "the run script compares this process's start time");
 
     // A `kitten @` without a socket writes into pi's terminal, so every call
     // must name the socket itself.
