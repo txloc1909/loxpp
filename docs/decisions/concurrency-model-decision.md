@@ -609,11 +609,12 @@ resume) runs frames with no C++ continuation. *Shared layer:*
 `task.receive()` on an empty mailbox, which is a call of a native, so a
 program with tasks and no `yield` was compiled without resume points.
 *Constraint:* the rule is the property "a compiled frame can be live under a
-suspension": a `YIELD` anywhere, or any name of the global `task`, through
-which alone a program reaches the task natives. A program that names `task`
-runs its main task on the scheduler, as native does. A program that does
-not has one task, so a `yield` outside every coroutine finds no other task
-and continues with `nil`, and its main task needs no driver. *Shared layer:*
+suspension": a reached `YIELD`, or a reached name of the global `task`,
+through which alone a program reaches the task natives (`coroutines.md`,
+"Change record: the mode follows the reached instructions", #1084). A program
+that names `task` runs its main task on the scheduler, as native does. A
+program that does not has one task, so a `yield` outside every coroutine finds
+no other task and continues with `nil`, and its main task needs no driver. *Shared layer:*
 `qbe::needsCoroutineMode` and `qbe::treeUsesTasks`
 (`src/backend/qbe_emitter.h`), the one test that the front end and
 `tools/qbe_emit_program.cpp` call. A new suspend point in the spec's table
