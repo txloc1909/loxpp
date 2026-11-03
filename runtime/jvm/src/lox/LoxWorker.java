@@ -548,7 +548,7 @@ final class LoxWorker {
      */
     static void waitChannel(SelectableChannel channel, int interest,
                             boolean timed, long deadlineNanos) {
-        if (LoxOps.callbackDepthOfChain() == 0) {
+        if (canPark()) {
             current().parkOnChannel(channel, interest, timed, deadlineNanos);
             return;
         }
@@ -566,6 +566,15 @@ final class LoxWorker {
             throw new IllegalStateException("cannot wait for a channel", e);
         }
     }
+
+    /**
+     * True when a wait of the running task parks it. False while a native
+     * callback is on the call chain: then the wait blocks the worker.
+     */
+    static boolean canPark() { return LoxOps.callbackDepthOfChain() == 0; }
+
+    /** The running task of the worker of this thread. */
+    static LoxTask runningTask() { return current().current; }
 
     /**
      * The running task starts a call that can wait for a channel. All waits
@@ -599,9 +608,9 @@ final class LoxWorker {
     }
 
     /**
-     * A close wakes every task parked on {@code channel}, in the order of
-     * their calls. Each joins the back of the run queue now. Call it before
-     * the channel closes.
+     * A close wakes every task parked on {@code channel}: the holder of each
+     * side, in the order in which their calls began to wait. Each joins the
+     * back of the run queue now. Call it before the channel closes.
      */
     static void wakeChannel(SelectableChannel channel) {
         LoxWorker worker = current();
@@ -612,6 +621,28 @@ final class LoxWorker {
             }
             ArrayList<LoxTask> woken = new ArrayList<>();
             worker.poller.cancelChannel(channel, woken);
+            for (LoxTask t : woken) {
+                worker.makeReady(t);
+            }
+        } finally {
+            LOCK.unlock();
+        }
+    }
+
+    /**
+     * Ends the wait of the task parked on {@code channel} for {@code
+     * interest}, if one is: it joins the back of the run queue now, and the
+     * other waits on the channel stay.
+     */
+    static void endWait(SelectableChannel channel, int interest) {
+        LoxWorker worker = current();
+        LOCK.lock();
+        try {
+            if (worker.poller == null) {
+                return;
+            }
+            ArrayList<LoxTask> woken = new ArrayList<>();
+            worker.poller.cancelInterest(channel, interest, woken);
             for (LoxTask t : woken) {
                 worker.makeReady(t);
             }

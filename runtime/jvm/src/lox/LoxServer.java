@@ -16,6 +16,7 @@ import java.nio.channels.SocketChannel;
 public final class LoxServer {
     private ServerSocketChannel server; // null once closed
     private final int boundPort;
+    private final LoxSide acceptSide = new LoxSide("accept side");
 
     private LoxServer(ServerSocketChannel server, int boundPort) {
         this.server = server;
@@ -49,23 +50,32 @@ public final class LoxServer {
     }
 
     public Object accept() {
-        LoxWorker.beginWaitingCall();
-        for (;;) {
-            if (server == null) {
-                throw LoxOps.makeError("SocketClosedError",
-                    "Cannot call 'accept' on a closed server.");
-            }
-            try {
-                SocketChannel peer = server.accept();
-                if (peer != null) {
-                    peer.configureBlocking(false);
-                    return new LoxSocket(peer);
+        checkOpen();
+        acceptSide.enter("accept");
+        try {
+            for (;;) {
+                checkOpen();
+                try {
+                    SocketChannel peer = server.accept();
+                    if (peer != null) {
+                        peer.configureBlocking(false);
+                        return new LoxSocket(peer);
+                    }
+                } catch (IOException e) {
+                    throw LoxOps.makeError("NetworkError",
+                                           "accept(): " + e.getMessage());
                 }
-            } catch (IOException e) {
-                throw LoxOps.makeError("NetworkError",
-                                       "accept(): " + e.getMessage());
+                acceptSide.await(server, SelectionKey.OP_ACCEPT);
             }
-            LoxWorker.waitChannel(server, SelectionKey.OP_ACCEPT);
+        } finally {
+            acceptSide.leave();
+        }
+    }
+
+    private void checkOpen() {
+        if (server == null) {
+            throw LoxOps.makeError("SocketClosedError",
+                "Cannot call 'accept' on a closed server.");
         }
     }
 

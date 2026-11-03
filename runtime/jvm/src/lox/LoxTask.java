@@ -41,14 +41,14 @@ public final class LoxTask {
     // must take its timer away (see LoxWorker.send).
     boolean limitedWait;
 
-    // The frame count and the handler depth of this task while another
-    // task of the worker runs (see LoxWorker.switchTo). A task starts below
-    // its first call, as native's scheduler resumes each task from an empty
-    // frame stack.
     // The number of the first wait of the call that the task is in (see
     // LoxPoller.addFd); 0 before the first wait of a call.
     long waitSeq;
 
+    // The frame count and the handler depth of this task while another
+    // task of the worker runs (see LoxWorker.switchTo). A task starts below
+    // its first call, as native's scheduler resumes each task from an empty
+    // frame stack.
     int savedFrameCount;
     int savedHandlerDepth;
 
