@@ -1,0 +1,33 @@
+// The rules for a "_" in a pattern head, each tested below
+// (spec/02-syntax.md, armPat and subPat; issue #762):
+//
+// 1. After "E.", "_" is a constructor name, so `E._` alone tests the tag.
+// 2. A "_" followed by "(" or "{" is a pattern head, not the wildcard, so
+//    `E._(y)` and `E._{x}` bind fields.
+// 3. A "_" followed by none of "(", "{" and "." is the wildcard.
+//
+// An enum named "_" is not in this probe's set: `_.A(y)` is rejected on every
+// consumer today, and issue #1076 tracks that defect.
+enum E { _(x) B }
+
+print match E._(7) {
+    case p @ E._(y) => str(y) + "/" + str(match p { case E._(z) => z case E.B => 0 })
+    case _ => "wild"
+};
+print match E._(3) {
+    case p @ E._{x} => str(x) + "/" + str(match p { case E._(z) => z case E.B => 0 })
+    case _ => "wild"
+};
+print match E._(5) {
+    case p @ E._ => "tag " + str(match p { case E._(z) => z case E.B => 0 })
+    case _ => "wild"
+};
+print match E.B() { case p @ E._(y) => str(y) case _ => "other" };
+print match E.B() { case p @ E._ => "tag" case _ => "other" };
+
+// STATUS: ok
+// CHECK: 7/7
+// CHECK: 3/3
+// CHECK: tag 5
+// CHECK: other
+// CHECK: other
