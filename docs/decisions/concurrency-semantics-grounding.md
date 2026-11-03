@@ -1,8 +1,9 @@
 # Ground the concurrency semantics before more concurrent work
 
 **Status:** accepted. The owner decided D1 to D4 on 2026-11-03. The pull
-request that adds this file records the approval.
-**Tracking:** the mission issue opens when this file is on `main`.
+request that adds this file records the approval. Mission #1058 shipped this
+decision on 2026-11-03: see "Shipped".
+**Tracking:** #1058.
 
 ## Owner decisions
 
@@ -84,7 +85,8 @@ of class `suspends` must let the other tasks of its worker run. So:
   implementation from the rule of `suspends` calls. The definition of a
   portable program loses the same clause.
 - `sleep` suspends in the bootstrap. `blockingSleep` stays only for the
-  contexts where a task cannot suspend.
+  contexts where a task cannot suspend. After N6 (PR #1082), `BlockedCall`
+  does this for `sleep` and for every other call of class `suspends`.
 - Each `NOT-BINDING: bootstrap` line that is about scheduling goes. The
   bootstrap lists the probes that it does not pass yet in its expected-failure
   file.
@@ -94,14 +96,14 @@ of class `suspends` must let the other tasks of its worker run. So:
 Yes. This question does not wait for the spec text, because D4 fixes the set of
 operations that the machine needs:
 
-| Operation | Lox++ construct | In `bootstrap/loxpp_interpreter.lox` today |
-|---|---|---|
-| Suspend a computation at any call depth and resume it | a host task, a coroutine | each interpreted task is a host task |
-| A first-in, first-out run queue | List | yes |
-| A mailbox, and a wake when a message arrives | List and a host `task.send` | `taskSend`, `awaitWake` |
-| Wait for any of many events, in a defined order | one host task per pending wait | Socket calls park through `callSuspending`. `SelectTimer` is the limit of a receive |
-| Block the worker | a host call where the host cannot suspend | `BlockedCall`, `BlockingSleeper` |
-| Workers that share nothing | one host thread for all of them | yes |
+| Operation | Lox++ construct | In `bootstrap/loxpp_interpreter.lox` before N6 | In `bootstrap/loxpp_interpreter.lox` after N6 (PR #1082) |
+|---|---|---|---|
+| Suspend a computation at any call depth and resume it | a host task, a coroutine | each interpreted task is a host task | the same. All the state of a task is in its record, `InterpTask`, so a park copies nothing |
+| A first-in, first-out run queue | List | yes | the host run queue: each interpreted task is a host task |
+| A mailbox, and a wake when a message arrives | List and a host `task.send` | `taskSend`, `awaitWake` | `taskSend` appends to the mailbox of the `InterpTask` and sends one wake to its host task. A plain receive waits in a host `task.receive()` |
+| Wait for any of many events, in a defined order | one host task per pending wait | Socket calls park through `callSuspending`. `SelectTimer` is the limit of a receive | `sleep`, `connect` and the Socket and Server calls park through `callSuspending`. A receive with a limit or a condition is the host `task.receive_where_within` or `task.receive_where`, with `ReceiveSelection.test` as the host `want`. No relay host task is between two waits |
+| Block the worker | a host call where the host cannot suspend | `BlockedCall`, `BlockingSleeper` | `BlockedCall`: the host call runs inside a host `__str__`, where the host cannot suspend. `sleep` blocks there too |
+| Workers that share nothing | one host thread for all of them | yes | the same |
 
 Two limits are constraints on the bootstrap work:
 
@@ -110,6 +112,8 @@ Two limits are constraints on the bootstrap work:
   defined, so the order of the interpreted tasks follows from it. This is
   true only if the mapping adds no step that can change the order. The extra
   send of `SelectTimer` is such a step, and the bootstrap work checks it.
+  N6 (PR #1082) removed `SelectTimer`; probe 366 fails when a relay host task
+  takes its place.
 - Guest workers on host workers that run at the same time are not needed.
   They are possible, because a guest message holds only values that can be
   written as host messages.
@@ -226,3 +230,114 @@ so the gate shows the gap and turns green with the last consumer.
 The work after this mission (invariant tests, the cleanup of weak tests, and
 the refactor of the runtimes) is filed as issues when the tracking issue
 opens.
+
+## Shipped
+
+Mission #1058 ran this decision as a DAG of seven nodes, one pull request per
+node. The nodes merged from 2026-11-02 to 2026-11-03. The retrospective is
+`docs/records/concurrency-semantics-grounding-retro.md`.
+
+| Node | Issue | Pull request | What shipped |
+|---|---|---|---|
+| N1 | #1059 | #1069 | Comments give worker parallelism, not scheduling, as the reason for a rule of one host thread |
+| N2 | #1060 | #1070 | The Task Machine in `spec/04-semantics.md` (task states, worker states, moves, per-task state, sides), with `tools/check_task_machine.py`; the D1 and D2 text; Sides rules 1 to 6 and `BusyError`; probes 347 to 365; the expected-failure lists |
+| N3 | #1061 | #1077 | Native: one waiting call per side, the holder in `ObjSocket` and `ObjServer`, closed before busy. The writer queue and the multi-waiter wake are removed |
+| N4 | #1062 | #1079 | JVM: `LoxSide` for each side, closed before busy, and a `close_write()` that wakes a waiting writer at the call. The multi-waiter path of `LoxPoller` is removed |
+| N6 | #1064 | #1082 | Bootstrap: `sleep` suspends; one record per task (`InterpTask`); `SelectTimer` and `BlockingSleeper` are removed; D3 is delegated to the host, with an argument rule by rule; probe 366 |
+| N5 | #1063 | #1083 | QBE: an unreached suspend point gets no resume state (#1048); probe 367 |
+| N7 | #1065 | this change | The differential gate tells a rejection from a halt; probe 368 (Sides rule 6 on the write side, #1080); the close of the mission |
+
+Every expected-failure list under `tools/spec-probe-xfail/` is empty at close:
+the directory holds only `.gitkeep`.
+
+### Rulings during the mission
+
+| Ruling | Issue |
+|---|---|
+| A call holds its side from its first wait until it returns or raises, also while its task is ready after the wait ended (owner decision) | #1060 |
+| Sides rule 6: a closed side fails as a closed value, also while a woken call still holds it | #1060 |
+| Sides rule 2 wins over the rule of contexts where a task cannot suspend: such a call on a held side raises `BusyError` | #1060 |
+| A close by a task of the same worker ends the wait at the close, as a send on the same worker delivers at the send | #1060 |
+| A message from another worker is an event outside the worker; its place among the waits seen at the same point is not defined | #1060 |
+| `close()` ends the wait on each side of its value; `close_write()` ends only the wait on the write side | #1060 |
+| The bootstrap may delegate D3 to the host, with an argument for each rule and a probe or a check where the mapping could break a rule | #1064 |
+| N7 takes #1080 and the JVM order question of the review of #1082 | #1065 |
+
+### The order of a passed limit and a message on one worker
+
+The review of #1082 found that native and the JVM order two tasks
+differently. Program: task A waits in `task.receive_where_within(want, 0.1)`
+and task B in `task.receive_within(0.1)`. The main task computes for 0.3 s
+with no suspend point, so both limits pass. Then it sends A a message that
+`want` does not select, and it sends B a message. Native prints B first; the
+JVM prints A first. With a print in `want`, native shows that A runs first,
+tests the new message, and waits again; the worker then sees A's limit after
+B ran.
+
+This order is not bound. Both sends make `message` moves at the send, so A
+joins the run queue before B on both. A then runs, and its message is not
+selected. The Task Machine says that a receive with a condition that finds no
+selected message makes the `receive` move again, with the start of its limit
+kept. Scheduling says that a worker sees a limit that has passed at points
+that the implementation chooses. The JVM sees A's limit when A tests its
+mailbox; native sees it later. Both are points that the implementation may
+choose, so no probe binds this order. On the JVM gate of this change, no
+probe diverges from native.
+
+### The differential gate
+
+`tools/diff_runtimes.py` compares each consumer with native in two phases:
+whether the program is rejected, and what it does when it runs. CI runs it
+over `test/translation-probes/` for the JVM ("JVM differential suite -
+probes"), for QBE (`tools/check_qbe_probes.sh`, "Check QBE probes (S7)"), and
+for the bootstrap ("Bootstrap differential suite - spec probes"). The mission
+probes are 260, 277, 279, 282, 323, 325 and 347 to 368.
+
+When native halts, the gate accepted any other stdout that is a prefix of
+native's. An empty stdout is a prefix of every stdout, so a consumer that
+rejected a halting program matched. A mutation of the bootstrap parser that
+rejects `for`-in showed this on probe 282 (`MATCH (halt)`). For a spec probe
+with `STATUS: error`, the other runner must now print the CHECK lines too.
+`tools/check_diff_runtimes_phases.py` (ctest `DiffRuntimesPhases`) checks
+both phases with stub runners. The gap stays for a halting program that is
+not a spec probe (#1087).
+
+The gates on the release build of this change, with no expected-failure
+list:
+
+| Consumer | `check_spec_probes.py` | `diff_runtimes.py` against native |
+|---|---|---|
+| Native | 293 pass, 0 fail | — |
+| JVM | 293 pass, 0 fail | 396 matched, 0 diverged |
+| QBE | 293 pass, 0 fail | 372 matched, 0 diverged (`test/translation-probes/`) |
+| Bootstrap | 291 pass, 0 fail, 2 exempt | 291 matched, 0 diverged, 2 exempt |
+
+### Bug classes that the mission found
+
+The four classes under "Constraints from named bug classes" bound every node.
+The reviews found the classes below. The reviews did not name them as classes, so they were not
+written here during the mission (rule 4 of "Plans for a language change").
+
+| Class | Found in | Layer | Constraint |
+|---|---|---|---|
+| The spec decides one case in two ways | #1070, findings F2, F3 and F6 | The spec text | Each new rule is checked against every section that decides the same case |
+| A check script passes when one row of its table is removed | #1070, finding F1 | The table check scripts | A script pins the names of each table in both directions and fails on a removed row |
+| A probe passes on an implementation that breaks the rule it is for | #1070, finding F5 (probe 358) | The shared probes | A probe forces the case that its rule names; a mutation of that rule fails it |
+| A rule that names several sides has a probe for only some of them | #1079 (rule 6 on the write side) | The shared probes | A rule gets a probe line for each side or value that it names (probe 368) |
+| A run-time comparison hides a compile-time rejection | #1065 (this change) | `tools/diff_runtimes.py` | A comparison that accepts a prefix of the output must also tell a rejection from a halt (#1087 for programs that are not spec probes) |
+
+### Follow-ups
+
+| Issue | Subject | Origin |
+|---|---|---|
+| #1066 | Invariant tests for the concurrent machine | Decision, work after the mission |
+| #1067 | Remove the weak tests of the concurrent runtime | Decision, work after the mission |
+| #1068 | Refactor the runtimes to read like the concurrent machine | Decision, work after the mission |
+| #1078 | An abandoned task holds no side of a Socket or a Server | Review of #1077 |
+| #1081 | JVM `LoxPoller.cancelInterest` key cleanup has no test that can fail | Review of #1079 |
+| #1084 | QBE: decide coroutine mode from reached instructions only | Review of #1083 |
+| #1085 | The Socket methods text names only `close()` as a call that wakes a waiting task | Review of #1070, round 3 |
+| #1086 | No program runs a limited receive on the JVM-hosted and QBE-hosted bootstraps | Review of #1082 |
+| #1087 | `diff_runtimes.py` cannot tell a rejection from a halt for a program that is not a spec probe | This change |
+
+#1080 closes with this change.
