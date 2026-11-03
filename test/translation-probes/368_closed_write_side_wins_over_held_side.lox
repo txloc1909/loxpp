@@ -1,0 +1,68 @@
+// A call on a closed write side fails as a call on a closed Socket does, also
+// while a call of another task still holds that side (spec/04-semantics.md,
+// The Task Machine, Sides, rule 6). `w1` and `w2` each call write() with a
+// string larger than the buffers of a connection while nothing reads the
+// peer, so each call waits and holds the write side of its Socket. `closer`
+// calls close_write() on `a` and close() on `b`, which ends both waits. The
+// woken calls still hold their sides, because their tasks have not run yet.
+// `closer` then calls write() on `a` and writeline() on `b` itself. Both raise
+// SocketClosedError, not BusyError. The woken calls then raise
+// SocketClosedError in their own tasks, in the order in which they began to
+// wait. The probe assumes, as probe 266 does, that the buffers of a
+// connection on the local host hold less than 32 MB together.
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: closer write after close_write: SocketClosedError
+// CHECK: closer writeline after close: SocketClosedError
+// CHECK: w1: SocketClosedError
+// CHECK: w2: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peerA = connect("127.0.0.1", srv.port());
+var a = srv.accept();
+var peerB = connect("127.0.0.1", srv.port());
+var b = srv.accept();
+var me = task.self();
+var big = "x";
+for (var i = 0; i < 25; i = i + 1) big = big + big;
+fun w1() {
+    try {
+        a.write(big);
+        task.send(me, "w1: no fault");
+    } catch (e) {
+        task.send(me, "w1: " + e.kind);
+    }
+}
+fun w2() {
+    try {
+        b.write(big);
+        task.send(me, "w2: no fault");
+    } catch (e) {
+        task.send(me, "w2: " + e.kind);
+    }
+}
+fun closer() {
+    a.close_write();
+    b.close();
+    try {
+        a.write("y");
+        task.send(me, "closer write after close_write: no fault");
+    } catch (e) {
+        task.send(me, "closer write after close_write: " + e.kind);
+    }
+    try {
+        b.writeline("y");
+        task.send(me, "closer writeline after close: no fault");
+    } catch (e) {
+        task.send(me, "closer writeline after close: " + e.kind);
+    }
+}
+task.spawn(w1);
+task.spawn(w2);
+task.spawn(closer);
+for (var i = 0; i < 4; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
