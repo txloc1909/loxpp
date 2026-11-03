@@ -32,9 +32,10 @@ final class LoxSide {
      */
     void enter(String method) {
         if (holder != null) {
-            throw LoxOps.makeError(
-                "BusyError", "Cannot call '" + method + "': a call of " +
-                                 "another task waits on the " + name + ".");
+            throw LoxOps.makeError("BusyError",
+                                   "Cannot call '" + method + "': a call of " +
+                                       "another task waits on the " + name +
+                                       ".");
         }
         LoxWorker.beginWaitingCall();
     }
