@@ -1846,7 +1846,7 @@ a call can wait on. The sections after it use these terms.
 | `wait` | a call of class suspends whose wait is not over at the call, where the task can suspend | `running` | `waiting` | — |
 | `wait-end` | the wait of a `waiting` task ends: its event happens, a task closes the value it waits on, or its limit passes | `waiting` | `ready` | joins the back |
 | `end` | the function of the task returns, or the task ends by an uncaught throw or a halting fault | `running` | `ended` | — |
-| `abandon` | the program ends | `ready`, `receiving`, `waiting` | `ended` | leaves |
+| `abandon` | the program ends, or, in a session, the line that spawned the task ends (see [A Session](#a-session)) | `ready`, `receiving`, `waiting` | `ended` | leaves |
 
 A receive with a condition that the task runs again after a `message` move
 tests the new messages. If none is selected, it makes the `receive` move
@@ -1894,7 +1894,9 @@ A side holds at most one call:
 
 1. A call **holds** its side from its first wait until it returns or raises.
    This includes the time after its wait ends, while its task is `ready`. A
-   call that does not wait never holds its side.
+   call that does not wait never holds its side. A call also stops holding
+   its side when its task makes the `end` or the `abandon` move: an `ended`
+   task never runs again, so its call never returns.
 2. A call on a side that a call of another task holds raises `BusyError`,
    unless rule 6 applies. It raises at the call, before it reads, writes, or
    accepts anything, also when it could return at once.
@@ -2088,8 +2090,10 @@ run. In a session the end of a line is not the end of the program, and the
 main task does not end with it: see [A Session](#a-session).
 
 When the program ends, a task that waits in a call of class suspends is
-abandoned like any other task. The runtime closes the Sockets and Servers that
-such a task waits on, because no deferred call will.
+abandoned like any other task. In a session, the end of a line abandons such a
+task too, when `task.spawn` made it on the main worker (see [A
+Session](#a-session), item 4). In both cases the runtime closes the Sockets
+and Servers that such a task waits on, because no deferred call will.
 
 A call of `exit(code)` in any task ends the program at once, with that exit
 code. A throw that no `try` statement in its task catches is uncaught: it
