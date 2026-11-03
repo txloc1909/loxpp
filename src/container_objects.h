@@ -95,15 +95,12 @@ struct ObjSocket : public Obj {
     ObjClass* klass; // shared Socket class; GC-tracked
     int fd{-1};      // raw descriptor; -1 when closed
     bool writeClosed{false};
-    // The tasks parked in write() or writeline() on this socket, in the order
-    // their calls began. Only the first one sends, so the bytes of one call
-    // are never split by the bytes of another. An entry can be stale (its task
-    // no longer waits here); the owner of the queue checks before it uses one.
-    // GC-tracked, so a stale entry never dangles. The queue is allocated at
-    // the first park: a Socket without the queue is about 480 bytes smaller,
-    // and most sockets never wait to write. Access it only through the members
-    // below.
-    std::unique_ptr<std::deque<ObjTask*>> writers;
+    // The task whose call holds each side (spec/04-semantics.md, The Task
+    // Machine, Sides), or null. The pointer only finds the task: the task's
+    // waiting call (ObjTask::io) says whether it still holds the side, so a
+    // pointer that outlives the hold is never read as a hold. GC-tracked.
+    ObjTask* readHolder{nullptr};
+    ObjTask* writeHolder{nullptr};
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
     std::string inbuf;
@@ -118,34 +115,6 @@ struct ObjSocket : public Obj {
 
     explicit ObjSocket(ObjClass* k) : Obj(ObjType::SOCKET), klass(k) {}
     ~ObjSocket() override;
-
-    bool hasWriters() const { return writers && !writers->empty(); }
-    // True once the first park allocated the queue; a test reads it.
-    bool hasWriterQueue() const { return writers != nullptr; }
-    ObjTask* frontWriter() const { return writers->front(); }
-    void popWriter() { writers->pop_front(); }
-    void pushWriter(ObjTask* task) {
-        if (!writers) {
-            writers = std::make_unique<std::deque<ObjTask*>>();
-        }
-        writers->push_back(task);
-    }
-    void clearWriters() { writers.reset(); }
-    std::deque<ObjTask*> takeWriters() {
-        std::deque<ObjTask*> out;
-        if (writers) {
-            out.swap(*writers);
-        }
-        return out;
-    }
-    template <typename F>
-    void forEachWriter(F&& f) const {
-        if (writers) {
-            for (ObjTask* t : *writers) {
-                f(t);
-            }
-        }
-    }
 };
 
 inline bool isObjSocket(Obj* o) { return isObjType(o, ObjType::SOCKET); }
@@ -161,6 +130,8 @@ struct ObjServer : public Obj {
     ObjClass* klass; // shared Server class; GC-tracked
     int fd{-1};      // listening descriptor; -1 when closed
     int boundPort{0};
+    // The task whose call holds the accept side, as ObjSocket::readHolder.
+    ObjTask* acceptHolder{nullptr};
 
     explicit ObjServer(ObjClass* k) : Obj(ObjType::SERVER), klass(k) {}
     ~ObjServer() override;
@@ -494,12 +465,12 @@ enum class ParkReason : std::uint8_t {
 
 // A network call that waits for its descriptor and goes on when the descriptor
 // is ready. The state of the call lives here and not on a C++ stack, because a
-// task that waits has no stack: the task owns the record while it is PARKED.
-// The record holds only what the call alone owns or what never changes: the
-// operation, the target, the method name, the count, and the bytes that
-// read_bytes took out of the socket already. It holds no offset into the
-// socket's input buffer, because another task can change that buffer while
-// this call waits.
+// task that waits has no stack: the task owns the record from the first wait
+// of the call until the task runs again. The record holds what the call alone
+// owns or what never changes: the operation, the target, the method name, the
+// count, and the bytes that read_bytes took out of the socket already. The
+// state of the socket's input buffer, which outlives the call, stays in the
+// socket.
 enum class IoOp : std::uint8_t {
     NONE,
     ACCEPT,
@@ -529,9 +500,9 @@ struct ParkedIo {
     std::string buf;
     // write and writeline: the program's String (GC-tracked through the task,
     // never copied), whether a newline follows it, and how many of its bytes,
-    // newline included, the descriptor has taken. Only the socket's writer
-    // queue moves the offset, and the String is immutable, so the offset stays
-    // valid while the call waits.
+    // newline included, the descriptor has taken. Only this call moves the
+    // offset, and the String is immutable, so the offset stays valid while the
+    // call waits.
     Obj* text{nullptr};
     bool newline{false};
     std::size_t offset{0};
@@ -571,7 +542,10 @@ struct ObjTask : public Obj {
     // The value of the parked call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
-    // The network call that the task waits in, while it is PARKED on one.
+    // The network call that the task waits in. It is set at the first wait
+    // of the call and kept until the task runs again, so it also names the
+    // call while the task is READY after its wait ended: such a call still
+    // holds its side (spec/04-semantics.md, The Task Machine, Sides, rule 1).
     ParkedIo io;
     // The state of a receive_within, receive_where, or receive_where_within
     // call (spec/04-semantics.md, task.receive_within). A task that waits in

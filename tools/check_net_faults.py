@@ -105,10 +105,10 @@ NATIVE_SITES = {
     ("step", CLOSED): 2,
     ("runIo", NETWORK): 2,
     ("closeDescriptor", CLOSED): 1,
-    ("checkSocketRead", CLOSED): 1,
+    ("openSocket", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
+    ("sideFree", BUSY): 1,
     ("stepWrite", NETWORK): 1,
-    ("runWrite", NETWORK): 1,
     ("socketCloseWriteNative", CLOSED): 1,
     ("serverAcceptNative", CLOSED): 1,
 }

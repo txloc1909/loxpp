@@ -1174,7 +1174,6 @@ void Runtime::releasePark(ObjTask* task) {
     }
     task->parkReason = ParkReason::NONE;
     task->parkToken = 0;
-    task->io = ParkedIo{};
 }
 
 void Runtime::rearmPark(ObjTask* task, int fd) {
@@ -1549,6 +1548,9 @@ bool Runtime::resumeTask(ObjTask* task) {
             argCount = 1;
         }
     } else {
+        // The network call that the task waited in returns or raises now, so
+        // from here on it holds no side.
+        task->io = ParkedIo{};
         Value received = from<Nil>(Nil{});
         if (!task->mailbox.empty() && task->receiving) {
             received = task->mailbox.front();
@@ -1638,6 +1640,7 @@ void Runtime::endTasks() {
             // The main task of a session survives the line, but its wait does
             // not: nothing would end it once m_parkedTasks is cleared below.
             releasePark(task);
+            task->io = ParkedIo{};
             task->pendingValue = Value{};
             task->hasPendingFault = false;
         }

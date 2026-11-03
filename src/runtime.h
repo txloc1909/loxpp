@@ -1038,7 +1038,8 @@ class Runtime {
     // unwound.
     void parkTask(ObjTask* task);
     // Cancels the wait of a parked task and erases it from the parked set.
-    // No-op for a task that is not parked.
+    // No-op for a task that is not parked. It keeps ObjTask::io: the call
+    // holds its side until the task runs again (resumeTask clears it).
     void releasePark(ObjTask* task);
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.

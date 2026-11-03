@@ -3,11 +3,14 @@
 // The spec probes 261 to 265, 278, 280, 281, 284 and 285 pin what a program
 // sees. These tests look at what a probe cannot see well: a call that waits
 // many times, the bytes at each chunk boundary, the level-triggered re-arm, a
-// close while two tasks wait, a descriptor number that comes back, the roots
-// of a parked call, a signal in the blocking wait, and the descriptor that the
-// end of the program closes. A feeder task writes in pieces with a sleep
-// between them, on the same worker as the reader, so every piece makes the
-// reader park again. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
+// close while a reader and a writer wait, a descriptor number that comes back,
+// the roots of a parked call, a signal in the blocking wait, and the
+// descriptor that the end of the program closes. The probes 347 to 365 pin the
+// rule of one call per side; the tests here look at its parts that a probe
+// cannot reach, such as a failed registration and the roots of a holder. A
+// feeder task writes in pieces with a sleep between them, on the same worker as
+// the reader, so every piece makes the reader park again. The `_gc` twin runs
+// the suite under LOXPP_STRESS_GC.
 
 #include "container_objects.h"
 #include "poller.h"
@@ -238,48 +241,27 @@ TEST_F(SocketParkTest, ACallWithNoWaitDoesNotPark) {
     EXPECT_FALSE(vm.runtime().hasPoller());
 }
 
-// Level-triggered re-arm: two tasks wait on one socket. One chunk of data
-// wakes both; the first takes it, and the second finds nothing and waits
-// again until the next chunk comes.
-TEST_F(SocketParkTest, ASecondReaderWaitsAgainWhenTheFirstTookTheData) {
-    VM vm;
-    ASSERT_EQ(run(vm, R"(
-        var a = "none"; var b = "none";
-        fun r1() { a = conn.readline(); task.send(me, 1); }
-        fun r2() { b = conn.readline(); task.send(me, 1); }
-        fun feeder() {
-            peer.writeline("one"); sleep(0.05);
-            peer.writeline("two"); task.send(me, 1);
-        }
-        task.spawn(r1);
-        task.spawn(r2);
-        task.spawn(feeder);
-        task.receive(); task.receive(); task.receive();
-    )"),
-              InterpretResult::OK);
-    EXPECT_EQ(globalString(vm, "a"), "one");
-    EXPECT_EQ(globalString(vm, "b"), "two");
-}
-
-// A close while two tasks wait on the socket fails both calls with
+// A close while tasks wait on the sockets fails each call with
 // SocketClosedError, and the message names each call.
 TEST_F(SocketParkTest, ACloseFailsEveryParkedCallWithItsOwnName) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
+        var peer2 = connect("127.0.0.1", srv.port());
+        var conn2 = srv.accept();
         var a = "none"; var b = "none"; var c = "none";
         fun r1() {
             try { conn.readline(); } catch (e) { a = e.kind + ": " + e.message; }
             task.send(me, 1);
         }
         fun r2() {
-            try { conn.read_bytes(3); } catch (e) { b = e.kind + ": " + e.message; }
+            try { conn2.read_bytes(3); } catch (e) { b = e.kind + ": " + e.message; }
             task.send(me, 1);
         }
         fun r3() {
             try { srv.accept(); srv.accept(); } catch (e) { c = e.kind + ": " + e.message; }
             task.send(me, 1);
         }
-        fun closer() { conn.close(); srv.close(); task.send(me, 1); }
+        fun closer() { conn.close(); conn2.close(); srv.close(); task.send(me, 1); }
         task.spawn(r1);
         task.spawn(r2);
         task.spawn(r3);
@@ -417,70 +399,29 @@ TEST_F(SocketParkTest, AReadlineScansEachByteOnce) {
     EXPECT_LE(sock->scannedBytes, 2u * 4001u);
 }
 
-// Two readers wait on one socket and a partial line is already in the buffer.
-// The first takes the line when its end arrives; the second must then find the
+// A readline that waited on a partial line, and the readline after it. The
+// first takes its line when its end arrives; the second must then find the
 // next newline in the bytes that are in the buffer now, and not wait for more
-// data because an offset from before the park points past it.
-TEST_F(SocketParkTest, ASecondReaderScansTheBufferAsItIsNow) {
+// data or return a line with a newline inside it because an offset from
+// before the park points past the first line.
+TEST_F(SocketParkTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
-        var l1 = "none"; var l2 = "none"; var l2Early = "none";
-        fun r1() { l1 = conn.readline(); task.send(me, 1); }
-        fun r2() { l2 = conn.readline(); task.send(me, 1); }
+        var l1 = "none"; var l2 = "none"; var l3 = "none";
+        fun r() {
+            l1 = conn.readline(); l2 = conn.readline(); l3 = conn.readline();
+            task.send(me, 1);
+        }
         peer.write("xxxxx");
-        task.spawn(r1);
-        task.spawn(r2);
-        sleep(0.1);
-        peer.write("\nyy\nzz");
-        sleep(0.2);
-        l2Early = l2;
-        peer.write("\n");
-        task.receive(); task.receive();
-    )"),
-              InterpretResult::OK);
-    EXPECT_EQ(globalString(vm, "l1"), "xxxxx");
-    EXPECT_EQ(globalString(vm, "l2Early"), "yy");
-    EXPECT_EQ(globalString(vm, "l2"), "yy");
-}
-
-// As above, but the data after the first line holds a second newline already.
-// An offset from before the park that points past the first one would return
-// a line with a newline inside it.
-TEST_F(SocketParkTest, ASecondReaderNeverReturnsALineWithANewline) {
-    VM vm;
-    ASSERT_EQ(run(vm, R"(
-        var l1 = "none"; var l2 = "none";
-        fun r1() { l1 = conn.readline(); task.send(me, 1); }
-        fun r2() { l2 = conn.readline(); task.send(me, 1); }
-        peer.write("xxxxx");
-        task.spawn(r1);
-        task.spawn(r2);
+        task.spawn(r);
         sleep(0.1);
         peer.write("\nyy\nzz\n");
-        task.receive(); task.receive();
+        task.receive();
     )"),
               InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "l1"), "xxxxx");
     EXPECT_EQ(globalString(vm, "l2"), "yy");
-}
-
-// A close fails the parked calls in the order in which they began to wait,
-// and the failed tasks join the run queue in that order.
-TEST_F(SocketParkTest, ACloseFailsParkedCallsInTheOrderTheyBeganToWait) {
-    VM vm;
-    ASSERT_EQ(run(vm, R"(
-        var log = "";
-        fun a() { try { conn.readline(); } catch (e) { log = log + "a"; } task.send(me, 1); }
-        fun b() { try { conn.read_bytes(2); } catch (e) { log = log + "b"; } task.send(me, 1); }
-        fun c() { try { conn.read(); } catch (e) { log = log + "c"; } task.send(me, 1); }
-        fun d() { try { conn.readlines(); } catch (e) { log = log + "d"; } task.send(me, 1); }
-        task.spawn(a); task.spawn(b); task.spawn(c); task.spawn(d);
-        var y = yield nil;
-        conn.close();
-        task.receive(); task.receive(); task.receive(); task.receive();
-    )"),
-              InterpretResult::OK);
-    EXPECT_EQ(globalString(vm, "log"), "abcd");
+    EXPECT_EQ(globalString(vm, "l3"), "zz");
 }
 
 // A call that waits again after a partial chunk began to wait at its first
@@ -954,14 +895,16 @@ TEST_F(SocketParkTest, ALargeWritelineKeepsItsNewlineAtTheEnd) {
     EXPECT_EQ(wrong.load(), 0u);
 }
 
-// Two tasks write 4 MiB each to one socket while the peer reads late. The
-// bytes of one call stay together, and the call that began first sends first:
-// the peer sees all of the first text and then all of the second.
-TEST_F(SocketParkTest, TwoParkedWritersDoNotInterleaveAndKeepCallOrder) {
+// A writer in a context where the task cannot suspend, on a write side that
+// a parked writer holds, raises BusyError at the call and sends nothing
+// (spec/04-semantics.md, The Task Machine, Sides, rules 2 and 5). Without the
+// check it would block the worker, and its bytes would follow or split the
+// bytes of the parked call.
+TEST_F(SocketParkTest, ABlockingWriterOnAHeldWriteSideRaisesBusyError) {
     constexpr size_t kHalf = size_t{1} << 22;
     HostListener host;
     std::string seen;
-    seen.reserve(2 * kHalf);
+    seen.reserve(kHalf);
     std::thread peer([&] {
         int fd = host.accept();
         drainHost(fd, 300, 0,
@@ -970,82 +913,9 @@ TEST_F(SocketParkTest, TwoParkedWritersDoNotInterleaveAndKeepCallOrder) {
     });
     VM vm;
     InterpretResult result = vm.interpret(connectToHost(host) + R"(
-        var a = "a"; var b = "b";
+        var a = "a";
         var i = 0;
-        while (i < 22) { a = a + a; b = b + b; i = i + 1; }
-        var me = task.self();
-        fun wa() { c.write(a); task.send(me, 1); }
-        fun wb() { c.write(b); task.send(me, 1); }
-        task.spawn(wa);
-        task.spawn(wb);
-        task.receive(); task.receive();
-        c.close();
-    )");
-    peer.join();
-    ASSERT_EQ(result, InterpretResult::OK);
-    ASSERT_EQ(seen.size(), 2 * kHalf);
-    EXPECT_EQ(seen.find_first_not_of('a'), kHalf);
-    EXPECT_EQ(seen.find_first_not_of('b', kHalf), std::string::npos);
-}
-
-// The second call begins while the first still waits, and the connection has
-// room at that moment because the peer reads in bursts. The second call must
-// still wait for the first: the peer sees all of the first text, then all of
-// the second.
-TEST_F(SocketParkTest, ALateWriterWaitsBehindAParkedWriterEvenWhenThereIsRoom) {
-    constexpr size_t kFirst = size_t{1} << 23;
-    constexpr size_t kSecond = size_t{1} << 20;
-    HostListener host;
-    std::string seen;
-    seen.reserve(kFirst + kSecond);
-    std::thread peer([&] {
-        int fd = host.accept();
-        drainHost(fd, 100, 64 * 1024,
-                  [&](const char* p, size_t n) { seen.append(p, n); });
-        close(fd);
-    });
-    VM vm;
-    InterpretResult result = vm.interpret(connectToHost(host) + R"(
-        var a = "a"; var b = "b";
-        var i = 0;
-        while (i < 23) { a = a + a; i = i + 1; }
-        i = 0;
-        while (i < 20) { b = b + b; i = i + 1; }
-        var me = task.self();
-        fun wa() { c.write(a); task.send(me, 1); }
-        fun wb() { sleep(0.2); c.write(b); task.send(me, 1); }
-        task.spawn(wa);
-        task.spawn(wb);
-        task.receive(); task.receive();
-        c.close();
-    )");
-    peer.join();
-    ASSERT_EQ(result, InterpretResult::OK);
-    ASSERT_EQ(seen.size(), kFirst + kSecond);
-    EXPECT_EQ(seen.find_first_not_of('a'), kFirst);
-    EXPECT_EQ(seen.find_first_not_of('b', kFirst), std::string::npos);
-}
-
-// A writer in a context where the task cannot suspend blocks its worker. It
-// must not send its bytes into the middle of a parked write: it first sends
-// the rest of the call that is ahead of it. After that, no byte of one text
-// is split by the other.
-TEST_F(SocketParkTest, ABlockingWriterSendsAfterTheParkedWriterAhead) {
-    constexpr size_t kHalf = size_t{1} << 22;
-    HostListener host;
-    std::string seen;
-    seen.reserve(2 * kHalf);
-    std::thread peer([&] {
-        int fd = host.accept();
-        drainHost(fd, 300, 0,
-                  [&](const char* p, size_t n) { seen.append(p, n); });
-        close(fd);
-    });
-    VM vm;
-    InterpretResult result = vm.interpret(connectToHost(host) + R"(
-        var a = "a"; var b = "b";
-        var i = 0;
-        while (i < 22) { a = a + a; b = b + b; i = i + 1; }
+        while (i < 22) { a = a + a; i = i + 1; }
         var me = task.self();
         var order = "";
         fun wa() {
@@ -1053,19 +923,22 @@ TEST_F(SocketParkTest, ABlockingWriterSendsAfterTheParkedWriterAhead) {
         }
         task.spawn(wa);
         var y = yield nil;
-        class W { __str__() { c.write(b); order = order + "B"; return "w"; } }
+        class W {
+            __str__() {
+                try { c.write("b"); order = order + "B"; }
+                catch (e) { order = order + e.kind; }
+                return "w";
+            }
+        }
         var s = str(W());
         task.receive();
         c.close();
     )");
     peer.join();
     ASSERT_EQ(result, InterpretResult::OK);
-    ASSERT_EQ(seen.size(), 2 * kHalf);
-    EXPECT_EQ(seen.find_first_not_of('a'), kHalf);
-    EXPECT_EQ(seen.find_first_not_of('b', kHalf), std::string::npos);
-    // The blocking writer sent the text ahead of it first. Its own call ended
-    // first, and the task of the earlier call ran after it.
-    EXPECT_EQ(globalString(vm, "order"), "BA");
+    ASSERT_EQ(seen.size(), kHalf);
+    EXPECT_EQ(seen.find_first_not_of('a'), std::string::npos);
+    EXPECT_EQ(globalString(vm, "order"), "BusyErrorA");
 }
 
 // The write calls in every context where a task cannot suspend block the
@@ -1212,9 +1085,11 @@ TEST_F(SocketParkTest, ACloseEndsAWriteToAPeerThatNeverReads) {
               "Cannot call 'write' on a closed socket.");
 }
 
-// A close fails parked writers in the order their calls began, with the name
-// of each call.
-TEST_F(SocketParkTest, ACloseFailsParkedWritersInCallOrder) {
+// A close ends the wait of the call that holds each side, in the order in
+// which the calls began to wait, with the name of each call. The two waits are
+// on one descriptor, so the order comes from the tokens of the waits and not
+// from the side. A call on a held side meanwhile raises BusyError.
+static std::string closeReaderAndWriter(bool writerFirst) {
     HostListener host;
     std::atomic<bool> release{false};
     std::thread peer([&] {
@@ -1225,27 +1100,43 @@ TEST_F(SocketParkTest, ACloseFailsParkedWritersInCallOrder) {
         close(fd);
     });
     VM vm;
-    InterpretResult result = vm.interpret(connectToHost(host) + R"(
+    InterpretResult result =
+        vm.interpret(connectToHost(host) + "var writerFirst = " +
+                     (writerFirst ? "true" : "false") + ";\n" + R"(
         var big = "x";
         var i = 0;
         while (i < 26) { big = big + big; i = i + 1; }
         var me = task.self();
         var log = "";
-        fun w1() { try { c.write(big); } catch (e) { log = log + "1" + e.message; } task.send(me, 1); }
-        fun w2() { try { c.writeline(big); } catch (e) { log = log + "2" + e.message; } task.send(me, 1); }
-        fun w3() { try { c.write("tail"); } catch (e) { log = log + "3" + e.message; } task.send(me, 1); }
-        task.spawn(w1); task.spawn(w2); task.spawn(w3);
+        fun w() { try { c.writeline(big); } catch (e) { log = log + "w" + e.message; } task.send(me, 1); }
+        fun r() { try { c.readline(); } catch (e) { log = log + "r" + e.message; } task.send(me, 1); }
+        fun busy() {
+            try { c.write("tail"); } catch (e) { log = log + "b" + e.kind; }
+            try { c.read_some(1); } catch (e) { log = log + "b" + e.kind; }
+            task.send(me, 1);
+        }
+        if (writerFirst) { task.spawn(w); task.spawn(r); } else { task.spawn(r); task.spawn(w); }
+        task.spawn(busy);
+        task.receive();
         sleep(0.2);
         c.close();
-        task.receive(); task.receive(); task.receive();
+        task.receive(); task.receive();
     )");
     release = true;
     peer.join();
-    ASSERT_EQ(result, InterpretResult::OK);
-    EXPECT_EQ(globalString(vm, "log"),
-              "1Cannot call 'write' on a closed socket."
-              "2Cannot call 'writeline' on a closed socket."
-              "3Cannot call 'write' on a closed socket.");
+    EXPECT_EQ(result, InterpretResult::OK);
+    return globalString(vm, "log");
+}
+
+TEST_F(SocketParkTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
+    EXPECT_EQ(closeReaderAndWriter(true),
+              "bBusyErrorbBusyError"
+              "wCannot call 'writeline' on a closed socket."
+              "rCannot call 'readline' on a closed socket.");
+    EXPECT_EQ(closeReaderAndWriter(false),
+              "bBusyErrorbBusyError"
+              "rCannot call 'readline' on a closed socket."
+              "wCannot call 'writeline' on a closed socket.");
 }
 
 // close_write while a writer waits: the call fails with SocketClosedError,
@@ -1298,9 +1189,9 @@ TEST_F(SocketParkTest, CloseWriteFailsAParkedWriter) {
 }
 
 // A peer that resets the connection while a writer waits: the call raises
-// NetworkError (EPIPE or ECONNRESET), the other tasks ran meanwhile, and the
-// writer queued behind it fails the same way.
-TEST_F(SocketParkTest, APeerThatResetsFailsParkedWritersWithNetworkError) {
+// NetworkError (EPIPE or ECONNRESET), and the other tasks ran meanwhile. A
+// second writer meanwhile finds the write side held and raises BusyError.
+TEST_F(SocketParkTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1326,7 +1217,7 @@ TEST_F(SocketParkTest, APeerThatResetsFailsParkedWritersWithNetworkError) {
     peer.join();
     ASSERT_EQ(result, InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "k1"), "NetworkError");
-    EXPECT_EQ(globalString(vm, "k2"), "NetworkError");
+    EXPECT_EQ(globalString(vm, "k2"), "BusyError");
     EXPECT_EQ(globalString(vm, "ticks"), "1");
 }
 
@@ -1396,9 +1287,10 @@ TEST_F(SocketParkTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
     EXPECT_FALSE(vm.runtime().hasPoller());
 }
 
-// A zero-length write returns at once, also when a writer is parked ahead of
-// it on a full connection: it has no bytes to order.
-TEST_F(SocketParkTest, AZeroLengthWriteDoesNotWaitBehindAParkedWriter) {
+// A zero-length write on a write side that a parked writer holds raises
+// BusyError, although it could return at once (spec/04-semantics.md, The Task
+// Machine, Sides, rule 2).
+TEST_F(SocketParkTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1415,14 +1307,13 @@ TEST_F(SocketParkTest, AZeroLengthWriteDoesNotWaitBehindAParkedWriter) {
         fun writer() { c.write(big); log = log + "W"; task.send(me, 1); }
         task.spawn(writer);
         var y = yield nil;
-        c.write("");
-        log = log + "Z";
+        try { c.write(""); log = log + "Z"; } catch (e) { log = log + e.kind; }
         task.receive();
         c.close();
     )");
     peer.join();
     ASSERT_EQ(result, InterpretResult::OK);
-    EXPECT_EQ(globalString(vm, "log"), "ZW");
+    EXPECT_EQ(globalString(vm, "log"), "BusyErrorW");
 }
 
 // A write that is not full does not park and builds no poller.
@@ -1584,10 +1475,9 @@ namespace {
 // test runner. Returns the exit code: 0 when the program behaved.
 //
 // The write fills the send buffer and parks. The hook makes the registration
-// of that one park fail, so the task is READY with the error and its entry is
-// still in the writer queue of the socket. The second write calls the pump
-// first. The pump must drop the stale entry, not step it: the park reset the
-// call's state, so a step reads a null String.
+// of that one park fail, so the task is READY with the error, and its call
+// raises when it runs. The call has ended then, so it holds the write side no
+// more: the second write must send its bytes, not raise BusyError.
 int writeWithFailedRegistration() {
     alarm(60);
     HostListener host;
@@ -1656,10 +1546,9 @@ int writeWithFailedRegistration() {
 
 } // namespace
 
-// A park that fails to register leaves its entry in the writer queue. The
-// next write on the socket skips the entry, finishes, and the stream ends with
-// the bytes of that write.
-TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoLiveWriter) {
+// A park that fails to register leaves no holder of the write side. The next
+// write on the socket finishes, and the stream ends with its bytes.
+TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoHolder) {
     fflush(nullptr);
     const pid_t pid = fork();
     ASSERT_GE(pid, 0);
@@ -1675,89 +1564,34 @@ TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoLiveWriter) {
 }
 
 // ---------------------------------------------------------------------------
-// What a closed socket keeps of its writer queue.
+// The roots of the holders of the sides.
 // ---------------------------------------------------------------------------
 
-namespace {
-
-// A program that parks two writers on `c` (the peer never reads) and then runs
-// `ending`. The queue is read after the program, so the checks below see what
-// the end of a call leaves behind, not what the program does next.
-void runWithParkedWriters(const std::string& ending, VM& vm) {
-    HostListener host;
-    std::atomic<bool> release{false};
-    std::thread peer([&] {
-        int fd = host.accept();
-        while (!release.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        close(fd);
-    });
-    InterpretResult result = vm.interpret(connectToHost(host) + R"(
-        var big = "x";
-        var i = 0;
-        while (i < 26) { big = big + big; i = i + 1; }
-        var me = task.self();
-        fun w1() { try { c.write(big); } catch (e) { } task.send(me, 1); }
-        fun w2() { try { c.writeline(big); } catch (e) { } task.send(me, 1); }
-        task.spawn(w1); task.spawn(w2);
-        sleep(0.2);
-    )" + ending + R"(
-        task.receive(); task.receive();
-    )");
-    release = true;
-    peer.join();
-    ASSERT_EQ(result, InterpretResult::OK);
-}
-
-ObjSocket* globalSocket(const VM& vm, const std::string& name) {
-    auto v = vm.getGlobal(name);
-    return v.has_value() && isSocket(*v) ? asObjSocket(as<Obj*>(*v)) : nullptr;
-}
-
-} // namespace
-
-// A close fails the parked writers and drops its queue. The failed tasks end,
-// and a queue that kept them would hold them for as long as the Socket lives.
-TEST_F(SocketParkTest, ACloseLeavesNoWriterInTheQueue) {
-    VM vm;
-    runWithParkedWriters("c.close();", vm);
-    ObjSocket* c = globalSocket(vm, "c");
-    ASSERT_NE(c, nullptr);
-    EXPECT_EQ(c->fd, -1);
-    EXPECT_FALSE(c->hasWriters());
-}
-
-// close_write fails the parked writers at once; the socket stays open and the
-// queue must not still list them.
-TEST_F(SocketParkTest, CloseWriteLeavesNoWriterInTheQueue) {
-    VM vm;
-    runWithParkedWriters("c.close_write();", vm);
-    ObjSocket* c = globalSocket(vm, "c");
-    ASSERT_NE(c, nullptr);
-    EXPECT_GE(c->fd, 0);
-    EXPECT_FALSE(c->hasWriters());
-}
-
-// A queued task that nothing else holds is a stale entry: its call ended and
-// the scheduler dropped it. The collector must reach it through the Socket,
-// or the entry dangles when the next write reads it.
-TEST_F(SocketParkTest, ATaskHeldOnlyByTheWriterQueueSurvivesACollection) {
+// A side reads its holder's task record to see whether the call still holds
+// it, so the collector must reach the task through the Socket or the Server,
+// or the read dangles once nothing else holds the task.
+TEST_F(SocketParkTest, ATaskFoundOnlyThroughASideSurvivesACollection) {
     MemoryManager mm;
     auto* sock = mm.create<ObjSocket>(nullptr);
     mm.pushTempRoot(sock);
-    const std::size_t withSocket = mm.bytesAllocated;
-    auto* task = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
-    sock->pushWriter(task);
-    const std::size_t withTask = mm.bytesAllocated;
-    ASSERT_GT(withTask, withSocket);
+    auto* srv = mm.create<ObjServer>(nullptr);
+    mm.pushTempRoot(srv);
+    const std::size_t withValues = mm.bytesAllocated;
+    sock->readHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    sock->writeHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    srv->acceptHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    const std::size_t withTasks = mm.bytesAllocated;
+    ASSERT_GT(withTasks, withValues);
 
     mm.collectGarbage();
-    EXPECT_EQ(mm.bytesAllocated, withTask);
+    EXPECT_EQ(mm.bytesAllocated, withTasks);
 
-    // The same task with no entry in the queue is garbage.
-    sock->clearWriters();
+    // The same tasks with no side that finds them are garbage.
+    sock->readHolder = nullptr;
+    sock->writeHolder = nullptr;
+    srv->acceptHolder = nullptr;
     mm.collectGarbage();
-    EXPECT_EQ(mm.bytesAllocated, withSocket);
+    EXPECT_EQ(mm.bytesAllocated, withValues);
+    mm.popTempRoot();
     mm.popTempRoot();
 }
