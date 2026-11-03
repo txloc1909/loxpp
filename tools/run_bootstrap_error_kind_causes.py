@@ -141,6 +141,10 @@ PROBES = [
     ("accept on a closed server",
      'var l = listen("127.0.0.1", 0); l.close(); try { l.accept(); } catch (e) { print e.kind; }',
      CATCHABLE, "SocketClosedError", "e.message"),
+    ("accept on a server whose accept side another task holds",
+     'var l = listen("127.0.0.1", 0); fun a() { try { l.accept(); } catch (e) {} } task.spawn(a); yield; '
+     'try { l.accept(); } catch (e) { print e.kind; } l.close();',
+     CATCHABLE, "BusyError", "e.message"),
     ("send of a value that is not a message", "try { task.send(task.self(), []); } catch (e) { print e.kind; }",
      CATCHABLE, "SendError", '"Value of type " + reflectTypeName(msg) + " is not a message."'),
     ("spawn_worker with a message that is not one",
