@@ -43,7 +43,7 @@ DIFF_RUNTIMES = REPO_ROOT / "tools" / "diff_runtimes.py"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from runner_precondition import require_runner
+from runner_precondition import refuse_unrunnable, require_runner
 
 STATIC_ERROR = """print "before";
 break;
@@ -91,7 +91,10 @@ def main() -> int:
         halt_probe = work / "halt_probe.lox"
         halt_probe.write_text(HALT_PROBE, encoding="utf-8")
 
-        trace = subprocess.run([native, str(runs)], capture_output=True, text=True, timeout=60)
+        try:
+            trace = subprocess.run([native, str(runs)], capture_output=True, text=True, timeout=60)
+        except OSError as exc:
+            refuse_unrunnable(native, exc)
         if trace.stdout != "one\ntwo\n":
             print("SKIP: the build under test does not print exactly the program's stdout "
                   "(a trace build); no stdout comparison can pass")
