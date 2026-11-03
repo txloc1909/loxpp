@@ -288,12 +288,14 @@ int runQbeTarget(const std::string& exePath, const std::string& scriptPath,
     std::optional<CompiledFunction> declarations;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
-        options.coroutineMode = qbe::needsCoroutineMode(tree);
         options.globalSlots = qbe::collectGlobalNames(tree);
+        // The mode and the task decision both read the shared analysis's
+        // reached set, so the analysis comes first.
         StackAnalysisTree analysis = analyzeStackTree(tree);
+        options.coroutineMode = qbe::needsCoroutineMode(tree, analysis);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, ssa, fns);
-        if (qbe::treeUsesTasks(tree)) {
+        if (qbe::treeUsesTasks(tree, analysis)) {
             declarations =
                 emitDeclarationsRoot(source, mm, script, options, ssa);
             if (!declarations.has_value()) {
