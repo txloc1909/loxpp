@@ -61,6 +61,44 @@ class SocketParkTest : public ::testing::Test {
     }
 };
 
+// In a session the end of a line abandons a task that `task.spawn` made. A
+// holder whose wait ended but that has not run yet is `ready`, and its call
+// never returns. An ended task holds no side, so the next line can read the
+// same Socket (spec/04-semantics.md, The Task Machine, Sides rule 1).
+TEST_F(SocketParkTest, AnAbandonedReadyHolderLeavesItsSideFree) {
+    VM vm;
+    vm.setSessionMode(true);
+    ASSERT_EQ(run(vm, R"(
+        var ran = false;
+        fun holder() { conn.readline(); ran = true; }
+    )"),
+              InterpretResult::OK);
+    ASSERT_EQ(vm.interpret(R"(
+        task.spawn(holder);
+        yield;
+        peer.writeline("one");
+        var end = clock() + 0.05;
+        while (clock() < end) {}
+        yield;
+        var ranAtLineEnd = ran;
+    )"),
+              InterpretResult::OK);
+    ASSERT_EQ(vm.interpret(R"(
+        peer.writeline("two");
+        var next = "none";
+        try { next = conn.readline(); } catch (e) { next = e.kind; }
+    )"),
+              InterpretResult::OK);
+    vm.endSession();
+    // The holder must still be ready at the end of the line, or the case
+    // that the rule names did not happen.
+    ASSERT_EQ(globalString(vm, "ranAtLineEnd"), "false");
+    // Whether the abandoned call took "one" is not bound; the line must come
+    // back and must not be a BusyError.
+    const std::string next = globalString(vm, "next");
+    EXPECT_TRUE(next == "one" || next == "two") << next;
+}
+
 // A line that comes in three chunks: the reader parks at each chunk, and the
 // bytes of the three joined, in order, are the line.
 TEST_F(SocketParkTest, ALineInThreeChunks) {
