@@ -278,11 +278,11 @@ final class LoxWorker {
     // the run queue (spec/04-semantics.md, The Task Machine).
     private boolean awaitMessage(LoxTask self, boolean canSuspend,
                                  boolean limited, long deadline) {
+        // A call that must suspend where its task cannot raises this also
+        // when its limit has passed: TimeoutError needs the `limit` move,
+        // which such a call cannot make (spec/04-semantics.md,
+        // task.receive_within, rule 6).
         if (!canSuspend) {
-            if (limited && deadline - System.nanoTime() <= 0) {
-                throw LoxOps.makeError("TimeoutError",
-                                       "The limit of the receive passed.");
-            }
             throw LoxOps.makeError("YieldAcrossNativeError",
                                    "Cannot receive across a native callback.");
         }
