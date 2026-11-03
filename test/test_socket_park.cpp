@@ -90,13 +90,37 @@ TEST_F(SocketParkTest, AnAbandonedReadyHolderLeavesItsSideFree) {
     )"),
               InterpretResult::OK);
     vm.endSession();
-    // The holder must still be ready at the end of the line, or the case
-    // that the rule names did not happen.
+    // The holder must not have run before the end of the line. If its wait
+    // was not seen to end, the line abandons a waiting holder instead, its
+    // Socket closes, and the check below fails with SocketClosedError.
     ASSERT_EQ(globalString(vm, "ranAtLineEnd"), "false");
     // Whether the abandoned call took "one" is not bound; the line must come
     // back and must not be a BusyError.
     const std::string next = globalString(vm, "next");
     EXPECT_TRUE(next == "one" || next == "two") << next;
+}
+
+// In a session the end of a line abandons a task that waits in a call of
+// class suspends, and the runtime closes the Socket that it waits on
+// (spec/04-semantics.md, Ending). The next line sees a closed Socket.
+TEST_F(SocketParkTest, TheEndOfALineClosesTheSocketOfAnAbandonedWaitingHolder) {
+    VM vm;
+    vm.setSessionMode(true);
+    ASSERT_EQ(run(vm, R"(
+        var ran = false;
+        fun holder() { conn.readline(); ran = true; }
+    )"),
+              InterpretResult::OK);
+    ASSERT_EQ(vm.interpret("task.spawn(holder); yield;"), InterpretResult::OK);
+    ASSERT_EQ(vm.interpret(R"(
+        peer.writeline("two");
+        var next = "none";
+        try { next = conn.readline(); } catch (e) { next = e.kind; }
+    )"),
+              InterpretResult::OK);
+    vm.endSession();
+    EXPECT_EQ(globalString(vm, "ran"), "false");
+    EXPECT_EQ(globalString(vm, "next"), "SocketClosedError");
 }
 
 // A line that comes in three chunks: the reader parks at each chunk, and the
