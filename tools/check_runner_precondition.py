@@ -80,6 +80,8 @@ TOOLS = (
          lambda r: py("check_bootstrap_stdin_exit.py") + [r[0]]),
     Tool("check_bootstrap_park_state.py", 1,
          lambda r: py("check_bootstrap_park_state.py") + ["--native", r[0]]),
+    Tool("check_diff_runtimes_phases.py", 1,
+         lambda r: py("check_diff_runtimes_phases.py") + ["--native", r[0]]),
     Tool("check_compile_error_cases.py", 1,
          lambda r: py("check_compile_error_cases.py") + ["--native", r[0]]),
     Tool("lsp_smoke.py", 1,

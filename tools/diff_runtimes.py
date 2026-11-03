@@ -31,6 +31,18 @@ deferred calls of a halt may run on one runner and not on the other. A match
 prints as "MATCH (halt)". A program that calls exit(70) on native is checked
 the same way, which is weaker than the exact comparison it could have.
 
+The prefix rule alone cannot tell a halt from a rejection: a runner that
+rejects the program prints nothing, and an empty stdout is a prefix of every
+stdout. For a spec probe with `STATUS: error` and CHECK lines that native
+passes, the CHECK lines are the output before the fault, so the other runner's
+stdout must also start with them (tools/check_spec_probes.py), or the program
+reports DIVERGE (compile phase when the other stdout is empty). For a program
+that is not a spec probe, the script cannot know where the fault is. For a
+probe with no CHECK line, the halt prints nothing before its fault, and the
+spec binds nothing else that tells it from a rejection. In both cases the
+prefix rule is the only check, and a rejection by the other runner still
+matches.
+
 Run. Otherwise this script compares stdout and the exact exit status: a run
 with the same stdout but another exit status reports DIVERGE. The probe
 criteria that the --xfail account uses are those of
@@ -681,6 +693,23 @@ def main() -> None:
         if native_status == NATIVE_HALT_STATUS:
             if other_status == 0:
                 print(f"DIVERGE     {lox_file}  (native halts, but other exited 0)")
+                diverged += 1
+                continue
+            probe = parse_probe_or_exit(lox_file)
+            if (
+                probe is not None
+                and probe.status == "error"
+                and not probe.static_error
+                and passes(probe, native_out, native_status)
+                and not passes(probe, other_out, other_status)
+            ):
+                phase = "compile phase: the other runner printed nothing, so it may reject the program" if other_out == "" else "halt"
+                print(
+                    f"DIVERGE     {lox_file}  ({phase}; native halts after the "
+                    f"probe's CHECK lines, and the other stdout does not start with them)"
+                )
+                for line in other_out.splitlines()[:20]:
+                    print(f"            | {line}")
                 diverged += 1
                 continue
             if native_out.startswith(other_out) or other_out.startswith(native_out):

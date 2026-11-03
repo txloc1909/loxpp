@@ -1,0 +1,39 @@
+// A receive with a condition that selects no message makes the `receive` move
+// again, also when its limit has passed, and it raises TimeoutError only after
+// the `limit` move, which joins the back of the run queue
+// (spec/04-semantics.md, The Task Machine; task.receive_within, rule 4). `a`
+// waits in receive_where_within with a limit of 1 s and `c` waits in
+// receive(). main sends `a` a message that `want` does not select and then
+// sends `c` a message: both `message` moves happen at the send, so the run
+// queue is a, c. main then computes for 2 s with no suspend point, so the
+// limit of `a` passes while `a` is ready. `a` runs, tests the message, and
+// makes the `receive` move again; its `limit` move then puts it behind `c`.
+// So `c` reports first. An implementation that raises TimeoutError at once
+// when `a` finds its limit passed reports `a` first.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: c: go
+// CHECK: a: TimeoutError pending 1
+var me = task.self();
+fun want(m) { return m == "sel"; }
+fun a() {
+    try {
+        var m = task.receive_where_within(want, 1);
+        task.send(me, "a: " + m);
+    } catch (e) {
+        task.send(me, "a: " + e.kind + " pending " + str(task.pending()));
+    }
+}
+fun c() {
+    task.send(me, "c: " + task.receive());
+}
+var ta = task.spawn(a);
+var tc = task.spawn(c);
+yield;
+task.send(ta, "nosel");
+task.send(tc, "go");
+var t0 = clock();
+var x = 0;
+while (clock() - t0 < 2) x = x + 1;
+print task.receive();
+print task.receive();
