@@ -1,8 +1,13 @@
-// A "_" followed by "(" or "{" is the head of a constructor pattern, not the
-// wildcard, so a constructor named "_" is the structural sub-pattern of an
-// @-binding in every form the spec gives a constructor pattern: the tag test,
-// the positional fields, and the named fields
-// (spec/02-syntax.md, armPat and subPat; issue #762).
+// The rules for a "_" in a pattern head, each tested below
+// (spec/02-syntax.md, armPat and subPat; issue #762):
+//
+// 1. After "E.", "_" is a constructor name, so `E._` alone tests the tag.
+// 2. A "_" followed by "(" or "{" is a pattern head, not the wildcard, so
+//    `E._(y)` and `E._{x}` bind fields.
+// 3. A "_" followed by none of "(", "{" and "." is the wildcard.
+//
+// An enum named "_" is not in this probe's set: `_.A(y)` is rejected on every
+// consumer today, and issue #1076 tracks that defect.
 enum E { _(x) B }
 
 print match E._(7) {
