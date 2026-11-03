@@ -33,13 +33,15 @@ the same way, which is weaker than the exact comparison it could have.
 
 The prefix rule alone cannot tell a halt from a rejection: a runner that
 rejects the program prints nothing, and an empty stdout is a prefix of every
-stdout. For a spec probe with `STATUS: error` that native passes, the CHECK
-lines are the output before the fault, so the other runner's stdout must also
-start with them (tools/check_spec_probes.py), or the program reports DIVERGE
-(compile phase when the other stdout is empty). For a program that is not a
-spec probe, the script cannot know where the fault is, so the prefix rule is
-the only check, and a rejection by the other runner of a program that native
-halts before it prints anything still matches.
+stdout. For a spec probe with `STATUS: error` and CHECK lines that native
+passes, the CHECK lines are the output before the fault, so the other runner's
+stdout must also start with them (tools/check_spec_probes.py), or the program
+reports DIVERGE (compile phase when the other stdout is empty). For a program
+that is not a spec probe, the script cannot know where the fault is. For a
+probe with no CHECK line, the halt prints nothing before its fault, and the
+spec binds nothing else that tells it from a rejection. In both cases the
+prefix rule is the only check, and a rejection by the other runner still
+matches.
 
 Run. Otherwise this script compares stdout and the exact exit status: a run
 with the same stdout but another exit status reports DIVERGE. The probe

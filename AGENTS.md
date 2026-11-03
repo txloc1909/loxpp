@@ -108,7 +108,8 @@ these things:
    behavior.
    Run-time parity does not prove compile-time parity. A rejection prints
    nothing, so a comparison that accepts a prefix of the output, as a halt
-   allows, must still tell a rejection from a halt.
+   allows, must still tell a rejection from a halt that has output before
+   its fault.
 6. **Check each new spec rule against every section that decides the same
    case.** For each rule that the change adds or changes, the plan or the
    pull request names the other sections of `spec/` that decide the same
