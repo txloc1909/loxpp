@@ -352,8 +352,9 @@ if(LOXPP_PYTHON3)
         SKIP_RETURN_CODE 125)
 
     # Issue #984: a call of class `suspends` parks its host task, so the
-    # bootstrap must run it through Interpreter.saveHostSuspendState. This
-    # holds isSuspendingHostCall's list to the `suspends` rows of
+    # bootstrap must run it through Interpreter.callSuspending, which blocks
+    # the worker where the task cannot suspend and switches back to the task
+    # after a park. This holds isSuspendingHostCall's list to the `suspends` rows of
     # spec/05-stdlib.md's Blocking calls table, both ways, so a call added to
     # one side cannot be missing from the other, and it requires each of the
     # three dispatch sites to hold its own guard line, negation included. It
@@ -363,19 +364,16 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_suspend_calls.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-    # Issue #984: the review of PR #983 found that the bootstrap lost a task's
-    # deferred call when the task resumed after a socket park. One case here
-    # runs per field of the per-task state the park overwrites, plus one for the
-    # Socket class, one for the Server class, and one for the restore on the
-    # fault path of each of those two classes. The script has 16 cases. 15
-    # compare against native. The `stringifyDepth` case compares with the
-    # control run of the bootstrap, because the depth limit it shows is
-    # implementation-defined. Cases for state that is live only where the task
-    # cannot suspend run with the mutation `force_park`, which makes the
-    # bootstrap park there. A mutation of the bootstrap changes the line that
-    # one case pins, and that case must fail, so every saved field and every
-    # restore on the fault path needs a case that catches it. Release build
-    # only: the comparison needs an untraced stdout.
+    # Issues #984, #1064: all the state of a task is in its record
+    # (InterpTask), so a park copies nothing. One case here runs per field of
+    # the record, per call of resumeTask after a park, and per dispatch guard
+    # of a call of class `suspends`, and two cases pin the block where the
+    # task cannot suspend. Each compares against native. Cases for state that
+    # is live only where the task cannot suspend run with the mutation
+    # `force_park`, which makes the bootstrap park there. A mutation of the
+    # bootstrap moves one field out of the record, or removes one switch back
+    # or one guard, and its case must fail. Release build only: the
+    # comparison needs an untraced stdout.
     add_test(NAME BootstrapParkState
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_bootstrap_park_state.py
                 --native $<TARGET_FILE:loxpp>
@@ -464,6 +462,17 @@ if(LOXPP_PYTHON3)
     # 125 there, after the other twelve cases pass, so the trace preset reports a
     # skip instead of a false red.
     set_tests_properties(DiffRuntimesXfailNames PROPERTIES SKIP_RETURN_CODE 125)
+
+    # tools/diff_runtimes.py compares both phases (AGENTS.md, "Plans for a
+    # language change", rule 5): a stub runner that rejects a program native
+    # runs or halts, accepts one native rejects, or prints other output must
+    # fail the comparison. A trace build cannot pass a stdout comparison, so
+    # the checker exits 125 there.
+    add_test(NAME DiffRuntimesPhases
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_diff_runtimes_phases.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(DiffRuntimesPhases PROPERTIES SKIP_RETURN_CODE 125)
 
     # Issue #907: a tool that spawns a runner from its command line refuses a
     # runner that does not exist or cannot start with exit 2, not with a

@@ -1,0 +1,36 @@
+// A call on a held side raises BusyError also when it could return at once
+// (spec/04-semantics.md, The Task Machine, Sides, rule 2). The peer sends "ab"
+// with no end of line. `first` calls readline(), takes "ab" into the buffer of
+// the Socket, finds no end of line, and waits: its call holds the read side.
+// `second`, a task of the same worker, then calls read_some(1). One byte is
+// there to return at once, but the call raises BusyError and takes nothing.
+// `second` then sends "c" and an end of line, and `first` gets the whole line
+// "abc": no byte went to `second`.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: second: BusyError
+// CHECK: first: abc
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+peer.write("ab");
+fun first() { task.send(me, "first: " + str(conn.readline())); }
+fun second() {
+    try {
+        var x = conn.read_some(1);
+        task.send(me, "second: no fault, got " + x);
+    } catch (e) {
+        task.send(me, "second: " + e.kind);
+    }
+    peer.writeline("c");
+}
+task.spawn(first);
+task.spawn(second);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

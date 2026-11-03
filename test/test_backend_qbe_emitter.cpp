@@ -21,6 +21,8 @@
 
 #include <gtest/gtest.h>
 
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -760,4 +762,81 @@ TEST(QbeEmitter, CoroutineModeGivesACompiledHandlerItsCatchResumeState) {
         << "a compiled handler must carry its catch resume state";
     EXPECT_NE(ssa.find("lox_fn_nested_catch"), std::string::npos)
         << "the catch block needs its own resume label";
+}
+
+namespace {
+
+// Every label that a jump of `ssa` names has its own definition line. QBE
+// rejects a program that jumps to a block it never defines ("is used
+// undefined").
+void expectEveryJumpTargetDefined(const std::string& ssa) {
+    std::istringstream lines(ssa);
+    std::string line;
+    std::vector<std::string> targets;
+    std::set<std::string> defined;
+    while (std::getline(lines, line)) {
+        if (line.starts_with("@")) {
+            defined.insert(line);
+            continue;
+        }
+        if (!line.starts_with("\tjnz ") && !line.starts_with("\tjmp ")) {
+            continue;
+        }
+        for (std::size_t at = line.find('@'); at != std::string::npos;
+             at = line.find('@', at + 1)) {
+            std::size_t end = line.find(',', at);
+            targets.push_back(line.substr(
+                at, end == std::string::npos ? std::string::npos : end - at));
+        }
+    }
+    for (const std::string& target : targets) {
+        EXPECT_TRUE(defined.contains(target))
+            << target << " is a jump target with no definition";
+    }
+}
+
+} // namespace
+
+TEST(QbeEmitter, CoroutineModeGivesAnUnreachedResumePointNoState) {
+    // A yield and a call after a return never run, so no frame suspends there
+    // and the prologue must not dispatch to them: the emitter emits no
+    // continuation label for an unreached block (issue #1048).
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun g() {} fun f() { return 1; yield; g(); }", {1}, options);
+    EXPECT_EQ(ssa.find("lox_fn_nested_resume"), std::string::npos)
+        << "an unreached resume point must get no resume state";
+    EXPECT_EQ(ssa.find("call $rt_resume_state"), std::string::npos)
+        << "a function with no reached resume point needs no dispatch";
+    expectEveryJumpTargetDefined(ssa);
+}
+
+TEST(QbeEmitter, CoroutineModeKeepsOnlyTheReachedResumePoints) {
+    // The first yield runs, the second is dead after the return: the dispatch
+    // holds the state of the first only, and each target it names exists.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun f() { yield 1; return 2; yield 3; }", {0}, options);
+    EXPECT_NE(ssa.find("call $rt_resume_state"), std::string::npos);
+    EXPECT_EQ(countOccurrences(ssa, "_resume_next"), 2)
+        << "one dispatch entry (a jnz reference and its label) for the one "
+           "reached yield";
+    expectEveryJumpTargetDefined(ssa);
+}
+
+TEST(QbeEmitter, CoroutineModeGivesTheCatchBlockOfADeadTryNoState) {
+    // A try after a return never pushes its handler, so its catch block is
+    // unreached and gets no catch resume state.
+    qbe::EmitOptions options;
+    options.coroutineMode = true;
+    std::string ssa = emitNestedWithOptions(
+        "fun g() { throw \"x\"; }\n"
+        "fun f() { return 0; try { g(); } catch (e) { yield; return 1; } }",
+        {1}, options);
+    EXPECT_EQ(ssa.find("lox_fn_nested_catch"), std::string::npos)
+        << "the catch block of a dead try must get no catch resume state";
+    EXPECT_EQ(ssa.find("lox_fn_nested_resume"), std::string::npos);
+    expectEveryJumpTargetDefined(ssa);
 }

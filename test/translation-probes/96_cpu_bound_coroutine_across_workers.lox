@@ -14,8 +14,7 @@
 //
 // The CHECK lines do not bind the bootstrap interpreter. It runs every
 // worker on one host thread, so a task runs alone among the tasks of every
-// worker (spec/README.md, Conformance: whether workers run at the same time
-// is implementation-defined).
+// worker (spec/README.md, Conformance, Parallel workers).
 // The probe on the NOT-BINDING line checks the bootstrap's own choice in
 // place of this one.
 // NOT-BINDING: bootstrap bootstrap-only/cpu_bound_work_blocks_all_workers.lox

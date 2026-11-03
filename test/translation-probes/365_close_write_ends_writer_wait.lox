@@ -1,0 +1,42 @@
+// A close_write() by another task ends the wait of the call that holds the
+// write side, and that call raises SocketClosedError, as a write after
+// close_write() does (spec/04-semantics.md, The Task Machine, Sides, rule 4;
+// spec/05-stdlib.md, `s.close_write()`). `writer` calls write() with a string
+// larger than the buffers of a connection while nothing reads the peer, so the
+// call waits and holds the write side. `other`, a task of the same worker,
+// calls close_write(), which raises nothing, and then yields. The woken
+// `writer` joins the run queue at the close, before `other`, so it reports
+// first. The probe assumes, as probe 266 does, that the buffers of a
+// connection on the local host hold less than 32 MB together.
+// STATUS: ok
+// TIMEOUT: 60
+// CHECK: writer: SocketClosedError
+// CHECK: other: after yield
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+var big = "x";
+for (var i = 0; i < 25; i = i + 1) big = big + big;
+fun writer() {
+    try {
+        conn.write(big);
+        task.send(me, "writer: no fault");
+    } catch (e) {
+        task.send(me, "writer: " + e.kind);
+    }
+}
+fun other() {
+    conn.close_write();
+    yield;
+    task.send(me, "other: after yield");
+}
+task.spawn(writer);
+task.spawn(other);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

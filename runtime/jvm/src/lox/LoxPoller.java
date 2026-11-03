@@ -73,6 +73,14 @@ final class LoxPoller {
     long addFd(LoxTask task, SelectableChannel channel, int interest, long seq,
                boolean timed, long deadlineNanos)
         throws ClosedChannelException {
+        for (Wait w : fdWaits) {
+            if (w.channel == channel && (w.interest & interest) != 0) {
+                // A side holds at most one call (LoxSide), so a second wait
+                // for one interest of a channel is a defect of the runtime.
+                throw new IllegalStateException(
+                    "a second wait for one interest of a channel");
+            }
+        }
         SelectionKey key = channel.keyFor(selector);
         if (key != null && !key.isValid()) {
             // A cancelled key stays registered until a select; registering
@@ -120,6 +128,42 @@ final class LoxPoller {
         SelectionKey key = channel.keyFor(selector);
         if (key != null) {
             key.cancel();
+        }
+    }
+
+    /**
+     * Removes the wait on {@code channel} for {@code interest}, if one is, and
+     * appends its task. The other waits on the channel stay, and the selector
+     * keeps the channel only while one does.
+     */
+    void cancelInterest(SelectableChannel channel, int interest,
+                        List<LoxTask> out) {
+        int left = 0;
+        for (Iterator<Wait> it = fdWaits.iterator(); it.hasNext();) {
+            Wait w = it.next();
+            if (w.channel != channel) {
+                continue;
+            }
+            if ((w.interest & interest) != 0) {
+                out.add(w.task);
+                it.remove();
+            } else {
+                left |= w.interest;
+            }
+        }
+        SelectionKey key = channel.keyFor(selector);
+        if (key == null || !key.isValid()) {
+            return;
+        }
+        if (left != 0) {
+            key.interestOps(left);
+            return;
+        }
+        key.cancel();
+        if (fdWaits.isEmpty()) {
+            // No select follows while nothing waits, and the selector holds a
+            // cancelled key until one does.
+            selectNow();
         }
     }
 

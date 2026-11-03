@@ -377,12 +377,16 @@ void MemoryManager::traceObject(Obj* obj) {
     case ObjType::SOCKET: {
         auto* sock = static_cast<ObjSocket*>(obj);
         markObject(sock->klass);
-        sock->forEachWriter([this](ObjTask* writer) { markObject(writer); });
+        markObject(sock->readHolder);
+        markObject(sock->writeHolder);
         break;
     }
-    case ObjType::SERVER:
-        markObject(static_cast<ObjServer*>(obj)->klass);
+    case ObjType::SERVER: {
+        auto* srv = static_cast<ObjServer*>(obj);
+        markObject(srv->klass);
+        markObject(srv->acceptHolder);
         break;
+    }
     case ObjType::PROCESS:
         markObject(static_cast<ObjProcess*>(obj)->klass);
         break;

@@ -1,0 +1,29 @@
+// A receive that must suspend where its task cannot suspend raises
+// YieldAcrossNativeError, also when its limit has passed
+// (spec/04-semantics.md, task.receive_within, rule 6: "The limit does not
+// change this rule"). TimeoutError needs the `limit` move (rule 4), and a call
+// that cannot make the `receive` move cannot make it either. The call runs in
+// a `__str__` that `str` calls, a context where the task cannot suspend. Its
+// `want` takes 0.2 s against a limit of 0.05 s and selects nothing, so the
+// call must suspend after its limit passed. The message stays in the
+// mailbox.
+// STATUS: ok
+// CHECK: ctx: YieldAcrossNativeError
+// CHECK: 1
+fun slow(m) {
+    var t0 = clock();
+    while (clock() - t0 < 0.2) {}
+    return false;
+}
+class P {
+    __str__() {
+        try {
+            return "got " + str(task.receive_where_within(slow, 0.05));
+        } catch (e) {
+            return "ctx: " + e.kind;
+        }
+    }
+}
+task.send(task.self(), "m");
+print str(P());
+print task.pending();

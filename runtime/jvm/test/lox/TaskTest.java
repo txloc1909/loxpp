@@ -42,7 +42,6 @@ public final class TaskTest {
         checkSleepParksOnlyTheTask();
         checkSleepUnderACallbackBlocksTheWorker();
         checkCloseWakesAParkedAccept();
-        checkTwoReadersShareBufferedBytes();
         checkSendWakesAPollingWorker();
         checkReadyChannelNobodyWaitsOnDoesNotSpin();
         checkWritableChannelNobodyWaitsOnDoesNotSpin();
@@ -316,28 +315,6 @@ public final class TaskTest {
         sleepSeconds(0.05);
         checkEquals("SocketClosedError", kind[0],
                     "a close raises the closed fault in the parked accept");
-    }
-
-    // Two tasks park in readline on one socket, and the peer sends two lines
-    // and closes its write side. The task that wakes second finds the second
-    // line in the buffer that the first task filled.
-    private static void checkTwoReadersShareBufferedBytes() {
-        LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] pair = connectedPair(server);
-        Object[] lines = new Object[2];
-        for (int i = 0; i < 2; i++) {
-            int at = i;
-            task("spawn", fn("reader", () -> lines[at] = pair[1].readline()));
-        }
-        LoxOps.yield(null);
-        pair[0].write("a\nb\n");
-        pair[0].closeWrite();
-        sleepSeconds(0.1);
-        boolean ab = "a".equals(lines[0]) && "b".equals(lines[1]);
-        boolean ba = "b".equals(lines[0]) && "a".equals(lines[1]);
-        check(ab || ba, "each of two parked readers gets one buffered line");
-        closeAndReap(pair);
-        server.close();
     }
 
     // The state of the worker that a probe task watches, set before it starts.

@@ -585,7 +585,8 @@ transcript means a quiet checkout: `git status --short` in every worktree in
 use catches a stray diff before it is mistaken for the next agent's own
 work, and it is worth checking before trusting that a worktree is clean.
 When a stray diff turns up, read it before deciding what to do with it — it
-may be superseded WIP from an abandoned attempt (safe to set aside with
-`git stash push -u -m "<tag>"`, never bare `git stash`, since the stash stack
-is shared with every other worktree) rather than something to discard
-outright.
+may be superseded WIP from an abandoned attempt rather than something to
+discard outright. Set it aside as a commit on a new branch (`git switch -c
+<tag>`, commit it there, then switch back to the branch of the worktree). Never use `git stash`: every worktree shares
+one stash list, so a `git stash pop` can apply the work of another agent
+(`AGENTS.md`, "Engineering rules").

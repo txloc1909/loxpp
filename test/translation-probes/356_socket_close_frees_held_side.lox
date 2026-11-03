@@ -1,0 +1,59 @@
+// A close by another task ends the wait of the call that holds a side, and
+// that call raises SocketClosedError (spec/04-semantics.md, The Task Machine,
+// Sides, rule 4). `holder` waits in readline(), so its call holds the read
+// side. `other`, a task of the same worker, calls readline() too, which raises
+// BusyError. `other` then calls close(), which does not wait and raises
+// nothing. The call of `holder` raises SocketClosedError, and with that it
+// holds the side no more: a later readline() by the main task raises
+// SocketClosedError, as a call on a closed Socket does, and not BusyError.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: other: BusyError
+// CHECK: other: closed
+// CHECK: holder: SocketClosedError
+// CHECK: main: SocketClosedError
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun holder() {
+    try {
+        conn.readline();
+        task.send(me, "holder: no fault");
+    } catch (e) {
+        task.send(me, "holder: " + e.kind);
+    }
+}
+fun other() {
+    try {
+        conn.readline();
+        task.send(me, "other: no fault");
+    } catch (e) {
+        task.send(me, "other: " + e.kind);
+    }
+    conn.close();
+    task.send(me, "other: closed");
+}
+task.spawn(holder);
+task.spawn(other);
+var closed = false;
+for (var i = 0; i < 3; i = i + 1) {
+    try {
+        var m = task.receive_within(3);
+        if (m == "other: closed") closed = true;
+        print m;
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
+// Without the close, the readline() below would wait for ever.
+if (!closed) {
+    print "main: not closed";
+} else {
+    try {
+        conn.readline();
+        print "main: no fault";
+    } catch (e) {
+        print "main: " + e.kind;
+    }
+}

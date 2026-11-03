@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { EVENTS_ENV } from "./child.ts";
+import { parentStartTime } from "../lib/parent-identity.ts";
 import {
   buildRunScript,
   closeWindowArgv,
@@ -193,10 +194,11 @@ export async function runInKittyWindow(opts: WindowRunOptions): Promise<WindowRu
         session: opts.session,
         cwd: opts.cwd,
         title: opts.title,
-        // The parent pid is the script's first argument: a `SIGKILL` of this
-        // process runs no handler here, so the script watches that pid itself
-        // and ends the run when it is gone.
-        command: ["/bin/sh", scriptPath, String(process.pid)],
+        // The parent pid is the script's first argument and the parent's start
+        // time its second: a `SIGKILL` of this process runs no handler here, so
+        // the script watches that pid and its identity itself, and ends the run
+        // when that parent is gone.
+        command: ["/bin/sh", scriptPath, String(process.pid), parentStartTime()],
         hold: opts.hold,
         keepFocus: opts.keepFocus,
         env,

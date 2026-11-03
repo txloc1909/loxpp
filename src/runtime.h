@@ -449,10 +449,10 @@ class Runtime {
     void completePark(ObjTask* task, Value value);
     void failPark(ObjTask* task, const char* kind, const char* msg);
     // Waits again for the descriptor of a PARKED task whose wait was reported
-    // but whose call is not done (the data was taken by another task, or only
-    // part of the call is done). The task keeps its place as a parked task and
-    // its call state; a refused registration fails the call with a
-    // NetworkError.
+    // but whose call is not done (only part of the call is done, or the
+    // descriptor had nothing for the call after all). The task keeps its place
+    // as a parked task and its call state; a refused registration fails the
+    // call with a NetworkError.
     void rearmPark(ObjTask* task, int fd);
     // Removes every wait on `fd` before the caller closes it, and appends the
     // tasks that were parked on it in the order their calls began to wait.
@@ -1038,7 +1038,8 @@ class Runtime {
     // unwound.
     void parkTask(ObjTask* task);
     // Cancels the wait of a parked task and erases it from the parked set.
-    // No-op for a task that is not parked.
+    // No-op for a task that is not parked. It keeps ObjTask::io: the call
+    // holds its side until the task runs again (resumeTask clears it).
     void releasePark(ObjTask* task);
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.

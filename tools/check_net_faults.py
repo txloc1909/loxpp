@@ -2,7 +2,9 @@
 """Checks the fault sites of the Socket and Server natives.
 
 spec/05-stdlib.md says which Socket and Server faults are catchable and
-which halt the program. This script lists every place in the native and the
+which halt the program. The catchable kinds are `NetworkError`,
+`SocketClosedError`, and `BusyError` (spec/04-semantics.md, The Task Machine,
+Sides); a site that names another kind fails. This script lists every place in the native and the
 JVM sources that raises a fault for a socket, and fails when a place is not
 in the table below, or when a table entry has no place. So a new fault site
 cannot be fatal by accident, and a catchable one cannot go back to fatal.
@@ -43,7 +45,8 @@ Native (src/stdlib/net_api.cpp):
     does not fail. The other scans read the literals, because the JVM kinds
     are string literals.
 
-JVM (runtime/jvm/src/lox/LoxSocket.java and LoxServer.java):
+JVM (runtime/jvm/src/lox/LoxSocket.java, LoxServer.java, and LoxSide.java,
+which raises the BusyError of a held side for both):
   - `new LoxError(` is a halting fault. Only argument checks use it, and
     `readBytesFrom`, which Process shares.
   - `makeError("KIND"` is a catchable fault of the given kind.
@@ -67,6 +70,7 @@ fails unless each defect changes the result. It proves the rules above can fail.
 
 Usage:
     tools/check_net_faults.py [--native PATH] [--socket PATH] [--server PATH]
+                              [--side PATH]
     tools/check_net_faults.py --self-test
 """
 
@@ -80,9 +84,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 NATIVE = REPO_ROOT / "src" / "stdlib" / "net_api.cpp"
 SOCKET = REPO_ROOT / "runtime" / "jvm" / "src" / "lox" / "LoxSocket.java"
 SERVER = REPO_ROOT / "runtime" / "jvm" / "src" / "lox" / "LoxServer.java"
+SIDE = REPO_ROOT / "runtime" / "jvm" / "src" / "lox" / "LoxSide.java"
 
 NETWORK = "NetworkError"
 CLOSED = "SocketClosedError"
+BUSY = "BusyError"
 HALT = "halt"
 
 # (function, kind or HALT) -> number of sites.
@@ -102,10 +108,10 @@ NATIVE_SITES = {
     ("step", CLOSED): 2,
     ("runIo", NETWORK): 2,
     ("closeDescriptor", CLOSED): 1,
-    ("checkSocketRead", CLOSED): 1,
+    ("openSocket", CLOSED): 1,
     ("checkSocketWrite", CLOSED): 1,
+    ("sideFree", BUSY): 1,
     ("stepWrite", NETWORK): 1,
-    ("runWrite", NETWORK): 1,
     ("socketCloseWriteNative", CLOSED): 1,
     ("serverAcceptNative", CLOSED): 1,
 }
@@ -117,14 +123,18 @@ SOCKET_SITES = {
     ("checkOpen", CLOSED): 1,
     ("checkWritable", CLOSED): 1,
     ("fill", NETWORK): 1,
-    ("writeBytes", NETWORK): 1,
+    ("writeCall", NETWORK): 1,
     ("connect", NETWORK): 3,
 }
 
 SERVER_SITES = {
     ("listen", NETWORK): 1,
-    ("accept", CLOSED): 1,
+    ("checkOpen", CLOSED): 1,
     ("accept", NETWORK): 1,
+}
+
+SIDE_SITES = {
+    ("enter", BUSY): 1,
 }
 
 NATIVE_FUNCTION = re.compile(r"^(?:static |inline )?[\w:<>*& ]+?[ *&](\w+)\([^;]*$")
@@ -270,7 +280,7 @@ def native_sites(text: str) -> tuple[Counter | None, list[str]]:
                 elif not re.fullmatch(r"k\w+", arg.group(1)):
                     problems.append(f"line {number}: a fault kind that is not a constant: {arg.group(1)}")
                 else:
-                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED}.get(arg.group(1))
+                    kind = {"kNetworkError": NETWORK, "kSocketClosedError": CLOSED, "kBusyError": BUSY}.get(arg.group(1))
                     if kind is None:
                         problems.append(f"line {number}: a fault names an unknown kind {arg.group(1)}")
                     else:
@@ -328,7 +338,7 @@ def java_sites(text: str) -> tuple[Counter | None, list[str]]:
             sites[(method, HALT)] += 1
         m = re.search(r'makeError\("(\w+)"', window)
         if m and "LoxOps.makeError" in line:
-            if m.group(1) not in (NETWORK, CLOSED):
+            if m.group(1) not in (NETWORK, CLOSED, BUSY):
                 problems.append(f"line {number}: makeError names an unknown kind {m.group(1)}")
             else:
                 sites[(method, m.group(1))] += 1
@@ -353,7 +363,7 @@ def compare(label: str, found: Counter, expected: dict) -> list[str]:
     return problems
 
 
-def self_test(native: str, socket: str) -> int:
+def self_test(native: str, socket: str, side: str) -> int:
     """Each defect below must change the result of the parser it targets."""
     def inject(text: str, anchor: str, extra: str, before: bool = False) -> str:
         assert text.count(anchor) >= 1, anchor
@@ -393,6 +403,11 @@ def self_test(native: str, socket: str) -> int:
         ("java: System.exit after a line break", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { System\n        .exit(1); }\n", True), True),
         ("java: a bare exit( from a static import", java_sites, SOCKET_SITES, inject(socket, java_fn, "    static void f() { exit(1); }\n", True), True),
         ("java: a fatal word inside a string is not a fatal exit", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return "System.exit and throw"; }\n', True), False),
+        ("native: a kBusyError site is a BusyError site", native_sites, {**NATIVE_SITES, ("socketReadlineNative", BUSY): 1}, inject(native, read_fn, '    raiseNet(kBusyError, "x");\n'), False),
+        ("native: a BusyError site that the table lacks", native_sites, NATIVE_SITES, inject(native, read_fn, '    raiseNet(kBusyError, "x");\n'), True),
+        ("java: a BusyError makeError is a BusyError site", java_sites, {**SOCKET_SITES, ("checkOpen", BUSY): 1}, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), False),
+        ("java: a BusyError site that the table lacks", java_sites, SOCKET_SITES, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), True),
+        ("java: LoxSide without its BusyError site", java_sites, SIDE_SITES, side.replace('makeError("BusyError"', 'makeError("NetworkError"', 1), True),
         ("java: a text block", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return """\n        "\n        """; }\n', True), True),
     ]
     failed = False
@@ -409,16 +424,19 @@ def main() -> int:
     parser.add_argument("--native", type=Path, default=NATIVE)
     parser.add_argument("--socket", type=Path, default=SOCKET)
     parser.add_argument("--server", type=Path, default=SERVER)
+    parser.add_argument("--side", type=Path, default=SIDE)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
-        return self_test(NATIVE.read_text(encoding="utf-8"), SOCKET.read_text(encoding="utf-8"))
+        return self_test(NATIVE.read_text(encoding="utf-8"), SOCKET.read_text(encoding="utf-8"),
+                         SIDE.read_text(encoding="utf-8"))
 
     problems: list[str] = []
     for label, path, parse, expected in (
         ("native", args.native, native_sites, NATIVE_SITES),
         ("LoxSocket", args.socket, java_sites, SOCKET_SITES),
         ("LoxServer", args.server, java_sites, SERVER_SITES),
+        ("LoxSide", args.side, java_sites, SIDE_SITES),
     ):
         found, extra = parse(path.read_text(encoding="utf-8"))
         problems += [f"{label}: {p}" for p in extra]
@@ -430,7 +448,7 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    total = sum(NATIVE_SITES.values()) + sum(SOCKET_SITES.values()) + sum(SERVER_SITES.values())
+    total = sum(sum(t.values()) for t in (NATIVE_SITES, SOCKET_SITES, SERVER_SITES, SIDE_SITES))
     print(f"check_net_faults.py: {total} fault sites match the table")
     return 0
 

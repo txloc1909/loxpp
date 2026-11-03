@@ -40,15 +40,18 @@ public final class LoxTask {
     // True while the task waits in a receive_* call that has a limit: a send
     // must take its timer away (see LoxWorker.send).
     boolean limitedWait;
+    // Set by a send that ends such a wait. False when the task runs again
+    // means that the `limit` move ended the wait.
+    boolean messageEndedWait;
+
+    // The number of the first wait of the call that the task is in (see
+    // LoxPoller.addFd); 0 before the first wait of a call.
+    long waitSeq;
 
     // The frame count and the handler depth of this task while another
     // task of the worker runs (see LoxWorker.switchTo). A task starts below
     // its first call, as native's scheduler resumes each task from an empty
     // frame stack.
-    // The number of the first wait of the call that the task is in (see
-    // LoxPoller.addFd); 0 before the first wait of a call.
-    long waitSeq;
-
     int savedFrameCount;
     int savedHandlerDepth;
 

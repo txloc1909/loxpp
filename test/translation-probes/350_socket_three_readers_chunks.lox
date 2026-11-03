@@ -1,58 +1,65 @@
-// Three tasks wait on one Socket, each in one call: two in read_some(2) and one
+// Three tasks call one Socket, each in one call: two in read_some(2) and one
 // in read_bytes(2). The peer sends "abcdef" in one write and keeps the
-// connection open. Every byte goes to exactly one task: read_some returns at
-// most 2 bytes, read_bytes returns exactly 2 bytes, and no task waits for
-// bytes that are already there (spec/05-stdlib.md, Socket). The six bytes
-// arrive together, so the three results are "ab", "cd" and "ef" in one order or
-// another. The probe checks the set of results, not which task gets which.
+// connection open. Issue #1047 checked that every byte went to exactly one
+// task. Under the rule of one call per side (spec/04-semantics.md, The Task
+// Machine, Sides), only one call waits: `some1` waits with no bytes to read
+// and holds the read side, so the calls of `some2` and `exact` raise
+// BusyError and take no byte. The peer writes only after that. `some1` then
+// reads the stream with read_some(2) until it has six bytes. Each result has
+// one or two bytes, and the results, in order, are the bytes of the stream
+// (spec/05-stdlib.md, Socket).
 // STATUS: ok
-// TIMEOUT: 20
-// CHECK: received 3 results
-// CHECK: total length 6
-// CHECK: none empty true
-// CHECK: pieces ab, cd, ef once each true
+// TIMEOUT: 30
+// CHECK: some2: BusyError
+// CHECK: exact: BusyError
+// CHECK: some1: abcdef, pieces of 1 or 2 bytes: true
 fun peer(main) {
     var srv = listen("127.0.0.1", 0);
     task.send(main, srv.port());
     var c = srv.accept();
-    sleep(0.2);
+    task.receive();
     c.write("abcdef");
     task.receive();
 }
 var me = task.self();
 var w = task.spawn_worker(peer, me);
 var s = connect("127.0.0.1", task.receive());
-fun some1() { task.send(me, s.read_some(2)); }
-fun some2() { task.send(me, s.read_some(2)); }
-fun exact() { task.send(me, s.read_bytes(2)); }
+fun some1() {
+    var text = "";
+    var sizes_ok = true;
+    while (len(text) < 6) {
+        var piece = s.read_some(2);
+        if (len(piece) < 1 or len(piece) > 2) sizes_ok = false;
+        if (len(piece) == 0) break;
+        text = text + piece;
+    }
+    task.send(me, "some1: " + text + ", pieces of 1 or 2 bytes: " + str(sizes_ok));
+}
+fun some2() {
+    try {
+        s.read_some(2);
+        task.send(me, "some2: no fault");
+    } catch (e) {
+        task.send(me, "some2: " + e.kind);
+    }
+}
+fun exact() {
+    try {
+        s.read_bytes(2);
+        task.send(me, "exact: no fault");
+    } catch (e) {
+        task.send(me, "exact: " + e.kind);
+    }
+    task.send(w, "write");
+}
 task.spawn(some1);
 task.spawn(some2);
 task.spawn(exact);
-var got = [];
-var i = 0;
-while (i < 3) {
+for (var i = 0; i < 3; i = i + 1) {
     try {
-        got.append(task.receive_within(3));
+        print task.receive_within(3);
     } catch (e) {
-        // The limit passed: the result stays missing.
+        print "missing: " + e.kind;
     }
-    i = i + 1;
 }
 task.send(w, "done");
-print "received " + str(len(got)) + " results";
-var total = 0;
-var none_empty = true;
-var seen = [];
-for (var r in got) {
-    total = total + len(r);
-    if (len(r) == 0) { none_empty = false; }
-    seen.append(r);
-}
-print "total length " + str(total);
-print "none empty " + str(none_empty);
-fun once(piece) {
-    var n = 0;
-    for (var x in seen) { if (x == piece) { n = n + 1; } }
-    return n == 1;
-}
-print "pieces ab, cd, ef once each " + str(once("ab") and once("cd") and once("ef"));

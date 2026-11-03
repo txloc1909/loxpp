@@ -1,0 +1,35 @@
+// A close_write() by another task ends only the wait on the write side
+// (spec/04-semantics.md, The Task Machine, Sides, rule 4; spec/05-stdlib.md,
+// `s.close_write()`). `reader` waits in readline() and holds the read side.
+// `other`, a task of the same worker, calls close_write() on the same Socket,
+// which raises nothing, and then the peer sends a line. The wait of `reader`
+// does not end at the close: it keeps waiting and gets the line.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: other: closed write
+// CHECK: reader: hello
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun reader() {
+    try {
+        task.send(me, "reader: " + str(conn.readline()));
+    } catch (e) {
+        task.send(me, "reader: " + e.kind);
+    }
+}
+fun other() {
+    conn.close_write();
+    task.send(me, "other: closed write");
+    peer.writeline("hello");
+}
+task.spawn(reader);
+task.spawn(other);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

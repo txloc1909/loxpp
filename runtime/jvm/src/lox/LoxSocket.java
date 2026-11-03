@@ -32,6 +32,9 @@ public final class LoxSocket {
         this.channel = channel;
     }
 
+    private final LoxSide readSide = new LoxSide("read side");
+    private final LoxSide writeSide = new LoxSide("write side");
+
     private void checkOpen(String method) {
         if (channel == null) {
             throw LoxOps.makeError("SocketClosedError",
@@ -47,12 +50,23 @@ public final class LoxSocket {
         }
     }
 
+    // A call on the read side starts. The closed check comes first: a closed
+    // side fails as a closed Socket even while a woken call still holds it.
+    private void enterRead(String method) {
+        checkOpen(method);
+        readSide.enter(method);
+    }
+
+    private void enterWrite(String method) {
+        checkWritable(method);
+        writeSide.enter(method);
+    }
+
     /**
      * Refills the empty buffer. False at the end of the stream. A task that
      * finds no bytes waits here; a close during the wait raises in checkOpen.
-     * Tasks that wait on one Socket share the buffer, so a task that wakes
-     * looks at the buffer first: another task may have filled it already, and
-     * a read into it would lose those bytes.
+     * The call tests the buffer before each read of the channel, so bytes
+     * that are there already are never read over.
      */
     private boolean fill(String method) {
         if (eof) {
@@ -83,19 +97,22 @@ public final class LoxSocket {
                 eof = true;
                 return false;
             }
-            LoxWorker.waitChannel(channel, SelectionKey.OP_READ);
+            readSide.await(channel, SelectionKey.OP_READ);
         }
     }
 
     public Object read() {
-        checkOpen("read");
-        LoxWorker.beginWaitingCall();
-        ByteArrayOutputStream all = new ByteArrayOutputStream();
-        do {
-            all.write(buf, pos, lim - pos);
-            pos = lim;
-        } while (fill("read"));
-        return new String(all.toByteArray(), LoxRuntime.CHARSET);
+        enterRead("read");
+        try {
+            ByteArrayOutputStream all = new ByteArrayOutputStream();
+            do {
+                all.write(buf, pos, lim - pos);
+                pos = lim;
+            } while (fill("read"));
+            return new String(all.toByteArray(), LoxRuntime.CHARSET);
+        } finally {
+            readSide.leave();
+        }
     }
 
     /**
@@ -104,8 +121,15 @@ public final class LoxSocket {
      * readStreamBytes.
      */
     public Object readBytes(int n) {
-        checkOpen("read_bytes");
-        LoxWorker.beginWaitingCall();
+        enterRead("read_bytes");
+        try {
+            return readBytesOfCall(n);
+        } finally {
+            readSide.leave();
+        }
+    }
+
+    private Object readBytesOfCall(int n) {
         ByteArrayOutputStream got = new ByteArrayOutputStream();
         while (got.size() < n) {
             if (pos == lim && !fill("read_bytes")) {
@@ -146,13 +170,19 @@ public final class LoxSocket {
     }
 
     /**
-     * The INVOKE and bound-native entry point. The stream state is checked
-     * before the byte count, matching native's checkSocketRead-then-asByteCount
-     * order, so a bad count on a closed socket reports the closed socket.
+     * The INVOKE and bound-native entry point. The stream state and the side
+     * are checked before the byte count, matching native's
+     * checkSocketRead-then-asByteCount order, so a bad count on a closed
+     * socket reports the closed socket.
      */
     public Object readBytesArg(Object arg) {
-        checkOpen("read_bytes");
-        return readBytes(checkByteCountArg(arg, "read_bytes"));
+        enterRead("read_bytes");
+        int n = checkByteCountArg(arg, "read_bytes");
+        try {
+            return readBytesOfCall(n);
+        } finally {
+            readSide.leave();
+        }
     }
 
     /**
@@ -160,7 +190,15 @@ public final class LoxSocket {
      * the unread buffer first, else one read of the channel. "" at EOF.
      */
     public Object readSome(int n) {
-        LoxWorker.beginWaitingCall();
+        enterRead("read_some");
+        try {
+            return readSomeOfCall(n);
+        } finally {
+            readSide.leave();
+        }
+    }
+
+    private Object readSomeOfCall(int n) {
         if (pos == lim && !fill("read_some")) {
             return "";
         }
@@ -171,15 +209,23 @@ public final class LoxSocket {
     }
 
     public Object readSomeArg(Object arg) {
-        checkOpen("read_some");
-        return readSome(checkByteCountArg(arg, "read_some", 1));
+        enterRead("read_some");
+        int n = checkByteCountArg(arg, "read_some", 1);
+        try {
+            return readSomeOfCall(n);
+        } finally {
+            readSide.leave();
+        }
     }
 
     /** One line, newline stripped; null at EOF. A partial trailing line still counts. */
     public Object readline() {
-        checkOpen("readline");
-        LoxWorker.beginWaitingCall();
-        return readLineOfCall();
+        enterRead("readline");
+        try {
+            return readLineOfCall();
+        } finally {
+            readSide.leave();
+        }
     }
 
     private Object readLineOfCall() {
@@ -203,56 +249,62 @@ public final class LoxSocket {
     }
 
     public Object readlines() {
-        checkOpen("readlines");
-        LoxWorker.beginWaitingCall();
-        LoxList list = new LoxList();
-        Object line;
-        while ((line = readLineOfCall()) != null) {
-            list.elements.add(line);
+        enterRead("readlines");
+        try {
+            LoxList list = new LoxList();
+            Object line;
+            while ((line = readLineOfCall()) != null) {
+                list.elements.add(line);
+            }
+            return list;
+        } finally {
+            readSide.leave();
         }
-        return list;
     }
 
     public void write(String s) {
-        writeBytes(s, "write");
+        writeCall("write", s, false);
     }
 
     public void writeline(String s) {
-        writeBytes(s + "\n", "writeline");
-    }
-
-    private void writeBytes(String s, String method) {
-        checkWritable(method);
-        LoxWorker.beginWaitingCall();
-        ByteBuffer data = ByteBuffer.wrap(s.getBytes(LoxRuntime.CHARSET));
-        while (data.hasRemaining()) {
-            try {
-                if (channel.write(data) > 0) {
-                    continue;
-                }
-            } catch (IOException e) {
-                throw LoxOps.makeError("NetworkError",
-                                       method + "(): " + e.getMessage());
-            }
-            LoxWorker.waitChannel(channel, SelectionKey.OP_WRITE);
-            checkWritable(method);
-        }
+        writeCall("writeline", s, true);
     }
 
     /**
-     * The INVOKE and bound-native entry points. The stream state is checked
-     * before the argument type, matching native's checkSocketWrite-then-type
-     * order, so a non-String write to a closed socket reports the same
-     * error on every backend.
+     * The INVOKE and bound-native entry points. The stream state and the side
+     * are checked before the argument type, matching native's
+     * checkSocketWrite-then-type order, so a non-String write to a closed
+     * socket reports the same error on every backend.
      */
     public void writeArg(Object arg) {
-        checkWritable("write");
-        write(checkStringArg(arg, "write"));
+        writeCall("write", arg, false);
     }
 
     public void writelineArg(Object arg) {
-        checkWritable("writeline");
-        writeline(checkStringArg(arg, "writeline"));
+        writeCall("writeline", arg, true);
+    }
+
+    private void writeCall(String method, Object arg, boolean newline) {
+        enterWrite(method);
+        String s = checkStringArg(arg, method);
+        try {
+            ByteBuffer data = ByteBuffer.wrap(
+                (newline ? s + "\n" : s).getBytes(LoxRuntime.CHARSET));
+            while (data.hasRemaining()) {
+                try {
+                    if (channel.write(data) > 0) {
+                        continue;
+                    }
+                } catch (IOException e) {
+                    throw LoxOps.makeError("NetworkError",
+                                           method + "(): " + e.getMessage());
+                }
+                writeSide.await(channel, SelectionKey.OP_WRITE);
+                checkWritable(method);
+            }
+        } finally {
+            writeSide.leave();
+        }
     }
 
     /**
@@ -263,12 +315,16 @@ public final class LoxSocket {
         if (channel == null || writeClosed) {
             return;
         }
+        // A write that waits cannot finish after this, so its wait ends now,
+        // and it raises as a write after close_write() does. A read that
+        // waits on the same channel keeps its wait.
+        writeClosed = true;
+        writeSide.endWait(channel, SelectionKey.OP_WRITE);
         try {
             channel.shutdownOutput();
         } catch (IOException ignored) {
             // Best effort, matching shutdown's own idempotence.
         }
-        writeClosed = true;
     }
 
     public void close() {

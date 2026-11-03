@@ -46,8 +46,7 @@ A probe passes when its stdout and its exit status agree.
 The expected-failure list holds one line per probe that the consumer does not
 pass yet: the file name, then a reason. Blank lines and lines that start with
 '#' are comments. The lists are files under tools/spec-probe-xfail/, one for each
-consumer, each passed with --xfail. The bootstrap interpreter
-has no list: it uses NOT-BINDING lines. A consumer that has no gap needs no
+consumer, each passed with --xfail. A consumer that has no gap needs no
 file, and a node that finds a gap creates one. A file that does not exist in an existing directory is
 no gap: it is reported as a NOTE and grades every probe. A path whose directory does not exist is a
 misnamed path and an error (exit code 2). Outcomes:

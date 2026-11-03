@@ -3,13 +3,8 @@
 // (spec/04-semantics.md, Scheduling). The three tasks begin to wait together;
 // they run in the order of the deadlines 0.1, 0.3, and 0.5, whatever the order
 // of their calls. A sleep is one of the waits.
-// The CHECK lines do not bind the bootstrap interpreter. It runs every worker on
-// one host thread, so a blocking call blocks every task (spec/README.md,
-// Conformance: scheduling is implementation-defined). The probe on the
-// NOT-BINDING line checks the bootstrap's own choice in its place.
 // STATUS: ok
 // TIMEOUT: 30
-// NOT-BINDING: bootstrap bootstrap-only/same_worker_blocking_call.lox
 // CHECK: limit 0.1
 // CHECK: sleep 0.3
 // CHECK: limit 0.5

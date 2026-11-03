@@ -75,6 +75,7 @@ jobs:
           tools/check_suspend_points.py
           tools/check_blocking_calls.py
           tools/check_blocking_decision_tables.py
+          tools/check_task_machine.py
 
       # The fault sites of the Socket and Server natives, native and JVM: each
       # one is a catchable fault of a named kind or an argument fault that
@@ -560,10 +561,12 @@ jobs:
       # line), against the stdout the spec defines. A consumer that cannot pass
       # a probe yet lists it in an expected-failure file under
       # tools/spec-probe-xfail/ and passes --xfail. The differential steps
-      # pass neither --xfail nor --oracle-xfail, so a list gates only through
-      # its own spec-probe step. Each step names its file even
-      # while the file is absent, so a file added later is gated at once. The
-      # bootstrap interpreter uses NOT-BINDING lines instead of a file.
+      # that walk the probe directory pass the same file as --xfail and
+      # native's file as --oracle-xfail, so a probe that both runs fail is
+      # graded XFAIL and not compared as a divergence. Each step names its
+      # file even while the file is absent, so a file added later is gated at
+      # once. The bootstrap interpreter also uses NOT-BINDING lines, for the
+      # behavior that it may choose differently.
       # Release only: the debug preset's instruction trace floods stdout (see
       # AGENTS.md).
       - name: Check spec probes - native
@@ -583,7 +586,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
+            bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
 
       - name: Run examples through loxpp bootstrap interpreter
         if: matrix.preset == 'release'
@@ -648,7 +651,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --timeout 120"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt --oracle-xfail tools/spec-probe-xfail/native.txt --timeout 120"
 
       # Three probes that the walk above skips. Two have no STATUS line,
       # because a CHECK line cannot hold the NUL byte they print. The third is
@@ -1248,7 +1251,7 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev-managed:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp tools/loxpp_jvm.sh test/translation-probes/ test/translation-probes/jvm-only/ --xfail tools/spec-probe-xfail/jvm.txt --oracle-xfail tools/spec-probe-xfail/native.txt"
 
       # The spec probes of test/translation-probes/ (the files with a
       # STATUS line) on the JVM backend, against the stdout the spec
