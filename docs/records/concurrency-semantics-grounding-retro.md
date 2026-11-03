@@ -46,9 +46,11 @@ A round is one reviewer comment with a verdict.
 | #1079 (N4) | 1 | 0 | None. Two non-blocking items, filed as #1080 and #1081 |
 | #1082 (N6) | 1 | 0 | None. Four non-blocking items: #1086, two with no action, and the decision table that this change updates |
 | #1083 (N5) | 1 | 0 | None. One non-blocking item, filed as #1084 |
+| #1088 (N7) | 1 when this record was written; the answer to it is this record's last change | 2 | The order question (F1). The playbook still told an agent to use `git stash` (F2) |
 
-Every blocking finding of the mission was at N2. After N2, each code node
-passed in one round.
+Every blocking finding of the code nodes was at N2. After N2, each code node
+passed in one round. The close node, #1088, had two blocking findings in its
+first round.
 
 ## What worked
 
@@ -154,16 +156,33 @@ break a rule. The review of #1082 checked that argument.
    Conformance, item 5. It passed on the bootstrap only because the old
    `sleep` blocked. N6 rewrote it.
 
-## The open order question
+## The order question, and a wrong argument at close
 
 The review of #1082 found that native and the JVM order two tasks
-differently: a task whose limit passed with a message it did not select, and
-a task that got its message. This change ran the program on both. With a
-print in `want`, native shows that the first task runs, tests the message, and
-waits again; the worker sees its limit later. The JVM sees the limit when the
-task tests its mailbox. Scheduling lets a worker see a passed limit at points
-that the implementation chooses, so the order is not bound. The decision,
-"Shipped", gives the argument.
+differently: a task whose limit passed with a message that it did not
+select, and a task that got its message. The first tip of #1088 said that the
+order is not bound, because Scheduling lets a worker see a passed limit at
+points that the implementation chooses.
+
+The review of #1088 (F1) showed that the argument was wrong. Seeing a limit
+is the `limit` move, and that move joins the back of the run queue. So no
+point that the implementation chooses can put the task ahead of a task that
+is already in the run queue. The reviewer gave a variant in which A's
+message arrives before its limit and the limit passes while A is `ready`:
+native, QBE and the bootstrap print C first, and the JVM printed A first.
+The orchestrator ruled on #1065 that the order is bound. #1088 adds probe
+369, one sentence in rule 4 of `task.receive_within`, and the JVM fix in
+`LoxWorker.awaitMessage`. With the old JVM code, probe 369 fails 5 of 5 runs.
+
+The first program (both limits pass before any send) stays open, for another
+reason than the one first given: the worker can see both limits before the
+sends.
+
+The cause is the class that rule 6 of "Plans for a language change" now
+names. Rule 4 of `task.receive_within` ("tested before the limit counts")
+could be read as "raises at once", and The Task Machine says the call makes
+the `receive` move again. The implementer read one section and not the
+other.
 
 ## Rules this retrospective produces
 
@@ -172,16 +191,21 @@ Each rule below is a rule for all future work. This change puts each one in
 
 1. **Check each new spec rule against every section that decides the same
    case** ("Plans for a language change", rule 6). Evidence: F2, F3 and F6 of
-   #1070, and F4, where one section sent the reader to another that did not
-   decide the case.
+   #1070; F4, where one section sent the reader to another that did not
+   decide the case; and F1 of #1088 (rule 4 of `task.receive_within` and The
+   Task Machine).
 2. **A comparison of a halt must still tell a rejection from a halt** (added
-   to rule 5). Evidence: the mutation of the bootstrap parser on probe 282 in
-   this change.
+   to rule 5), when the halt has output before its fault. Evidence: the
+   mutation of the bootstrap parser on probe 282 in this change. A halt with
+   no output before its fault looks like a rejection under the behavior the
+   spec binds (#1087).
 3. **A probe set covers each side, kind, or value that a rule names**
    ("Engineering rules"). Evidence: #1080 (rule 6 had no write-side probe),
    F5 of #1070 (probe 358 did not force its case).
 4. **Do not use `git stash`** ("Engineering rules"). Evidence: the shared
-   stash reflog above. The incident itself has no thread.
+   stash reflog above. The incident itself has no thread. The review of #1088
+   (F2) found that `docs/process/multi-agent-playbook.md` told an agent to use
+   `git stash push`; this change makes it agree.
 
 No rule is proposed for the `pull_request` trigger: it is a fault of the CI
 host, and the orchestrator's task already says to start CI by

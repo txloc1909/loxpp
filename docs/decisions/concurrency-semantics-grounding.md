@@ -241,11 +241,11 @@ node. The nodes merged from 2026-11-02 to 2026-11-03. The retrospective is
 |---|---|---|---|
 | N1 | #1059 | #1069 | Comments give worker parallelism, not scheduling, as the reason for a rule of one host thread |
 | N2 | #1060 | #1070 | The Task Machine in `spec/04-semantics.md` (task states, worker states, moves, per-task state, sides), with `tools/check_task_machine.py`; the D1 and D2 text; Sides rules 1 to 6 and `BusyError`; probes 347 to 365; the expected-failure lists |
-| N3 | #1061 | #1077 | Native: one waiting call per side, the holder in `ObjSocket` and `ObjServer`, closed before busy. The writer queue and the multi-waiter wake are removed |
+| N3 | #1061 | #1077 | Native: one waiting call per side, the holder in `ObjSocket` and `ObjServer`, closed before busy. The writer queue and the multi-waiter wake are removed. Also closes #1054 |
 | N4 | #1062 | #1079 | JVM: `LoxSide` for each side, closed before busy, and a `close_write()` that wakes a waiting writer at the call. The multi-waiter path of `LoxPoller` is removed |
 | N6 | #1064 | #1082 | Bootstrap: `sleep` suspends; one record per task (`InterpTask`); `SelectTimer` and `BlockingSleeper` are removed; D3 is delegated to the host, with an argument rule by rule; probe 366 |
-| N5 | #1063 | #1083 | QBE: an unreached suspend point gets no resume state (#1048); probe 367 |
-| N7 | #1065 | this change | The differential gate tells a rejection from a halt; probe 368 (Sides rule 6 on the write side, #1080); the close of the mission |
+| N5 | #1063 | #1083 | QBE: an unreached suspend point gets no resume state; probe 367. Also closes #1048 |
+| N7 | #1065 | this change | The differential gate tells a rejection from a halt; probe 368 (Sides rule 6 on the write side, #1080); probe 369, one sentence in rule 4 of `task.receive_within`, and the JVM fix for the order of a passed limit; the close of the mission |
 
 Every expected-failure list under `tools/spec-probe-xfail/` is empty at close:
 the directory holds only `.gitkeep`.
@@ -262,27 +262,40 @@ the directory holds only `.gitkeep`.
 | `close()` ends the wait on each side of its value; `close_write()` ends only the wait on the write side | #1060 |
 | The bootstrap may delegate D3 to the host, with an argument for each rule and a probe or a check where the mapping could break a rule | #1064 |
 | N7 takes #1080 and the JVM order question of the review of #1082 | #1065 |
+| The order of a passed limit is bound: a receive that selects no message makes the `receive` move again, and the passed limit is seen as a `limit` move that joins the back of the run queue | #1065 |
 
 ### The order of a passed limit and a message on one worker
 
 The review of #1082 found that native and the JVM order two tasks
-differently. Program: task A waits in `task.receive_where_within(want, 0.1)`
-and task B in `task.receive_within(0.1)`. The main task computes for 0.3 s
-with no suspend point, so both limits pass. Then it sends A a message that
-`want` does not select, and it sends B a message. Native prints B first; the
-JVM prints A first. With a print in `want`, native shows that A runs first,
-tests the new message, and waits again; the worker then sees A's limit after
-B ran.
+differently: a task whose limit passed with a message that it did not
+select, and a task that got its message. The first form of this section
+said that the order is not bound. That argument was wrong, and the review of
+#1088 (F1) showed why.
 
-This order is not bound. Both sends make `message` moves at the send, so A
-joins the run queue before B on both. A then runs, and its message is not
-selected. The Task Machine says that a receive with a condition that finds no
-selected message makes the `receive` move again, with the start of its limit
-kept. Scheduling says that a worker sees a limit that has passed at points
-that the implementation chooses. The JVM sees A's limit when A tests its
-mailbox; native sees it later. Both are points that the implementation may
-choose, so no probe binds this order. On the JVM gate of this change, no
-probe diverges from native.
+The ruling on #1065: the order is bound, and The Task Machine decides it. A
+receive with a condition that selects no message makes the `receive` move
+again, with its limit kept. When the worker then sees the passed limit, the
+task makes the `limit` move, which joins the back of the run queue. An
+implementation must not raise `TimeoutError` without that move. Rule 4 of
+`task.receive_within` says that a message in the mailbox is tested before the
+limit counts. It does not let the call skip the move. The point where a worker
+sees a passed limit is open, but each such point puts the task at the back, so
+it cannot put the task ahead of a task that is already in the run queue.
+
+The bound case is probe 369: task A waits in `task.receive_where_within` with
+a limit of 1 s, and task C in `task.receive()`. Main sends A a message that
+A's `want` does not select, and then sends C a message. Both `message` moves
+happen at the send, so the run queue is A, C. Main then computes for 2 s, so
+A's limit passes while A is `ready`. A tests the message and makes the
+`receive` move again, and its `limit` move puts it behind C. Native, QBE and
+the bootstrap print C first. The JVM raised `TimeoutError` at once in
+`LoxWorker.awaitMessage` and printed A first. This change fixes the JVM: a
+call whose limit passed still waits, and it raises only after the `limit`
+move ended the wait. It adds one sentence to rule 4.
+
+The first program of the review of #1082 (both limits pass before main sends
+anything) stays open: the worker can see both limits before the sends, and
+then A and B join the run queue by their `limit` moves, in deadline order.
 
 ### The differential gate
 
@@ -291,7 +304,7 @@ whether the program is rejected, and what it does when it runs. CI runs it
 over `test/translation-probes/` for the JVM ("JVM differential suite -
 probes"), for QBE (`tools/check_qbe_probes.sh`, "Check QBE probes (S7)"), and
 for the bootstrap ("Bootstrap differential suite - spec probes"). The mission
-probes are 260, 277, 279, 282, 323, 325 and 347 to 368.
+probes are 260, 277, 279, 282, 323, 325 and 347 to 369.
 
 When native halts, the gate accepted any other stdout that is a prefix of
 native's. An empty stdout is a prefix of every stdout, so a consumer that
@@ -300,17 +313,18 @@ rejects `for`-in showed this on probe 282 (`MATCH (halt)`). For a spec probe
 with `STATUS: error`, the other runner must now print the CHECK lines too.
 `tools/check_diff_runtimes_phases.py` (ctest `DiffRuntimesPhases`) checks
 both phases with stub runners. The gap stays for a halting program that is
-not a spec probe (#1087).
+not a spec probe, and for the five spec probes with `STATUS: error` and no
+CHECK line (#1087).
 
 The gates on the release build of this change, with no expected-failure
 list:
 
 | Consumer | `check_spec_probes.py` | `diff_runtimes.py` against native |
 |---|---|---|
-| Native | 293 pass, 0 fail | — |
-| JVM | 293 pass, 0 fail | 396 matched, 0 diverged |
-| QBE | 293 pass, 0 fail | 372 matched, 0 diverged (`test/translation-probes/`) |
-| Bootstrap | 291 pass, 0 fail, 2 exempt | 291 matched, 0 diverged, 2 exempt |
+| Native | 294 pass, 0 fail | — |
+| JVM | 294 pass, 0 fail | 397 matched, 0 diverged |
+| QBE | 294 pass, 0 fail | 373 matched, 0 diverged (`test/translation-probes/`) |
+| Bootstrap | 292 pass, 0 fail, 2 exempt | 292 matched, 0 diverged, 2 exempt |
 
 ### Bug classes that the mission found
 
@@ -320,7 +334,7 @@ written here during the mission (rule 4 of "Plans for a language change").
 
 | Class | Found in | Layer | Constraint |
 |---|---|---|---|
-| The spec decides one case in two ways | #1070, findings F2, F3 and F6 | The spec text | Each new rule is checked against every section that decides the same case |
+| The spec decides one case in two ways | #1070, findings F2, F3 and F6; #1088, F1 (rule 4 of `task.receive_within` and The Task Machine) | The spec text | Each new rule is checked against every section that decides the same case |
 | A check script passes when one row of its table is removed | #1070, finding F1 | The table check scripts | A script pins the names of each table in both directions and fails on a removed row |
 | A probe passes on an implementation that breaks the rule it is for | #1070, finding F5 (probe 358) | The shared probes | A probe forces the case that its rule names; a mutation of that rule fails it |
 | A rule that names several sides has a probe for only some of them | #1079 (rule 6 on the write side) | The shared probes | A rule gets a probe line for each side or value that it names (probe 368) |
