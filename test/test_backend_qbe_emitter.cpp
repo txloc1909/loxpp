@@ -737,6 +737,19 @@ bool treeUsesTasksFor(const std::string& source) {
 
 } // namespace
 
+// An analysis of a different tree must fail loudly, not read past the end of
+// `reached`.
+TEST(QbeEmitter, AMismatchedStackAnalysisThrows) {
+    MemoryManager mm;
+    ObjFunction* script = compile("print 1;", &mm);
+    ASSERT_NE(script, nullptr);
+    DecodedFunction tree = decodeFunctionTree(script);
+    EXPECT_THROW(qbe::needsCoroutineMode(tree, StackAnalysisTree{}),
+                 std::runtime_error);
+    EXPECT_THROW(qbe::treeUsesTasks(tree, StackAnalysisTree{}),
+                 std::runtime_error);
+}
+
 TEST(QbeEmitter, AProgramWithNoYieldAndNoTaskKeepsTheFastMode) {
     EXPECT_FALSE(needsCoroutineModeFor("fun f(x) { return x + 1; } "
                                        "print f(1);"));
