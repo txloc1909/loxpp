@@ -124,11 +124,11 @@ SOCKET_SITES = {
     ("checkWritable", CLOSED): 1,
     ("fill", NETWORK): 1,
     ("writeCall", NETWORK): 1,
-    ("connect", NETWORK): 3,
+    ("connect", NETWORK): 4,
 }
 
 SERVER_SITES = {
-    ("listen", NETWORK): 1,
+    ("listen", NETWORK): 2,
     ("checkOpen", CLOSED): 1,
     ("accept", NETWORK): 1,
 }

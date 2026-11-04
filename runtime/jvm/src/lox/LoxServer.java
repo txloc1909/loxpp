@@ -1,6 +1,7 @@
 package lox;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.StandardSocketOptions;
 import java.nio.channels.SelectionKey;
@@ -24,29 +25,47 @@ public final class LoxServer {
     }
 
     public static LoxServer listen(String host, int port) {
-        ServerSocketChannel server = null;
+        String failure = "unknown host";
         try {
-            server = ServerSocketChannel.open();
-            server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
-            server.bind(new InetSocketAddress(host, port));
-            server.configureBlocking(false);
-            LoxServer made = new LoxServer(
-                server, ((InetSocketAddress)server.getLocalAddress()).getPort());
-            server = null; // the Server owns the channel now
-            return made;
-        } catch (IOException e) {
-            throw LoxOps.makeError("NetworkError",
-                                   "listen(): cannot listen on '" + host + ":" +
-                                       port + "': " + e.getMessage());
-        } finally {
-            if (server != null) {
+            InetAddress[] addresses = LoxSocket.resolveHost(host);
+            if (addresses == null) {
+                throw LoxOps.makeError("NetworkError",
+                                       "listen(): cannot resolve '" + host +
+                                           "'");
+            }
+            // Every resolved address is tried in order, as native does: the
+            // first one can be unusable (an IPv6 address on a host with IPv6
+            // off) while a later one binds.
+            for (InetAddress ip : addresses) {
+                ServerSocketChannel server = null;
                 try {
-                    server.close();
-                } catch (IOException ignored) {
-                    // The listen fault is the one to report.
+                    server = ServerSocketChannel.open();
+                    server.setOption(StandardSocketOptions.SO_REUSEADDR, true);
+                    server.bind(new InetSocketAddress(ip, port));
+                    server.configureBlocking(false);
+                    LoxServer made = new LoxServer(
+                        server,
+                        ((InetSocketAddress)server.getLocalAddress()).getPort());
+                    server = null; // the Server owns the channel now
+                    return made;
+                } catch (IOException e) {
+                    failure = e.getMessage() != null ? e.getMessage() : failure;
+                } finally {
+                    if (server != null) {
+                        try {
+                            server.close();
+                        } catch (IOException ignored) {
+                            // The listen fault is the one to report.
+                        }
+                    }
                 }
             }
+        } catch (IOException e) {
+            failure = e.getMessage() != null ? e.getMessage() : failure;
         }
+        throw LoxOps.makeError("NetworkError",
+                               "listen(): cannot listen on '" + host + ":" +
+                                   port + "': " + failure);
     }
 
     public Object accept() {
