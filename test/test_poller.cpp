@@ -14,11 +14,27 @@
 #include <ctime>
 #include <dirent.h>
 #include <fcntl.h>
+#include <ostream>
 #include <pthread.h>
 #include <set>
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+// gtest prints an enum of this scope as its underlying byte otherwise.
+void PrintTo(WaitReason reason, std::ostream* os) {
+    switch (reason) {
+    case WaitReason::None:
+        *os << "WaitReason::None";
+        break;
+    case WaitReason::Inbox:
+        *os << "WaitReason::Inbox";
+        break;
+    case WaitReason::Poller:
+        *os << "WaitReason::Poller";
+        break;
+    }
+}
 
 namespace {
 
@@ -388,10 +404,12 @@ TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
     TwoWorkers w;
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
     EXPECT_FALSE(w.other.idle());
+    EXPECT_EQ(w.other.waitReason, WaitReason::Poller);
     EXPECT_EQ(w.group->busy.load(), 2);
     // The main worker waits in receive with nothing inbound. The other can
     // still end a wait, so this is not a deadlock.
     EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_EQ(w.mainInbox.waitReason, WaitReason::Inbox);
     EXPECT_FALSE(w.group->deadlock.load());
     EXPECT_EQ(w.group->busy.load(), 1);
 }
@@ -399,6 +417,7 @@ TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
 TEST(IdleAccountingTest, RealDeadlockIsStillReported) {
     TwoWorkers w;
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Inbox));
+    EXPECT_EQ(w.other.waitReason, WaitReason::Inbox);
     EXPECT_TRUE(w.group->goIdle(w.mainInbox, WaitReason::Inbox));
     EXPECT_TRUE(w.group->deadlock.load());
 }
