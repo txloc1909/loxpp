@@ -1,0 +1,32 @@
+// A `yield` no path reaches costs a QBE program nothing.
+//
+// Run: tools/loxpp_qbe.sh benchmarks/coroutine_mode_dead_yield.lox
+//
+// Identical to benchmarks/coroutine_mode_floor.lox plus one `yield` that sits
+// after an unconditional `return`, so no frame can ever suspend there. On the
+// native VM the extra instruction changes nothing. On the QBE backend the
+// mode follows the instructions the shared analysis reaches
+// (docs/decisions/coroutines.md, "Backends"), so a dead `yield` decides
+// nothing: register promotion stays on and this number matches the floor's.
+// Before #1084 any `yield` the program contained turned the mode on for every
+// function, and the gap against the floor was what every call paid for it.
+
+fun step(i, limit) {
+    if (i < limit) return i + 1;
+    return i;
+    yield 0;
+}
+
+fun run(reps) {
+    var i = 0;
+    while (i < reps) {
+        i = step(i, reps);
+    }
+    return i;
+}
+
+var REPS = 200000;
+var start = clock();
+run(REPS);
+var elapsed = clock() - start;
+print elapsed / REPS * 1000000000.0;

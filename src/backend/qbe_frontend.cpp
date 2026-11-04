@@ -168,9 +168,9 @@ std::string rawDelimiter(const std::string& source) {
 // the src/ include tree. rt_capi.cpp static_asserts the runtime side of that
 // layout; an end-to-end CI step compiles and runs the harness to prove it.
 // `declarations`: the compiled root of the declarations-only compile, which
-// a worker runs. Only a program that names `task` has one, and only that
-// program runs its main task on the scheduler (rt_run_tasks): any other
-// program has one task, so a task switch there finds no other task.
+// a worker runs. Only a program with a reached name of `task` has one, and
+// only that program runs its main task on the scheduler (rt_run_tasks): any
+// other program has one task, so a task switch there finds no other task.
 std::string buildHarness(const std::string& source,
                          const std::vector<CompiledFunction>& fns,
                          const std::optional<CompiledFunction>& declarations) {
@@ -288,12 +288,14 @@ int runQbeTarget(const std::string& exePath, const std::string& scriptPath,
     std::optional<CompiledFunction> declarations;
     try {
         DecodedFunction tree = decodeFunctionTree(script);
-        options.coroutineMode = qbe::needsCoroutineMode(tree);
         options.globalSlots = qbe::collectGlobalNames(tree);
+        // The mode and the task decision both read the shared analysis's
+        // reached set, so the analysis comes first.
         StackAnalysisTree analysis = analyzeStackTree(tree);
+        options.coroutineMode = qbe::needsCoroutineMode(tree, analysis);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, ssa, fns);
-        if (qbe::treeUsesTasks(tree)) {
+        if (qbe::treeUsesTasks(tree, analysis)) {
             declarations =
                 emitDeclarationsRoot(source, mm, script, options, ssa);
             if (!declarations.has_value()) {

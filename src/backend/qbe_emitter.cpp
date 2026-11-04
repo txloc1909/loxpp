@@ -1640,30 +1640,46 @@ bool namesGlobal(const DecodedFunction& fn, const DecodedInstruction& ins,
 }
 
 template <typename Pred>
-bool anyInstruction(const DecodedFunction& node, const Pred& pred) {
-    if (std::ranges::any_of(
-            node.instructions,
-            [&](const DecodedInstruction& ins) { return pred(node, ins); })) {
-        return true;
+bool anyReachedInstruction(const DecodedFunction& node,
+                           const StackAnalysisTree& analysisNode,
+                           const Pred& pred) {
+    if (analysisNode.self.reached.size() != node.instructions.size() ||
+        analysisNode.nested.size() != node.nested.size()) {
+        throw std::runtime_error(
+            "qbe: the stack analysis does not match function " + node.id +
+            " — analyzeStackTree and decodeFunctionTree disagree");
     }
-    return std::ranges::any_of(node.nested, [&](const DecodedFunction& child) {
-        return anyInstruction(child, pred);
-    });
+    for (std::size_t i = 0; i < node.instructions.size(); i++) {
+        if (analysisNode.self.reached[i] && pred(node, node.instructions[i])) {
+            return true;
+        }
+    }
+    for (std::size_t i = 0; i < node.nested.size(); i++) {
+        if (anyReachedInstruction(node.nested[i], analysisNode.nested[i],
+                                  pred)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
 
-bool treeUsesTasks(const DecodedFunction& root) {
-    return anyInstruction(
-        root, [](const DecodedFunction& fn, const DecodedInstruction& ins) {
+bool treeUsesTasks(const DecodedFunction& root,
+                   const StackAnalysisTree& analysis) {
+    return anyReachedInstruction(
+        root, analysis,
+        [](const DecodedFunction& fn, const DecodedInstruction& ins) {
             return namesGlobal(fn, ins, "task");
         });
 }
 
-bool needsCoroutineMode(const DecodedFunction& root) {
-    return treeUsesTasks(root) ||
-           anyInstruction(
-               root, [](const DecodedFunction&, const DecodedInstruction& ins) {
+bool needsCoroutineMode(const DecodedFunction& root,
+                        const StackAnalysisTree& analysis) {
+    return treeUsesTasks(root, analysis) ||
+           anyReachedInstruction(
+               root, analysis,
+               [](const DecodedFunction&, const DecodedInstruction& ins) {
                    return ins.op == Op::YIELD;
                });
 }

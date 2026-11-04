@@ -394,7 +394,7 @@ class Runtime {
     [[nodiscard]] bool isTopLevelFunction(const Value& fn) const;
 
     // The task that runs now, or nullptr when no scheduler runs (a compiled
-    // program that never names `task`, which the QBE entry runs with
+    // program with no reached name of `task`, which the QBE entry runs with
     // rt_call).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 

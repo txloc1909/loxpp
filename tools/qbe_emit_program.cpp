@@ -108,9 +108,10 @@ int main(int argc, char** argv) {
 
     DecodedFunction tree = decodeFunctionTree(script);
     try {
-        options.coroutineMode = qbe::needsCoroutineMode(tree);
-        options.globalSlots = qbe::collectGlobalNames(tree);
+        // Both read the shared analysis's reached set; analyze first.
         StackAnalysisTree analysis = analyzeStackTree(tree);
+        options.coroutineMode = qbe::needsCoroutineMode(tree, analysis);
+        options.globalSlots = qbe::collectGlobalNames(tree);
         CaptureAnalysis captures = analyzeCaptures(tree);
         emitTree(tree, analysis, captures, options, stdout, stderr);
     } catch (const std::exception& e) {

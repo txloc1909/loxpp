@@ -112,17 +112,30 @@ std::string emitScript(const DecodedFunction& fn,
                        const std::string& qbeSymbol,
                        const EmitOptions& options = {});
 
-// True when a function of the program `root` names the global `task`. Only
-// that global reaches the task module (no native returns a global by name),
-// and a --target qbe program is one source, so a program for which this is
-// false never spawns a task or a worker and never receives.
-bool treeUsesTasks(const DecodedFunction& root);
+// True when a *reached* function of the program `root` names the global
+// `task`. Only that global reaches the task module (no native returns a
+// global by name), and a --target qbe program is one source, so a program for
+// which this is false never spawns a task or a worker and never receives.
+//
+// `analysis` is analyzeStackTree(root)'s own result for `root`: the two trees
+// are walked in parallel, and an instruction the shared analysis does not
+// reach (FunctionStackAnalysis::reached) is not consulted. An unreached
+// instruction never runs, so it cannot reach the task module. The pair must
+// come from the same tree — a length mismatch throws.
+bool treeUsesTasks(const DecodedFunction& root,
+                   const StackAnalysisTree& analysis);
 
 // The whole-program rule for EmitOptions::coroutineMode: a compiled frame can
 // be live under a suspension. A suspension is a YIELD or a task.receive() on
 // an empty mailbox, and every frame below it suspends with it. A function
 // with neither can still be such a frame, because calls are dynamic, so the
-// rule covers the whole program (docs/decisions/coroutines.md).
-bool needsCoroutineMode(const DecodedFunction& root);
+// rule covers every function of the program (docs/decisions/coroutines.md).
+// Within a function it covers only the instructions the shared analysis
+// reaches (`analysis`): an unreached YIELD cannot suspend the frame that
+// never executes it. A reachable-only rule is still an over-approximation of
+// the running program — a reached instruction of a function nothing calls
+// counts too — which is what keeps the rule safe when calls are dynamic.
+bool needsCoroutineMode(const DecodedFunction& root,
+                        const StackAnalysisTree& analysis);
 
 } // namespace qbe

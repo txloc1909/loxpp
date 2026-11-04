@@ -3839,15 +3839,15 @@ Runtime::OpResult Runtime::opIterNext() {
 Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
     // The compiled frame returns kRtYield only when this returns OK.
     if (m_currentCoroutine == nullptr) {
-        // No scheduler runs this program: the QBE entry runs a program that
-        // never names `task` with rt_call (qbe::treeUsesTasks), so it is one
-        // task and no other task can exist. A yield outside every coroutine
-        // is a task switch (spec/04-semantics.md, yield Expression), and with
-        // an empty run queue the task runs again at once: callCompiled()
-        // re-enters the frame with nil as the value. The yield raises while a
-        // native runs or a C++ caller waits for the result of Lox code (a
-        // SynchronousRun: a map key's __hash__ or __eq__, a __str__, a
-        // deferred call).
+        // No scheduler runs this program: the QBE entry runs a program with
+        // no reached name of `task` with rt_call (qbe::treeUsesTasks), so it
+        // is one task and no other task can exist. A yield outside every
+        // coroutine is a task switch (spec/04-semantics.md, yield Expression),
+        // and with an empty run queue the task runs again at once:
+        // callCompiled() re-enters the frame with nil as the value. The yield
+        // raises while a native runs or a C++ caller waits for the result of
+        // Lox code (a SynchronousRun: a map key's __hash__ or __eq__, a
+        // __str__, a deferred call).
         if (m_nativeDepth > 0 || m_reentrantRunDepth > 0) {
             return fromThrow(raiseThrowableError(
                 "YieldAcrossNativeError",

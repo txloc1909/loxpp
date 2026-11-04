@@ -2,13 +2,18 @@
 //
 // Run: tools/loxpp_qbe.sh benchmarks/coroutine_mode_tax.lox
 //
-// Identical to benchmarks/coroutine_mode_floor.lox plus one function that
-// contains a `yield` and is never called. On the native VM the extra
-// function changes nothing. On the QBE backend any `YIELD` in the program
+// Identical to benchmarks/coroutine_mode_floor.lox plus one function that is
+// never called and whose body does contain a `yield`. On the native VM the
+// extra function changes nothing. On the QBE backend a reached `YIELD` still
 // compiles the whole program in coroutine mode (docs/decisions/coroutines.md,
-// "Backends"): every function becomes a resume-block state machine driven by
-// the runtime, and register promotion is off. The difference between this
-// number and the floor's is what every call pays for that rule.
+// "Backends"): the mode covers every function, because calls are dynamic, so
+// a `yield` in an uncalled function is still one a frame could suspend at.
+// Every function becomes a resume-block state machine driven by the runtime,
+// and register promotion is off. The difference between this number and the
+// floor's is what every call pays for that rule.
+//
+// benchmarks/coroutine_mode_dead_yield.lox is the same program with the
+// `yield` where no path reaches it: that one keeps the floor's cost.
 
 fun step(i, limit) {
     if (i < limit) return i + 1;

@@ -12,7 +12,7 @@
 // Every member needs the scheduler of runTasks(). A Runtime that runs a
 // program without it (rt_call, backend/rt_capi.h) has no task, so there the
 // members fail before they touch one. The QBE front end runs every program
-// that names `task` through the scheduler (rt_run_tasks).
+// with a reached name of `task` through the scheduler (rt_run_tasks).
 static Runtime* taskRuntime() {
     Runtime* rt = getActiveRuntime();
     if (rt->currentTask() == nullptr) {

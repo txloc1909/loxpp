@@ -87,9 +87,10 @@ a collection is a process-global pause, not a coroutine's work.
 
 ## Backends
 
-- QBE: native (#530/#535). A program that contains any `YIELD`, or that names
-  the `task` module (a `task.receive()` suspends too), is compiled in
-  coroutine mode (`qbe::needsCoroutineMode`): every function becomes a
+- QBE: native (#530/#535). A program with a `YIELD` the shared analysis
+  reaches, or a reached name of the `task` module (a `task.receive()`
+  suspends too), is compiled in coroutine mode (`qbe::needsCoroutineMode`):
+  every function becomes a
   resume-block state machine
   (`CallFrame::compiledState`), and `Runtime::runCompiledFrames` drives the
   frames, re-entering each at its saved point. Every opcode whose runtime
@@ -99,6 +100,23 @@ a collection is a process-global pause, not a coroutine's work.
   task in `task.receive` (#729). The interpreter fallback was dropped: a
   caller that does not itself contain `YIELD` must still suspend, and dynamic
   dispatch makes the safe fallback set the whole program.
+
+  **Change record: the mode follows the reached instructions (#1084).** This
+  bullet first said "contains any `YIELD`", meaning anywhere in the decoded
+  tree. A `yield` after a `return` is dead code, so it turned the mode on for
+  every function and cost each of them its register promotion
+  (`promoteRegisters && !coroutineMode`) for an instruction no frame can run.
+  `VISION.md`, *cost*: no construct adds work at a site that does not name
+  it. The rule now reads the reached set the shared analysis
+  (`FunctionStackAnalysis::reached`) computes, in `qbe::needsCoroutineMode`
+  and `qbe::treeUsesTasks` alike — the second must agree, because the front
+  end picks the scheduler entry (`rt_run_tasks` versus `rt_call`) from it,
+  and only a driver entry makes a compiled frame resumable. The property is
+  unchanged: the mode is never off where a frame can suspend. Reach is per
+  function entry, not per call site, so a reached `YIELD` in a function
+  nothing calls still turns the mode on. Benchmark
+  `benchmarks/coroutine_mode_dead_yield.lox` matches the floor;
+  `benchmarks/coroutine_mode_tax.lox` keeps the cost of the residual rule.
 - JVM: each coroutine is a virtual thread; `yield`/`resume` use a handoff over
   two zero-capacity queues. No stack copying (shared-heap object model). The
   carrier pool is raised from the processor count, so a CPU-bound coroutine
@@ -133,3 +151,5 @@ gate for that directory.
 - `docs/records/non-local-control-flow-retro.md` — the process rules this mission
   follows (five at the time; rule 6 came from `docs/records/coroutines-retro.md`).
 - Tracking issue #523; node issue #524.
+- `docs/records/qbe-reached-coroutine-mode-2026-11-03.md` — the measurement
+  behind the change record above (#1084).

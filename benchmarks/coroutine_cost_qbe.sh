@@ -14,7 +14,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-programs=(coroutine_yield coroutine_call_baseline coroutine_mode_floor coroutine_mode_tax coroutine_yield_depth coroutine_footprint)
+programs=(coroutine_yield coroutine_call_baseline coroutine_mode_floor coroutine_mode_tax coroutine_mode_dead_yield coroutine_yield_depth coroutine_footprint)
 
 phase="${1:-}"
 case "$phase" in
@@ -46,8 +46,10 @@ run)
     timed "$out/coroutine_call_baseline"
     echo "== call with local state, ns per call, normal mode =="
     timed "$out/coroutine_mode_floor"
-    echo "== call with local state, ns per call, coroutine mode (an unreached YIELD in the program) =="
+    echo "== call with local state, ns per call, coroutine mode (a reached YIELD, in a function nothing calls) =="
     timed "$out/coroutine_mode_tax"
+    echo "== call with local state, ns per call, normal mode (a YIELD no path reaches) =="
+    timed "$out/coroutine_mode_dead_yield"
     echo
     echo "== per-yield cost against depth, coroutine mode =="
     for d in 1 10 100; do printf 'depth %-4s' "$d"; timed "$out/coroutine_yield_depth" "$d" | tail -1; done

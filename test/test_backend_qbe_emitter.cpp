@@ -721,10 +721,34 @@ bool needsCoroutineModeFor(const std::string& source) {
     if (script == nullptr) {
         throw std::runtime_error("compilation failed");
     }
-    return qbe::needsCoroutineMode(decodeFunctionTree(script));
+    DecodedFunction tree = decodeFunctionTree(script);
+    return qbe::needsCoroutineMode(tree, analyzeStackTree(tree));
+}
+
+bool treeUsesTasksFor(const std::string& source) {
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    if (script == nullptr) {
+        throw std::runtime_error("compilation failed");
+    }
+    DecodedFunction tree = decodeFunctionTree(script);
+    return qbe::treeUsesTasks(tree, analyzeStackTree(tree));
 }
 
 } // namespace
+
+// An analysis of a different tree must fail loudly, not read past the end of
+// `reached`.
+TEST(QbeEmitter, AMismatchedStackAnalysisThrows) {
+    MemoryManager mm;
+    ObjFunction* script = compile("print 1;", &mm);
+    ASSERT_NE(script, nullptr);
+    DecodedFunction tree = decodeFunctionTree(script);
+    EXPECT_THROW(qbe::needsCoroutineMode(tree, StackAnalysisTree{}),
+                 std::runtime_error);
+    EXPECT_THROW(qbe::treeUsesTasks(tree, StackAnalysisTree{}),
+                 std::runtime_error);
+}
 
 TEST(QbeEmitter, AProgramWithNoYieldAndNoTaskKeepsTheFastMode) {
     EXPECT_FALSE(needsCoroutineModeFor("fun f(x) { return x + 1; } "
@@ -745,6 +769,64 @@ TEST(QbeEmitter, ANameOfTheTaskModuleNeedsCoroutineMode) {
     // In a nested function, read through an alias.
     EXPECT_TRUE(needsCoroutineModeFor("fun f() { var t = task; "
                                       "return t.self(); } print f();"));
+}
+
+// The mode costs every function its register promotion, so an instruction no
+// path runs must not decide it: the cost control in VISION.md allows no work
+// at a site a construct does not name (probe 367 holds the run-time half).
+TEST(QbeEmitter, ADeadYieldNeedsNoCoroutineMode) {
+    EXPECT_FALSE(needsCoroutineModeFor("fun f() { return 1; yield; } "
+                                       "print f();"));
+    EXPECT_FALSE(needsCoroutineModeFor("fun g() { throw \"x\"; yield; } "
+                                       "try { g(); } catch (e) { print e; }"));
+    // Unreached at the top level.
+    EXPECT_FALSE(needsCoroutineModeFor("print 1; throw \"x\"; yield;"));
+}
+
+TEST(QbeEmitter, ADeadYieldBesideAReachedOneStillNeedsCoroutineMode) {
+    EXPECT_TRUE(needsCoroutineModeFor("fun f() { yield 1; } yield;"));
+    EXPECT_TRUE(needsCoroutineModeFor("fun f() { if (false) { return; } "
+                                      "return; yield; } f(); yield 1;"));
+}
+
+TEST(QbeEmitter, ADeadNameOfTheTaskModuleNeedsNoCoroutineMode) {
+    EXPECT_FALSE(needsCoroutineModeFor("fun f() { return \"r\"; "
+                                       "task.receive(); } print f();"));
+}
+
+TEST(QbeEmitter, TreeUsesTasksFollowsTheReachedInstructions) {
+    EXPECT_FALSE(treeUsesTasksFor("fun f() { return 1; task.receive(); } "
+                                  "print f();"));
+    EXPECT_TRUE(treeUsesTasksFor("print task.receive();"));
+    EXPECT_FALSE(treeUsesTasksFor("fun f() { var task = 1; return task; } "
+                                  "print f();"));
+}
+
+TEST(QbeEmitter, ADeadYieldKeepsRegisterPromotion) {
+    // End to end: the front end's own decision feeds the emitter's options,
+    // and with a `yield` no path reaches the frame keeps promotion and gets
+    // no resume dispatch.
+    const std::string source =
+        "fun sum(n) { var i = 0; while (i < n) { i = i + 1; } return i; "
+        "return 0; yield 1; } print sum(3);";
+    MemoryManager mm;
+    ObjFunction* script = compile(source, &mm);
+    ASSERT_NE(script, nullptr);
+    DecodedFunction tree = decodeFunctionTree(script);
+    StackAnalysisTree analysis = analyzeStackTree(tree);
+    qbe::EmitOptions options;
+    options.globalSlots = qbe::collectGlobalNames(tree);
+    options.coroutineMode = qbe::needsCoroutineMode(tree, analysis);
+    EXPECT_FALSE(options.coroutineMode) << "a dead yield decides nothing";
+    CaptureAnalysis captures = analyzeCaptures(tree);
+    const DecodedFunction& fn = tree.nested.at(0);
+    std::string ssa =
+        qbe::emitScript(fn, analysis.nested.at(0).self,
+                        captures.functions.at(fn.id), "lox_fn_nested", options);
+    EXPECT_NE(ssa.find("%qp1"), std::string::npos)
+        << "the loop counter must be promoted";
+    EXPECT_EQ(ssa.find("call $rt_resume_state(l %rt)"), std::string::npos)
+        << "no frame can suspend, so the frame needs no resume dispatch";
 }
 
 TEST(QbeEmitter, CoroutineModeGivesACompiledHandlerItsCatchResumeState) {
