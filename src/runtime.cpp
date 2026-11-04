@@ -1732,7 +1732,7 @@ Runtime::WaitResult Runtime::waitForWork() {
         }
     }
     if (m_group->goIdle(inbox) && m_isMainWorker) {
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
         return WaitResult::Deadlock;
     }
     // The thread sleeps here: an idle worker uses no CPU.
@@ -1746,7 +1746,7 @@ Runtime::WaitResult Runtime::waitForWork() {
         return WaitResult::Work;
     }
     if (m_isMainWorker) {
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
         return WaitResult::Deadlock;
     }
     return WaitResult::Ended;
@@ -1851,7 +1851,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
         m_group->addWorker(&inbox);
         std::lock_guard<std::mutex> lock(inbox.mutex);
         inbox.group = m_group;
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
     } else {
         m_group->beginLine(inbox);
     }

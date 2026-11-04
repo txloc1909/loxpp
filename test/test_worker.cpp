@@ -462,7 +462,7 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
         // C7: the worker holds a wait, so it never counted itself idle.
         // This is the test that ties waitForWork to WaitReason::Poller.
         Inbox& inbox = rt.memoryManager().inbox();
-        EXPECT_FALSE(inbox.idle);
+        EXPECT_FALSE(inbox.idle());
         EXPECT_EQ(inbox.group->busy.load(), 1);
         auto me = vm.getGlobal("me");
         ASSERT_TRUE(me.has_value());
@@ -614,7 +614,7 @@ std::unique_lock<std::mutex> lockIdleHeap(MemoryManager* heap) {
         std::chrono::steady_clock::now() + std::chrono::seconds(60);
     for (;;) {
         std::unique_lock<std::mutex> lock(heap->inbox().mutex);
-        if (heap->inbox().idle || std::chrono::steady_clock::now() > end) {
+        if (heap->inbox().idle() || std::chrono::steady_clock::now() > end) {
             return lock;
         }
         lock.unlock();

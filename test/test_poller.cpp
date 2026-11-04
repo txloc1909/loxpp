@@ -387,7 +387,7 @@ struct TwoWorkers {
 TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
     TwoWorkers w;
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
-    EXPECT_FALSE(w.other.idle);
+    EXPECT_FALSE(w.other.idle());
     EXPECT_EQ(w.group->busy.load(), 2);
     // The main worker waits in receive with nothing inbound. The other can
     // still end a wait, so this is not a deadlock.
