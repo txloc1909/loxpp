@@ -537,7 +537,9 @@ arguments are required. `host` must be a String naming a local address.
 `port` must be an integer Number from 0 through 65535; `0` asks the operating
 system to choose an unused port, which `Server.port()` then reports. Any other
 argument is a runtime error. A failure to resolve the name, to bind, or to
-listen raises a catchable `NetworkError`.
+listen raises a catchable `NetworkError`. The call resolves the name before it
+binds. A name that is not a numeric address waits while it resolves, and no
+other task of the worker runs during that wait.
 
 **Arity:** 2  
 **Returns:** Server
