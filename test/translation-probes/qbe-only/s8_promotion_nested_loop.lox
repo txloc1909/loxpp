@@ -1,0 +1,38 @@
+// S8 (#1052): the promotion dataflow is a must analysis over block cycles.
+// A nested loop makes the inner body's block a join of the inner loop's own
+// back edge and the block outside it. If the analysis starts that block from
+// "no value" instead of what its predecessors carry, it drops the outer
+// counter from the block's entry, and every read of the counter in the inner
+// body then loads its stack cell — which the promoted increment never wrote.
+// The counter sticks at 0 and the program never ends (native prints six
+// lines and exits).
+fun grid(rows, cols) {
+  var cells = 0;
+  for (var r = 0; r < rows; r = r + 1) {
+    for (var c = 0; c < cols; c = c + 1) {
+      print str(r) + "," + str(c);
+      cells = cells + 1;
+    }
+  }
+  return cells;
+}
+
+print grid(3, 2);
+
+// The same cycle one level deeper, with a while loop as the outer one, so
+// the join carries two promoted slots across two back edges.
+fun table(rows, cols) {
+  var r = 0;
+  var sum = 0;
+  while (r < rows) {
+    var c = 0;
+    while (c < cols) {
+      sum = sum + r * 10 + c;
+      c = c + 1;
+    }
+    r = r + 1;
+  }
+  return sum;
+}
+
+print table(3, 2);

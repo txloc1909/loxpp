@@ -79,17 +79,52 @@ void advance(
     }
 }
 
-// Recomputes `t`'s entry value from its reachable predecessors' exit
-// values: a slot survives only when every reachable predecessor carries it.
-// When the predecessors agree on one value it is forwarded; when they
-// disagree the block gets an SSA phi.
+// A phi whose predecessors all carry one value carries no information: the
+// block cycle did not change the slot, so the phi is that value. The merge
+// records such a collapse here instead of rewriting the phi forever (Braun et
+// al., "Simple and Efficient Construction of Static Single Assignment Form",
+// the trivial-phi rule), and every later comparison goes through resolve().
+using CollapseMap = std::unordered_map<std::string, std::string>;
+
+std::string resolve(const CollapseMap& collapse, const std::string& name) {
+    std::string cur = name;
+    // A collapse points at a definition or at another phi, so a chain is
+    // short; the bound keeps a malformed map from looping.
+    for (int i = 0; i < 64; i++) {
+        auto it = collapse.find(cur);
+        if (it == collapse.end() || it->second == cur) {
+            return cur;
+        }
+        cur = it->second;
+    }
+    return cur;
+}
+
+// Recomputes `t`'s entry value from its reachable predecessors' exit values:
+// a slot survives only when every reachable predecessor carries it. When the
+// predecessors carry one value it is forwarded; when they carry more the
+// block gets an SSA phi.
+//
+// Two cases leave the slot in its stack cell instead, recorded permanently in
+// droppedSlots so the decision cannot be revisited. One: the phi would need
+// an argument naming itself, which QBE cannot express (an argument must be
+// defined in its own predecessor). Two: the block already collapsed its phi
+// onto one value and a later merge carries another, so the collapse no longer
+// holds. Both write the slot back on every incoming edge (tailSpill), so the
+// block's reload reads this iteration's value and not a stale one — a branch
+// edge is not a safe point. A merge that keeps giving up and taking the slot
+// back would never stop rewriting it, and the worklist would never converge
+// (#1052).
 void mergeInto(
     int t, const Cfg& cfg, const std::vector<bool>& reachable,
     const std::vector<bool>& computed,
     const std::vector<std::unordered_map<int, std::string>>& outValue,
     const std::unordered_map<int, std::string>& prologueValue,
     std::vector<std::unordered_map<int, std::string>>& entryValue,
-    std::vector<std::vector<PromoPhi>>& phis) {
+    std::vector<std::vector<PromoPhi>>& phis,
+    std::vector<std::set<int>>& tailSpill,
+    std::vector<std::set<int>>& droppedSlots, CollapseMap& collapse,
+    std::set<std::string>& createdPhis) {
     // (predecessor index, its exit values). The emitter's prologue block is
     // a real predecessor of cfg block 0 even though no cfg edge names it.
     std::vector<std::pair<int, const std::unordered_map<int, std::string>*>>
@@ -116,6 +151,15 @@ void mergeInto(
 
     std::unordered_map<int, std::string> merged;
     std::vector<PromoPhi> newPhis;
+    auto leaveInStackCell = [&](int slot) {
+        droppedSlots[static_cast<std::size_t>(t)].insert(slot);
+        for (const auto& [p, values] : preds) {
+            (void)values;
+            if (p != kProloguePred) {
+                tailSpill[static_cast<std::size_t>(p)].insert(slot);
+            }
+        }
+    };
     if (!preds.empty()) {
         std::set<int> slots;
         for (const auto& [p, values] : preds) {
@@ -126,6 +170,9 @@ void mergeInto(
             }
         }
         for (int slot : slots) {
+            if (droppedSlots[static_cast<std::size_t>(t)].contains(slot)) {
+                continue;
+            }
             bool allHave = true;
             for (const auto& [p, values] : preds) {
                 (void)p;
@@ -137,28 +184,42 @@ void mergeInto(
             if (!allHave) {
                 continue;
             }
-            const std::string& first = preds.front().second->at(slot);
-            bool same = true;
-            for (const auto& [p, values] : preds) {
+            std::string name = phiName(t, slot);
+            bool collapsedPhi = resolve(collapse, name) != name;
+            std::set<std::string> values;
+            bool selfReferenced = false;
+            for (const auto& [p, pred] : preds) {
                 (void)p;
-                if (values->at(slot) != first) {
-                    same = false;
-                    break;
+                std::string value = resolve(collapse, pred->at(slot));
+                if (!collapsedPhi && value == name) {
+                    selfReferenced = true;
+                } else {
+                    values.insert(std::move(value));
                 }
             }
-            if (same) {
-                merged[slot] = first;
-            } else {
-                std::string name = phiName(t, slot);
-                PromoPhi phi;
-                phi.slot = slot;
-                phi.name = name;
-                for (const auto& [p, values] : preds) {
-                    phi.args.emplace_back(p, values->at(slot));
+            if (values.size() == 1) {
+                // One value on every path that changes the slot; the paths
+                // that carry this block's own phi change nothing.
+                std::string value = *values.begin();
+                if (createdPhis.contains(name)) {
+                    collapse[name] = value;
                 }
-                merged[slot] = name;
-                newPhis.push_back(std::move(phi));
+                merged[slot] = std::move(value);
+                continue;
             }
+            if (values.empty() || selfReferenced || collapsedPhi) {
+                leaveInStackCell(slot);
+                continue;
+            }
+            PromoPhi phi;
+            phi.slot = slot;
+            phi.name = name;
+            for (const auto& [p, pred] : preds) {
+                phi.args.emplace_back(p, resolve(collapse, pred->at(slot)));
+            }
+            merged[slot] = name;
+            createdPhis.insert(name);
+            newPhis.push_back(std::move(phi));
         }
     }
     entryValue[static_cast<std::size_t>(t)] = std::move(merged);
@@ -268,6 +329,7 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
     plan.entryValue.resize(n);
     plan.phis.resize(n);
     plan.catchReload.resize(n);
+    plan.tailSpill.resize(n);
 
     if (!hasCandidate) {
         return plan;
@@ -353,15 +415,39 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
 
     std::vector<std::unordered_map<int, std::string>> outValue(n);
     std::vector<bool> computed(n, false);
+    // Slots a merge had to leave in the stack cell. The decision is
+    // permanent: re-deriving a value from a predecessor that later gains one
+    // would restart the rewrite that made the merge give up.
+    std::vector<std::set<int>> dropped(n);
+    CollapseMap collapse;
+    std::set<std::string> createdPhis;
     std::deque<int> worklist;
-    // Seed every reachable block, not only the entry and catch seeds: a
-    // block whose entry value is empty (an arity-0 function, or any block
-    // before the first declaration reaches it) never "changes" when a
-    // predecessor is merged into it, so a change-only worklist would never
-    // visit its successors either.
-    for (std::size_t b = 0; b < n; b++) {
-        if (reachable[b]) {
-            worklist.push_back(static_cast<int>(b));
+    std::vector<bool> queued(n, false);
+    auto enqueue = [&](int b) {
+        if (!queued[static_cast<std::size_t>(b)]) {
+            queued[static_cast<std::size_t>(b)] = true;
+            worklist.push_back(b);
+        }
+    };
+    // Seed only the blocks whose entry value is defined without a
+    // predecessor: block 0 (the prologue loads the promoted parameters) and
+    // each catch handler (cfg.h wires no generic edge into one; every
+    // fallible call spills the promoted slots before it can throw there).
+    // Every other block is computed when a real predecessor first reaches
+    // it. Seeding all of them with an empty value is not equivalent: an
+    // empty value is indistinguishable from a genuine "no value on this
+    // path", so the block's own merge would drop the slot, and a block
+    // cycle (a nested loop, or a try body that loops) could then never carry
+    // it back in — the promotion dataflow is a must analysis and only
+    // converges to a useful fixpoint when each block starts from what its
+    // predecessors actually carry (#1052).
+    if (n > 0 && reachable[0]) {
+        enqueue(0);
+    }
+    for (const HandlerEntry& he : cfg.handlerEntries) {
+        if (he.catchBlock >= 0 && static_cast<std::size_t>(he.catchBlock) < n &&
+            reachable[static_cast<std::size_t>(he.catchBlock)]) {
+            enqueue(he.catchBlock);
         }
     }
 
@@ -376,6 +462,7 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
         }
         int b = worklist.front();
         worklist.pop_front();
+        queued[static_cast<std::size_t>(b)] = false;
         std::unordered_map<int, std::string> cur =
             plan.entryValue[static_cast<std::size_t>(b)];
         advance(cfg.blocks[static_cast<std::size_t>(b)], plan.declareAt,
@@ -395,10 +482,59 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
             }
             auto before = plan.entryValue[static_cast<std::size_t>(t)];
             mergeInto(t, cfg, reachable, computed, outValue, prologueValue,
-                      plan.entryValue, plan.phis);
-            if (plan.entryValue[static_cast<std::size_t>(t)] != before) {
-                worklist.push_back(t);
+                      plan.entryValue, plan.phis, plan.tailSpill, dropped,
+                      collapse, createdPhis);
+            // A target that has never been computed still moves forward
+            // even when its entry value does not change, or the blocks
+            // downstream of it would never be visited at all.
+            if (!computed[static_cast<std::size_t>(t)] ||
+                plan.entryValue[static_cast<std::size_t>(t)] != before) {
+                enqueue(t);
             }
+        }
+    }
+
+    // Resolve what the collapse map redirected, and drop every phi that ends
+    // up carrying a single value. A phi can turn out trivial only after the
+    // merge that created it, so repeat until the plan stops changing.
+    for (std::size_t round = 0;; round++) {
+        bool changed = false;
+        for (auto& blockPhis : plan.phis) {
+            std::vector<PromoPhi> kept;
+            for (PromoPhi& phi : blockPhis) {
+                if (resolve(collapse, phi.name) != phi.name) {
+                    changed = true;
+                    continue;
+                }
+                std::set<std::string> args;
+                for (const auto& [p, value] : phi.args) {
+                    (void)p;
+                    args.insert(resolve(collapse, value));
+                }
+                if (args.size() == 1) {
+                    collapse[phi.name] = *args.begin();
+                    changed = true;
+                    continue;
+                }
+                for (auto& [p, value] : phi.args) {
+                    (void)p;
+                    value = resolve(collapse, value);
+                }
+                kept.push_back(std::move(phi));
+            }
+            blockPhis = std::move(kept);
+        }
+        for (auto& blockValues : plan.entryValue) {
+            for (auto& [slot, value] : blockValues) {
+                std::string resolved = resolve(collapse, value);
+                if (resolved != value) {
+                    value = std::move(resolved);
+                    changed = true;
+                }
+            }
+        }
+        if (!changed || round > createdPhis.size() + 1) {
+            break;
         }
     }
 
