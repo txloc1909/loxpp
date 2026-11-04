@@ -323,6 +323,35 @@ public final class SocketTest {
                     "read_bytes on a closed socket is fatal");
         is.close();
 
+        // A name that names no address is a catchable NetworkError from
+        // listen, connect and connect_within, never a JVM exception that runs
+        // past a Lox try (spec/05-stdlib.md, connect, connect_within,
+        // listen). The empty name is the one Java answers differently: it
+        // maps it to the loopback address, so this listener makes it
+        // discriminate.
+        LoxServer refuser = LoxServer.listen("127.0.0.1", 0);
+        int refuserPort = (int)refuser.port();
+        String[] noAddress = {"", "a b"};
+        for (String name : noAddress) {
+            String shown = name.isEmpty() ? "the empty name" : "'" + name + "'";
+            checkThrows(() -> LoxServer.listen(name, 0), LoxError.class,
+                        "listen() with " + shown + " raises NetworkError");
+            checkThrows(() -> LoxSocket.connect(name, refuserPort), LoxError.class,
+                        "connect() with " + shown + " raises NetworkError");
+            checkThrows(() -> LoxSocket.connect(name, refuserPort, 1_000_000_000L),
+                        LoxError.class,
+                        "connect_within() with " + shown + " raises NetworkError");
+        }
+        String unresolved = null;
+        try {
+            LoxSocket.connect("", refuserPort);
+        } catch (LoxError e) {
+            unresolved = e.getMessage();
+        }
+        check(unresolved != null && unresolved.contains("cannot resolve"),
+              "connect() with the empty name reports that it resolved no address");
+        refuser.close();
+
         System.exit(TestSupport.finish("SocketTest"));
     }
 }
