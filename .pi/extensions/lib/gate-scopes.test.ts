@@ -123,6 +123,26 @@ test("a release scope clears a cached debug sanitizer flag", () => {
   }
 });
 
+test("a debug scope discards any configure another scope wrote", () => {
+  // The release preset pins LOXPP_DEBUG_PRINT_CODE and
+  // LOXPP_DEBUG_TRACE_EXECUTION to OFF, and the debug preset leaves both to
+  // CMakeLists.txt's Debug default of ON, so a cached OFF wins over the
+  // fresh configure CI's debug leg makes in a checkout with no build/. A native
+  // gate after a backend or qbe gate in one worktree then builds a traced-off
+  // Debug build with ASan and runs the tests that skip on a traced build.
+  const lines = gatePlan("native").script.split("\n").map((line) => line.trim());
+  const configure = lines.findIndex((line) => line === "cmake --preset debug");
+  assert.notEqual(configure, -1, "the native scope configures the debug preset");
+
+  const discard = lines.indexOf("rm -rf build");
+  assert.notEqual(discard, -1, "the native scope removes the build directory first");
+  // No cmake command may run before the removal, or a cache would be written
+  // again ahead of it.
+  const firstCmake = lines.findIndex((line) => /\bcmake\b/.test(line));
+  assert.notEqual(firstCmake, -1, "the native scope runs cmake");
+  assert.ok(discard < firstCmake, "the build directory goes before any configure or build");
+});
+
 test("the other scopes keep the image and the differential line they had", () => {
   // The backend scope's diff line is the #855 fix: a managed backend names its
   // own runner there. Moving the scopes into a module must not drop it.
