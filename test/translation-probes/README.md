@@ -449,7 +449,10 @@ each has an off-the-shelf solution.
 | `qbe-only/fib` | naive recursive Fibonacci: the `CALL`/`RETURN` round-trip with no closures | P5 |
 | `qbe-only/s8_promotion_across_call` | a promoted local reassigned a fresh list each iteration must spill to its slot before an allocating call, or `LOXPP_STRESS_GC=1` frees it (issue #461) | none (QBE-only gate) |
 | `qbe-only/s8_promotion_after_catch` | a promoted loop variable survives a catch: the catch entry reloads it from its stack cell, and the back edge carries the reloaded value on (issue #1052) | none (QBE-only gate) |
+| `qbe-only/s8_promotion_catch_join` | at the join after a `try`, the catch path carries a local and the loop path does not, so the join reads the stack cell and the catch body's write must reach it first (issue #1052) | none (QBE-only gate) |
+| `qbe-only/s8_promotion_giveup_loop` | an innermost loop header that gives a slot up reads the cell, and every edge into it must write the cell, including one from a predecessor the dataflow reached after the give-up (issue #1052) | none (QBE-only gate) |
 | `qbe-only/s8_promotion_captured` | a local a nested closure captures stays in its stack slot, never promoted, and the closure observes later writes across a GC | none (QBE-only gate) |
+| `qbe-only/s8_promotion_loop_exit` | a loop exit reads a local the body writes while a different back edge forwards it; every body edge must write the cell, or the exit returns the value from before the loop (issue #1052) | none (QBE-only gate) |
 | `qbe-only/s8_promotion_loop` | a non-captured loop counter and accumulator carried across the back-edge by a phi give the same result under `LOXPP_STRESS_GC=1` | none (QBE-only gate) |
 | `qbe-only/s8_promotion_nested_loop` | an outer loop's promoted counter stays promoted at the inner loop's join, so the inner body reads the register and not its stale stack cell (issue #1052) | none (QBE-only gate) |
 | `qbe-only/V1_fresh_cell_no_lists` | the `V1_fresh_cell` hazard with no list opcodes (S4): a captured loop-body local needs a fresh cell per iteration, checked through globals instead of a list slot | P4 |

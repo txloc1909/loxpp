@@ -1,0 +1,21 @@
+// S8 (#1052): a `try` whose body is a loop that ends in a `throw`, and a
+// catch body that writes a local declared before the `try`. At the join after
+// the `try`, the catch path carries the local in a register and the loop path
+// does not, so the join reads the stack cell. The catch's write must reach
+// that cell first, or the `try` statement loses what its catch body set.
+fun g() {
+  var i = 0;
+  var y = 0;
+  var out = "";
+  try {
+    while (i < 5) {
+      if (i == 1) { y = 20; i = i + 1; continue; }
+      out = out + "L";
+      if (i == 4) throw y;
+      i = i + 1;
+    }
+  } catch (e) { out = out + "[x]"; }
+  return out;
+}
+
+print g();

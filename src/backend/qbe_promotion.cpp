@@ -106,15 +106,18 @@ std::string resolve(const CollapseMap& collapse, const std::string& name) {
 // block gets an SSA phi.
 //
 // Two cases leave the slot in its stack cell instead, recorded permanently in
-// droppedSlots so the decision cannot be revisited. One: the phi would need
-// an argument naming itself, which QBE cannot express (an argument must be
-// defined in its own predecessor). Two: the block already collapsed its phi
-// onto one value and a later merge carries another, so the collapse no longer
-// holds. Both write the slot back on every incoming edge (tailSpill), so the
-// block's reload reads this iteration's value and not a stale one — a branch
-// edge is not a safe point. A merge that keeps giving up and taking the slot
-// back would never stop rewriting it, and the worklist would never converge
-// (#1052).
+// droppedSlots so the decision cannot be revisited: the phi would need an
+// argument naming itself, which QBE cannot express (an argument must be
+// defined in its own predecessor), or the block already collapsed its phi onto
+// one value and a later merge carries another, so the collapse no longer
+// holds. A merge that keeps giving up and taking the slot back would never
+// stop rewriting it, and the worklist would never converge (#1052).
+//
+// Such a block reads the slot from its stack cell, so every incoming edge
+// must leave a current value there. planPromotion decides those stores after
+// this flow settles: a predecessor the worklist reaches later is still
+// spilled, and a predecessor whose value a later merge removes is spilled
+// too.
 void mergeInto(
     int t, const Cfg& cfg, const std::vector<bool>& reachable,
     const std::vector<bool>& computed,
@@ -122,7 +125,6 @@ void mergeInto(
     const std::unordered_map<int, std::string>& prologueValue,
     std::vector<std::unordered_map<int, std::string>>& entryValue,
     std::vector<std::vector<PromoPhi>>& phis,
-    std::vector<std::set<int>>& tailSpill,
     std::vector<std::set<int>>& droppedSlots, CollapseMap& collapse,
     std::set<std::string>& createdPhis) {
     // (predecessor index, its exit values). The emitter's prologue block is
@@ -153,12 +155,6 @@ void mergeInto(
     std::vector<PromoPhi> newPhis;
     auto leaveInStackCell = [&](int slot) {
         droppedSlots[static_cast<std::size_t>(t)].insert(slot);
-        for (const auto& [p, values] : preds) {
-            (void)values;
-            if (p != kProloguePred) {
-                tailSpill[static_cast<std::size_t>(p)].insert(slot);
-            }
-        }
     };
     if (!preds.empty()) {
         std::set<int> slots;
@@ -482,8 +478,8 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
             }
             auto before = plan.entryValue[static_cast<std::size_t>(t)];
             mergeInto(t, cfg, reachable, computed, outValue, prologueValue,
-                      plan.entryValue, plan.phis, plan.tailSpill, dropped,
-                      collapse, createdPhis);
+                      plan.entryValue, plan.phis, dropped, collapse,
+                      createdPhis);
             // A target that has never been computed still moves forward
             // even when its entry value does not change, or the blocks
             // downstream of it would never be visited at all.
@@ -535,6 +531,43 @@ PromotionPlan planPromotion(const DecodedFunction& fn,
         }
         if (!changed || round > createdPhis.size() + 1) {
             break;
+        }
+    }
+
+    // A block whose entry carries no value for a slot reads that slot from its
+    // stack cell, so every incoming edge must leave this iteration's value
+    // there. A branch edge is not a safe point: a predecessor that holds the
+    // slot in a register writes it back in its own tail. This is decided from
+    // the settled flow, never while it runs: a predecessor the worklist
+    // reaches later, or one whose value a later merge removes, must be spilled
+    // like any other (#1052).
+    for (std::size_t b = 0; b < n; b++) {
+        if (!reachable[b]) {
+            continue;
+        }
+        std::set<int> missing;
+        for (std::size_t s = 1; s < plan.candidate.size(); s++) {
+            if (plan.candidate[s]) {
+                missing.insert(static_cast<int>(s));
+            }
+        }
+        for (const auto& [slot, value] : plan.entryValue[b]) {
+            (void)value;
+            missing.erase(slot);
+        }
+        if (missing.empty()) {
+            continue;
+        }
+        for (int p : cfg.blocks[b].predecessors) {
+            if (p < 0 || static_cast<std::size_t>(p) >= n ||
+                !reachable[static_cast<std::size_t>(p)]) {
+                continue;
+            }
+            for (int slot : missing) {
+                if (outValue[static_cast<std::size_t>(p)].contains(slot)) {
+                    plan.tailSpill[static_cast<std::size_t>(p)].insert(slot);
+                }
+            }
         }
     }
 

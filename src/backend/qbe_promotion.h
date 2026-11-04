@@ -25,6 +25,12 @@
 // A phi whose predecessors all carry one value collapses onto that value, so
 // such a cycle settles on the value it carries in from outside.
 //
+// A block that gives a slot up reads that slot from its stack cell, and a
+// branch edge is not a safe point: every incoming edge must write the cell
+// first. Those stores (tailSpill) come from the settled flow, never from a
+// merge that is still running, or a predecessor reached later keeps a stale
+// cell (#1052).
+//
 // The emitter, not this pass, emits the reloads/spills; this pass only names
 // the values and says where they change.
 

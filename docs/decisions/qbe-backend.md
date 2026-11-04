@@ -311,23 +311,31 @@ itself (MIT licence, needs a `THIRD_PARTY.md` entry).
 interpreter become very large QBE functions. Measure QBE's time and memory
 on `bootstrap/loxpp_interpreter.lox` early.
 
-**Q9: promotion is a must analysis.** A local kept in a QBE register is not in
-its stack cell, so a block may use the register only when every path into it
-carries one value for that local. The dataflow in `qbe_promotion` therefore
-runs as a must analysis, and it converges to the greatest fixpoint: a block's
-entry starts from what its predecessors carry (the prologue for block 0, a
-reload of its own stack cell for a catch block), never from an empty state,
-which is indistinguishable from "no value on this path". An empty seed drops
-the local in every block cycle — a nested loop, or a loop inside a `try` — and
-the dropped block then reads a stack cell that the promoted write never
-updated (#1052). Two further rules follow. A phi whose predecessors all carry
-one value collapses onto that value (the trivial-phi rule), so a cycle that
-never changes the local settles on the value it carries in from outside.
-Where a phi would have to name itself, or where a later merge contradicts a
-collapse, the block reloads the local from its stack cell, and every
-predecessor writes its own value there in its tail first — a branch edge is
-not a safe point. Those two give-ups are permanent; a merge that keeps taking
-the slot back would never stop rewriting it.
+**Q9: promotion is a must analysis, and every give-up needs a spill edge.**
+A local kept in a QBE register is not in its stack cell, so a block may use the
+register only when every path into it carries one value for that local. The
+dataflow in `qbe_promotion` is therefore a must analysis. It starts only where a
+value exists without a predecessor — the prologue for block 0, a reload of the
+block's own cell for a catch handler. An empty seed is indistinguishable from
+"no value on this path", and it drops the local in every block cycle (a nested
+loop, or a loop inside a `try`, #1052). A phi whose predecessors all carry one
+value collapses onto that value (the trivial-phi rule), so a cycle that never
+changes the local settles on the value it carries in from outside.
+
+A block that gives a slot up reads the slot from its stack cell, and a branch
+edge is not a safe point. Every incoming edge must therefore write the cell
+first. These stores are computed from the settled flow, after the last merge,
+and they cover every predecessor that carries the slot: one the worklist
+reached after the give-up, and one whose value a later merge removed, each need
+the store like any other.
+
+Named bug class for the remaining work on this pass: **a give-up decision whose
+edge set is not final**. A decision that records its predecessor set while the
+flow is still running loses the write of a predecessor reached later, and the
+block then reads a value from a previous iteration or from before the loop.
+Any new reason to leave a slot in its stack cell must go through the same
+post-fixpoint spill pass, and must come with a probe that carries a promoted
+value across it.
 
 ## Staged plan
 
