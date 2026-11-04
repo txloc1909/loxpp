@@ -422,6 +422,33 @@ TEST(IdleAccountingTest, RealDeadlockIsStillReported) {
     EXPECT_TRUE(w.group->deadlock.load());
 }
 
+// A sender counts an idle worker back in once, and only once: the inbox stops
+// saying it waits for a message. A count that climbs above the number of busy
+// workers never reaches zero, so a real deadlock would hang instead of being
+// reported.
+TEST(IdleAccountingTest, ASecondSendDoesNotCountAnIdleWorkerAgain) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_EQ(w.group->busy.load(), 1);
+    EXPECT_TRUE(postEnvelope(w.mainInbox, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.mainInbox.waitReason, WaitReason::None);
+    EXPECT_EQ(w.group->busy.load(), 2);
+    EXPECT_TRUE(postEnvelope(w.mainInbox, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.group->busy.load(), 2);
+}
+
+// The worker that left took its own count with it. A message that arrives in
+// the window before its heap retires must not count it back in.
+TEST(IdleAccountingTest, AMessageDoesNotCountBackAWorkerThatLeft) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.other));
+    EXPECT_EQ(w.group->busy.load(), 1);
+    EXPECT_FALSE(w.group->leave(w.other));
+    EXPECT_EQ(w.other.waitReason, WaitReason::None);
+    EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.group->busy.load(), 1);
+}
+
 // The wait ended and the worker waits for a message only: now it counts.
 TEST(IdleAccountingTest, WorkerThatLosesItsWaitsCountsAsIdle) {
     TwoWorkers w;
