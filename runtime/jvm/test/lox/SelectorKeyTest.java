@@ -39,6 +39,7 @@ public final class SelectorKeyTest {
         checkSocketParksAgainWhileAnotherSocketWaits();
         checkAcceptLoopWhileAnotherSocketWaits();
         checkReadWakeKeepsTheWriteWait();
+        checkCloseWriteDropsTheKeyOfTheOnlyWait();
 
         finished.countDown();
         System.exit(TestSupport.finish("SelectorKeyTest"));
@@ -197,6 +198,41 @@ public final class SelectorKeyTest {
         LoxOps.yield(null);
         server.close();
         bystanderServer.close();
+    }
+
+    // close_write() ends the only wait of the poller. No select follows while
+    // nothing waits, and the program may never park again, so the key of the
+    // wait it ended must go at the close itself.
+    private static void checkCloseWriteDropsTheKeyOfTheOnlyWait() {
+        LoxServer server = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket[] pair = connectedPair(server);
+        int size = 32 << 20; // more than the socket buffers hold
+        String big = "x".repeat(size);
+        String[] kind = {"none"};
+        boolean[] done = {false};
+        checkEquals(0, LoxWorker.current().selectorKeyCount(),
+                    "the selector starts with no key");
+        task("spawn", fn("writer", () -> {
+            try {
+                pair[1].write(big);
+            } catch (LoxError e) {
+                kind[0] =
+                    (String)((LoxInstance)e.getValue()).fields.get("kind");
+            }
+            done[0] = true;
+        }));
+        LoxOps.yield(null); // the writer fills the send buffer and parks
+        checkEquals(1, LoxWorker.current().selectorKeyCount(),
+                    "the parked write holds its selector key");
+        pair[1].closeWrite();
+        checkEquals(0, LoxWorker.current().selectorKeyCount(),
+                    "close_write() drops the key of the wait it ended");
+        yieldUntil(done);
+        checkEquals("SocketClosedError", kind[0],
+                    "the woken write raises the closed-socket fault");
+        pair[0].close();
+        pair[1].close();
+        server.close();
     }
 
     // A read and a write wait on one Socket. The read wakes first and must
