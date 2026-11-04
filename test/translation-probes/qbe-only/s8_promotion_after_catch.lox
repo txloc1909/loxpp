@@ -1,0 +1,65 @@
+// S8 (#1052): a promoted local must survive a catch. A catch block has no
+// cfg predecessor (cfg.h's HandlerEntry), so its entry value for every
+// promoted slot in scope is a reload from that slot's stack cell, and every
+// fallible call spills the promoted slots first. The loop then carries the
+// reloaded value on its back edge. If the back edge drops the slot instead,
+// the loop variable stops advancing and the loop never ends.
+//
+// The reported program: a for loop whose try body ends in a throw, with an
+// inner loop before it.
+fun loopAfterCatch() {
+  for (var i = 0; i < 3; i = i + 1) {
+    try {
+      for (var j = 0; j < 2; j = j + 1) {
+        print str(i) + "," + str(j);
+      }
+      throw "i" + str(i);
+    } catch (e) {
+      print "caught " + e;
+    }
+  }
+}
+
+loopAfterCatch();
+
+// A local written immediately before the throw: the write is still in its
+// register when THROW reaches the catch, so the catch's reload must see the
+// spilled value, not the one the slot held on entry to the iteration.
+fun spillBeforeThrow(n) {
+  var log = "";
+  var i = 0;
+  while (i < n) {
+    var k = i * 10;
+    try {
+      k = k + 1;
+      throw "t" + str(i);
+    } catch (e) {
+      log = log + e + "=" + str(k) + " ";
+    }
+    i = i + 1;
+  }
+  return log;
+}
+
+print spillBeforeThrow(3);
+
+// The catch reads a slot the inner loop's own variable occupied, then the
+// outer loop reuses that slot: the reload and the inner loop's declaration
+// write the same cell in one iteration.
+fun reusedSlot(n) {
+  var total = 0;
+  for (var i = 0; i < n; i = i + 1) {
+    var j = i;
+    try {
+      while (j < i + 2) {
+        j = j + 1;
+      }
+      throw j;
+    } catch (e) {
+      total = total + e;
+    }
+  }
+  return total;
+}
+
+print reusedSlot(4);

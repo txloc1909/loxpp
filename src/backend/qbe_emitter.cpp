@@ -376,6 +376,23 @@ class Emitter {
         }
     }
 
+    // S8: a successor that must reload a slot from its stack cell (see
+    // PromotionPlan::tailSpill) needs this block's value there first. A
+    // branch edge is not a safe point, so without this store the promoted
+    // value would still be only in its register when the successor runs.
+    void emitTailSpills(std::size_t blockIndex) {
+        if (!m_plan.has_value() || blockIndex >= m_plan->tailSpill.size()) {
+            return;
+        }
+        for (int slot : m_plan->tailSpill[blockIndex]) {
+            auto cur = m_cur.find(slot);
+            if (cur != m_cur.end()) {
+                std::string a = addr(slot);
+                storel(cur->second, a);
+            }
+        }
+    }
+
     // Applies the plan's own non-SET_LOCAL promotion events at `offset`: a
     // declaring push (invisible var) defines the slot's register value right
     // after its stack store; a POP that reclaims the slot drops it. Mirrors
@@ -1508,6 +1525,7 @@ class Emitter {
         // non-terminal cfg block gets a stable `_tail` block that holds its
         // terminator — the last emitted path falls through into it.
         m_body << "@" << block.label << "_tail\n";
+        emitTailSpills(blockIndex);
         if (block.instructions.back().op == Op::JUMP_TABLE) {
             emitJumpTableTerminator(block, cfg);
             return;

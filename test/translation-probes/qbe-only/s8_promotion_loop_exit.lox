@@ -1,0 +1,23 @@
+// S8 (#1052): a loop whose back edge redefines one local and forwards
+// another, with four `continue` branches that each reach the header from a
+// different block. One of them is a predecessor the promotion dataflow only
+// reaches after it has given the written local up at the header. The exit
+// block reads that local from its stack cell, so the body's write must reach
+// the cell on every edge out of the body; otherwise the function returns the
+// value from before the loop.
+fun f(a) {
+  var v0 = a + 0;
+  var v1 = a + 1;
+  var c = 0;
+  while (c < 5) {
+    if (v0 == 2) { c = c + 1; continue; }
+    v1 = v0;
+    if (v0 < 3) { c = c + 1; continue; }
+    if (v0 == 2) { c = c + 1; continue; }
+    if (v1 == 2) { c = c + 1; continue; }
+    c = c + 1;
+  }
+  return "|v1=" + str(v1) + "|c=" + str(c);
+}
+
+print f(4);

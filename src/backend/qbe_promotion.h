@@ -15,6 +15,22 @@
 // local set and reloads those slots from memory, because every fallible call
 // spills them before it can throw into that catch.
 //
+// The flow is a *must* analysis, so it starts only where a value exists
+// without a predecessor: the prologue for block 0, the reload for a catch
+// handler. Every other block is computed from a real predecessor. Starting a
+// block from an empty value is not the same thing — it is indistinguishable
+// from a genuine "no value on this path" — and it drops the slot in every
+// block cycle (a nested loop, or a loop inside a try), where the dropped
+// block then reads a stack cell the promoted write never updated (#1052).
+// A phi whose predecessors all carry one value collapses onto that value, so
+// such a cycle settles on the value it carries in from outside.
+//
+// A block that gives a slot up reads that slot from its stack cell, and a
+// branch edge is not a safe point: every incoming edge must write the cell
+// first. Those stores (tailSpill) come from the settled flow, never from a
+// merge that is still running, or a predecessor reached later keeps a stale
+// cell (#1052).
+//
 // The emitter, not this pass, emits the reloads/spills; this pass only names
 // the values and says where they change.
 
@@ -24,6 +40,7 @@
 #include "chunk_decoder.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -63,6 +80,14 @@ struct PromotionPlan {
     // The emitter loads each from its stack slot at the block's entry, in
     // slot order so the emitted .ssa does not depend on a hash.
     std::vector<std::map<int, std::string>> catchReload;
+
+    // Per cfg block index: promoted slots to write back to their stack cell
+    // in the block's own tail, before its terminator. A merge that cannot
+    // give its block a value for a slot (the phi would need a self-referencing
+    // argument) leaves the block to reload that slot, and these stores make
+    // the reload read this iteration's value: a branch edge is not a safe
+    // point, so an unspilled register value would not be there yet.
+    std::vector<std::set<int>> tailSpill;
 
     // A declaring push (abstract_stack's InvisibleVarSite offset) -> the
     // (slot, value name) the emitter defines right after it.

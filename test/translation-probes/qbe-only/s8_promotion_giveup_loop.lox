@@ -1,0 +1,28 @@
+// S8 (#1052): triple-nested loops with a `continue` in the innermost one.
+// The innermost header's phi carries its own value on one incoming edge, so
+// the promotion gives the slot up there and the block reads the stack cell.
+// Every edge into that block must then write the cell first, including an
+// edge whose predecessor the dataflow reached after the decision; otherwise
+// the innermost loop reads a stale outer counter and never leaves the block
+// that increments it, so the outer loop cannot end.
+fun f(a) {
+  var v = a;
+  var n = 0;
+  while (n < 4) {
+    var m = 0;
+    while (m < 1) {
+      var k = 0;
+      while (k < 1) {
+        v = v + 3;
+        if (v < 3) { k = k + 1; continue; }
+        v = 13;
+        k = k + 1;
+      }
+      m = m + 1;
+    }
+    n = n + 1;
+  }
+  return str(n);
+}
+
+print f(1);
