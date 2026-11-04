@@ -22,9 +22,26 @@ export const GATE_IMAGES: Record<GateScope, string> = {
   qbe: "loxpp-dev-qbe",
 };
 
+// A debug gate must configure from a cache that no other scope wrote, because
+// the debug preset and the release preset disagree about more than the build
+// type: release pins LOXPP_DEBUG_PRINT_CODE and LOXPP_DEBUG_TRACE_EXECUTION to
+// OFF, and debug leaves both to CMakeLists.txt's default for a Debug build
+// (ON). A cached OFF outlives the switch back to Debug, so a native gate that
+// follows a backend or qbe gate builds a traced-off Debug build with ASan. That
+// is a configuration CI never runs, and it changes which tests run: the checks
+// that skip themselves on a traced build instead run and hit their timeouts
+// (#896).
+//
+// The build directory goes rather than the two flags being listed: a list is a
+// second copy of the presets, and the next option a preset pins would slip
+// through it. A directory no scope wrote is the cache CI's fresh checkout
+// configures, whatever the presets say.
+const NATIVE_CONFIGURE = `rm -rf build
+cmake --preset debug`;
+
 const NATIVE_SCRIPT = `set -e
 cd /workspace
-cmake --preset debug
+${NATIVE_CONFIGURE}
 cmake --build build
 ctest --test-dir build --output-on-failure -j$(nproc)`;
 
