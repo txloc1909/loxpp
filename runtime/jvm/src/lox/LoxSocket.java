@@ -346,6 +346,17 @@ public final class LoxSocket {
 
     static volatile Resolver resolver = InetAddress::getAllByName;
 
+    /**
+     * Resolves {@code host} into the addresses it names, or returns null for a
+     * name that names none. An empty name is null: the C library's
+     * getaddrinfo reports no name for it, while Java maps "" to the loopback
+     * address, and the empty name must fail on every backend
+     * (spec/05-stdlib.md, connect and listen).
+     */
+    static InetAddress[] resolveHost(String host) throws IOException {
+        return host.isEmpty() ? null : resolver.resolve(host);
+    }
+
     public static LoxSocket connect(String host, int port) {
         return connect(host, port, 0);
     }
@@ -363,9 +374,15 @@ public final class LoxSocket {
         String failure = "unknown host";
         LoxWorker.beginWaitingCall();
         try {
+            InetAddress[] addresses = resolveHost(host);
+            if (addresses == null) {
+                throw LoxOps.makeError("NetworkError",
+                                       "connect(): cannot resolve '" + host +
+                                           "'");
+            }
             // A host name resolves here and blocks the worker; a numeric
             // address does not (spec/05-stdlib.md, connect).
-            for (InetAddress ip : resolver.resolve(host)) {
+            for (InetAddress ip : addresses) {
                 if (timed && deadline - System.nanoTime() <= 0) {
                     throw LoxOps.makeError("NetworkError",
                                            timeoutMessage(host, port));

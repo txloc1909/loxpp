@@ -124,11 +124,11 @@ SOCKET_SITES = {
     ("checkWritable", CLOSED): 1,
     ("fill", NETWORK): 1,
     ("writeCall", NETWORK): 1,
-    ("connect", NETWORK): 3,
+    ("connect", NETWORK): 4,
 }
 
 SERVER_SITES = {
-    ("listen", NETWORK): 1,
+    ("listen", NETWORK): 2,
     ("checkOpen", CLOSED): 1,
     ("accept", NETWORK): 1,
 }
@@ -336,7 +336,9 @@ def java_sites(text: str) -> tuple[Counter | None, list[str]]:
             problems.append(f"line {number}: a throw other than LoxError or makeError")
         if "new LoxError(" in line:
             sites[(method, HALT)] += 1
-        m = re.search(r'makeError\("(\w+)"', window)
+        # `\s*` after the open parenthesis: a formatter can break the call
+        # there, and such a site must still count.
+        m = re.search(r'makeError\(\s*"(\w+)"', window)
         if m and "LoxOps.makeError" in line:
             if m.group(1) not in (NETWORK, CLOSED, BUSY):
                 problems.append(f"line {number}: makeError names an unknown kind {m.group(1)}")
@@ -407,6 +409,7 @@ def self_test(native: str, socket: str, side: str) -> int:
         ("native: a BusyError site that the table lacks", native_sites, NATIVE_SITES, inject(native, read_fn, '    raiseNet(kBusyError, "x");\n'), True),
         ("java: a BusyError makeError is a BusyError site", java_sites, {**SOCKET_SITES, ("checkOpen", BUSY): 1}, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), False),
         ("java: a BusyError site that the table lacks", java_sites, SOCKET_SITES, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError("BusyError", "x");\n'), True),
+        ("java: a makeError split after its open parenthesis counts", java_sites, {**SOCKET_SITES, ("checkOpen", NETWORK): 1}, inject(socket, java_fn + "String method) {\n", '        throw LoxOps.makeError(\n            "NetworkError", "x");\n'), False),
         ("java: LoxSide without its BusyError site", java_sites, SIDE_SITES, side.replace('makeError("BusyError"', 'makeError("NetworkError"', 1), True),
         ("java: a text block", java_sites, SOCKET_SITES, inject(socket, java_fn, '    static String f() { return """\n        "\n        """; }\n', True), True),
     ]
