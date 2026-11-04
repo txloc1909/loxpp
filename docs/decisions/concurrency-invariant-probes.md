@@ -1,6 +1,7 @@
 # Invariant probes for the concurrent machine
 
-**Status:** proposal
+**Status:** accepted. The owner approved it on 2026-11-05 in the pull request
+that moved it here (#1096).
 **Issue:** #1066. Follow-up of mission #1058
 (`docs/decisions/concurrency-semantics-grounding.md`).
 
@@ -80,8 +81,9 @@ xfail file lists the probe.
 The tracking issue holds the DAG: N0 this decision, N1 I2 probes and the check
 script, N2 I3 probes, N3 I1 probes, N4 close. N1 to N3 run in parallel.
 
-## Open questions
+## Open question
 
-- Can I3 pin #950 and #996 without wall-clock time? N2 checks this against
-  the repros of the two issues.
+- None for I3. The owner ruled on 2026-11-05 that I3 must pin #950 and #996
+  without wall-clock time. If N2 finds a case that needs a limit to pass, N2
+  uses `clock()` as rule 1 allows and states why.
 - Does QBE need a replacement probe for the coroutine field of I1? N3 decides.
