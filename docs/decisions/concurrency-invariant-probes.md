@@ -27,15 +27,49 @@ do. So each invariant gets probes that run on every backend.
 | I2 | No task waits while the condition of its wait is already true | Sides rules 2 and 6; `receive` tests the mailbox before it waits | #1054, #1047, #948 |
 | I3 | The ready order follows the first wait of each call | The Task Machine, moves and run queue | #950, #996 |
 
-### Probes (filled in by the nodes)
+### Probes
 
-Each probe is a spec probe in `test/translation-probes/`, numbered from 374.
+One row for each case. `tools/check_invariant_probes.py` reads this table:
 
-| Id | Case | Probe |
+- The `Case` of an I1 row is a row of the task-owned state table in
+  `spec/04-semantics.md`, and each such row has one I1 row.
+- The `Case` of an I2 row starts with a point of the suspend point table of
+  the same file of class receive, or a `sleep`, `Socket` or `Server` point,
+  and each such point has one I2 row.
+- A probe in the last column exists in `test/translation-probes/`, carries a
+  `STATUS` line and has a row in its `README.md`. A `—` means that the probe
+  is not written yet; the script accepts it until its `--strict` flag, which
+  N4 turns on in CI.
+
+| Id | Case | Probes |
 |---|---|---|
-| I1 | one probe for each field of the task-owned state table | N3 |
-| I2 | one probe for each call kind: `read`, `read_bytes`, `read_some`, `readline`, `readlines`, `accept`, `write`, `receive`, `receive_where` | N1 |
-| I3 | a call that wakes and waits again keeps its place; one case for a socket call and one for a receive | N2 |
+| I1 | the mailbox | — |
+| I1 | the current task | — |
+| I1 | the call frames | — |
+| I1 | the deferred calls | — |
+| I1 | the handlers | — |
+| I1 | the current coroutine | — |
+| I1 | the contexts | — |
+| I1 | the overflow unwind | — |
+| I1 | the waiting call | — |
+| I2 | `task.receive()` | `380_receive_message_held_does_not_suspend` |
+| I2 | `task.receive_within(seconds)` | `381_receive_within_message_held_does_not_suspend` |
+| I2 | `task.receive_where(want)` | `382_receive_where_selected_message_held_does_not_suspend` |
+| I2 | `task.receive_where_within(want, seconds)` | `383_receive_where_within_selected_message_held_does_not_suspend` |
+| I2 | `sleep(seconds)` | `384_sleep_zero_does_not_suspend` |
+| I2 | `Socket.read_some(n)` | `385_read_some_bytes_held_does_not_suspend` |
+| I2 | `Socket.read_bytes(n)` | `386_read_bytes_bytes_held_does_not_suspend` |
+| I2 | `Socket.readline()` | `387_readline_line_held_does_not_suspend` |
+| I2 | `Socket.read()` | `388_read_end_held_does_not_suspend` |
+| I2 | `Socket.readlines()` | `389_readlines_end_held_does_not_suspend` |
+| I2 | `Socket.write(text)` | `390_write_does_not_suspend` |
+| I2 | `Socket.writeline(text)` | `391_writeline_does_not_suspend` |
+| I2 | `Server.accept()` | `392_accept_pending_connection_does_not_suspend` |
+| I2 | `Socket.readline()` on a closed read side | `393_read_closed_side_does_not_suspend` |
+| I2 | `Socket.write(text)` on a closed write side | `394_write_closed_side_does_not_suspend` |
+| I2 | `Server.accept()` on a closed Server | `395_accept_closed_server_does_not_suspend` |
+| I3 | a Socket call that waits again | — |
+| I3 | a receive that waits again | — |
 
 ## Rules
 

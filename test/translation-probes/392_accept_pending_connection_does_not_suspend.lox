@@ -1,0 +1,28 @@
+// Invariant I2: no task waits while the condition of its wait is already true
+// (spec/04-semantics.md, Suspend Points: a call of class suspends waits only when the wait is not over at the call).
+// A peer has connected before `t` calls `accept()`, so the call returns the connection at once.
+// The connect of a client on the local host returns after the connection is in the queue of the Server.
+// Task `other` is ready when `t` makes the call. If the call returns at once, `t`
+// sends its result before `other` runs. A call that suspends anyway lets `other` send
+// first, or never returns.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t: accepted
+// CHECK: other
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var me = task.self();
+fun other() { task.send(me, "other"); }
+fun t() {
+    srv.accept();
+    task.send(me, "t: accepted");
+}
+task.spawn(t);
+task.spawn(other);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

@@ -1,0 +1,40 @@
+// Invariant I2: no task waits while the condition of its wait is already true
+// (spec/04-semantics.md, Suspend Points: a call of class suspends waits only when the wait is not over at the call).
+// The peer writes two bytes and closes. `t` takes one byte in `read_some(1)`. `read()` finds
+// the other byte held and the close of the peer already in.
+// `feeder` writes to the peer and then computes for 0.5 seconds with no suspend point, so
+// the worker sees the end of the wait of `t` only after the bytes are in. The probe assumes
+// that the bytes of a write on the local host arrive within 0.5 seconds, as probe 358 does.
+// Task `other` is ready when `t` makes the second call. If the call returns at once, `t`
+// sends its result before `other` runs. A call that suspends anyway lets `other` send
+// first, or never returns.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t: b
+// CHECK: other
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+fun other() { task.send(me, "other"); }
+fun t() {
+    conn.read_some(1);
+    task.spawn(other);
+    var b = conn.read();
+    task.send(me, "t: " + b);
+}
+fun feeder() {
+    peer.write("ab");
+    peer.close();
+    var end = clock() + 0.5;
+    while (clock() < end) { }
+}
+task.spawn(t);
+task.spawn(feeder);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

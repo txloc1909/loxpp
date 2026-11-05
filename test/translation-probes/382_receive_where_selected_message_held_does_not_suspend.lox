@@ -1,0 +1,28 @@
+// Invariant I2: no task waits while the condition of its wait is already true
+// (spec/04-semantics.md, Suspend Points: a call of class suspends waits only when the wait is not over at the call).
+// The mailbox of `t` holds a message that `want` selects, behind one that it does not select,
+// so `task.receive_where(want)` returns the selected message at once.
+// Task `other` is ready when `t` makes the call. If the call returns at once, `t`
+// sends its result before `other` runs. A call that suspends anyway lets `other` send
+// first, or never returns.
+// STATUS: ok
+// CHECK: t: hello
+// CHECK: other
+var me = task.self();
+fun want(x) { return x == "hello"; }
+fun t() {
+    var m = task.receive_where(want);
+    task.send(me, "t: " + m);
+}
+fun other() { task.send(me, "other"); }
+var h = task.spawn(t);
+task.send(h, "skipped");
+task.send(h, "hello");
+task.spawn(other);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(3);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
