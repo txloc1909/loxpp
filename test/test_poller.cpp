@@ -451,14 +451,30 @@ TEST(IdleAccountingTest, AMessageDoesNotCountBackAWorkerThatLeft) {
 
 // Only a wait for a message leaves the count. A sender must not count a worker
 // that waits in its poller a second time: it never left the count, and a count
-// above the number of busy workers never reaches zero again.
+// above the number of busy workers never reaches zero again. The worker is in
+// the state that Runtime::waitForWork() builds for that wait, polling with its
+// poller set, so a sender that asks that state the wrong question counts it.
 TEST(IdleAccountingTest, ASendDoesNotCountAWorkerThatWaitsInItsPoller) {
     TwoWorkers w;
+    Poller poller;
+    Pipe unused;
+    poller.waitFd(unused.rd, Poller::Interest::Read);
+    poller.waitUntil(Clock::now() + std::chrono::seconds(3));
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
     EXPECT_EQ(w.group->busy.load(), 2);
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.poller = &poller;
+        w.other.polling = true;
+    }
     EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
     EXPECT_EQ(w.other.waitReason, WaitReason::Poller);
     EXPECT_EQ(w.group->busy.load(), 2);
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.polling = false;
+        w.other.poller = nullptr;
+    }
 }
 
 // The wait ended and the worker waits for a message only: now it counts.
