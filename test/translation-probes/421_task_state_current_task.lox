@@ -1,0 +1,31 @@
+// Invariant I1, the current task (spec/04-semantics.md, The Task Machine, the
+// table of task-owned state): task.self() returns the handle of the task that
+// runs, after any park. Tasks `t1` and `t2` wait in task.receive(). Main wakes
+// `t2` first, so the order in which the tasks run again is not the order in which
+// they parked. Each task compares its task.self() to both handles.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2: false true
+// CHECK: t1: true false
+var me = task.self();
+var h1 = nil;
+var h2 = nil;
+fun run(name) {
+    task.receive();
+    var s = task.self();
+    task.send(me, name + ": " + str(s == h1) + " " + str(s == h2));
+}
+fun t1() { run("t1"); }
+fun t2() { run("t2"); }
+h1 = task.spawn(t1);
+h2 = task.spawn(t2);
+yield;
+task.send(h2, "go");
+task.send(h1, "go");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

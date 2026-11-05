@@ -1,0 +1,33 @@
+// Invariant I1, the call frames (spec/04-semantics.md, The Task Machine, the table
+// of task-owned state): each frame of a task, with its locals, stays as it was when
+// the task parked. Tasks `t1` and `t2` recurse to depths 3 and 5 and wait in
+// task.receive() at the bottom. Each frame holds a local. Main wakes `t2` first.
+// Each task sums the locals of its own frames on the way back.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2: 150
+// CHECK: t1: 60
+var me = task.self();
+fun deep(n, tag) {
+    if (n == 0) {
+        task.receive();
+        return 0;
+    }
+    var local = n * 10;
+    var below = deep(n - 1, tag);
+    return below + local;
+}
+fun t1() { task.send(me, "t1: " + str(deep(3, "t1"))); }
+fun t2() { task.send(me, "t2: " + str(deep(5, "t2"))); }
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+task.send(h2, "go");
+task.send(h1, "go");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

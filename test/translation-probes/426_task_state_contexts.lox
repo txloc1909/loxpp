@@ -1,0 +1,40 @@
+// Invariant I1, the contexts (spec/04-semantics.md, The Task Machine, the table of
+// task-owned state; Contexts where a task cannot suspend): a context that is active
+// in the frames of one task is not active in another task. `t2` waits in
+// task.receive(). `t1` prints an instance whose `__str__` calls task.receive() on
+// an empty mailbox, so the call raises YieldAcrossNativeError, and `t1` catches it.
+// `t1` then calls task.receive() outside the context, and it waits: the call does
+// not raise. Main wakes `t2` and then `t1`, and each task has its own message. A
+// task that leaves the context marked, or that parks in it, prints another line.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t1 str: YieldAcrossNativeError
+// CHECK: t2 got go2
+// CHECK: t1 got go1
+var me = task.self();
+class Bad {
+    __str__() { return task.receive(); }
+}
+fun t1() {
+    try {
+        print Bad();
+        task.send(me, "t1 str: no fault");
+    } catch (e) {
+        task.send(me, "t1 str: " + e.kind);
+    }
+    task.send(me, "t1 got " + task.receive());
+}
+fun t2() { task.send(me, "t2 got " + task.receive()); }
+var h2 = task.spawn(t2);
+var h1 = task.spawn(t1);
+yield;
+print task.receive_within(5);
+task.send(h2, "go2");
+task.send(h1, "go1");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
