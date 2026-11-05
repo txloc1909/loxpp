@@ -335,7 +335,13 @@ flow is still running loses the write of a predecessor reached later, and the
 block then reads a value from a previous iteration or from before the loop.
 Any new reason to leave a slot in its stack cell must go through the same
 post-fixpoint spill pass, and must come with a probe that carries a promoted
-value across it.
+value across it. Each of the three current reasons has one in
+`test/translation-probes/qbe-only/`: `s8_promotion_giveup_loop` and
+`s8_promotion_loop_exit` for a phi that would name itself,
+`s8_promotion_catch_join` for a join some predecessor does not reach, and
+`s8_promotion_collapsed_giveup` for a collapse a later merge contradicts. A
+probe is only a check if removing its reason makes it fail; the
+`collapsed` one hangs QBE without the give-up.
 
 ## Staged plan
 
