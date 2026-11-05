@@ -449,6 +449,18 @@ TEST(IdleAccountingTest, AMessageDoesNotCountBackAWorkerThatLeft) {
     EXPECT_EQ(w.group->busy.load(), 1);
 }
 
+// Only a wait for a message leaves the count. A sender must not count a worker
+// that waits in its poller a second time: it never left the count, and a count
+// above the number of busy workers never reaches zero again.
+TEST(IdleAccountingTest, ASendDoesNotCountAWorkerThatWaitsInItsPoller) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
+    EXPECT_EQ(w.group->busy.load(), 2);
+    EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.other.waitReason, WaitReason::Poller);
+    EXPECT_EQ(w.group->busy.load(), 2);
+}
+
 // The wait ended and the worker waits for a message only: now it counts.
 TEST(IdleAccountingTest, WorkerThatLosesItsWaitsCountsAsIdle) {
     TwoWorkers w;
