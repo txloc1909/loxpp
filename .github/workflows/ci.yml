@@ -965,6 +965,22 @@ jobs:
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
 
+      - name: Build your own Redis - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
+
+      - name: Build your own Redis - differential vs redis-server
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-redis/tests/diff_redis.py
+
   managed-toolchains:
     name: Managed toolchains (JVM)
     runs-on: ubuntu-latest

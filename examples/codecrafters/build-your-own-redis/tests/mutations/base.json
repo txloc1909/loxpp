@@ -1,0 +1,100 @@
+[
+ {
+  "name": "PING replies wrong",
+  "old": "return simple(\"PONG\");",
+  "new": "return simple(\"PANG\");",
+  "cases": [
+   "base-02 respond to PING",
+   "base-03 multiple PINGs on one connection"
+  ]
+ },
+ {
+  "name": "connections served in the accept task",
+  "old": "    task.spawn(runReader);\n",
+  "new": "    runReader();\n",
+  "cases": [
+   "base-04 concurrent clients"
+  ]
+ },
+ {
+  "name": "ECHO case-sensitive",
+  "old": "var name = upper(argv[0]);",
+  "new": "var name = argv[0];",
+  "cases": [
+   "base-05 ECHO is case-insensitive"
+  ]
+ },
+ {
+  "name": "SET does not store",
+  "old": "    store[argv[1]] = Entry(argv[2], expiresAt);\n",
+  "new": "",
+  "cases": [
+   "base-06 GET"
+  ]
+ },
+ {
+  "name": "expiry ignored",
+  "old": "if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {",
+  "new": "if (false) {",
+  "cases": [
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "PX read as seconds",
+  "old": "            if (opt == \"EX\") {\n                n = n * 1000;",
+  "new": "            if (true) {\n                n = n * 1000;",
+  "cases": [
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "expiry in seconds (old time())",
+  "old": "    return time() * 1000;",
+  "new": "    var t = time();\n    return (t - t % 1) * 1000;",
+  "cases": [
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "PX option case-sensitive",
+  "old": "var opt = upper(argv[i]);",
+  "new": "var opt = argv[i];",
+  "cases": [
+   "base-07 SET with PX"
+  ]
+ },
+ {
+  "name": "missing key not null",
+  "old": "        return NULL_BULK;\n    }\n    return bulk(entry.value);",
+  "new": "        return bulk(\"\");\n    }\n    return bulk(entry.value);",
+  "cases": [
+   "local: GET of a missing key is a null bulk string",
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "bulk read by line",
+  "old": "            var data = sock.read_bytes(size + 2);",
+  "new": "            var data = sock.readline() + \"\\n\";",
+  "cases": [
+   "local: ECHO keeps every byte value"
+  ]
+ },
+ {
+  "name": "no inline commands",
+  "old": "            return [splitWords(line), nbytes];",
+  "new": "            throw \"protocol error\";",
+  "cases": [
+   "local: inline command"
+  ]
+ },
+ {
+  "name": "unknown command not an error",
+  "old": "    return errorReply(\"ERR unknown command '\" + argv[0] + \"'\");",
+  "new": "    return simple(\"OK\");",
+  "cases": [
+   "local: unknown command is an error"
+  ]
+ }
+]

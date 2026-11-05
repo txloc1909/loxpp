@@ -1,0 +1,431 @@
+// redis.lox — Codecrafters "Build your own Redis" in pure Lox++.
+//
+//   your_program.sh [--port <n>]
+//
+// Each connection runs as two tasks on the one worker:
+//
+//   reader   owns the read side of the socket. It parses RESP and sends one
+//            Msg.Cmd per command to the session task.
+//   session  owns the write side. It takes messages from its mailbox, runs
+//            each command, and writes the reply.
+//
+// A session must also take messages from other tasks while its client sends
+// nothing (a blocked list pop, a published message, a replica ack). A task
+// that waits in readline cannot receive, so reading and replying are two
+// tasks. Only the session writes the socket: two tasks that wait on one side
+// of a socket raise BusyError.
+//
+// The keyspace is a set of global Maps that every task of the worker shares.
+// The code that runs one command has no suspend point: every write to a
+// socket comes after the command. So each command is atomic, as in Redis.
+
+// ===========================================================================
+// String helpers (the stdlib has no split/upper/trim built in).
+// ===========================================================================
+
+fun upper(s) {
+    var out = "";
+    var i = 0;
+    while (i < len(s)) {
+        var c = ord(s[i]);
+        if (c >= 97 and c <= 122) {
+            out = out + chr(c - 32);
+        } else {
+            out = out + s[i];
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// readline() strips the '\n' but keeps the '\r'.
+fun trimCR(s) {
+    if (len(s) > 0 and s[len(s) - 1] == "\r") {
+        return s[0:len(s) - 1];
+    }
+    return s;
+}
+
+// Returns the integer value of s, or nil when s is not an optional '-'
+// followed by one or more decimal digits.
+fun parseInteger(s) {
+    var i = 0;
+    var negative = false;
+    if (len(s) > 0 and s[0] == "-") {
+        negative = true;
+        i = 1;
+    }
+    if (i >= len(s)) {
+        return nil;
+    }
+    var n = 0;
+    while (i < len(s)) {
+        var c = ord(s[i]);
+        if (c < 48 or c > 57) {
+            return nil;
+        }
+        n = n * 10 + (c - 48);
+        i = i + 1;
+    }
+    if (negative) {
+        return -n;
+    }
+    return n;
+}
+
+// Splits an inline command on runs of spaces and tabs.
+fun splitWords(s) {
+    var words = [];
+    var word = "";
+    var i = 0;
+    while (i < len(s)) {
+        var c = s[i];
+        if (c == " " or c == "\t") {
+            if (word != "") {
+                words.append(word);
+                word = "";
+            }
+        } else {
+            word = word + c;
+        }
+        i = i + 1;
+    }
+    if (word != "") {
+        words.append(word);
+    }
+    return words;
+}
+
+// ===========================================================================
+// RESP encoding
+// ===========================================================================
+
+fun simple(s) {
+    return "+" + s + "\r\n";
+}
+
+fun errorReply(s) {
+    return "-" + s + "\r\n";
+}
+
+fun bulk(s) {
+    return "$" + str(len(s)) + "\r\n" + s + "\r\n";
+}
+
+var NULL_BULK = "$-1\r\n";
+
+fun integerReply(n) {
+    return ":" + str(n) + "\r\n";
+}
+
+// items holds replies that are already encoded.
+fun arrayReply(items) {
+    var out = "*" + str(len(items)) + "\r\n";
+    for (var item in items) {
+        out = out + item;
+    }
+    return out;
+}
+
+fun wrongArgs(name) {
+    return errorReply("ERR wrong number of arguments for '" + name + "' command");
+}
+
+// ===========================================================================
+// Messages between tasks
+//
+// A List is not a message (spec/03-types.md, Messages), also between tasks of
+// one worker, so the arguments of a command travel as an enum list.
+// ===========================================================================
+
+enum Args { Cons(head, tail) Empty }
+enum Msg { Cmd(args, nbytes) Closed }
+
+fun toArgs(list) {
+    var out = Args.Empty();
+    var i = len(list) - 1;
+    while (i >= 0) {
+        out = Args.Cons(list[i], out);
+        i = i - 1;
+    }
+    return out;
+}
+
+fun fromArgs(args) {
+    var out = [];
+    var rest = args;
+    var done = false;
+    while (!done) {
+        done = match rest {
+            case Args.Cons(head, tail) => {
+                out.append(head);
+                rest = tail;
+                false
+            }
+            case Args.Empty => true
+        };
+    }
+    return out;
+}
+
+// ===========================================================================
+// Keyspace
+// ===========================================================================
+
+class Entry {
+    init(value, expiresAt) {
+        this.value = value;
+        // Milliseconds since the epoch, or nil for a key with no expiry.
+        this.expiresAt = expiresAt;
+    }
+}
+
+var store = {};
+
+fun nowMs() {
+    return time() * 1000;
+}
+
+// Returns the live entry of key, or nil. An expired key is removed here, on
+// access, as Redis does lazily.
+fun lookup(key) {
+    var entry = store[key];
+    if (entry == nil) {
+        return nil;
+    }
+    if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {
+        store.del(key);
+        return nil;
+    }
+    return entry;
+}
+
+// ===========================================================================
+// Commands
+// ===========================================================================
+
+fun cmdSet(argv) {
+    if (len(argv) < 3) {
+        return wrongArgs("set");
+    }
+    var expiresAt = nil;
+    var i = 3;
+    while (i < len(argv)) {
+        var opt = upper(argv[i]);
+        if ((opt == "PX" or opt == "EX") and i + 1 < len(argv)) {
+            var n = parseInteger(argv[i + 1]);
+            if (n == nil or n <= 0) {
+                return errorReply("ERR invalid expire time in 'set' command");
+            }
+            if (opt == "EX") {
+                n = n * 1000;
+            }
+            expiresAt = nowMs() + n;
+            i = i + 2;
+        } else {
+            return errorReply("ERR syntax error");
+        }
+    }
+    store[argv[1]] = Entry(argv[2], expiresAt);
+    return simple("OK");
+}
+
+fun cmdGet(argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("get");
+    }
+    var entry = lookup(argv[1]);
+    if (entry == nil) {
+        return NULL_BULK;
+    }
+    return bulk(entry.value);
+}
+
+fun execute(argv) {
+    if (len(argv) == 0) {
+        return "";
+    }
+    var name = upper(argv[0]);
+    if (name == "PING") {
+        if (len(argv) == 1) {
+            return simple("PONG");
+        }
+        return bulk(argv[1]);
+    }
+    if (name == "ECHO") {
+        if (len(argv) != 2) {
+            return wrongArgs("echo");
+        }
+        return bulk(argv[1]);
+    }
+    if (name == "SET") {
+        return cmdSet(argv);
+    }
+    if (name == "GET") {
+        return cmdGet(argv);
+    }
+    return errorReply("ERR unknown command '" + argv[0] + "'");
+}
+
+// ===========================================================================
+// Connection: reader task and session task
+// ===========================================================================
+
+// Reads one command. Returns [args, nbytes], or nil at end of stream.
+// nbytes counts every byte of the command on the wire: readline() drops the
+// '\n', so each line adds one.
+fun readCommand(sock) {
+    while (true) {
+        var raw = sock.readline();
+        if (raw == nil) {
+            return nil;
+        }
+        var nbytes = len(raw) + 1;
+        var line = trimCR(raw);
+        if (line == "") {
+            continue;
+        }
+        if (line[0] != "*") {
+            return [splitWords(line), nbytes];
+        }
+        var count = parseInteger(line[1:len(line)]);
+        if (count == nil) {
+            throw "protocol error: bad array header";
+        }
+        var argv = [];
+        var i = 0;
+        while (i < count) {
+            var hraw = sock.readline();
+            if (hraw == nil) {
+                return nil;
+            }
+            nbytes = nbytes + len(hraw) + 1;
+            var header = trimCR(hraw);
+            if (len(header) == 0 or header[0] != "$") {
+                throw "protocol error: expected a bulk string";
+            }
+            var size = parseInteger(header[1:len(header)]);
+            if (size == nil or size < 0 or size > 536870912) {
+                throw "protocol error: bad bulk length";
+            }
+            var data = sock.read_bytes(size + 2);
+            if (len(data) < size + 2) {
+                return nil;
+            }
+            nbytes = nbytes + size + 2;
+            argv.append(data[0:size]);
+            i = i + 1;
+        }
+        return [argv, nbytes];
+    }
+}
+
+fun printFault(prefix, e) {
+    try {
+        print prefix + e.message;
+    } catch (ignored) {
+    }
+}
+
+// The session can end first (a write fault). Then the send raises
+// DeadTaskError, and the reader ends too.
+fun readLoop(sock, session) {
+    try {
+        while (true) {
+            var cmd = readCommand(sock);
+            if (cmd == nil) {
+                break;
+            }
+            task.send(session, Msg.Cmd(toArgs(cmd[0]), cmd[1]));
+        }
+    } catch (e) {
+        if (e.kind != "DeadTaskError" and e.kind != "SocketClosedError") {
+            printFault("read fault: ", e);
+        }
+    }
+    try {
+        task.send(session, Msg.Closed());
+    } catch (ignored) {
+    }
+}
+
+// Returns true: the session goes on after a command.
+fun runCommand(sock, argv) {
+    var reply = execute(argv);
+    if (reply != "") {
+        sock.write(reply);
+    }
+    return true;
+}
+
+// close() wakes a reader that waits in readline on this socket, so the
+// deferred close also ends the reader.
+fun sessionLoop(sock) {
+    defer sock.close();
+    try {
+        var running = true;
+        while (running) {
+            var msg = task.receive();
+            running = match msg {
+                case Msg.Cmd(args, nbytes) => runCommand(sock, fromArgs(args))
+                case Msg.Closed => false
+            };
+        }
+    } catch (e) {
+        printFault("connection fault: ", e);
+    }
+}
+
+// task.spawn passes no arguments, so closures hold the socket and the handle.
+fun startConnection(sock) {
+    fun runSession() {
+        sessionLoop(sock);
+    }
+    var session = task.spawn(runSession);
+    fun runReader() {
+        readLoop(sock, session);
+    }
+    task.spawn(runReader);
+}
+
+// ===========================================================================
+// Start
+// ===========================================================================
+
+fun flagValue(name, fallback) {
+    var a = args();
+    var i = 0;
+    while (i + 1 < len(a)) {
+        if (a[i] == name) {
+            return a[i + 1];
+        }
+        i = i + 1;
+    }
+    return fallback;
+}
+
+fun main() {
+    var port = parseInteger(flagValue("--port", "6379"));
+    if (port == nil) {
+        print "redis.lox: --port needs an integer";
+        exit(64);
+    }
+    var server = listen("0.0.0.0", port);
+    // A fault of accept() that does not go away would print every 20 ms, so
+    // the first one is the only one printed.
+    var acceptFaultPrinted = false;
+    while (true) {
+        try {
+            var sock = server.accept();
+            startConnection(sock);
+        } catch (e) {
+            if (!acceptFaultPrinted) {
+                acceptFaultPrinted = true;
+                printFault("accept fault: ", e);
+            }
+            sleep(0.02);
+        }
+    }
+}
+
+main();

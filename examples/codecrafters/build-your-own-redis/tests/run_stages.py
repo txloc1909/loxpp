@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+# run_stages.py — public-source test oracle for the Lox++ Redis server.
+#
+# The stage cases are transcribed from codecrafters-io/build-your-own-redis
+# stage_descriptions/*.md (public, no membership needed). Local regression
+# cases are marked "local:". The suite drives the real challenge entrypoint,
+# your_program.sh, over raw TCP with a small RESP client.
+#
+# Usage: tests/run_stages.py [your_program.sh]
+
+import os
+import random
+import socket
+import string
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PROG = os.path.join(HERE, "..", "your_program.sh")
+
+PASS = 0
+FAIL = 0
+
+
+def check(name, cond, detail=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print("  ok   %s" % name)
+    else:
+        FAIL += 1
+        print("  FAIL %s  %s" % (name, detail))
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def rand_word(n=8):
+    return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
+
+
+# ---------------------------------------------------------------------------
+# Server process
+# ---------------------------------------------------------------------------
+
+
+class Server:
+    def __init__(self, prog, args):
+        self.port = free_port()
+        self.log = tempfile.NamedTemporaryFile(
+            prefix="loxpp-redis-", suffix=".log", delete=False)
+        self.proc = subprocess.Popen(
+            [prog, "--port", str(self.port)] + args,
+            stdout=self.log, stderr=subprocess.STDOUT)
+        self.up = self._wait_up()
+
+    def _wait_up(self):
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                return False
+            try:
+                socket.create_connection(
+                    ("127.0.0.1", self.port), timeout=0.2).close()
+                return True
+            except OSError:
+                time.sleep(0.05)
+        return False
+
+    def client(self):
+        return Client(self.port)
+
+    def log_text(self):
+        with open(self.log.name, errors="replace") as f:
+            return f.read()
+
+    def stop(self):
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# RESP client
+# ---------------------------------------------------------------------------
+
+
+def encode(*args):
+    out = b"*%d\r\n" % len(args)
+    for a in args:
+        if isinstance(a, int):
+            a = str(a)
+        if isinstance(a, str):
+            a = a.encode("latin-1")
+        out += b"$%d\r\n%s\r\n" % (len(a), a)
+    return out
+
+
+class Error(str):
+    """A RESP simple error, kept apart from a simple string."""
+
+
+class Client:
+    def __init__(self, port):
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        self.sock.settimeout(5)
+        self.buf = b""
+
+    def close(self):
+        self.sock.close()
+
+    def send_raw(self, raw):
+        self.sock.sendall(raw)
+
+    def _fill(self):
+        chunk = self.sock.recv(65536)
+        if not chunk:
+            raise EOFError("server closed the connection")
+        self.buf += chunk
+
+    def _line(self):
+        while b"\r\n" not in self.buf:
+            self._fill()
+        line, _, self.buf = self.buf.partition(b"\r\n")
+        return line
+
+    def _exact(self, n):
+        while len(self.buf) < n:
+            self._fill()
+        data, self.buf = self.buf[:n], self.buf[n:]
+        return data
+
+    def read(self):
+        line = self._line()
+        kind, rest = line[:1], line[1:].decode("latin-1")
+        if kind == b"+":
+            return rest
+        if kind == b"-":
+            return Error(rest)
+        if kind == b":":
+            return int(rest)
+        if kind == b"$":
+            n = int(rest)
+            if n < 0:
+                return None
+            data = self._exact(n + 2)
+            return data[:n].decode("latin-1")
+        if kind == b"*":
+            n = int(rest)
+            if n < 0:
+                return None
+            return [self.read() for _ in range(n)]
+        raise ValueError("bad RESP type byte: %r" % line)
+
+    def call(self, *args):
+        self.send_raw(encode(*args))
+        return self.read()
+
+
+# ---------------------------------------------------------------------------
+# Stage groups. Each returns nothing; it records cases with check().
+# ---------------------------------------------------------------------------
+
+
+def stages_base(prog):
+    srv = Server(prog, [])
+    try:
+        check("base-01 bind to a port", srv.up, srv.log_text())
+        if not srv.up:
+            return
+
+        c = srv.client()
+        check("base-02 respond to PING", c.call("PING") == "PONG")
+
+        c.send_raw(encode("PING") + encode("PING") + encode("ping"))
+        got = [c.read() for _ in range(3)]
+        check("base-03 multiple PINGs on one connection",
+              got == ["PONG"] * 3, repr(got))
+
+        a, b = srv.client(), srv.client()
+        a.send_raw(encode("PING"))
+        b.send_raw(encode("PING"))
+        ra, rb = a.read(), b.read()
+        check("base-04 concurrent clients", ra == "PONG" and rb == "PONG",
+              repr((ra, rb)))
+        # A connection that stays open must not stop the others.
+        d = srv.client()
+        check("local: a third client while two stay open",
+              d.call("PING") == "PONG")
+        a.close()
+        b.close()
+        d.close()
+
+        word = rand_word()
+        check("base-05 ECHO", c.call("ECHO", word) == word)
+        check("base-05 ECHO is case-insensitive",
+              c.call("eChO", word) == word)
+
+        key, val = rand_word(), rand_word()
+        check("base-06 SET", c.call("SET", key, val) == "OK")
+        check("base-06 GET", c.call("GET", key) == val)
+        check("local: GET of a missing key is a null bulk string",
+              c.call("GET", rand_word()) is None)
+
+        key, val = rand_word(), rand_word()
+        check("base-07 SET with PX",
+              c.call("SET", key, val, "px", "100") == "OK")
+        check("base-07 GET before expiry", c.call("GET", key) == val)
+        time.sleep(0.2)
+        check("base-07 GET after expiry", c.call("GET", key) is None)
+
+        key = rand_word()
+        c.call("SET", key, "v", "PX", "1000")
+        time.sleep(0.2)
+        check("local: a 1000 ms key is alive at 200 ms",
+              c.call("GET", key) == "v")
+
+        binary = "".join(chr(i) for i in range(256)) + "\r\n"
+        check("local: ECHO keeps every byte value",
+              c.call("ECHO", binary) == binary)
+
+        c.send_raw(b"PING\r\n")
+        check("local: inline command", c.read() == "PONG")
+
+        got = c.call("NOSUCHCOMMAND")
+        check("local: unknown command is an error",
+              isinstance(got, Error), repr(got))
+        check("local: the connection survives an error",
+              c.call("PING") == "PONG")
+        c.close()
+    finally:
+        srv.stop()
+
+
+GROUPS = [
+    ("base", stages_base),
+]
+
+
+def main():
+    prog = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROG)
+    if not os.path.exists(prog):
+        print("entrypoint not found: %s" % prog)
+        return 1
+    random.seed(1)
+    for name, run in GROUPS:
+        print("== %s" % name)
+        try:
+            run(prog)
+        except Exception as e:  # a crash in one group must not hide the rest
+            check("%s: group ran to the end" % name, False, repr(e))
+    print("\n%d passed, %d failed" % (PASS, FAIL))
+    return 0 if FAIL == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
