@@ -17,9 +17,9 @@ var conn = srv.accept();
 var me = task.self();
 fun other() { task.send(me, "other"); }
 fun t() {
-    var a = conn.readline();
+    conn.readline();
     task.spawn(other);
-    var b = conn.write("x");
+    conn.write("x");
     task.send(me, "t: " + "wrote");
 }
 fun feeder() {

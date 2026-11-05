@@ -14,7 +14,7 @@ var peer = connect("127.0.0.1", srv.port());
 var me = task.self();
 fun other() { task.send(me, "other"); }
 fun t() {
-    var c = srv.accept();
+    srv.accept();
     task.send(me, "t: accepted");
 }
 task.spawn(t);
