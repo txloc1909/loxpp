@@ -335,13 +335,23 @@ flow is still running loses the write of a predecessor reached later, and the
 block then reads a value from a previous iteration or from before the loop.
 Any new reason to leave a slot in its stack cell must go through the same
 post-fixpoint spill pass, and must come with a probe that carries a promoted
-value across it. Each of the three current reasons has one in
-`test/translation-probes/qbe-only/`: `s8_promotion_giveup_loop` and
-`s8_promotion_loop_exit` for a phi that would name itself,
-`s8_promotion_catch_join` for a join some predecessor does not reach, and
-`s8_promotion_collapsed_giveup` for a collapse a later merge contradicts. A
-probe is only a check if removing its reason makes it fail; the
-`collapsed` one hangs QBE without the give-up.
+value across it.
+
+The pass gives a slot up at four sites. A probe is a check only if removing
+the site it names makes it fail, so this table records which sites have one,
+measured at #1103:
+
+| Site | Probe that fails without it |
+|---|---|
+| a predecessor carries no value (`!allHave`) | `s8_promotion_giveup_loop`, `s8_promotion_catch_join` (the build aborts with `unordered_map::at`, exit 70: a phi needs a value from every predecessor) |
+| a phi with nothing but itself to name (`values.empty()`) | none: no program in the corpus reaches this site, so no probe can force it |
+| a phi that would name itself (`selfReferenced`) | none: removing the site changes no probe and no program of `examples/`, `test/translation-probes/` or `test/coroutine-probes/` |
+| a collapse a later merge contradicts (`collapsedPhi`) | `s8_promotion_collapsed_giveup` (QBE never ends) |
+
+`#1107` carries the two gaps. The spill pass itself is bound by three probes:
+removing it makes `s8_promotion_giveup_loop` hang and `s8_promotion_loop_exit`
+and `s8_promotion_catch_join` diverge. A site without a probe that fails is
+named in this table rather than claimed.
 
 ## Staged plan
 
