@@ -33,6 +33,24 @@
 // it back unchanged.
 var MAX_KEYWORD = 32;
 
+fun lower(s) {
+    if (len(s) > MAX_KEYWORD) {
+        return s;
+    }
+    var out = "";
+    var i = 0;
+    while (i < len(s)) {
+        var c = ord(s[i]);
+        if (c >= 65 and c <= 90) {
+            out = out + chr(c + 32);
+        } else {
+            out = out + s[i];
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
 fun upper(s) {
     if (len(s) > MAX_KEYWORD) {
         return s;
@@ -167,15 +185,6 @@ fun integerReply(n) {
     return ":" + str(n) + "\r\n";
 }
 
-// items holds replies that are already encoded.
-fun arrayReply(items) {
-    var out = "*" + str(len(items)) + "\r\n";
-    for (var item in items) {
-        out = out + item;
-    }
-    return out;
-}
-
 fun wrongArgs(name) {
     return errorReply("ERR wrong number of arguments for '" + name + "' command");
 }
@@ -188,9 +197,11 @@ fun wrongArgs(name) {
 // ===========================================================================
 
 enum Args { Cons(head, tail) Empty }
-// Fail(text) carries a protocol error: the session replies with it and ends
-// the connection, as Redis does.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed }
+// Reader to session: Cmd, Fail, Closed. Fail(text) carries a protocol error:
+// the session replies with it and ends the connection, as Redis does.
+// Session to reader: Credit after each command it has done, and Stop when it
+// ends.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Stop }
 
 fun toArgs(list) {
     var out = Args.Empty();
@@ -326,6 +337,26 @@ fun cmdSet(argv) {
     return reply;
 }
 
+// INFO has one section so far. A section name that is not known adds
+// nothing, as in Redis.
+fun cmdInfo(argv) {
+    var clients = len(argv) == 1;
+    var i = 1;
+    while (i < len(argv)) {
+        var want = lower(argv[i]);
+        if (want == "all" or want == "default" or want == "everything"
+            or want == "clients") {
+            clients = true;
+        }
+        i = i + 1;
+    }
+    var out = "";
+    if (clients) {
+        out = out + "# Clients\r\nconnected_clients:" + str(connectedClients) + "\r\n";
+    }
+    return bulk(out);
+}
+
 fun cmdGet(argv) {
     if (len(argv) != 2) {
         return wrongArgs("get");
@@ -373,6 +404,9 @@ fun execute(argv) {
     if (name == "SET") {
         return cmdSet(argv);
     }
+    if (name == "INFO") {
+        return cmdInfo(argv);
+    }
     if (name == "GET") {
         return cmdGet(argv);
     }
@@ -382,6 +416,16 @@ fun execute(argv) {
 // ===========================================================================
 // Connection: reader task and session task
 // ===========================================================================
+
+// Limits on what one client can make the server read and hold, as in Redis
+// 7.0. Work for each byte in Lox++ is allowed only under INLINE_MAX.
+var INLINE_MAX = 65536;
+var ARRAY_MAX = 1048576;
+var BULK_MAX = 536870912;
+
+// A reader yields after this many array elements, so that one long array
+// does not keep the other tasks of the worker from running.
+var ELEMENTS_PER_YIELD = 1024;
 
 // Reads one command. Returns [args, nbytes], or nil at end of stream.
 // nbytes counts every byte of the command on the wire: readline() drops the
@@ -398,15 +442,21 @@ fun readCommand(sock) {
             continue;
         }
         if (line[0] != "*") {
+            if (len(raw) > INLINE_MAX) {
+                throw ProtocolError("Protocol error: too big inline request");
+            }
             return [splitWords(line), nbytes];
         }
         var count = parseInteger(line[1:len(line)]);
-        if (count == nil or count > 1048576) {
+        if (count == nil or count > ARRAY_MAX) {
             throw ProtocolError("Protocol error: invalid multibulk length");
         }
         var argv = [];
         var i = 0;
         while (i < count) {
+            if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {
+                yield nil;
+            }
             var hraw = sock.readline();
             if (hraw == nil) {
                 return nil;
@@ -421,7 +471,7 @@ fun readCommand(sock) {
                 throw ProtocolError("Protocol error: expected '$', got " + got);
             }
             var size = parseInteger(header[1:len(header)]);
-            if (size == nil or size < 0 or size > 536870912) {
+            if (size == nil or size < 0 or size > BULK_MAX) {
                 throw ProtocolError("Protocol error: invalid bulk length");
             }
             var data = sock.read_bytes(size + 2);
@@ -446,22 +496,91 @@ fun printFault(prefix, e) {
     }
 }
 
-// The session can end first (a write fault). Then the send raises
-// DeadTaskError, and the reader ends too.
-fun readLoop(sock, session) {
+// The two tasks of one connection, and its socket. Both tasks run on the
+// one worker, so they share this object.
+class Conn {
+    init(sock) {
+        this.sock = sock;
+        this.session = nil;
+        this.reader = nil;
+        // The tasks of this connection that have not ended.
+        this.liveTasks = 2;
+    }
+}
+
+// The connections with a task that has not ended. INFO reports it as
+// connected_clients, so a task that outlives its connection shows there.
+var connectedClients = 0;
+
+fun taskEnded(conn) {
+    conn.liveTasks = conn.liveTasks - 1;
+    if (conn.liveTasks == 0) {
+        connectedClients = connectedClients - 1;
+    }
+}
+
+// The reader sends at most WINDOW commands that the session has not done.
+// So a client that sends without reading its replies fills at most WINDOW
+// messages of the session mailbox; after that the reader stops reading, and
+// TCP makes the client wait. The reader also yields every WINDOW commands,
+// so a client that sends a long pipeline does not keep the other tasks of
+// the worker from running.
+var WINDOW = 64;
+
+// Waits until the session gives back at least one credit. Returns the new
+// number of credits, or nil when the session has ended.
+fun awaitCredit() {
+    var credits = 0;
+    var msg = task.receive();
+    while (true) {
+        var stop = match msg {
+            case Msg.Credit => false
+            case Msg.Stop => true
+            // Only the session sends to the reader, and it sends only these
+            // two.
+            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed => true
+        };
+        if (stop) {
+            return nil;
+        }
+        credits = credits + 1;
+        if (task.pending() == 0) {
+            return credits;
+        }
+        msg = task.receive();
+    }
+}
+
+fun readLoop(conn) {
+    defer taskEnded(conn);
+    var credits = WINDOW;
+    var sinceYield = 0;
     try {
         while (true) {
-            var cmd = readCommand(sock);
+            var cmd = readCommand(conn.sock);
             if (cmd == nil) {
                 break;
             }
-            task.send(session, Msg.Cmd(toArgs(cmd[0]), cmd[1]));
+            task.send(conn.session, Msg.Cmd(toArgs(cmd[0]), cmd[1]));
+            credits = credits - 1;
+            sinceYield = sinceYield + 1;
+            if (sinceYield == WINDOW) {
+                sinceYield = 0;
+                yield nil;
+            }
+            if (credits == 0) {
+                var more = awaitCredit();
+                if (more == nil) {
+                    return;
+                }
+                credits = more;
+            }
         }
     } catch (e) {
         var kind = faultKind(e);
         if (kind == "ProtocolError") {
             try {
-                task.send(session, Msg.Fail(faultText(e)));
+                task.send(conn.session, Msg.Fail(faultText(e)));
             } catch (ignored) {
             }
         } else if (kind != "DeadTaskError" and kind != "SocketClosedError"
@@ -472,38 +591,60 @@ fun readLoop(sock, session) {
         }
     }
     try {
-        task.send(session, Msg.Closed());
+        task.send(conn.session, Msg.Closed());
     } catch (ignored) {
     }
 }
 
 // Returns true: the session goes on after a command.
-fun runCommand(sock, argv) {
+fun runCommand(conn, argv) {
     var reply = execute(argv);
     if (reply != "") {
-        sock.write(reply);
+        conn.sock.write(reply);
     }
+    giveCredit(conn);
     return true;
 }
 
+fun giveCredit(conn) {
+    try {
+        task.send(conn.reader, Msg.Credit());
+    } catch (ignored) {
+        // The reader has ended; the session ends at its Closed message.
+    }
+}
+
 // Returns false: a protocol error ends the connection.
-fun failConnection(sock, text) {
-    sock.write(errorReply("ERR " + text));
+fun failConnection(conn, text) {
+    conn.sock.write(errorReply("ERR " + text));
     return false;
 }
 
-// close() wakes a reader that waits in readline on this socket, so the
-// deferred close also ends the reader.
-fun sessionLoop(sock) {
-    defer sock.close();
+// When the session ends, it closes the socket and stops the reader. The
+// close wakes a reader that waits in a read, and Stop wakes a reader that
+// waits for credit, so no task of the connection outlives it.
+fun endSession(conn) {
+    conn.sock.close();
+    try {
+        task.send(conn.reader, Msg.Stop());
+    } catch (ignored) {
+    }
+}
+
+fun sessionLoop(conn) {
+    defer taskEnded(conn);
+    defer endSession(conn);
     try {
         var running = true;
         while (running) {
             var msg = task.receive();
             running = match msg {
-                case Msg.Cmd(args, nbytes) => runCommand(sock, fromArgs(args))
-                case Msg.Fail(text) => failConnection(sock, text)
+                case Msg.Cmd(args, nbytes) => runCommand(conn, fromArgs(args))
+                case Msg.Fail(text) => failConnection(conn, text)
                 case Msg.Closed => false
+                // Only the reader sends to the session, and it never sends
+                // these.
+                case Msg.Credit or Msg.Stop => true
             };
         }
     } catch (e) {
@@ -514,16 +655,20 @@ fun sessionLoop(sock) {
     }
 }
 
-// task.spawn passes no arguments, so closures hold the socket and the handle.
+// task.spawn passes no arguments, so closures hold the connection. Both
+// handles are set before either task first runs: the accept loop does not
+// suspend between the two spawns.
 fun startConnection(sock) {
+    var conn = Conn(sock);
+    connectedClients = connectedClients + 1;
     fun runSession() {
-        sessionLoop(sock);
+        sessionLoop(conn);
     }
-    var session = task.spawn(runSession);
     fun runReader() {
-        readLoop(sock, session);
+        readLoop(conn);
     }
-    task.spawn(runReader);
+    conn.session = task.spawn(runSession);
+    conn.reader = task.spawn(runReader);
 }
 
 // ===========================================================================

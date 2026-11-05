@@ -12,9 +12,11 @@ import os
 import random
 import socket
 import string
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -324,8 +326,214 @@ def stages_base(prog):
         srv.stop()
 
 
+# ---------------------------------------------------------------------------
+# Fairness: one client must not stop the server for the other clients. The
+# probes and their limits come from the referee ruling on PR #1125.
+# ---------------------------------------------------------------------------
+
+
+def rss_kib(pid):
+    try:
+        with open("/proc/%d/status" % pid) as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return 0
+
+
+def measure_while(srv, action):
+    """Runs action() while a measurer opens a new connection every 20 ms and
+    times one PING on it. Returns (worst seconds, wrong replies, peak RSS in
+    KiB)."""
+    stop = threading.Event()
+    worst = [0.0]
+    wrong = []
+    peak = [rss_kib(srv.proc.pid)]
+
+    def measurer():
+        while not stop.is_set():
+            start = time.time()
+            try:
+                m = socket.create_connection(("127.0.0.1", srv.port), timeout=15)
+                m.sendall(encode("PING"))
+                data = b""
+                while not data.endswith(b"\r\n"):
+                    chunk = m.recv(64)
+                    if not chunk:
+                        break
+                    data += chunk
+                m.close()
+                if data != b"+PONG\r\n":
+                    wrong.append(data)
+            except OSError as e:
+                wrong.append(repr(e))
+            worst[0] = max(worst[0], time.time() - start)
+            peak[0] = max(peak[0], rss_kib(srv.proc.pid))
+            time.sleep(0.02)
+
+    th = threading.Thread(target=measurer)
+    th.start()
+    try:
+        action()
+    finally:
+        stop.set()
+        th.join(30)
+    print("       measured: worst PING %.3f s, peak RSS %d KiB"
+          % (worst[0], peak[0]))
+    return worst[0], wrong, peak[0]
+
+
+def flood(port, seconds, read_replies):
+    """One client that sends pipelines of PING for the given time. It reads
+    and drops the replies, or never reads them."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(0.2)
+    chunk = encode("PING") * 1000
+    deadline = time.time() + seconds
+    done = threading.Event()
+
+    def drain():
+        sock.settimeout(0.2)
+        while not done.is_set():
+            try:
+                if not sock.recv(1 << 16):
+                    return
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+
+    if read_replies:
+        threading.Thread(target=drain, daemon=True).start()
+    off = 0
+    while time.time() < deadline:
+        try:
+            off += sock.send(chunk[off:])
+            if off == len(chunk):
+                off = 0
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+    done.set()
+    sock.close()
+
+
+def flooders(port, count, seconds, read_replies):
+    def run():
+        ths = [threading.Thread(target=flood, args=(port, seconds, read_replies))
+               for _ in range(count)]
+        for t in ths:
+            t.start()
+        for t in ths:
+            t.join()
+    return run
+
+
+def send_all(port, raw):
+    def run():
+        sock = socket.create_connection(("127.0.0.1", port), timeout=30)
+        try:
+            sock.sendall(raw)
+            sock.settimeout(30)
+            sock.recv(256)
+        except OSError:
+            pass
+        sock.close()
+    return run
+
+
+def stages_fairness(prog):
+    srv = Server(prog, [])
+    try:
+        check("fairness: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+
+        worst, wrong, _ = measure_while(srv, flooders(srv.port, 4, 5, True))
+        check("local: P1 4 pipelining clients that read, PING within 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s, wrong %r" % (worst, wrong[:3]))
+
+        worst, wrong, peak = measure_while(srv, flooders(srv.port, 4, 5, False))
+        check("local: P2 4 pipelining clients that do not read, PING within 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s, wrong %r" % (worst, wrong[:3]))
+        check("local: P2 server RSS stays at most 64 MB",
+              peak <= 64 * 1024, "peak %d KiB" % peak)
+
+        c = srv.client()
+        c.send_raw(b"PING " + b"a" * 65532 + b"\r\n")
+        got = c.try_read(5)
+        check("local: P3 an inline line of 65537 bytes is a protocol error",
+              isinstance(got, Error) and "too big inline request" in got, repr(got)[:100])
+        check("local: P3 the server closes that connection", c.try_read(2) is CLOSED)
+        c.close()
+
+        worst, wrong, _ = measure_while(
+            srv, send_all(srv.port, b"PING " + b"a" * (64 << 20) + b"\r\n"))
+        check("local: P3 a 64 MB inline line stalls PING at most 1.0 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+
+        worst, wrong, _ = measure_while(
+            srv, send_all(srv.port, b"*1048576\r\n" + b"$0\r\n\r\n" * 1048576))
+        check("local: P4 an array of 1048576 empty bulks stalls PING at most 1.0 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+
+        # 1000 clients that send more than a window of commands and reset
+        # the connection without reading. Each connection's tasks must end:
+        # the session closes its socket, so the open files of the server go
+        # back to the count before.
+        def open_fds():
+            try:
+                return len(os.listdir("/proc/%d/fd" % srv.proc.pid))
+            except OSError:
+                return -1
+        before = open_fds()
+        burst = encode("PING") * 200
+        for _ in range(1000):
+            r = socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+            r.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                         struct.pack("ii", 1, 0))
+            try:
+                r.sendall(burst)
+            except OSError:
+                pass
+            r.close()
+        deadline = time.time() + 10
+        while time.time() < deadline and open_fds() > before + 5:
+            time.sleep(0.1)
+        after = open_fds()
+        check("local: 1000 reset connections leave no open socket",
+              0 <= after <= before + 5, "%d open files before, %d after"
+              % (before, after))
+        # A connection counts in connected_clients until both of its tasks
+        # end, so a task that outlives its connection keeps it above 1.
+        c = srv.client()
+        deadline = time.time() + 10
+        clients = None
+        while time.time() < deadline:
+            info = c.call("INFO", "clients")
+            clients = [l for l in info.split("\r\n")
+                       if l.startswith("connected_clients:")]
+            if clients == ["connected_clients:1"]:
+                break
+            time.sleep(0.1)
+        check("local: 1000 reset connections leave no task",
+              clients == ["connected_clients:1"], repr(clients))
+        c.close()
+
+        c = srv.client()
+        check("local: the server serves after the fairness probes",
+              c.call("PING") == "PONG")
+        c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
+    ("fairness", stages_fairness),
 ]
 
 

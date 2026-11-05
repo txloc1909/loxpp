@@ -48,7 +48,8 @@ All tasks run on the one main worker.
   session task for each command. At the end of the stream it sends
   `Msg.Closed`.
 - The **session** task owns the write side. It takes messages from its
-  mailbox with `task.receive()`, runs each command, and writes the reply.
+  mailbox with `task.receive()`, runs each command, writes the reply, and
+  sends `Msg.Credit` back to the reader (see rule 4 below).
 
 Why two: a session must also take messages from other tasks while its
 client sends nothing (a blocked list pop, a published message, a replica
@@ -56,9 +57,11 @@ acknowledgement). A task that waits in `readline` cannot receive. Only the
 session writes the socket, because two tasks that wait on one side of a
 socket raise `BusyError` (`spec/05-stdlib.md`, Socket methods).
 
-When the session ends, its deferred `close()` wakes the reader, whose
-`readline` then raises `SocketClosedError`. When the reader ends first, it
-sends `Msg.Closed`.
+When the session ends, it closes the socket and sends `Msg.Stop` to the
+reader. The close wakes a reader that waits in a read (its call raises
+`SocketClosedError`), and `Stop` wakes a reader that waits for credit. When
+the reader ends first, it sends `Msg.Closed`. So neither task outlives the
+connection.
 
 ### Messages
 
@@ -108,15 +111,60 @@ printed.
     them);
   - an array header above 1048576 (Redis waits for the arguments).
 
-### Commands do not stop other clients for long
+### One client must not stop the other clients
 
-A command has no suspend point, so while it runs, no other client gets a
-reply. So the work of a command must stay linear in its input. A helper that
-grows a String one byte at a time takes time that grows with the square of
-the length, and one long argument then stops every client for minutes.
-`upper` gives a word longer than any keyword back unchanged, and
-`splitWords` slices. The `local:` cases with a 256 KB name and a 256 KB
-inline word hold this.
+All tasks run on one worker, and a command has no suspend point. So one
+client could stop every other client by a fault, by a long command, by a
+long pipeline, or by input that it never ends. Six rules prevent this. They
+come from the referee ruling on PR #1125, and every stage group keeps them.
+
+1. **No halting fault from client input.** See "Faults" above.
+2. **Suspend points in the reader.** The reader yields after every 64
+   commands (`WINDOW`) and after every 1024 elements of one array
+   (`ELEMENTS_PER_YIELD`). The native VM looks at the network at each task
+   switch, so the other connections then get their turn.
+3. **The Redis 7.0 limits on sizes.** An inline line has at most 65536 bytes
+   (`INLINE_MAX`; above it: `-ERR Protocol error: too big inline request`),
+   an array at most 1048576 elements (`ARRAY_MAX`), and a bulk at most
+   512 MB (`BULK_MAX`). Work for each byte in Lox++ code happens only under
+   the inline limit.
+4. **A bound on each queue that a client fills.** The reader sends at most
+   `WINDOW` (64) commands that the session has not done. After each
+   command, the session gives one credit back. A client that sends without
+   reading its replies therefore fills at most 64 messages of the session
+   mailbox; then the reader stops reading, and TCP makes the client wait.
+   When the session ends, it closes the socket and sends `Stop` to the
+   reader, so a reader that waits for credit does not outlive its
+   connection.
+5. **A command is atomic, and its work is linear**, as in the Redis
+   documentation of the command. `upper` gives a word longer than any
+   keyword back unchanged, and `splitWords` slices.
+6. **Each limit and its measured stall** are in the table below.
+
+| Probe (`tests/run_stages.py`, group `fairness`) | Limit | Measured |
+|---|---|---|
+| P1: 4 clients send PING pipelines for 5 s and read the replies | another client's PING within 0.5 s | 0.006 s |
+| P2: the same, but the clients never read | PING within 0.5 s; server RSS at most 64 MB | 0.006 s; 7.5 MB |
+| P3: an inline line of 65537 bytes | protocol error, connection closed | as required |
+| P3: an inline line of 64 MB | PING within 1.0 s | 0.43 s |
+| P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.27 s |
+
+Measured in the dev container with the `release` preset, on 16 CPUs. Each
+probe has a mutation in `tests/mutations/base.json` that removes its guard.
+
+Known residuals, each with its own issue:
+
+- The spec does not promise that a task switch lets the worker see ended
+  socket waits; rule 2 depends on the native VM doing so (#1131).
+- One socket read of a stream that keeps arriving does not switch tasks, so
+  a 512 MB bulk keeps the other clients waiting while it arrives (#1132).
+- `readline` has no length limit, so the server reads a long inline line
+  before it can reject it: the 64 MB line of P3 raises the RSS to about
+  140 MB for a moment (#1133).
+- A 512 MB `ECHO` took 5.96 s against 0.19 s in `redis-server`, mostly in
+  native String work (#1134).
+- One `SET` with 1048576 options takes about 0.9 s: that is the command
+  itself, which rule 5 allows.
 
 ## Run
 

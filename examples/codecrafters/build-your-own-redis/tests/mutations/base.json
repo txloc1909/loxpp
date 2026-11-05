@@ -136,5 +136,53 @@
   "cases": [
    "local: a 256 KB inline word does not stop other clients"
   ]
+ },
+ {
+  "name": "M1 no window and no yield",
+  "old": "var WINDOW = 64;",
+  "new": "var WINDOW = 100000000;",
+  "cases": [
+   "local: P1 4 pipelining clients that read, PING within 0.5 s"
+  ]
+ },
+ {
+  "name": "M2 no credit bound",
+  "old": "            credits = credits - 1;\n",
+  "new": "",
+  "cases": [
+   "local: P2 server RSS stays at most 64 MB"
+  ]
+ },
+ {
+  "name": "M3 no inline limit",
+  "old": "            if (len(raw) > INLINE_MAX) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P3 an inline line of 65537 bytes is a protocol error"
+  ]
+ },
+ {
+  "name": "M4 no yield in a long array",
+  "old": "            if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P4 an array of 1048576 empty bulks stalls PING at most 1.0 s"
+  ]
+ },
+ {
+  "name": "M5 session does not close the socket",
+  "old": "    conn.sock.close();\n",
+  "new": "",
+  "cases": [
+   "local: 1000 reset connections leave no open socket"
+  ]
+ },
+ {
+  "name": "M6 session does not stop the reader",
+  "old": "    try {\n        task.send(conn.reader, Msg.Stop());\n    } catch (ignored) {\n    }\n",
+  "new": "",
+  "cases": [
+   "local: 1000 reset connections leave no task"
+  ]
  }
 ]

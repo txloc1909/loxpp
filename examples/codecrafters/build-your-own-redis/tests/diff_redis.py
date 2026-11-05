@@ -67,6 +67,7 @@ SCRIPTS = {
             ["SET", "g", "7", "PX", "10", "PXAT", "10"],
         ]),
         ("long-unknown-command", [["X" * 300], ["PING"]]),
+        ("info-clients", [["INFO", "nosuchsection"]]),
         ("arity", [["GET"], ["SET", "k"], ["ECHO"], ["ECHO", "a", "b"],
                    ["PING", "a", "b"]]),
         ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
