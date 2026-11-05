@@ -1,9 +1,10 @@
 // S8 (#1103): the promotion dataflow leaves a slot in its stack cell at three
 // sites, and this probe forces the `collapsed` one. A block's phi is created,
 // then collapses onto the one value its predecessors carry (the trivial-phi
-// rule), and a later merge contradicts that collapse. From then on the block,
-// and every block that inherits its state, reads the slot from its stack cell,
-// and the pass after the value flow writes the cell on every incoming edge
+// rule), and a later merge contradicts that collapse. The block then carries
+// no register value for the slot, so it reads the slot from its stack cell
+// wherever it reads it, and every later block that inherits its state does the
+// same. The pass after the value flow writes the cell on every incoming edge
 // that carries the slot in a register.
 //
 // `i` is reused across two loops: the first raises it to 3, the second
