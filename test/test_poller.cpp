@@ -14,11 +14,27 @@
 #include <ctime>
 #include <dirent.h>
 #include <fcntl.h>
+#include <ostream>
 #include <pthread.h>
 #include <set>
 #include <thread>
 #include <unistd.h>
 #include <vector>
+
+// gtest prints an enum of this scope as its underlying byte otherwise.
+void PrintTo(WaitReason reason, std::ostream* os) {
+    switch (reason) {
+    case WaitReason::None:
+        *os << "WaitReason::None";
+        break;
+    case WaitReason::Inbox:
+        *os << "WaitReason::Inbox";
+        break;
+    case WaitReason::Poller:
+        *os << "WaitReason::Poller";
+        break;
+    }
+}
 
 namespace {
 
@@ -387,11 +403,13 @@ struct TwoWorkers {
 TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
     TwoWorkers w;
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
-    EXPECT_FALSE(w.other.idle);
+    EXPECT_FALSE(w.other.idle());
+    EXPECT_EQ(w.other.waitReason, WaitReason::Poller);
     EXPECT_EQ(w.group->busy.load(), 2);
     // The main worker waits in receive with nothing inbound. The other can
     // still end a wait, so this is not a deadlock.
     EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_EQ(w.mainInbox.waitReason, WaitReason::Inbox);
     EXPECT_FALSE(w.group->deadlock.load());
     EXPECT_EQ(w.group->busy.load(), 1);
 }
@@ -399,8 +417,64 @@ TEST(IdleAccountingTest, WorkerWithARegisteredWaitStaysBusy) {
 TEST(IdleAccountingTest, RealDeadlockIsStillReported) {
     TwoWorkers w;
     EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Inbox));
+    EXPECT_EQ(w.other.waitReason, WaitReason::Inbox);
     EXPECT_TRUE(w.group->goIdle(w.mainInbox, WaitReason::Inbox));
     EXPECT_TRUE(w.group->deadlock.load());
+}
+
+// A sender counts an idle worker back in once, and only once: the inbox stops
+// saying it waits for a message. A count that climbs above the number of busy
+// workers never reaches zero, so a real deadlock would hang instead of being
+// reported.
+TEST(IdleAccountingTest, ASecondSendDoesNotCountAnIdleWorkerAgain) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.mainInbox));
+    EXPECT_EQ(w.group->busy.load(), 1);
+    EXPECT_TRUE(postEnvelope(w.mainInbox, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.mainInbox.waitReason, WaitReason::None);
+    EXPECT_EQ(w.group->busy.load(), 2);
+    EXPECT_TRUE(postEnvelope(w.mainInbox, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.group->busy.load(), 2);
+}
+
+// The worker that left took its own count with it. A message that arrives in
+// the window before its heap retires must not count it back in.
+TEST(IdleAccountingTest, AMessageDoesNotCountBackAWorkerThatLeft) {
+    TwoWorkers w;
+    EXPECT_FALSE(w.group->goIdle(w.other));
+    EXPECT_EQ(w.group->busy.load(), 1);
+    EXPECT_FALSE(w.group->leave(w.other));
+    EXPECT_EQ(w.other.waitReason, WaitReason::None);
+    EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.group->busy.load(), 1);
+}
+
+// Only a wait for a message leaves the count. A sender must not count a worker
+// that waits in its poller a second time: it never left the count, and a count
+// above the number of busy workers never reaches zero again. The worker is in
+// the state that Runtime::waitForWork() builds for that wait, polling with its
+// poller set, so a sender that asks that state the wrong question counts it.
+TEST(IdleAccountingTest, ASendDoesNotCountAWorkerThatWaitsInItsPoller) {
+    TwoWorkers w;
+    Poller poller;
+    Pipe unused;
+    poller.waitFd(unused.rd, Poller::Interest::Read);
+    poller.waitUntil(Clock::now() + std::chrono::seconds(3));
+    EXPECT_FALSE(w.group->goIdle(w.other, WaitReason::Poller));
+    EXPECT_EQ(w.group->busy.load(), 2);
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.poller = &poller;
+        w.other.polling = true;
+    }
+    EXPECT_TRUE(postEnvelope(w.other, Envelope{nullptr, Value{}}));
+    EXPECT_EQ(w.other.waitReason, WaitReason::Poller);
+    EXPECT_EQ(w.group->busy.load(), 2);
+    {
+        std::lock_guard<std::mutex> lock(w.other.mutex);
+        w.other.polling = false;
+        w.other.poller = nullptr;
+    }
 }
 
 // The wait ended and the worker waits for a message only: now it counts.
