@@ -13,12 +13,14 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 // Directives so a temp directory + file are created before each test and
@@ -168,6 +170,30 @@ TEST_F(OsApiTest, Time_ReturnsWallClockSeconds) {
     double t = as<Number>(h.lastResult());
     EXPECT_GE(t, static_cast<double>(before) - 1.0);
     EXPECT_LE(t, static_cast<double>(after) + 1.0);
+}
+
+// A whole-second clock gives an integral value for every sample. Samples
+// 13 ms apart cannot all fall on a second boundary with a finer clock.
+TEST_F(OsApiTest, Time_HasSubSecondPrecision) {
+    constexpr int kSamples = 8;
+    int fractional = 0;
+    double previous = 0.0;
+    for (int i = 0; i < kSamples; ++i) {
+        VMTestHarness h;
+        ASSERT_EQ(h.run("time();"), InterpretResult::OK);
+        ASSERT_TRUE(is<Number>(h.lastResult()));
+        double t = as<Number>(h.lastResult());
+        if (t != std::floor(t)) {
+            ++fractional;
+        }
+        if (i > 0) {
+            EXPECT_GE(t, previous);
+            EXPECT_LT(t - previous, 1.0);
+        }
+        previous = t;
+        std::this_thread::sleep_for(std::chrono::milliseconds(13));
+    }
+    EXPECT_GT(fractional, 0);
 }
 
 // ---------------------------------------------------------------------------

@@ -94,7 +94,11 @@ static Value exitNative(int /*argc*/, Value* argv) {
 }
 
 static Value timeNative(int /*argc*/, Value* /*argv*/) {
-    return from<Number>(static_cast<Number>(std::time(nullptr)));
+    // Sub-second: a program that times out a key or stamps an event in
+    // milliseconds needs a wall clock finer than std::time's whole seconds.
+    using Seconds = std::chrono::duration<double>;
+    return from<Number>(
+        Seconds(std::chrono::system_clock::now().time_since_epoch()).count());
 }
 
 static Value sleepNative(int /*argc*/, Value* argv) {
