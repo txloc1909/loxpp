@@ -1,14 +1,20 @@
-// S8 (#1052): the promotion dataflow gives a slot up for three reasons. This
+// S8 (#1103): the promotion dataflow gives a slot up at four sites, and this
 // probe forces the `collapsed` one: a block's phi first collapses onto the
 // value every incoming edge carries (the trivial-phi rule), and a later merge
-// then contradicts that collapse, so the block must read the slot from its
-// stack cell and every incoming edge must write the cell first.
+// contradicts that collapse. From then on that block, and every block that
+// inherits its state, reads the slot from its stack cell, and the pass after
+// the value flow writes the cell on every incoming edge.
 //
-// `i` is reused across two loops. The second loop's header reads it in its
-// condition, and the `continue` branch adds a third predecessor to that
-// header, which is what makes the collapse happen before the contradiction.
-// If the block keeps the stale collapsed value instead of the cell, the
-// header's condition never sees the decremented `i` and the loop never ends.
+// `i` is reused across two loops: the first raises it to 3, the second
+// decrements it while a `continue` branch reaches the second loop's inner
+// header from a third edge. The give-up lands on that inner header (the
+// `while (j < 2)` block), which does not itself read `i`; the blocks of the
+// second loop's body inherit the missing value and read `i` from its cell.
+// With the give-up, `i = i - 1` reads the cell and the outer loop ends.
+// Without it those blocks keep the collapsed value (3), so every iteration
+// sets `i` back to 2 and `while (i >= 0)` never ends. Removing the
+// `collapsedPhi` site from qbe_promotion.cpp therefore makes this probe
+// time out instead of printing -1/4.
 fun f() {
   var i = 0;
   while (i < 3) { i = i + 1; }
