@@ -82,6 +82,25 @@ Lazy, as in Redis: a read compares the deadline of the key with
 `time() * 1000` and removes an expired key. This needs a `time()` finer than
 whole seconds, which the native VM has since #1124.
 
+### Faults
+
+An uncaught fault in any task ends the whole program, and a property read on
+a value that is not an Instance or an Error is a halting fault, also inside a
+`catch` block. So the server throws only `ProtocolError` instances, and every
+`catch` reads a fault through `faultKind` and `faultText`, which check the
+kind of the value first.
+
+A malformed request gets `-ERR Protocol error: ...`, and the server closes
+that connection, as Redis does. A reset by a client is normal and is not
+printed.
+
+### Known differences from Redis
+
+- An integer argument has at most 15 digits, so that it is exact in a
+  Number. Redis accepts the full 64-bit range.
+- An inline command (a line with no `*` header) is split on spaces and tabs.
+  Redis also reads quotes and escapes in it.
+
 ## Run
 
 ```sh

@@ -26,7 +26,7 @@
  },
  {
   "name": "SET does not store",
-  "old": "    store[argv[1]] = Entry(argv[2], expiresAt);\n",
+  "old": "    store[key] = Entry(argv[2], expiresAt);\n",
   "new": "",
   "cases": [
    "base-06 GET"
@@ -53,7 +53,7 @@
   "old": "    return time() * 1000;",
   "new": "    var t = time();\n    return (t - t % 1) * 1000;",
   "cases": [
-   "base-07 GET after expiry"
+   "local: PX 100 expires in each of 5 rounds"
   ]
  },
  {
@@ -95,6 +95,30 @@
   "new": "    return simple(\"OK\");",
   "cases": [
    "local: unknown command is an error"
+  ]
+ },
+ {
+  "name": "protocol error thrown as a String",
+  "old": "throw ProtocolError(\"Protocol error: invalid multibulk length\");",
+  "new": "throw \"Protocol error: invalid multibulk length\";",
+  "cases": [
+   "local: bad array length is a protocol error"
+  ]
+ },
+ {
+  "name": "no CRLF check after the bulk",
+  "old": "if (data[size:size + 2] != \"\\r\\n\") {",
+  "new": "if (false) {",
+  "cases": [
+   "local: no CRLF after the bulk is a protocol error"
+  ]
+ },
+ {
+  "name": "no array length limit",
+  "old": "if (count == nil or count > 1048576) {",
+  "new": "if (count == nil) {",
+  "cases": [
+   "local: array too long is a protocol error"
   ]
  }
 ]

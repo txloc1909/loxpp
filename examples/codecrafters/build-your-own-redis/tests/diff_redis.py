@@ -44,7 +44,20 @@ SCRIPTS = {
             ["SET", "g", "6", "PX"],
             ["SET", "h", "7", "BOGUS"],
         ]),
-        ("arity", [["GET"], ["SET", "k"], ["ECHO"], ["ECHO", "a", "b"]]),
+        ("set-options", [
+            ["SET", "k", "1", "NX"], ["SET", "k", "2", "NX"], ["GET", "k"],
+            ["SET", "k", "3", "XX"], ["SET", "m", "4", "XX"], ["GET", "m"],
+            ["SET", "k", "5", "GET"], ["SET", "new", "6", "GET"],
+            ["SET", "k", "7", "NX", "GET"], ["SET", "k", "8", "NX", "XX"],
+            ["SET", "t", "1", "PX", "100000"], ["SET", "t", "2", "KEEPTTL"],
+            ["GET", "t"], ["SET", "t", "3", "KEEPTTL", "PX", "10"],
+            ["SET", "t", "4", "EX", "10", "PX", "100"],
+            ["SET", "t", "5", "PX", "0100"], ["SET", "t", "6", "PX", "-0"],
+            ["SET", "t", "7", "PX", "99999999999999"],
+            ["SET", "t", "8", "EX", "9999999999999"],
+        ]),
+        ("arity", [["GET"], ["SET", "k"], ["ECHO"], ["ECHO", "a", "b"],
+                   ["PING", "a", "b"]]),
         ("unknown", [["NOSUCHCOMMAND"], ["PING"]]),
     ],
 }
@@ -112,7 +125,13 @@ def main():
                           % (name, oracle.up, ours.up))
                     continue
                 want = run_script(oracle, script)
-                got = run_script(ours, script)
+                try:
+                    got = run_script(ours, script)
+                except (OSError, EOFError, ValueError) as e:
+                    FAIL += 1
+                    print("  FAIL %s  the Lox++ server failed: %r" % (name, e))
+                    print("       server log:\n%s" % ours.log_text())
+                    continue
                 if want == got:
                     PASS += 1
                     print("  ok   %s" % name)

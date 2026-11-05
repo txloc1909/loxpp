@@ -46,8 +46,10 @@ fun trimCR(s) {
     return s;
 }
 
-// Returns the integer value of s, or nil when s is not an optional '-'
-// followed by one or more decimal digits.
+// Returns the integer value of s as a Number, or nil. As in Redis, s is
+// "0", or an optional '-' and digits with no leading zero. It has at most 15
+// digits, so the value is exact in a Number; Redis allows the full 64-bit
+// range.
 fun parseInteger(s) {
     var i = 0;
     var negative = false;
@@ -55,7 +57,10 @@ fun parseInteger(s) {
         negative = true;
         i = 1;
     }
-    if (i >= len(s)) {
+    if (i >= len(s) or len(s) - i > 15) {
+        return nil;
+    }
+    if (s[i] == "0" and (len(s) - i > 1 or negative)) {
         return nil;
     }
     var n = 0;
@@ -97,6 +102,42 @@ fun splitWords(s) {
 }
 
 // ===========================================================================
+// Faults
+//
+// A catch block can get any value: an Error from the runtime, or a value of
+// a throw. A property read on a value that is not an Instance or an Error is
+// a halting fault, also inside a catch block, so these helpers check the
+// kind of the value first.
+// ===========================================================================
+
+class ProtocolError {
+    init(message) {
+        this.kind = "ProtocolError";
+        this.message = message;
+    }
+}
+
+fun faultKind(e) {
+    if (type(e) == "Error") {
+        return e.kind;
+    }
+    if (type(e) == "Instance" and hasField(e, "kind")) {
+        return e.kind;
+    }
+    return type(e);
+}
+
+fun faultText(e) {
+    if (type(e) == "Error") {
+        return e.message;
+    }
+    if (type(e) == "Instance" and hasField(e, "message")) {
+        return str(e.message);
+    }
+    return str(e);
+}
+
+// ===========================================================================
 // RESP encoding
 // ===========================================================================
 
@@ -113,6 +154,7 @@ fun bulk(s) {
 }
 
 var NULL_BULK = "$-1\r\n";
+var NOT_INTEGER = "-ERR value is not an integer or out of range\r\n";
 
 fun integerReply(n) {
     return ":" + str(n) + "\r\n";
@@ -139,7 +181,9 @@ fun wrongArgs(name) {
 // ===========================================================================
 
 enum Args { Cons(head, tail) Empty }
-enum Msg { Cmd(args, nbytes) Closed }
+// Fail(text) carries a protocol error: the session replies with it and ends
+// the connection, as Redis does.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed }
 
 fun toArgs(list) {
     var out = Args.Empty();
@@ -208,26 +252,61 @@ fun cmdSet(argv) {
     if (len(argv) < 3) {
         return wrongArgs("set");
     }
+    var key = argv[1];
     var expiresAt = nil;
+    var hasExpiry = false;
+    var keepTtl = false;
+    var condition = nil;
+    var returnOld = false;
     var i = 3;
     while (i < len(argv)) {
         var opt = upper(argv[i]);
-        if ((opt == "PX" or opt == "EX") and i + 1 < len(argv)) {
+        if ((opt == "PX" or opt == "EX") and i + 1 < len(argv) and !hasExpiry and !keepTtl) {
             var n = parseInteger(argv[i + 1]);
-            if (n == nil or n <= 0) {
-                return errorReply("ERR invalid expire time in 'set' command");
+            if (n == nil) {
+                return NOT_INTEGER;
             }
             if (opt == "EX") {
                 n = n * 1000;
             }
+            if (n <= 0) {
+                return errorReply("ERR invalid expire time in 'set' command");
+            }
             expiresAt = nowMs() + n;
+            hasExpiry = true;
             i = i + 2;
+        } else if (opt == "KEEPTTL" and !hasExpiry) {
+            keepTtl = true;
+            i = i + 1;
+        } else if ((opt == "NX" or opt == "XX") and (condition == nil or condition == opt)) {
+            condition = opt;
+            i = i + 1;
+        } else if (opt == "GET") {
+            returnOld = true;
+            i = i + 1;
         } else {
             return errorReply("ERR syntax error");
         }
     }
-    store[argv[1]] = Entry(argv[2], expiresAt);
-    return simple("OK");
+    var old = lookup(key);
+    var reply = simple("OK");
+    if (returnOld) {
+        reply = NULL_BULK;
+        if (old != nil) {
+            reply = bulk(old.value);
+        }
+    }
+    if ((condition == "NX" and old != nil) or (condition == "XX" and old == nil)) {
+        if (returnOld) {
+            return reply;
+        }
+        return NULL_BULK;
+    }
+    if (keepTtl and old != nil) {
+        expiresAt = old.expiresAt;
+    }
+    store[key] = Entry(argv[2], expiresAt);
+    return reply;
 }
 
 fun cmdGet(argv) {
@@ -250,7 +329,10 @@ fun execute(argv) {
         if (len(argv) == 1) {
             return simple("PONG");
         }
-        return bulk(argv[1]);
+        if (len(argv) == 2) {
+            return bulk(argv[1]);
+        }
+        return wrongArgs("ping");
     }
     if (name == "ECHO") {
         if (len(argv) != 2) {
@@ -289,8 +371,8 @@ fun readCommand(sock) {
             return [splitWords(line), nbytes];
         }
         var count = parseInteger(line[1:len(line)]);
-        if (count == nil) {
-            throw "protocol error: bad array header";
+        if (count == nil or count > 1048576) {
+            throw ProtocolError("Protocol error: invalid multibulk length");
         }
         var argv = [];
         var i = 0;
@@ -302,15 +384,22 @@ fun readCommand(sock) {
             nbytes = nbytes + len(hraw) + 1;
             var header = trimCR(hraw);
             if (len(header) == 0 or header[0] != "$") {
-                throw "protocol error: expected a bulk string";
+                var got = "end of line";
+                if (len(header) > 0) {
+                    got = "'" + header[0] + "'";
+                }
+                throw ProtocolError("Protocol error: expected '$', got " + got);
             }
             var size = parseInteger(header[1:len(header)]);
             if (size == nil or size < 0 or size > 536870912) {
-                throw "protocol error: bad bulk length";
+                throw ProtocolError("Protocol error: invalid bulk length");
             }
             var data = sock.read_bytes(size + 2);
             if (len(data) < size + 2) {
                 return nil;
+            }
+            if (data[size:size + 2] != "\r\n") {
+                throw ProtocolError("Protocol error: bulk string not followed by CRLF");
             }
             nbytes = nbytes + size + 2;
             argv.append(data[0:size]);
@@ -322,7 +411,7 @@ fun readCommand(sock) {
 
 fun printFault(prefix, e) {
     try {
-        print prefix + e.message;
+        print prefix + faultText(e);
     } catch (ignored) {
     }
 }
@@ -339,7 +428,16 @@ fun readLoop(sock, session) {
             task.send(session, Msg.Cmd(toArgs(cmd[0]), cmd[1]));
         }
     } catch (e) {
-        if (e.kind != "DeadTaskError" and e.kind != "SocketClosedError") {
+        var kind = faultKind(e);
+        if (kind == "ProtocolError") {
+            try {
+                task.send(session, Msg.Fail(faultText(e)));
+            } catch (ignored) {
+            }
+        } else if (kind != "DeadTaskError" and kind != "SocketClosedError"
+                   and kind != "NetworkError") {
+            // A reset by the client is a NetworkError: it is normal, so it
+            // is not printed.
             printFault("read fault: ", e);
         }
     }
@@ -358,6 +456,12 @@ fun runCommand(sock, argv) {
     return true;
 }
 
+// Returns false: a protocol error ends the connection.
+fun failConnection(sock, text) {
+    sock.write(errorReply("ERR " + text));
+    return false;
+}
+
 // close() wakes a reader that waits in readline on this socket, so the
 // deferred close also ends the reader.
 fun sessionLoop(sock) {
@@ -368,11 +472,15 @@ fun sessionLoop(sock) {
             var msg = task.receive();
             running = match msg {
                 case Msg.Cmd(args, nbytes) => runCommand(sock, fromArgs(args))
+                case Msg.Fail(text) => failConnection(sock, text)
                 case Msg.Closed => false
             };
         }
     } catch (e) {
-        printFault("connection fault: ", e);
+        var kind = faultKind(e);
+        if (kind != "NetworkError" and kind != "SocketClosedError") {
+            printFault("connection fault: ", e);
+        }
     }
 }
 

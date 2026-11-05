@@ -219,6 +219,19 @@ def stages_base(prog):
         time.sleep(0.2)
         check("base-07 GET after expiry", c.call("GET", key) is None)
 
+        # A whole-second clock expires a 100 ms key only when a second
+        # boundary falls in the 200 ms wait: one round in five. Five rounds
+        # in a row catch it with a chance of 1 - 0.2**5.
+        rounds = 0
+        for _ in range(5):
+            key = rand_word()
+            c.call("SET", key, "v", "PX", "100")
+            time.sleep(0.2)
+            if c.call("GET", key) is None:
+                rounds += 1
+        check("local: PX 100 expires in each of 5 rounds", rounds == 5,
+              "%d of 5" % rounds)
+
         key = rand_word()
         c.call("SET", key, "v", "PX", "1000")
         time.sleep(0.2)
@@ -231,6 +244,38 @@ def stages_base(prog):
 
         c.send_raw(b"PING\r\n")
         check("local: inline command", c.read() == "PONG")
+
+        # A malformed request gets a protocol error, the server closes that
+        # connection, and the server stays up for the other clients.
+        bad = [
+            ("bad array length", b"*abc\r\n"),
+            ("array too long", b"*99999999\r\n"),
+            ("not a bulk string", b"*1\r\n:5\r\n"),
+            ("negative bulk length", b"*1\r\n$-1\r\n"),
+            ("bulk length too large", b"*1\r\n$999999999\r\n"),
+            ("no CRLF after the bulk", b"*1\r\n$4\r\nPINGxx"),
+        ]
+        for name, raw in bad:
+            m = srv.client()
+            m.send_raw(raw)
+            try:
+                got = m.read()
+            except (OSError, EOFError) as e:
+                got = e
+            check("local: %s is a protocol error" % name,
+                  isinstance(got, Error) and got.startswith("ERR Protocol error"),
+                  repr(got))
+            m.close()
+            fresh = srv.client()
+            try:
+                alive = fresh.call("PING") == "PONG"
+            except (OSError, EOFError):
+                alive = False
+            check("local: the server is up after %s" % name, alive,
+                  srv.log_text()[-300:])
+            fresh.close()
+            if not alive:
+                return
 
         got = c.call("NOSUCHCOMMAND")
         check("local: unknown command is an error",
