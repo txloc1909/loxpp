@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     clang-tidy \
     pkg-config \
     python3 \
+    redis-server \
+    redis-tools \
     curl \
     unzip \
     && rm -rf /var/lib/apt/lists/*
