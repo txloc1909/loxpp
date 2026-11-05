@@ -43,15 +43,15 @@ One row for each case. `tools/check_invariant_probes.py` reads this table:
 
 | Id | Case | Probes |
 |---|---|---|
-| I1 | the mailbox | — |
-| I1 | the current task | — |
-| I1 | the call frames | — |
-| I1 | the deferred calls | — |
-| I1 | the handlers | — |
-| I1 | the current coroutine | — |
-| I1 | the contexts | — |
-| I1 | the overflow unwind | — |
-| I1 | the waiting call | — |
+| I1 | the mailbox | `420_task_state_mailbox` |
+| I1 | the current task | `421_task_state_current_task` |
+| I1 | the call frames | `422_task_state_call_frames` |
+| I1 | the deferred calls | `423_task_state_deferred_calls` |
+| I1 | the handlers | `424_task_state_handlers` |
+| I1 | the current coroutine | `425_task_state_current_coroutine` |
+| I1 | the contexts | `426_task_state_contexts` |
+| I1 | the overflow unwind | `427_task_state_overflow_unwind` |
+| I1 | the waiting call | `428_task_state_waiting_call` |
 | I2 | `task.receive()` | `380_receive_message_held_does_not_suspend` |
 | I2 | `task.receive_within(seconds)` | `381_receive_within_message_held_does_not_suspend` |
 | I2 | `task.receive_where(want)` | `382_receive_where_selected_message_held_does_not_suspend` |

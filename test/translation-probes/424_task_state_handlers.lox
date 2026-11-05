@@ -1,0 +1,38 @@
+// Invariant I1, the handlers (spec/04-semantics.md, The Task Machine, the table of
+// task-owned state): the `try` statements whose body runs in the frames of a task
+// belong to it. `t1` and `t2` each wait in task.receive() inside a `try`, and
+// then throw a value of their own. Main wakes `t2` first. The throw of each task
+// reaches the handler of that task, with its own value.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2 caught two
+// CHECK: t1 caught one
+var me = task.self();
+fun t1() {
+    try {
+        task.receive();
+        throw "one";
+    } catch (e) {
+        task.send(me, "t1 caught " + e);
+    }
+}
+fun t2() {
+    try {
+        task.receive();
+        throw "two";
+    } catch (e) {
+        task.send(me, "t2 caught " + e);
+    }
+}
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+task.send(h2, "go");
+task.send(h1, "go");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

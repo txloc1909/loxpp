@@ -1,0 +1,38 @@
+// Invariant I1, the deferred calls (spec/04-semantics.md, The Task Machine, the
+// table of task-owned state): the pending deferred calls of a task run when that
+// task's frame ends, and not before. `t1` defers two calls and `t2` defers one.
+// Both wait in task.receive(), and main wakes `t2` first. Each task prints a line
+// after it wakes, and then its deferred calls run in the reverse order of the
+// defers, before the other task continues.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2 body
+// CHECK: t2 defer
+// CHECK: t1 body
+// CHECK: t1 defer b
+// CHECK: t1 defer a
+var me = task.self();
+fun say(s) { task.send(me, s); }
+fun t1() {
+    defer say("t1 defer a");
+    defer say("t1 defer b");
+    task.receive();
+    say("t1 body");
+}
+fun t2() {
+    defer say("t2 defer");
+    task.receive();
+    say("t2 body");
+}
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+task.send(h2, "go");
+task.send(h1, "go");
+for (var i = 0; i < 5; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
