@@ -152,7 +152,7 @@ list of probes that failed for each mutation.
 |---|---|---|---|
 | I2 | 14: one for each call kind, and one for each closed side | #1104 | None. Each mutation failed only the probe of its case |
 | I3 | 3: a wait that waits again gets a new place, a new call keeps an old place, a receive that waits again restarts its limit | #1108 | None |
-| I1 | 9: one for each row of the task-owned state table | #1126 | The mailbox and the call frames fail all nine probes (#1128). The JVM counters change no probe result (#1129) |
+| I1 | 9: one for each row of the task-owned state table, and 3 finer ones for the mailbox and the call frames rows: a scan position that tasks share, a message delivered to another task, and at most five saved frames | #1126, #1128 | The coarse mutations of the mailbox and of the call frames fail all nine probes, but the finer ones fail one probe each (420, 420, 422). The JVM counters change no probe result (accepted, #1129) |
 
 ### What the probes cannot show
 
@@ -165,13 +165,18 @@ list of probes that failed for each mutation.
   (#999, #1044) is C++ only, so no `.lox` probe uses it.
 - Probes 400 to 402 use real time: a computation of 0.5 seconds with no suspend
   point, and for probe 402 real limits.
+- The write side of a call that waits again (issue #933) has no probe. It
+  needs two writers whose waits end at one point and a reader on another
+  worker, with timing that was not stable (#1127, closed as not planned).
+- On the JVM a task is a virtual thread, so its frames, handlers, deferred
+  calls and current coroutine are per task. The per-worker counters
+  `frameCount` and `handlerDepth` change only the depth at which a stack
+  overflow is caught, and no program sees them leak (#1129, closed as not
+  planned). A defect is reachable in `LoxWorker.suspend` and `makeCurrent`.
 
 ### Follow-ups
 
 | Issue | What |
 |---|---|
-| #1127 | A probe for a Socket write that waits again (#933) |
-| #1128 | Probes that single out the mailbox row and the call frames row of I1 |
-| #1129 | JVM: a probe that sees the per-worker counters of a parked task shared |
+| #1128 | Probes that single out the mailbox row and the call frames row of I1. Done: probe 420 starts the scan of the two tasks at different places, and three finer mutations fail one probe each |
 | #1068 | The refactor of the runtimes. The strong tests it needs are ready |
-
