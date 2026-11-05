@@ -1,0 +1,69 @@
+// Invariant I3: a new call takes a new place in the order of ready waits; only
+// a call that waits again keeps its own (spec/04-semantics.md, Scheduling: tasks
+// whose wait for a Socket has ended join the run queue "in the order in which
+// their calls began to wait"; issue #996). Tasks `a1`, `a2` and `a3` each call
+// readline() twice on their own connection. Tasks `b1`, `b2` and `b3` each call
+// readline() once on theirs, after the first calls of `a1` to `a3` began to
+// wait. The feeder sends the first line to the connections of `a1` to `a3`.
+// Each of them returns, and calls readline() again. Those second calls begin to
+// wait after the calls of `b1` to `b3`. The feeder then sends a line to each of
+// the six connections and computes for 0.5 seconds with no suspend point, so
+// the worker sees the six waits end at one point. The calls of `b1` to `b3`
+// began to wait first, so they come first. An implementation that lets a new
+// call keep the place of the earlier call of its task puts `a1` to `a3` before
+// them. The probe assumes that the bytes of a write on the local host arrive
+// within 0.4 seconds.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: a1: first
+// CHECK: a2: first
+// CHECK: a3: first
+// CHECK: b1: b
+// CHECK: b2: b
+// CHECK: b3: b
+// CHECK: a1: second
+// CHECK: a2: second
+// CHECK: a3: second
+var srv = listen("127.0.0.1", 0);
+var peers = [];
+var conns = [];
+for (var i = 0; i < 6; i = i + 1) {
+    peers.append(connect("127.0.0.1", srv.port()));
+    conns.append(srv.accept());
+}
+var me = task.self();
+fun twice(name, conn) {
+    task.send(me, name + ": " + conn.readline());
+    task.send(me, name + ": " + conn.readline());
+}
+fun once(name, conn) { task.send(me, name + ": " + conn.readline()); }
+fun a1() { twice("a1", conns[0]); }
+fun a2() { twice("a2", conns[1]); }
+fun a3() { twice("a3", conns[2]); }
+fun b1() { once("b1", conns[3]); }
+fun b2() { once("b2", conns[4]); }
+fun b3() { once("b3", conns[5]); }
+fun feeder() {
+    for (var i = 0; i < 3; i = i + 1) peers[i].writeline("first");
+    var t0 = clock();
+    while (clock() - t0 < 0.4) { }
+    sleep(0.2);
+    for (var i = 0; i < 3; i = i + 1) peers[i].writeline("second");
+    for (var i = 3; i < 6; i = i + 1) peers[i].writeline("b");
+    t0 = clock();
+    while (clock() - t0 < 0.5) { }
+}
+task.spawn(a1);
+task.spawn(a2);
+task.spawn(a3);
+task.spawn(b1);
+task.spawn(b2);
+task.spawn(b3);
+task.spawn(feeder);
+for (var i = 0; i < 9; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

@@ -1,0 +1,54 @@
+// Invariant I3: a receive that waits again keeps the place of its first wait,
+// and that place includes its limit (spec/04-semantics.md, The Task Machine, the
+// `receive` move; `task.receive_within`, rule 4: a receive that selects no
+// message makes the `receive` move again with its limit kept). Task `a` calls
+// task.receive_where_within(want, 1.0) at time 0, and task `b` calls
+// task.receive_within(1.0) at about time 0.4. At about time 0.8 the feeder sends
+// `a` a message that `want` does not select. `a` runs, tests it, and waits
+// again. The feeder then computes with no suspend point until time 2.3, so the
+// worker sees both limits at one point. They join the run queue in the order of
+// their deadlines: the limit of `a`, at 1.0, comes before the limit of `b`, at
+// 1.4. An implementation that restarts the limit when `a` waits again gives `a`
+// the deadline 1.8, and `b` comes first. The probe assumes that the times
+// between the sleeps and the computation are within 0.2 seconds of the time
+// asked.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: a: TimeoutError
+// CHECK: b: TimeoutError
+var me = task.self();
+var start = clock();
+fun want(x) { return x == "go"; }
+fun a() {
+    try {
+        task.receive_where_within(want, 1.0);
+        task.send(me, "a: got a message");
+    } catch (e) {
+        task.send(me, "a: " + e.kind);
+    }
+}
+fun b() {
+    try {
+        task.receive_within(1.0);
+        task.send(me, "b: got a message");
+    } catch (e) {
+        task.send(me, "b: " + e.kind);
+    }
+}
+var ta = task.spawn(a);
+fun feeder() {
+    sleep(0.4);
+    task.spawn(b);
+    sleep(0.4);
+    task.send(ta, "noise");
+    sleep(0.1);
+    while (clock() - start < 2.3) { }
+}
+task.spawn(feeder);
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

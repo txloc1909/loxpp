@@ -1,0 +1,55 @@
+// Invariant I3: a call keeps the place of its first wait until it returns
+// (spec/04-semantics.md, Scheduling: tasks whose wait for a Socket has ended
+// join the run queue "in the order in which their calls began to wait"; issue
+// #950). Readers `r1`, `r2` and `r3` call readline() on three connections,
+// and then the late reader `late` calls readline() on a fourth. The feeder
+// sends the start of a line, without an end of line, to the three early
+// connections. Their calls take the bytes and wait again. The feeder then
+// sends the rest of each of the three lines and a whole line to the late
+// connection, and computes for 0.5 seconds with no suspend point. The worker
+// sees all four waits end at one point. The calls of the three early readers
+// began to wait before the call of the late reader, so they come first, in
+// their own order. An implementation that gives a call a new place when it
+// waits again puts `late` before them. The probe assumes that the bytes of a
+// write on the local host arrive within 0.4 seconds.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: r1: start-end
+// CHECK: r2: start-end
+// CHECK: r3: start-end
+// CHECK: late: late
+var srv = listen("127.0.0.1", 0);
+var peers = [];
+var conns = [];
+for (var i = 0; i < 4; i = i + 1) {
+    peers.append(connect("127.0.0.1", srv.port()));
+    conns.append(srv.accept());
+}
+var me = task.self();
+fun reader(name, conn) { task.send(me, name + ": " + conn.readline()); }
+fun r1() { reader("r1", conns[0]); }
+fun r2() { reader("r2", conns[1]); }
+fun r3() { reader("r3", conns[2]); }
+fun late() { reader("late", conns[3]); }
+fun feeder() {
+    for (var i = 0; i < 3; i = i + 1) peers[i].write("start-");
+    var t0 = clock();
+    while (clock() - t0 < 0.4) { }
+    sleep(0.2);
+    for (var i = 0; i < 3; i = i + 1) peers[i].writeline("end");
+    peers[3].writeline("late");
+    t0 = clock();
+    while (clock() - t0 < 0.5) { }
+}
+task.spawn(r1);
+task.spawn(r2);
+task.spawn(r3);
+task.spawn(late);
+task.spawn(feeder);
+for (var i = 0; i < 4; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}
