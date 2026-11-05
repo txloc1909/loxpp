@@ -23,7 +23,20 @@
 // String helpers (the stdlib has no split/upper/trim built in).
 // ===========================================================================
 
+// A command does not suspend, so a helper whose time grows with the square
+// of its input lets one client stop every other client. These helpers stay
+// linear: they slice, and do not grow a String one byte at a time on long
+// input.
+
+// The longest command name or option that upper() converts. Every name
+// and option is shorter, so a longer word matches none, and upper() gives
+// it back unchanged.
+var MAX_KEYWORD = 32;
+
 fun upper(s) {
+    if (len(s) > MAX_KEYWORD) {
+        return s;
+    }
     var out = "";
     var i = 0;
     while (i < len(s)) {
@@ -81,22 +94,16 @@ fun parseInteger(s) {
 // Splits an inline command on runs of spaces and tabs.
 fun splitWords(s) {
     var words = [];
-    var word = "";
+    var start = 0;
     var i = 0;
-    while (i < len(s)) {
-        var c = s[i];
-        if (c == " " or c == "\t") {
-            if (word != "") {
-                words.append(word);
-                word = "";
+    while (i <= len(s)) {
+        if (i == len(s) or s[i] == " " or s[i] == "\t") {
+            if (i > start) {
+                words.append(s[start:i]);
             }
-        } else {
-            word = word + c;
+            start = i + 1;
         }
         i = i + 1;
-    }
-    if (word != "") {
-        words.append(word);
     }
     return words;
 }
@@ -248,34 +255,27 @@ fun lookup(key) {
 // Commands
 // ===========================================================================
 
+// Redis reads every option before it checks a number, so a syntax error
+// comes before an integer error.
 fun cmdSet(argv) {
     if (len(argv) < 3) {
         return wrongArgs("set");
     }
     var key = argv[1];
-    var expiresAt = nil;
-    var hasExpiry = false;
+    var expiryUnit = nil;
+    var expiryText = nil;
     var keepTtl = false;
     var condition = nil;
     var returnOld = false;
     var i = 3;
     while (i < len(argv)) {
         var opt = upper(argv[i]);
-        if ((opt == "PX" or opt == "EX") and i + 1 < len(argv) and !hasExpiry and !keepTtl) {
-            var n = parseInteger(argv[i + 1]);
-            if (n == nil) {
-                return NOT_INTEGER;
-            }
-            if (opt == "EX") {
-                n = n * 1000;
-            }
-            if (n <= 0) {
-                return errorReply("ERR invalid expire time in 'set' command");
-            }
-            expiresAt = nowMs() + n;
-            hasExpiry = true;
+        if ((opt == "PX" or opt == "EX" or opt == "PXAT" or opt == "EXAT")
+            and i + 1 < len(argv) and expiryUnit == nil and !keepTtl) {
+            expiryUnit = opt;
+            expiryText = argv[i + 1];
             i = i + 2;
-        } else if (opt == "KEEPTTL" and !hasExpiry) {
+        } else if (opt == "KEEPTTL" and expiryUnit == nil) {
             keepTtl = true;
             i = i + 1;
         } else if ((opt == "NX" or opt == "XX") and (condition == nil or condition == opt)) {
@@ -286,6 +286,23 @@ fun cmdSet(argv) {
             i = i + 1;
         } else {
             return errorReply("ERR syntax error");
+        }
+    }
+    var expiresAt = nil;
+    if (expiryUnit != nil) {
+        var n = parseInteger(expiryText);
+        if (n == nil) {
+            return NOT_INTEGER;
+        }
+        if (n <= 0) {
+            return errorReply("ERR invalid expire time in 'set' command");
+        }
+        if (expiryUnit == "EX" or expiryUnit == "EXAT") {
+            n = n * 1000;
+        }
+        expiresAt = n;
+        if (expiryUnit == "PX" or expiryUnit == "EX") {
+            expiresAt = nowMs() + n;
         }
     }
     var old = lookup(key);
@@ -320,6 +337,19 @@ fun cmdGet(argv) {
     return bulk(entry.value);
 }
 
+// The text of Redis 7.0: the name and the start of the arguments, each cut
+// so that the message stays short.
+fun unknownCommand(argv) {
+    var shown = "";
+    var i = 1;
+    while (i < len(argv) and len(shown) < 128) {
+        shown = shown + "'" + argv[i][0:128 - len(shown)] + "' ";
+        i = i + 1;
+    }
+    return errorReply("ERR unknown command '" + argv[0][0:128]
+                      + "', with args beginning with: " + shown);
+}
+
 fun execute(argv) {
     if (len(argv) == 0) {
         return "";
@@ -346,7 +376,7 @@ fun execute(argv) {
     if (name == "GET") {
         return cmdGet(argv);
     }
-    return errorReply("ERR unknown command '" + argv[0] + "'");
+    return unknownCommand(argv);
 }
 
 // ===========================================================================

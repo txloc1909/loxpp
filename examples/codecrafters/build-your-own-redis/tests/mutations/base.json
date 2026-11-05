@@ -42,8 +42,8 @@
  },
  {
   "name": "PX read as seconds",
-  "old": "            if (opt == \"EX\") {\n                n = n * 1000;",
-  "new": "            if (true) {\n                n = n * 1000;",
+  "old": "        if (expiryUnit == \"EX\" or expiryUnit == \"EXAT\") {",
+  "new": "        if (true) {",
   "cases": [
    "base-07 GET after expiry"
   ]
@@ -91,7 +91,7 @@
  },
  {
   "name": "unknown command not an error",
-  "old": "    return errorReply(\"ERR unknown command '\" + argv[0] + \"'\");",
+  "old": "    return unknownCommand(argv);",
   "new": "    return simple(\"OK\");",
   "cases": [
    "local: unknown command is an error"
@@ -119,6 +119,22 @@
   "new": "if (count == nil) {",
   "cases": [
    "local: array too long is a protocol error"
+  ]
+ },
+ {
+  "name": "upper on a long word",
+  "old": "    if (len(s) > MAX_KEYWORD) {\n        return s;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: a 256 KB command name does not stop other clients"
+  ]
+ },
+ {
+  "name": "splitWords grows a word byte by byte",
+  "old": "                words.append(s[start:i]);",
+  "new": "                var w = \"\";\n                for (var ch in s[start:i]) {\n                    w = w + ch;\n                }\n                words.append(w);",
+  "cases": [
+   "local: a 256 KB inline word does not stop other clients"
   ]
  }
 ]

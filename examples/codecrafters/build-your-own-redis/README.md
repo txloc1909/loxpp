@@ -100,6 +100,23 @@ printed.
   Number. Redis accepts the full 64-bit range.
 - An inline command (a line with no `*` header) is split on spaces and tabs.
   Redis also reads quotes and escapes in it.
+- A last inline command with no newline before the end of the stream gets a
+  reply. Redis sends nothing.
+- The server is stricter than the Redis 7.0 of the dev image in two places,
+  and replies with a protocol error where Redis does not:
+  - two bytes other than CRLF after a bulk string (Redis 7.0 does not check
+    them);
+  - an array header above 1048576 (Redis waits for the arguments).
+
+### Commands do not stop other clients for long
+
+A command has no suspend point, so while it runs, no other client gets a
+reply. So the work of a command must stay linear in its input. A helper that
+grows a String one byte at a time takes time that grows with the square of
+the length, and one long argument then stops every client for minutes.
+`upper` gives a word longer than any keyword back unchanged, and
+`splitWords` slices. The `local:` cases with a 256 KB name and a 256 KB
+inline word hold this.
 
 ## Run
 

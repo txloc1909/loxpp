@@ -106,6 +106,10 @@ def encode(*args):
     return out
 
 
+TIMEOUT = "<no reply within the limit>"
+CLOSED = "<connection closed>"
+
+
 class Error(str):
     """A RESP simple error, kept apart from a simple string."""
 
@@ -165,6 +169,20 @@ class Client:
     def call(self, *args):
         self.send_raw(encode(*args))
         return self.read()
+
+    def try_read(self, timeout=2):
+        """Reads one reply. Returns TIMEOUT when none comes within timeout
+        seconds, and CLOSED when the server closes the connection, so a
+        missing reply fails one named case instead of the whole group."""
+        self.sock.settimeout(timeout)
+        try:
+            return self.read()
+        except socket.timeout:
+            return TIMEOUT
+        except (EOFError, OSError):
+            return CLOSED
+        finally:
+            self.sock.settimeout(5)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +294,25 @@ def stages_base(prog):
             fresh.close()
             if not alive:
                 return
+
+        # A command does not suspend. A long command name or inline line
+        # must not stop the other clients for long.
+        for name, raw in [
+            ("a 256 KB command name", encode("A" * 262144)),
+            ("a 256 KB inline word", b"PING " + b"a" * 262144 + b"\r\n"),
+        ]:
+            m = srv.client()
+            m.send_raw(raw)
+            time.sleep(0.05)
+            other = srv.client()
+            start = time.time()
+            other.send_raw(encode("PING"))
+            got = other.try_read(10)
+            took = time.time() - start
+            check("local: %s does not stop other clients" % name,
+                  got == "PONG" and took < 3.0, "%r after %.1f s" % (got, took))
+            m.close()
+            other.close()
 
         got = c.call("NOSUCHCOMMAND")
         check("local: unknown command is an error",

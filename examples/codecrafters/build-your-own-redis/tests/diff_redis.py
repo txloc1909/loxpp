@@ -4,8 +4,8 @@
 #
 # Each script is a list of commands. The test sends the same script to a
 # fresh redis-server and to a fresh Lox++ server, and compares the replies one
-# by one. Error replies compare by their first word only (for example "ERR"
-# or "WRONGTYPE"): the text after it differs between Redis versions.
+# by one, error texts included. The oracle is the redis-server of the dev
+# image (7.0.15); another version can word an error in another way.
 #
 # Usage: tests/diff_redis.py [your_program.sh]
 
@@ -55,17 +55,29 @@ SCRIPTS = {
             ["SET", "t", "5", "PX", "0100"], ["SET", "t", "6", "PX", "-0"],
             ["SET", "t", "7", "PX", "99999999999999"],
             ["SET", "t", "8", "EX", "9999999999999"],
+            ["SET", "t", "9", "PX", "abc", "FOO"], ["SET", "t", "9", "PX", "0", "FOO"],
+            ["SET", "t", "9", "PX", "abc"], ["SET", "t", "9", "PX", "0"],
         ]),
+        ("set-absolute-expiry", [
+            ["SET", "a", "1", "PXAT", "9999999999999"], ["GET", "a"],
+            ["SET", "b", "2", "EXAT", "9999999999"], ["GET", "b"],
+            ["SET", "c", "3", "PXAT", "1"], ["GET", "c"],
+            ["SET", "d", "4", "EXAT", "1"], ["GET", "d"],
+            ["SET", "e", "5", "PXAT", "0"], ["SET", "f", "6", "EXAT", "x"],
+            ["SET", "g", "7", "PX", "10", "PXAT", "10"],
+        ]),
+        ("long-unknown-command", [["X" * 300], ["PING"]]),
         ("arity", [["GET"], ["SET", "k"], ["ECHO"], ["ECHO", "a", "b"],
                    ["PING", "a", "b"]]),
-        ("unknown", [["NOSUCHCOMMAND"], ["PING"]]),
+        ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
+                     ["NOSUCH", "x" * 200, "y"], ["PING"]]),
     ],
 }
 
 
 def normalize(reply):
     if isinstance(reply, Error):
-        return ("error", reply.split(" ", 1)[0])
+        return ("error", str(reply))
     if isinstance(reply, list):
         return [normalize(r) for r in reply]
     return reply
