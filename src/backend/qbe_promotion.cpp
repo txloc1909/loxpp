@@ -105,13 +105,14 @@ std::string resolve(const CollapseMap& collapse, const std::string& name) {
 // predecessors carry one value it is forwarded; when they carry more the
 // block gets an SSA phi.
 //
-// Two cases leave the slot in its stack cell instead, recorded permanently in
-// droppedSlots so the decision cannot be revisited: the phi would need an
-// argument naming itself, which QBE cannot express (an argument must be
-// defined in its own predecessor), or the block already collapsed its phi onto
-// one value and a later merge carries another, so the collapse no longer
-// holds. A merge that keeps giving up and taking the slot back would never
-// stop rewriting it, and the worklist would never converge (#1052).
+// A slot is left in its stack cell, recorded permanently in droppedSlots so
+// the decision cannot be revisited, in three cases: a predecessor does not
+// carry it at all, the phi would need an argument naming itself (QBE cannot
+// express it — an argument must be defined in its own predecessor), or the
+// block already collapsed its phi onto one value and a later merge carries
+// another, so the collapse no longer holds. A merge that keeps giving up and
+// taking the slot back would never stop rewriting it, and the worklist would
+// never converge (#1052).
 //
 // Such a block reads the slot from its stack cell, so every incoming edge
 // must leave a current value there. planPromotion decides those stores after
@@ -203,7 +204,11 @@ void mergeInto(
                 merged[slot] = std::move(value);
                 continue;
             }
-            if (values.empty() || selfReferenced || collapsedPhi) {
+            // `values` cannot be empty here without `selfReferenced`: with
+            // the phi not collapsed, every predecessor's value is either this
+            // block's own phi (which sets selfReferenced) or a member of
+            // `values`; with it collapsed, every predecessor contributes one.
+            if (selfReferenced || collapsedPhi) {
                 leaveInStackCell(slot);
                 continue;
             }

@@ -1,20 +1,19 @@
-// S8 (#1103): the promotion dataflow gives a slot up at four sites, and this
-// probe forces the `collapsed` one: a block's phi first collapses onto the
-// value every incoming edge carries (the trivial-phi rule), and a later merge
-// contradicts that collapse. From then on that block, and every block that
-// inherits its state, reads the slot from its stack cell, and the pass after
-// the value flow writes the cell on every incoming edge.
+// S8 (#1103): the promotion dataflow leaves a slot in its stack cell at three
+// sites, and this probe forces the `collapsed` one. A block's phi is created,
+// then collapses onto the one value its predecessors carry (the trivial-phi
+// rule), and a later merge contradicts that collapse. From then on the block,
+// and every block that inherits its state, reads the slot from its stack cell,
+// and the pass after the value flow writes the cell on every incoming edge
+// that carries the slot in a register.
 //
 // `i` is reused across two loops: the first raises it to 3, the second
-// decrements it while a `continue` branch reaches the second loop's inner
-// header from a third edge. The give-up lands on that inner header (the
-// `while (j < 2)` block), which does not itself read `i`; the blocks of the
-// second loop's body inherit the missing value and read `i` from its cell.
+// decrements it. The give-up for `i` lands on the second loop's inner header
+// (the `while (j < 2)` block), which does not itself read `i`; the blocks of
+// the second loop's body inherit the missing value and read `i` from its cell.
 // With the give-up, `i = i - 1` reads the cell and the outer loop ends.
 // Without it those blocks keep the collapsed value (3), so every iteration
-// sets `i` back to 2 and `while (i >= 0)` never ends. Removing the
-// `collapsedPhi` site from qbe_promotion.cpp therefore makes this probe
-// time out instead of printing -1/4.
+// sets `i` back to 2 and `while (i >= 0)` never ends: removing the site from
+// qbe_promotion.cpp makes this probe time out instead of printing -1/4.
 fun f() {
   var i = 0;
   while (i < 3) { i = i + 1; }
