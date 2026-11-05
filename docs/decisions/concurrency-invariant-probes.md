@@ -68,8 +68,9 @@ One row for each case. `tools/check_invariant_probes.py` reads this table:
 | I2 | `Socket.readline()` on a closed read side | `393_read_closed_side_does_not_suspend` |
 | I2 | `Socket.write(text)` on a closed write side | `394_write_closed_side_does_not_suspend` |
 | I2 | `Server.accept()` on a closed Server | `395_accept_closed_server_does_not_suspend` |
-| I3 | a Socket call that waits again | — |
-| I3 | a receive that waits again | — |
+| I3 | a Socket call that waits again | `400_socket_call_that_waits_again_keeps_its_place` |
+| I3 | a new Socket call after a call of the same task | `401_socket_new_call_takes_a_new_place` |
+| I3 | a receive that waits again | `402_receive_that_waits_again_keeps_its_limit` |
 
 ## Rules
 
