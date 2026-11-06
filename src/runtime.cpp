@@ -1144,7 +1144,7 @@ void Runtime::parkTask(ObjTask* task) {
         m_runQueue.push_back(task);
         return;
     }
-    task->state = TaskState::PARKED;
+    task->state = TaskState::WAITING;
     task->parkReason = request.reason;
     task->parkToken = token;
     m_parkedTasks.emplace(token, task);
@@ -1209,7 +1209,7 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
 }
 
 void Runtime::unparkTask(ObjTask* task) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     releasePark(task);
@@ -1218,7 +1218,7 @@ void Runtime::unparkTask(ObjTask* task) {
 }
 
 void Runtime::completePark(ObjTask* task, Value value) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     task->pendingValue = value;
@@ -1226,7 +1226,7 @@ void Runtime::completePark(ObjTask* task, Value value) {
 }
 
 void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     task->hasPendingFault = true;
@@ -1369,7 +1369,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
         task->state = TaskState::READY;
         m_waitingTasks.erase(task);
         m_runQueue.push_back(task);
-    } else if (task->state == TaskState::PARKED && task->sel.pendingRetry) {
+    } else if (task->state == TaskState::WAITING && task->sel.pendingRetry) {
         // A receive_* call with a limit: the message ends the wait of the
         // limit, and the call tests the message when the task runs.
         unparkTask(task);
