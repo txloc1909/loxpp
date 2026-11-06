@@ -818,20 +818,20 @@ public final class LoxRuntime {
             return null;
         }));
         module.fields.put("receive", new LoxNative("receive", 0, args -> {
-            boolean canSuspend = LoxOps.callbackDepthOfChain() == 0;
+            boolean canSuspend = !LoxWorker.blocked();
             return LoxWorker.current().receive(canSuspend);
         }));
         module.fields.put(
             "receive_within", new LoxNative("receive_within", 1, args -> {
                 long nanos = requireLimit("task.receive_within", args[0]);
                 return LoxWorker.current().receiveSelective(
-                    null, true, nanos, canSuspendHere());
+                    null, true, nanos, !LoxWorker.blocked());
             }));
         module.fields.put(
             "receive_where", new LoxNative("receive_where", 1, args -> {
                 requireWant("task.receive_where", args[0]);
                 return LoxWorker.current().receiveSelective(
-                    args[0], false, 0, canSuspendHere());
+                    args[0], false, 0, !LoxWorker.blocked());
             }));
         module.fields.put(
             "receive_where_within",
@@ -839,7 +839,7 @@ public final class LoxRuntime {
                 requireWant("task.receive_where_within", args[0]);
                 long nanos = requireLimit("task.receive_where_within", args[1]);
                 return LoxWorker.current().receiveSelective(
-                    args[0], true, nanos, canSuspendHere());
+                    args[0], true, nanos, !LoxWorker.blocked());
             }));
         module.fields.put(
             "self",
@@ -849,10 +849,6 @@ public final class LoxRuntime {
                 return (double)LoxWorker.current().pending();
             }));
         globals.define("task", module);
-    }
-
-    private static boolean canSuspendHere() {
-        return LoxOps.callbackDepthOfChain() == 0;
     }
 
     private static void requireWant(String name, Object want) {

@@ -520,7 +520,7 @@ final class LoxWorker {
         task.ended = true;
         task.discardMessages();
         liveTasks--;
-        if (liveTasks == 0) {
+        if (workerState() == WorkerState.FINISHED) {
             // Only a worker other than the main worker gets here: the
             // program ends when the main task ends.
             liveWorkers--;
@@ -595,7 +595,7 @@ final class LoxWorker {
      */
     static void waitChannel(SelectableChannel channel, int interest,
                             boolean timed, long deadlineNanos) {
-        if (canWait()) {
+        if (!blocked()) {
             current().waitOnChannel(channel, interest, timed, deadlineNanos);
             return;
         }
@@ -614,11 +614,31 @@ final class LoxWorker {
         }
     }
 
+    /** The states of a worker (spec/04-semantics.md, The Task Machine). */
+    enum WorkerState { ACTIVE, BLOCKED, IDLE, FINISHED }
+
     /**
-     * True when a wait of the running task suspends it. False while a native
-     * callback is on the call chain: then the wait blocks the worker.
+     * True while a native callback is on the call chain of the running task:
+     * a call of class suspends then blocks the worker, and its wait does not
+     * suspend the task. Reads no field of a worker, so it needs no lock.
      */
-    static boolean canWait() { return LoxOps.callbackDepthOfChain() == 0; }
+    static boolean blocked() { return LoxOps.callbackDepthOfChain() != 0; }
+
+    /**
+     * The state of this worker, derived from the call chain, the poller and
+     * the count of live tasks. Caller holds LOCK. The worker is {@code
+     * IDLE} while it sleeps in its poller too, as a worker with a wait
+     * registered is not idle for the deadlock count.
+     */
+    private WorkerState workerState() {
+        if (blocked()) {
+            return WorkerState.BLOCKED;
+        }
+        if (liveTasks == 0) {
+            return WorkerState.FINISHED;
+        }
+        return idle || inPoll ? WorkerState.IDLE : WorkerState.ACTIVE;
+    }
 
     /** The running task of the worker of this thread. */
     static LoxTask runningTask() { return current().current; }
@@ -639,7 +659,7 @@ final class LoxWorker {
     static void sleepNanos(long nanos) {
         // Capped so that the deadline cannot overflow nanoTime's range.
         long span = Math.min(nanos, 1L << 60);
-        if (LoxOps.callbackDepthOfChain() == 0) {
+        if (!blocked()) {
             current().waitUntil(System.nanoTime() + span);
             return;
         }
