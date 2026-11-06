@@ -581,6 +581,19 @@ struct ObjTask : public Obj {
     // it (DeadTaskError).
     std::atomic<bool> ended{false};
 
+    // The state of the task in the Task Machine of the spec
+    // (spec/04-semantics.md, The Task Machine). A receive with a limit waits
+    // on the timer of its limit, so its task is WAITING here, and `receiving`
+    // in the spec. The two predicates split WAITING by that case: a task is in
+    // exactly one of them, or in no spec state of a wait.
+    [[nodiscard]] bool inStateReceiving() const {
+        return state == TaskState::RECEIVING ||
+               (state == TaskState::WAITING && sel.pendingRetry);
+    }
+    [[nodiscard]] bool inStateWaiting() const {
+        return state == TaskState::WAITING && !sel.pendingRetry;
+    }
+
     ObjTask(ObjCoroutine* c, std::uint64_t e, VmAllocator<Value> alloc)
         : Obj(ObjType::TASK), co(c), mailbox(alloc), epoch(e) {}
 };
