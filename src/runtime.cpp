@@ -1307,10 +1307,15 @@ Runtime::WorkerState Runtime::workerState() const {
     if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
         return WorkerState::FINISHED;
     }
-    if (m_currentTask == nullptr) {
-        return m_runQueue.empty() ? WorkerState::IDLE : WorkerState::ACTIVE;
+    if (m_currentTask != nullptr) {
+        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
     }
-    return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
+    // Without a scheduler (runTasks never ran) the program runs on the thread
+    // alone, outside every task, and a call that waits blocks the worker.
+    if (m_group == nullptr) {
+        return WorkerState::BLOCKED;
+    }
+    return m_runQueue.empty() ? WorkerState::IDLE : WorkerState::ACTIVE;
 }
 
 bool Runtime::taskCanSuspend() const {
