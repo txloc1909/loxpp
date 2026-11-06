@@ -1306,6 +1306,7 @@ void Runtime::raiseFromNative(const char* kind, const char* msg) {
         fromThrow(raiseThrowableError(kind, msg, m_nativeStopAtFrameCount));
 }
 
+// The `spawn` move.
 ObjTask* Runtime::spawnTask(Value fn) {
     auto* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn,
                                          VmAllocator<Value>{&m_mm});
@@ -1972,6 +1973,8 @@ void workerMain(WorkerStart start) {
 
 } // namespace
 
+// The `spawn-worker` move: the new task is READY from its start. It joins the
+// run queue of the new worker as that worker's first task (runWorker).
 ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     int number = 0;
     {
@@ -2084,6 +2087,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
                                          VmAllocator<Value>{&m_mm});
     m_mm.popTempRoot();
     m_mm.popTempRoot();
+    // The `spawn-worker` move ends here: the task is the first of this worker.
     task->serial = m_nextTaskSerial++;
     task->state = TaskState::READY;
     m_runQueue.push_back(task);

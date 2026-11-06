@@ -385,8 +385,9 @@ class Runtime {
               std::vector<std::shared_ptr<const std::string>> sources,
               int sourceId, int ordinal, ObjTask* task, Value msg);
 
-    // task.spawn_worker after its checks passed: makes the heap and the
-    // first task of a new worker, starts its thread, and returns the handle.
+    // task.spawn_worker after its checks passed (the `spawn-worker` move):
+    // makes the heap and the first task of a new worker, starts its thread,
+    // and returns the handle.
     ObjTask* spawnWorker(ObjClosure* entry, Value msg);
 
     // True when `fn` is a function that a top-level `fun` declaration of a
@@ -398,8 +399,9 @@ class Runtime {
     // rt_call).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 
-    // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
-    // no arguments when it first runs. It joins the back of the run queue.
+    // task.spawn (the `spawn` move): a new task that calls `fn` (a Function or
+    // BoundMethod) with no arguments when it first runs. It joins the back of
+    // the run queue.
     ObjTask* spawnTask(Value fn);
 
     // True when `task` cannot receive a message again: its function
