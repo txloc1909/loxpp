@@ -12,8 +12,8 @@ import java.nio.channels.SocketChannel;
 /**
  * Mirrors src/stdlib/net_api.cpp's ObjSocket over a nonblocking {@link
  * SocketChannel}. A call that finds nothing to read, no room to write, or no
- * finished connection makes its task wait, and the other tasks of its worker run
- * ({@link LoxWorker#waitChannel}). Text crosses this boundary as {@link
+ * finished connection makes its task wait, and the other tasks of its worker
+ * run ({@link LoxWorker#waitChannel}). Text crosses this boundary as {@link
  * LoxRuntime#CHARSET}, the same byte-boundary rule {@link LoxFile} follows.
  */
 public final class LoxSocket {

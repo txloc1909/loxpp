@@ -535,9 +535,9 @@ set(LOXPP_GTEST_TARGETS
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)
 endif()
-# A park test that fails by sleeping for ever never returns. A ctest TIMEOUT
-# ends it. The limit is far above the run time of any park test on a loaded
-# host, so only a hang reaches it.
+# A task-wait test that fails by sleeping for ever never returns. A ctest
+# TIMEOUT ends it. The limit is far above the run time of any task-wait test
+# on a loaded host, so only a hang reaches it.
 set(LOXPP_HANG_GUARDED_TARGETS test_task_wait test_task_wait_gc)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     set(props "")
