@@ -1133,7 +1133,7 @@ void Runtime::waitTask(ObjTask* task) {
         // read.
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         task->hasPendingFault = true;
         task->faultKind = "NetworkError";
         task->faultMessage = message;
@@ -1364,7 +1364,7 @@ void Runtime::retireTask(ObjTask* task) {
     task->startArg = Value{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
-    task->io = ParkedIo{};
+    task->io = WaitingCall{};
     task->sel = ObjTask::SelectiveReceive{};
     releaseWait(task);
     m_receivingTasks.erase(task);
@@ -1596,7 +1596,7 @@ bool Runtime::runTask(ObjTask* task) {
     } else {
         // The network call that the task waited in returns or raises now, so
         // from here on it holds no side.
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         Value received = from<Nil>(Nil{});
         if (!task->mailbox.empty() && task->receiving) {
             received = task->mailbox.front();
@@ -1693,7 +1693,7 @@ void Runtime::abandonTask(ObjTask* task) {
     // The main task of a session survives the line, but its wait does not:
     // nothing would end it once m_waitingTasks is cleared.
     releaseWait(task);
-    task->io = ParkedIo{};
+    task->io = WaitingCall{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
 }
