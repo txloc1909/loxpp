@@ -48,6 +48,8 @@ public abstract class LoxClosure implements LoxCallable {
     // The frame count and the two stack-overflow guard fields below are one
     // set per worker (LoxWorker.frameCount, unwindingStackOverflow,
     // overflowInFlight), as native keeps them in its one Runtime per worker.
+    // unwindingStackOverflow is in the record of the running task
+    // (LoxTask.Owned).
     //
     // The frame count starts at 1, not 0: src/vm.cpp's own interpret() pushes
     // the top-level script itself as CallFrame 0 through the very same call()
@@ -126,7 +128,7 @@ public abstract class LoxClosure implements LoxCallable {
                     "Expected " + arity + " arguments but got " + args.length + ".");
         }
         LoxWorker w = LoxWorker.current();
-        if (w.unwindingStackOverflow) {
+        if (w.owned().unwindingStackOverflow) {
             // Already unwinding one StackOverflowError: only the reserve
             // stands between here and fatal, and no further catchable
             // attempt is made (see unwindingStackOverflow's comment above).
@@ -146,7 +148,7 @@ public abstract class LoxClosure implements LoxCallable {
                 // overflow to be re-entrant with.
                 throw new LoxError("Stack overflow.");
             }
-            w.unwindingStackOverflow = true;
+            w.owned().unwindingStackOverflow = true;
             LoxError overflow =
                     LoxOps.makeError("StackOverflowError", "Stack overflow.");
             w.overflowInFlight = overflow;
@@ -168,7 +170,7 @@ public abstract class LoxClosure implements LoxCallable {
     // being mistaken for part of the same unwind.
     static void endStackOverflowUnwind() {
         LoxWorker w = LoxWorker.current();
-        w.unwindingStackOverflow = false;
+        w.owned().unwindingStackOverflow = false;
         w.overflowInFlight = null;
     }
 
@@ -178,7 +180,7 @@ public abstract class LoxClosure implements LoxCallable {
     // the delivered value.
     static boolean isOverflowInFlight(LoxError error) {
         LoxWorker w = LoxWorker.current();
-        return w.unwindingStackOverflow && error == w.overflowInFlight;
+        return w.owned().unwindingStackOverflow && error == w.overflowInFlight;
     }
 
     // Package-private: LoxOps.runDefers() calls this when a deferred call's
@@ -193,7 +195,7 @@ public abstract class LoxClosure implements LoxCallable {
     // is the one caller that can supply `replaced` correctly.
     static void replaceOverflowInFlight(LoxError replaced, LoxError replacement) {
         LoxWorker w = LoxWorker.current();
-        if (w.unwindingStackOverflow && replaced == w.overflowInFlight) {
+        if (w.owned().unwindingStackOverflow && replaced == w.overflowInFlight) {
             w.overflowInFlight = replacement;
         }
     }
@@ -219,7 +221,7 @@ public abstract class LoxClosure implements LoxCallable {
      */
     static void checkResumeBudget(int frameCount) {
         LoxWorker w = LoxWorker.current();
-        if (w.unwindingStackOverflow) {
+        if (w.owned().unwindingStackOverflow) {
             if (frameCount > FRAMES_MAX + FRAMES_RESERVE) {
                 throw new LoxError("Stack overflow.");
             }
@@ -231,7 +233,7 @@ public abstract class LoxClosure implements LoxCallable {
         if (!LoxOps.isHandlerLive()) {
             throw new LoxError("Stack overflow.");
         }
-        w.unwindingStackOverflow = true;
+        w.owned().unwindingStackOverflow = true;
         LoxError overflow =
             LoxOps.makeError("StackOverflowError", "Stack overflow.");
         w.overflowInFlight = overflow;

@@ -101,7 +101,6 @@ final class LoxWorker {
     // The runtime counters that native keeps in its Runtime, one Runtime per
     // worker. LoxClosure, LoxOps, and LoxCoroutine read and write them.
     int frameCount = 1;
-    boolean unwindingStackOverflow;
     LoxError overflowInFlight;
     int handlerDepth;
     int stringifyDepth;
@@ -119,6 +118,9 @@ final class LoxWorker {
     // The task that runs now. Written under LOCK by the task that gives
     // control, before its thread wakes this one.
     LoxTask current;
+
+    /** The record of the state that belongs to the task that runs now. */
+    LoxTask.Owned owned() { return current.owned; }
 
     private LoxWorker(int number) {
         this.number = number;

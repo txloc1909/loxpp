@@ -22,7 +22,22 @@ public final class LoxTask {
     // The mailbox uses null for an empty place, and nil is a message.
     private static final Object NIL = new Object();
 
+    /**
+     * The state that belongs to one task and that no other task may see
+     * (spec/04-semantics.md, The Task Machine). {@code LoxWorker.owned()}
+     * names the record of the task that runs now.
+     */
+    static final class Owned {
+        /**
+         * True for the dynamic extent between a StackOverflowError that
+         * {@code LoxClosure} raises and the resolution of that same fault.
+         * See the comment at the top of {@code LoxClosure}.
+         */
+        boolean unwindingStackOverflow;
+    }
+
     final LoxWorker worker;
+    final Owned owned = new Owned();
 
     State state = State.READY;
     boolean ended;
