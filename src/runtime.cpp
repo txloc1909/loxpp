@@ -1365,7 +1365,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     m_mm.pushTempRoot(task);
     task->mailbox.push_back(msg);
     m_mm.popTempRoot();
-    if (task->state == TaskState::WAITING) {
+    if (task->state == TaskState::RECEIVING) {
         task->state = TaskState::READY;
         m_waitingTasks.erase(task);
         m_runQueue.push_back(task);
@@ -1609,7 +1609,7 @@ bool Runtime::resumeTask(ObjTask* task) {
             parkTask(task);
             return true;
         }
-        task->state = TaskState::WAITING;
+        task->state = TaskState::RECEIVING;
         task->receiving = !task->sel.pendingRetry;
         m_waitingTasks.insert(task);
         return true;
