@@ -177,16 +177,17 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     // opened after it has already passed FRAMES_MAX would never see an exact
     // match again.
     if (m_frameCount >= FRAMES_MAX && !m_handlerStack.empty() &&
-        !m_unwindingStackOverflow) {
-        // See m_unwindingStackOverflow's own comment (runtime.h) and this
-        // guard's own matching one in push(): a deferred call drained by the
-        // handleThrow() below can itself reach this same guard again. Hold
-        // the flag for exactly this call, so a nested hit falls through to
-        // the hard ceiling below instead of recursing.
-        m_unwindingStackOverflow = true;
+        !m_owned->unwindingStackOverflow) {
+        // See TaskOwned::unwindingStackOverflow's own comment
+        // (container_objects.h) and this guard's own matching one in push(): a
+        // deferred call drained by the handleThrow() below can itself reach
+        // this same guard again. Hold the flag for exactly this call, so a
+        // nested hit falls through to the hard ceiling below instead of
+        // recursing.
+        m_owned->unwindingStackOverflow = true;
         ThrowOutcome outcome = raiseThrowableError(
             "StackOverflowError", "Stack overflow.", stopAtFrameCount);
-        m_unwindingStackOverflow = false;
+        m_owned->unwindingStackOverflow = false;
         // Uncaught falls through to this same return unchanged:
         // raiseThrowableError() already reported it, and m_frameCount is
         // reset to 0 by then (see runtimeError()/resetStack()), so
@@ -195,14 +196,14 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     }
     // No handler active: the true hard ceiling, unaffected by the reserve,
     // same depth as before the reserve existed. While unwinding a
-    // StackOverflowError (m_unwindingStackOverflow), the ceiling moves out to
-    // FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
+    // StackOverflowError (m_owned->unwindingStackOverflow), the ceiling moves
+    // out to FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
     // m_frames[] actually has — so a deferred call drained during that
     // unwind can use the reserve; past that, it stays fatal rather than
     // recursing into the same handler again.
-    if (m_frameCount >=
-        FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
+    if (m_frameCount >= FRAMES_MAX + (m_owned->unwindingStackOverflow
+                                          ? STACK_OVERFLOW_FRAME_RESERVE
+                                          : 0)) {
         runtimeError("Stack overflow.");
         return ThrowOutcome::Uncaught;
     }
@@ -616,22 +617,24 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // raises a catchable StackOverflowError instead of writing past
         // m_frames[]/stack[]. The ceilings mirror call()/checkStackOverflow().
         const std::ptrdiff_t frameCeiling =
-            FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0);
+            FRAMES_MAX + (m_owned->unwindingStackOverflow
+                              ? STACK_OVERFLOW_FRAME_RESERVE
+                              : 0);
         const std::ptrdiff_t stackCeiling =
-            STACK_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+            STACK_MAX + (m_owned->unwindingStackOverflow
+                             ? STACK_OVERFLOW_STACK_RESERVE
+                             : 0);
         if (static_cast<std::ptrdiff_t>(entry) +
                     static_cast<std::ptrdiff_t>(co->frames.size()) >
                 frameCeiling ||
             static_cast<std::ptrdiff_t>(base - stack) +
                     static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
                 stackCeiling) {
-            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
-                m_unwindingStackOverflow = true;
+            if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
+                m_owned->unwindingStackOverflow = true;
                 ThrowOutcome outcome = raiseThrowableError(
                     "StackOverflowError", "Stack overflow.", boundary);
-                m_unwindingStackOverflow = false;
+                m_owned->unwindingStackOverflow = false;
                 m_reentrantOutcome = fromThrow(outcome);
             } else {
                 runtimeError("Stack overflow.");
@@ -1553,7 +1556,7 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
 bool Runtime::runTask(ObjTask* task) {
     ObjCoroutine* co = task->co;
     task->state = TaskState::RUNNING;
-    m_currentTask = task;
+    enterTask(task);
 
     // The resume window: for a first resume, the slot the stored callee goes
     // into, and the message of task.spawn_worker for a worker's first task;
@@ -1604,7 +1607,7 @@ bool Runtime::runTask(ObjTask* task) {
     m_cleanNativeDepth = -1;
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     // A fault the resumed coroutine did not raise must not reach the next
     // resume.
     m_faultTask = nullptr;
@@ -1697,7 +1700,7 @@ void Runtime::abandonTasks() {
     m_parkRequest = ParkRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     m_taskSwitchPending = false;
     m_taskSwitchInner = nullptr;
     m_cleanNativeDepth = -1;

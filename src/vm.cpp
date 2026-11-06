@@ -175,16 +175,16 @@ InterpretResult VM::run(int stopAtFrameCount) {
             // re-armed by a fresh push() past the threshold later).
             m_rt.m_stackOverflow = false;
             if (!m_rt.m_handlerStack.empty() &&
-                !m_rt.m_unwindingStackOverflow) {
-                // See m_unwindingStackOverflow's own comment (runtime.h) and
+                !m_rt.m_owned->unwindingStackOverflow) {
+                // See TaskOwned::unwindingStackOverflow's own comment and
                 // Runtime::call()'s matching guard: hold the flag for
                 // exactly this catch attempt, so a nested hit (from a
                 // deferred call this unwind drains) falls through to the
                 // fatal branch below instead of recursing.
-                m_rt.m_unwindingStackOverflow = true;
+                m_rt.m_owned->unwindingStackOverflow = true;
                 Runtime::ThrowOutcome outcome =
                     tryCatchableError("StackOverflowError", "Stack overflow.");
-                m_rt.m_unwindingStackOverflow = false;
+                m_rt.m_owned->unwindingStackOverflow = false;
                 CATCHABLE_OR_RETURN(outcome);
             } else {
                 RAISE_ERROR("Stack overflow.");

@@ -65,7 +65,7 @@ public abstract class LoxClosure implements LoxCallable {
     // reachable only through a deferred call that itself recurses too deep
     // while running during the first overflow's own unwind — is not
     // delivered to any catchBlock (spec/04-semantics.md line 1120); it is
-    // fatal, matching native's own m_unwindingStackOverflow guard
+    // fatal, matching native's own TaskOwned::unwindingStackOverflow guard
     // (src/vm.h).
     //
     // overflowInFlight is the LoxError object whose delivery to getValue()

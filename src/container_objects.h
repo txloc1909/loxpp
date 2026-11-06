@@ -518,6 +518,29 @@ struct ParkedIo {
     std::string timeoutMessage;
 };
 
+// The state that belongs to one task and that no other task may see
+// (spec/04-semantics.md, The Task Machine). The worker keeps one record for
+// the code that runs outside every task, and `Runtime::m_owned` points at the
+// record of the task that runs now.
+struct TaskOwned {
+    // True for the duration of one StackOverflowError's own handleThrow()
+    // call (set and cleared by two plain assignments, at both overflow
+    // guards). Draining a discarded frame's defer runs arbitrary Lox++ code
+    // (runPendingDefers() -> a nested run()), and that code can itself
+    // recurse deep enough to reach either overflow guard again, because the
+    // reserve lets the unwind of a StackOverflowError run deferred calls at
+    // all. Without this flag, each such nested hit re-enters handleThrow()'s
+    // own unwind through genuine C++ recursion (call() ->
+    // raiseThrowableError() -> handleThrow() -> runPendingDefers() -> a
+    // nested run() -> call() -> ...), one level per remaining frame, and
+    // crashes the process with a real native stack overflow instead of a
+    // Lox++-level fault. Both overflow guards skip the catchable path while
+    // this flag is set, and fall to their own hard ceiling (FRAMES_MAX or
+    // STACK_MAX plus the reserve): the second overflow stays fatal, it is
+    // never handed to the same handler a second time.
+    bool unwindingStackOverflow{false};
+};
+
 // The object lives in the heap of its worker. A handle on another worker is
 // a pointer to this same object, held as a message: that worker reads only
 // `ended` and the heap id, and routes a send through the inbound queue of
@@ -530,6 +553,7 @@ struct ObjTask : public Obj {
     // collect, so the owner roots this task across it (deliverMessage).
     std::deque<Value, VmAllocator<Value>> mailbox;
     TaskState state{TaskState::READY};
+    TaskOwned owned;
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
     bool receiving{false};

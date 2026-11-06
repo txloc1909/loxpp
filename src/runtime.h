@@ -96,8 +96,8 @@ class Runtime {
 
     // Extra capacity held ABOVE the two ceilings above, spent only while a
     // StackOverflowError's own unwind is in progress (see
-    // m_unwindingStackOverflow). Both overflow guards (the frame-count check
-    // in call(), the value-stack check in push()) still fire exactly at
+    // m_owned->unwindingStackOverflow). Both overflow guards (the frame-count
+    // check in call(), the value-stack check in push()) still fire exactly at
     // FRAMES_MAX/STACK_MAX, for every program, handler or not — this reserve
     // is not subtracted from that threshold, so an open try/catch never
     // changes how deep a program that does not overflow can go. The room it
@@ -249,16 +249,18 @@ class Runtime {
         // STACK_OVERFLOW_STACK_RESERVE's own comment above): an open
         // try/catch must never change how deep a program that does not
         // overflow can go. While unwinding a StackOverflowError
-        // (m_unwindingStackOverflow), the ceiling moves out to STACK_MAX +
-        // STACK_OVERFLOW_STACK_RESERVE — the physical capacity `stack`
+        // (m_owned->unwindingStackOverflow), the ceiling moves out to STACK_MAX
+        // + STACK_OVERFLOW_STACK_RESERVE — the physical capacity `stack`
         // actually has — so a deferred call drained during that unwind can
         // use the reserve; past that, it stays fatal.
         std::ptrdiff_t hardCeiling =
-            STACK_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
-        // Use >=, not ==: the ceiling moves with m_unwindingStackOverflow,
-        // and stackTop only grows, so a pointer already past STACK_MAX when
-        // the flag clears would never hit an exact match again.
+            STACK_MAX + (m_owned->unwindingStackOverflow
+                             ? STACK_OVERFLOW_STACK_RESERVE
+                             : 0);
+        // Use >=, not ==: the ceiling moves with
+        // m_owned->unwindingStackOverflow, and stackTop only grows, so a
+        // pointer already past STACK_MAX when the flag clears would never hit
+        // an exact match again.
         if (stackTop >= stack + hardCeiling) {
             m_stackOverflow = true;
             return;
@@ -983,16 +985,17 @@ class Runtime {
     // so the QBE and native paths overflow at the same call depth.
     OpResult checkStackOverflow(Value* neededTop, int stopAtFrameCount) {
         std::ptrdiff_t hardCeiling =
-            STACK_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+            STACK_MAX + (m_owned->unwindingStackOverflow
+                             ? STACK_OVERFLOW_STACK_RESERVE
+                             : 0);
         if (neededTop <= stack + hardCeiling) {
             return OpResult::OK;
         }
-        if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
-            m_unwindingStackOverflow = true;
+        if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
+            m_owned->unwindingStackOverflow = true;
             ThrowOutcome outcome = raiseThrowableError(
                 "StackOverflowError", "Stack overflow.", stopAtFrameCount);
-            m_unwindingStackOverflow = false;
+            m_owned->unwindingStackOverflow = false;
             return fromThrow(outcome);
         }
         runtimeError("Stack overflow.");
@@ -1303,7 +1306,7 @@ class Runtime {
 
     // Sized FRAMES_MAX/STACK_MAX plus the reserve above, not just
     // FRAMES_MAX/STACK_MAX: the reserve is spent above those ceilings, while
-    // a StackOverflowError unwinds (see m_unwindingStackOverflow and
+    // a StackOverflowError unwinds (see m_owned->unwindingStackOverflow and
     // STACK_OVERFLOW_FRAME_RESERVE/STACK_OVERFLOW_STACK_RESERVE), so the
     // physical storage must reach past them or that unwind's own pushes run
     // out of bounds.
@@ -1328,24 +1331,10 @@ class Runtime {
     Value stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE];
     Value* stackTop;
     bool m_stackOverflow{false};
-    // True for the duration of one StackOverflowError's own handleThrow()
-    // call (set and cleared by two plain assignments, at both overflow
-    // guards below). Draining a discarded frame's defer runs arbitrary
-    // Lox++ code (runPendingDefers() -> a nested run()), and that code can
-    // itself recurse deep enough to reach either overflow guard again —
-    // reachable only because the reserve lets a StackOverflowError's own
-    // unwind run deferred calls at all; every frame between the original
-    // overflow and the handler can hold one. Without this flag, each such
-    // nested hit re-enters handleThrow()'s own unwind through genuine C++
-    // recursion (call() -> raiseThrowableError() -> handleThrow() ->
-    // runPendingDefers() -> a nested run() -> call() -> ...), one level
-    // per remaining frame, crashing the process with a real native stack
-    // overflow instead of a Lox++-level fault. Both overflow guards skip the
-    // catchable path while this flag is set, falling straight through to
-    // their own hard ceiling (FRAMES_MAX/STACK_MAX plus the reserve) instead:
-    // the second overflow stays fatal, it is never handed to the same
-    // handler a second time.
-    bool m_unwindingStackOverflow{false};
+    // The state of the task that runs now, or of no task. Set with
+    // m_currentTask by enterTask().
+    TaskOwned m_noTaskOwned;
+    TaskOwned* m_owned{&m_noTaskOwned};
     Table m_globals;
     std::array<ObjString*, static_cast<std::size_t>(Protocol::Count)>
         m_protocolNames{};
@@ -1378,6 +1367,10 @@ class Runtime {
     // while the main task itself stays alive for the next line.
     bool m_mainLineDone{false};
     ObjTask* m_currentTask{nullptr};
+    void enterTask(ObjTask* task) {
+        m_currentTask = task;
+        m_owned = task != nullptr ? &task->owned : &m_noTaskOwned;
+    }
     std::deque<ObjTask*> m_runQueue;
     // Counts the runs of runTasks(). A task whose epoch is older has ended.
     std::uint64_t m_taskEpoch{0};
