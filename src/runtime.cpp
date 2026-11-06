@@ -1543,7 +1543,10 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
     }
 }
 
-bool Runtime::resumeTask(ObjTask* task) {
+// The `run` move: the scheduler took `task` from the head of the run queue.
+// The task runs until it suspends or ends, and then makes the move that its
+// exit names: `yield`, `receive`, `wait` or `end`.
+bool Runtime::runTask(ObjTask* task) {
     ObjCoroutine* co = task->co;
     task->state = TaskState::RUNNING;
     m_currentTask = task;
@@ -1620,20 +1623,38 @@ bool Runtime::resumeTask(ObjTask* task) {
     if (m_taskSwitchPending) {
         m_taskSwitchPending = false;
         m_taskSwitchInner = nullptr;
-        if (m_parkRequest.reason != ParkReason::NONE) {
+        // A receive with a limit asks for a wait on its timer, and it is a
+        // receive all the same.
+        if (task->sel.pendingRetry ||
+            m_parkRequest.reason == ParkReason::NONE) {
+            receiveTask(task);
+        } else {
             waitTask(task);
-            return true;
         }
-        task->state = TaskState::RECEIVING;
-        task->receiving = !task->sel.pendingRetry;
-        m_receivingTasks.insert(task);
         return true;
     }
-    // A `yield` outside every coroutine the task resumed: the yielded value
-    // is discarded, and the task joins the back of the run queue.
+    yieldTask(task);
+    return true;
+}
+
+// The `receive` move: the task found no message to take.
+void Runtime::receiveTask(ObjTask* task) {
+    if (m_parkRequest.reason != ParkReason::NONE) {
+        // The receive has a limit: it waits on the timer of the limit, so the
+        // task is WAITING (see ObjTask::inStateReceiving).
+        waitTask(task);
+        return;
+    }
+    task->state = TaskState::RECEIVING;
+    task->receiving = !task->sel.pendingRetry;
+    m_receivingTasks.insert(task);
+}
+
+// The `yield` move: a `yield` outside every coroutine the task resumed. The
+// yielded value is discarded, and the task joins the back of the run queue.
+void Runtime::yieldTask(ObjTask* task) {
     task->state = TaskState::READY;
     m_runQueue.push_back(task);
-    return true;
 }
 
 void Runtime::endTasks() {
@@ -1849,7 +1870,7 @@ InterpretResult Runtime::schedule() {
         }
         ObjTask* task = m_runQueue.front();
         m_runQueue.pop_front();
-        if (!resumeTask(task)) {
+        if (!runTask(task)) {
             return InterpretResult::RUNTIME_ERROR;
         }
     }

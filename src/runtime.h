@@ -1007,9 +1007,12 @@ class Runtime {
     // The task joins the back of the run queue, and its call tests the mailbox
     // before it raises.
     void limitTask(ObjTask* task);
-    // Resumes `task` from the scheduler, once. Returns false on a fatal error
-    // (already reported); the program then ends.
-    bool resumeTask(ObjTask* task);
+    // The `run` move: runs `task` from the scheduler, once. Returns false on a
+    // fatal error (already reported); the program then ends.
+    bool runTask(ObjTask* task);
+    // The moves that a run of a task can end in. waitTask is below.
+    void receiveTask(ObjTask* task);
+    void yieldTask(ObjTask* task);
 
     // The scheduler loop of this worker: drains the inbound queue between
     // tasks, runs the head of the run queue, and waits on the inbound
@@ -1043,12 +1046,12 @@ class Runtime {
     void endTasks();
 
     // The `wait` move: the task that a wait request suspended becomes
-    // WAITING, and its wait is registered. Called by resumeTask after the
+    // WAITING, and its wait is registered. Called by runTask after the
     // frames of the task unwound.
     void waitTask(ObjTask* task);
     // Cancels the wait of a task and erases it from m_waitingTasks. No-op for
     // a task that has no wait registered. It keeps ObjTask::io: the call
-    // holds its side until the task runs again (resumeTask clears it).
+    // holds its side until the task runs again (runTask clears it).
     void releaseWait(ObjTask* task);
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.
@@ -1387,7 +1390,7 @@ class Runtime {
     // receive in it would remove a message from the mailbox that the call
     // is testing.
     int m_selectDepth{0};
-    // What requestWait asked for, until resumeTask carries it out.
+    // What requestWait asked for, until runTask carries it out.
     struct ParkRequest {
         ParkReason reason{ParkReason::NONE};
         int fd{-1};
@@ -1403,7 +1406,7 @@ class Runtime {
     // in m_waitingTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
     // The task whose pending fault this resume raises before it runs on, or
-    // null. resumeTask sets it and clears it on every switch, so a fault that
+    // null. runTask sets it and clears it on every switch, so a fault that
     // the resume never reaches is dropped there and cannot reach the next
     // resume. raiseResumeFault takes the kind and the message from the task,
     // and clears this before it raises. While it is set the task is
