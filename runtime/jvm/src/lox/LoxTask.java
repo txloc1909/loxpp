@@ -48,6 +48,13 @@ public final class LoxTask {
          * testing.
          */
         int selectDepth;
+        /**
+         * The number of calls that this task has open. A task starts below
+         * its first call, as native's scheduler resumes each task from an
+         * empty frame stack. The first task of a worker starts at 1, the
+         * frame of the top-level script.
+         */
+        int frameCount;
     }
 
     final LoxWorker worker;
@@ -77,11 +84,8 @@ public final class LoxTask {
     // LoxPoller.addFd); 0 before the first wait of a call.
     long waitSeq;
 
-    // The frame count and the handler depth of this task while another
-    // task of the worker runs (see LoxWorker.switchTo). A task starts below
-    // its first call, as native's scheduler resumes each task from an empty
-    // frame stack.
-    int savedFrameCount;
+    // The handler depth of this task while another task of the worker runs
+    // (see LoxWorker.switchTo).
     int savedHandlerDepth;
 
     // A thread of this task waits here while the task is suspended. Only

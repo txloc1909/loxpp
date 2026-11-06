@@ -98,9 +98,8 @@ final class LoxWorker {
     final int number;
     LoxGlobals globals;
 
-    // The runtime counters that native keeps in its Runtime, one Runtime per
-    // worker. LoxClosure, LoxOps, and LoxCoroutine read and write them.
-    int frameCount = 1;
+    // The runtime counter that native keeps in its Runtime, one Runtime per
+    // worker. LoxClosure, LoxOps, and LoxCoroutine read and write it.
     int handlerDepth;
 
     // Guarded by LOCK.
@@ -125,6 +124,7 @@ final class LoxWorker {
         LoxTask first = new LoxTask(this);
         first.state = LoxTask.State.RUNNING;
         first.started = true;
+        first.owned.frameCount = 1;
         current = first;
     }
 
@@ -409,7 +409,7 @@ final class LoxWorker {
             LoxRuntime.runDeclarations();
             // The declarations ran as the script frame; the entry is the
             // first frame of the task, as native's scheduler runs it.
-            frameCount = 0;
+            task.owned.frameCount = 0;
             LoxClosure fn = (LoxClosure)entryClass
                                 .getConstructor(Object[][].class)
                                 .newInstance((Object)new Object[0][]);
@@ -489,7 +489,6 @@ final class LoxWorker {
         if (state == LoxTask.State.READY) {
             runQueue.addLast(self);
         }
-        self.savedFrameCount = frameCount;
         self.savedHandlerDepth = handlerDepth;
         LoxTask next = takeNext();
         if (next == self) {
@@ -754,7 +753,6 @@ final class LoxWorker {
     private void runTask(LoxTask task) {
         current = task;
         task.state = LoxTask.State.RUNNING;
-        frameCount = task.savedFrameCount;
         handlerDepth = task.savedHandlerDepth;
     }
 
