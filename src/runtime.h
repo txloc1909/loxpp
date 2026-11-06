@@ -407,7 +407,7 @@ class Runtime {
     [[nodiscard]] bool taskEnded(const ObjTask* task) const;
 
     // task.send after its checks passed: appends `msg` to the mailbox of
-    // `task`. A task that waits in task.receive() joins the run queue.
+    // `task`. A task that is `receiving` makes the `message` move.
     void deliverMessage(ObjTask* task, Value msg);
 
     // task.send after its checks passed, for a task of this worker or of
@@ -998,6 +998,13 @@ class Runtime {
     }
 
   private:
+    // The `message` move: a message arrived for a `receiving` task. The task
+    // joins the back of the run queue.
+    void messageTask(ObjTask* task);
+    // The `limit` move: the limit of the receive of a `receiving` task passed.
+    // The task joins the back of the run queue, and its call tests the mailbox
+    // before it raises.
+    void limitTask(ObjTask* task);
     // Resumes `task` from the scheduler, once. Returns false on a fatal error
     // (already reported); the program then ends.
     bool resumeTask(ObjTask* task);

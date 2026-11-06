@@ -1278,8 +1278,9 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         ObjTask* task = found->second;
         if (task->io.op != IoOp::NONE) {
             resumeParkedIo(*this, task);
+        } else if (task->inStateReceiving()) {
+            limitTask(task);
         } else {
-            task->sel.timedOut = task->sel.pendingRetry;
             completePark(task, from<Nil>(Nil{}));
         }
     }
@@ -1365,15 +1366,28 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     m_mm.pushTempRoot(task);
     task->mailbox.push_back(msg);
     m_mm.popTempRoot();
+    if (task->inStateReceiving()) {
+        messageTask(task);
+    }
+}
+
+void Runtime::messageTask(ObjTask* task) {
     if (task->state == TaskState::RECEIVING) {
         task->state = TaskState::READY;
         m_receivingTasks.erase(task);
         m_runQueue.push_back(task);
-    } else if (task->state == TaskState::WAITING && task->sel.pendingRetry) {
+    } else {
         // A receive_* call with a limit: the message ends the wait of the
         // limit, and the call tests the message when the task runs.
         unparkTask(task);
     }
+}
+
+void Runtime::limitTask(ObjTask* task) {
+    // The call tests the messages that arrived with the limit first, and
+    // raises TimeoutError only if none is selected.
+    task->sel.timedOut = true;
+    completePark(task, from<Nil>(Nil{}));
 }
 
 bool Runtime::sendMessage(ObjTask* task, Value msg) {
