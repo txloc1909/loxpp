@@ -42,6 +42,12 @@ public final class LoxTask {
         LoxError overflowInFlight;
         /** The nesting depth of the stringify call that runs now. */
         int stringifyDepth;
+        /**
+         * Greater than 0 while a {@code want} function of a receive_where
+         * call runs. A receive in it would remove a message that the call is
+         * testing.
+         */
+        int selectDepth;
     }
 
     final LoxWorker worker;

@@ -216,13 +216,8 @@ final class LoxWorker {
         }
     }
 
-    // Greater than 0 while a `want` function of a receive_where call runs. A
-    // receive in it would remove a message that the call is testing. Only
-    // the running task of the worker reads or writes it.
-    private int selectDepth;
-
     private void rejectInWant() {
-        if (selectDepth > 0) {
+        if (owned().selectDepth > 0) {
             throw LoxOps.makeError("YieldAcrossNativeError",
                                    "Cannot receive in a function that "
                                        + "receive_where calls.");
@@ -279,13 +274,14 @@ final class LoxWorker {
     }
 
     private boolean callWant(Object want, Object msg) {
-        selectDepth++;
+        LoxTask.Owned owned = owned();
+        owned.selectDepth++;
         LoxOps.enterCallback();
         try {
             return !LoxOps.isFalsy(LoxOps.call(want, new Object[] {msg}));
         } finally {
             LoxOps.exitCallback();
-            selectDepth--;
+            owned.selectDepth--;
         }
     }
 
