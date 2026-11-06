@@ -3484,12 +3484,12 @@ class InterpTask {
         this.worker    = worker;
         this.mailbox   = [];
         this.head      = 0;
-        this.waiting   = false;
+        this.receiving = false;
         // True while the task waits in a receive_* call with a limit. Such a
         // task can still run when its timer ends, so it counts as ready for
         // the deadlock check.
         this.limited   = false;
-        this.dead      = false;
+        this.ended     = false;
         // The host task handle. The main task gets its handle when it first
         // waits, so a program that never uses tasks never needs a host that
         // runs tasks.
@@ -3586,10 +3586,10 @@ class ReceiveSelection {
         var interp = this.interp;
         var t = this.t;
         interp.resumeTask(t);
-        if (t.waiting) {
+        if (t.receiving) {
             // The wake of a send. The sender counted the task as ready again
             // when the wait has no limit.
-            t.waiting = false;
+            t.receiving = false;
         }
         while (this.scanned < t.pending()) {
             if (!this.hasWant) {
@@ -3613,7 +3613,7 @@ class ReceiveSelection {
             interp.setError("YieldAcrossNativeError", "Cannot receive across a native callback.", 0);
             return true;
         }
-        t.waiting = true;
+        t.receiving = true;
         t.limited = this.limited;
         if (!this.limited) {
             interp.readyTasks = interp.readyTasks - 1;
@@ -3843,7 +3843,7 @@ class Interpreter {
     }
 
     checkDeadlock() {
-        if (this.mainTask.waiting and this.readyTasks == 0) {
+        if (this.mainTask.receiving and this.readyTasks == 0) {
             this.fatalError("Deadlock: every task waits in receive.");
         }
     }
@@ -3904,13 +3904,13 @@ class Interpreter {
             this.setSendError(msg);
             return nil;
         }
-        if (t.dead) {
+        if (t.ended) {
             this.setError("DeadTaskError", "Cannot send to a task that has ended.", 0);
             return nil;
         }
         t.mailbox.append(msg);
-        if (t.waiting) {
-            t.waiting = false;
+        if (t.receiving) {
+            t.receiving = false;
             if (!t.limited) this.readyTasks = this.readyTasks + 1;
             task.send(t.host, true);
         }
@@ -3930,7 +3930,7 @@ class Interpreter {
             return nil;
         }
         if (t.host == nil) t.host = task.self();
-        t.waiting = true;
+        t.receiving = true;
         this.readyTasks = this.readyTasks - 1;
         this.checkDeadlock();
         task.receive();
@@ -3966,7 +3966,7 @@ class Interpreter {
     // The receive_* calls (spec/04-semantics.md, task.receive_within). The
     // host's own receive_where or receive_where_within waits, with a host
     // `want` (ReceiveSelection.test) that tests the interpreted mailbox. A
-    // send to a waiting task puts one wake in its host mailbox, so the host
+    // send to a receiving task puts one wake in its host mailbox, so the host
     // calls the test each time the task runs again after a message arrived.
     // The host keeps the limit for the whole call and puts the task in the
     // run queue at the place the host order gives a limit (spec/04-semantics.md,
@@ -3993,7 +3993,7 @@ class Interpreter {
         }
         // The wakes that the test did not select stay in the host mailbox.
         // No send adds one now, because the task no longer waits.
-        t.waiting = false;
+        t.receiving = false;
         t.limited = false;
         while (task.pending() > 0) task.receive();
         if (timedOut) {
@@ -4029,7 +4029,7 @@ class Interpreter {
             this.reportUncaught();
             exit(70);
         }
-        t.dead = true;
+        t.ended = true;
         t.mailbox = [];
         t.head = 0;
         this.readyTasks = this.readyTasks - 1;
