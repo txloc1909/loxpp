@@ -338,7 +338,7 @@ TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
         [](Runtime& rt, ObjTask* task) {
             // The send ran during the park. It left the task parked, with the
             // message in its mailbox.
-            EXPECT_EQ(task->state, TaskState::PARKED);
+            EXPECT_EQ(task->state, TaskState::WAITING);
             EXPECT_EQ(task->mailbox.size(), 1u);
             EXPECT_NE(task->parkReason, ParkReason::NONE);
             rt.completePark(task, from<Number>(42.0));

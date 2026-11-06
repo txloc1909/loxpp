@@ -448,11 +448,11 @@ inline bool isCoroutine(const Value& v) {
 // suspension of it. A Task value is the handle: identity equality, always a
 // message.
 enum class TaskState : std::uint8_t {
-    READY,   // in the run queue
-    RUNNING, // the scheduler resumed it and it has not suspended yet
-    WAITING, // suspended in task.receive() on an empty mailbox
-    PARKED,  // suspended in a native call that waits for time or a descriptor
-    DEAD,    // its function returned, or the program ended it
+    READY,     // in the run queue
+    RUNNING,   // the scheduler resumed it and it has not suspended yet
+    RECEIVING, // suspended in task.receive() on an empty mailbox
+    WAITING,   // suspended in a native call that waits for time or a descriptor
+    ENDED,     // its function returned, or the program ended it
 };
 
 // What a parked task waits for. The wait is one wait of the worker's Poller.
@@ -531,7 +531,7 @@ struct ObjTask : public Obj {
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
     bool receiving{false};
-    // Set while the task is PARKED: what it waits for and the Poller token of
+    // Set while the task is WAITING: what it waits for and the Poller token of
     // that wait. A parked task keeps its result and its fault here, not in the
     // mailbox, so task.pending() never sees them.
     ParkReason parkReason{ParkReason::NONE};
