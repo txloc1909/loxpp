@@ -1707,7 +1707,7 @@ void Runtime::abandonTasks() {
         left.push_back(entry.second);
         // No deferred call will close the descriptor of a waiting call.
         if (entry.second->io.op != IoOp::NONE) {
-            closeParkedDescriptor(*this, entry.second);
+            closeWaitingDescriptor(*this, entry.second);
         }
     }
     for (ObjTask* task : left) {

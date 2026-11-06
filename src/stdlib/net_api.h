@@ -24,7 +24,7 @@ struct ObjTask;
 void resumeWaitingCall(Runtime& rt, ObjTask* task);
 
 // Closes the descriptor that a WAITING task waits on, at the end of the run.
-void closeParkedDescriptor(Runtime& rt, ObjTask* task);
+void closeWaitingDescriptor(Runtime& rt, ObjTask* task);
 
 // One address that connect() may try.
 struct ConnectAddress {

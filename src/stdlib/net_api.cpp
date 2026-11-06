@@ -1105,7 +1105,7 @@ static void closeDescriptor(int& fd, const char* noun) {
     }
 }
 
-void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
+void closeWaitingDescriptor(Runtime& rt, ObjTask* task) {
     if (task->io.op == IoOp::CONNECT) {
         // The attempt has no Socket. The end of the task closes it.
         return;
