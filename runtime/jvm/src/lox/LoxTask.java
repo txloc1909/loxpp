@@ -12,11 +12,11 @@ import java.util.concurrent.Semaphore;
  */
 public final class LoxTask {
     enum State {
-        READY,   // in the run queue of its worker, or not started yet
-        RUNNING, // the current task of its worker
-        WAITING, // in task.receive() on an empty mailbox
-        PARKED,  // in a call that waits for a channel or for time
-        DEAD,
+        READY,     // in the run queue of its worker, or not started yet
+        RUNNING,   // the current task of its worker
+        RECEIVING, // in task.receive() on an empty mailbox
+        WAITING,   // in a call that waits for a channel or for time
+        ENDED,
     }
 
     // The mailbox uses null for an empty place, and nil is a message.

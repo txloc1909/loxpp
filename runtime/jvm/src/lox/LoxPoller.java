@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.TreeSet;
 
 /**
- * The wait set of one worker: the channels its parked tasks wait on and the
+ * The wait set of one worker: the channels its waiting tasks wait on and the
  * timers they wait for (spec/04-semantics.md, Scheduling). The worker creates
  * it on its first park, so a program that never parks pays nothing.
  *
