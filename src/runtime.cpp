@@ -1098,7 +1098,7 @@ bool Runtime::raiseResumeFault(int entry) {
     return false;
 }
 
-bool Runtime::requestWait(ParkReason reason, int fd,
+bool Runtime::requestWait(WaitEvent reason, int fd,
                           Poller::Clock::time_point deadline) {
     if (workerState() == WorkerState::BLOCKED) {
         return false;
@@ -1114,16 +1114,16 @@ void Runtime::waitTask(ObjTask* task) {
     m_parkRequest = ParkRequest{};
     Poller::Token token = 0;
     switch (request.reason) {
-    case ParkReason::TIMER:
+    case WaitEvent::TIMER:
         token = poller().waitUntil(request.deadline);
         break;
-    case ParkReason::FD_READ:
+    case WaitEvent::FD_READ:
         token = poller().waitFd(request.fd, Poller::Interest::Read);
         break;
-    case ParkReason::FD_WRITE:
+    case WaitEvent::FD_WRITE:
         token = poller().waitFd(request.fd, Poller::Interest::Write);
         break;
-    case ParkReason::NONE:
+    case WaitEvent::NONE:
         break;
     }
     task->pendingValue = Value{};
@@ -1160,7 +1160,7 @@ void Runtime::waitTask(ObjTask* task) {
 }
 
 void Runtime::releaseWait(ObjTask* task) {
-    if (task->parkReason == ParkReason::NONE) {
+    if (task->parkReason == WaitEvent::NONE) {
         return;
     }
     // A wait that the poller reported is gone already; cancel() is then a
@@ -1176,13 +1176,13 @@ void Runtime::releaseWait(ObjTask* task) {
         m_parkTimers.erase(task->parkTimerToken);
         task->parkTimerToken = 0;
     }
-    task->parkReason = ParkReason::NONE;
+    task->parkReason = WaitEvent::NONE;
     task->parkToken = 0;
 }
 
 void Runtime::rearmWait(ObjTask* task, int fd) {
     m_waitingTasks.erase(task->parkToken);
-    const auto interest = task->parkReason == ParkReason::FD_WRITE
+    const auto interest = task->parkReason == WaitEvent::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
     // The call began to wait at its first wait, so it keeps that token.
@@ -1525,7 +1525,7 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         return false;
     }
     if (sel.limited) {
-        m_parkRequest = ParkRequest{ParkReason::TIMER, -1, sel.deadline};
+        m_parkRequest = ParkRequest{WaitEvent::TIMER, -1, sel.deadline};
     }
     sel.pendingRetry = true;
     m_taskSwitchPending = true;
@@ -1653,8 +1653,7 @@ bool Runtime::runTask(ObjTask* task) {
         m_taskSwitchInner = nullptr;
         // A receive with a limit asks for a wait on its timer, and it is a
         // receive all the same.
-        if (task->sel.pendingRetry ||
-            m_parkRequest.reason == ParkReason::NONE) {
+        if (task->sel.pendingRetry || m_parkRequest.reason == WaitEvent::NONE) {
             receiveTask(task);
         } else {
             waitTask(task);
@@ -1667,7 +1666,7 @@ bool Runtime::runTask(ObjTask* task) {
 
 // The `receive` move: the task found no message to take.
 void Runtime::receiveTask(ObjTask* task) {
-    if (m_parkRequest.reason != ParkReason::NONE) {
+    if (m_parkRequest.reason != WaitEvent::NONE) {
         // The receive has a limit: it waits on the timer of the limit, so the
         // task is WAITING (see ObjTask::inStateReceiving).
         waitTask(task);

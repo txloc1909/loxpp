@@ -44,7 +44,7 @@ int g_writeFd = -1;
 Value parkFarNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->requestWait(ParkReason::TIMER, -1,
+    if (!rt->requestWait(WaitEvent::TIMER, -1,
                          PClock::now() + std::chrono::seconds(30))) {
         return from<Number>(-1.0);
     }
@@ -55,7 +55,7 @@ Value parkFarNative(int /*argc*/, Value* /*argv*/) {
 Value parkFdNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->requestWait(ParkReason::FD_READ, g_parkFd)) {
+    if (!rt->requestWait(WaitEvent::FD_READ, g_parkFd)) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -340,7 +340,7 @@ TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
             // message in its mailbox.
             EXPECT_EQ(task->state, TaskState::WAITING);
             EXPECT_EQ(task->mailbox.size(), 1u);
-            EXPECT_NE(task->parkReason, ParkReason::NONE);
+            EXPECT_NE(task->parkReason, WaitEvent::NONE);
             rt.completeWait(task, from<Number>(42.0));
         },
         [](ObjTask* task) { return task->mailbox.size() == 1u; });
