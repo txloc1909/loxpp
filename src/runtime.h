@@ -442,21 +442,21 @@ class Runtime {
     // and FD_WRITE; `deadline` only for TIMER.
     bool requestWait(ParkReason reason, int fd = -1,
                      Poller::Clock::time_point deadline = {});
-    // Ends the wait of a WAITING task of this worker, on the owner thread. The
-    // task joins the back of the run queue and its call returns `value`
-    // (completePark) or raises a catchable fault of `kind` (failPark) when it
-    // runs again. Both cancel the wait if it is still registered.
-    void completePark(ObjTask* task, Value value);
-    void failPark(ObjTask* task, const char* kind, const char* msg);
+    // The `wait-end` move for a WAITING task of this worker, on the owner
+    // thread. The task joins the back of the run queue and its call returns
+    // `value` (completeWait) or raises a catchable fault of `kind` (failWait)
+    // when it runs again. Both cancel the wait if it is still registered.
+    void completeWait(ObjTask* task, Value value);
+    void failWait(ObjTask* task, const char* kind, const char* msg);
     // Waits again for the descriptor of a WAITING task whose wait was reported
     // but whose call is not done (only part of the call is done, or the
     // descriptor had nothing for the call after all). The task keeps its place
-    // as a parked task and its call state; a refused registration fails the
+    // as a WAITING task and its call state; a refused registration fails the
     // call with a NetworkError.
-    void rearmPark(ObjTask* task, int fd);
+    void rearmWait(ObjTask* task, int fd);
     // Removes every wait on `fd` before the caller closes it, and appends the
-    // tasks that were parked on it in the order their calls began to wait.
-    // They stay WAITING: the caller ends each wait with failPark.
+    // tasks that wait on it in the order their calls began to wait.
+    // They stay WAITING: the caller ends each wait with failWait.
     void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.
@@ -906,8 +906,8 @@ class Runtime {
     // and maps with no VM::run() opcode wrapping it (backend/rt_capi.cpp).
     [[nodiscard]] MemoryManager& memoryManager() { return m_mm; }
 
-    // The wait set of this worker. Created by the first call, which a park
-    // makes; a worker that never parks never makes one. Owner thread only.
+    // The wait set of this worker. Created by the first call, which a wait
+    // makes; a worker that never waits never makes one. Owner thread only.
     Poller& poller();
     [[nodiscard]] bool hasPoller() const { return m_poller != nullptr; }
     // Called on the owner thread, outside every lock, with the tokens that
@@ -1044,17 +1044,20 @@ class Runtime {
     // WAITING, and its wait is registered. Called by resumeTask after the
     // frames of the task unwound.
     void waitTask(ObjTask* task);
-    // Cancels the wait of a parked task and erases it from the parked set.
-    // No-op for a task that is not parked. It keeps ObjTask::io: the call
+    // Cancels the wait of a task and erases it from m_waitingTasks. No-op for
+    // a task that has no wait registered. It keeps ObjTask::io: the call
     // holds its side until the task runs again (resumeTask clears it).
-    void releasePark(ObjTask* task);
+    void releaseWait(ObjTask* task);
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.
     void pollWhileBusy();
-    // Moves a WAITING task to the back of the run queue.
-    void unparkTask(ObjTask* task);
+    // The step that the `wait-end`, `message` and `limit` moves share for a
+    // WAITING task: it cancels the wait and moves the task to the back of the
+    // run queue.
+    void waitEndTask(ObjTask* task);
     // Handles the tokens that one wait of the poller reported: wakes the
-    // parked tasks they name, then calls the handler of setPollHandler().
+    // WAITING tasks they name (the `wait-end` move, or the `limit` move for a
+    // receive with a limit), then calls the handler of setPollHandler().
     void onPollReady(const std::vector<Poller::Token>& ready);
     // The continuation of a task that resumes with a pending fault: raises it
     // in the innermost coroutine of the task, whose frames are restored and
@@ -1390,10 +1393,11 @@ class Runtime {
     };
     ParkRequest m_parkRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
-    // the collector (pushTempRoot cannot span a suspension). Not the same as
-    // m_receivingTasks: those wait for a message, not for time or a descriptor.
+    // the collector (pushTempRoot cannot span a suspension). It includes a
+    // receive with a limit, which waits on its timer. m_receivingTasks holds
+    // the tasks in state RECEIVING: those wait for a message and no timer.
     std::unordered_map<Poller::Token, ObjTask*> m_waitingTasks;
-    // The limit timers of parked connect calls, by Poller token. A task is
+    // The limit timers of waiting connect calls, by Poller token. A task is
     // in m_waitingTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
     // The task whose pending fault this resume raises before it runs on, or

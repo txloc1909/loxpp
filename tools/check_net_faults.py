@@ -14,9 +14,9 @@ Native (src/stdlib/net_api.cpp):
   - `raiseNet(KIND, ...)` is a catchable fault of the given kind.
   - `setFault(out, KIND, ...)` records a catchable fault in the outcome of a
     read-side step. The caller raises it with `raiseNet(out.faultKind, ...)`
-    where the task runs, or `failPark(task, out.faultKind, ...)` where the task
+    where the task runs, or `failWait(task, out.faultKind, ...)` where the task
     was parked. Those two pass a kind through and are not sites.
-  - `failPark(task, KIND, ...)` with a constant kind ends a parked call with a
+  - `failWait(task, KIND, ...)` with a constant kind ends a parked call with a
     catchable fault of that kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
     Socket write path uses `stepWrite` and `raiseNet`.
@@ -32,7 +32,7 @@ Native (src/stdlib/net_api.cpp):
     function that is not an argument check cannot pass.
   - The name `faultKind` may appear only in the member declaration, in
     `setFault`, and as the kind argument of `raiseNet(out.faultKind` and
-    `failPark(task, out.faultKind`. So every way to write the member by its
+    `failWait(task, out.faultKind`. So every way to write the member by its
     name fails: `=` (also over two lines), `+=`, a pointer or reference
     alias, `std::exchange`, `std::swap`, and a designated initializer.
   - `IoOutcome` may be created only as `IoOutcome out;` (default
@@ -143,7 +143,7 @@ JAVA_METHOD = re.compile(r"^    (?:public |private )?(?:static )?(?:final )?[\w<
 
 # A fatal exit that the table has no row for. Every one fails, with no
 # allowed site: a Socket or Server fault is either catchable (raiseNet,
-# setFault, failPark, makeError) or an argument check (nativeRuntimeError,
+# setFault, failWait, makeError) or an argument check (nativeRuntimeError,
 # new LoxError), and those two are counted by the table.
 FATAL_NATIVE = re.compile(
     r"(?<![\w.])(abort|runtimeError|exit|_exit|_Exit|quick_exit|terminate|throw)\b"
@@ -266,11 +266,11 @@ def native_sites(text: str) -> tuple[Counter | None, list[str]]:
             window = line
             if line.rstrip().endswith(("(", ",")) and number < len(lines):
                 window += " " + lines[number].strip()
-            for head in re.finditer(r"\b(raiseNet|setFault|failPark)\(", line):
+            for head in re.finditer(r"\b(raiseNet|setFault|failWait)\(", line):
                 pattern = {
                     "raiseNet": r"raiseNet\(\s*([\w.]+)",
                     "setFault": r"setFault\(\s*out,\s*([\w.]+)",
-                    "failPark": r"failPark\(\s*task,\s*([\w.]+)",
+                    "failWait": r"failWait\(\s*task,\s*([\w.]+)",
                 }[head.group(1)]
                 arg = re.match(pattern, window[head.start():])
                 if arg is None:
@@ -296,7 +296,7 @@ def native_sites(text: str) -> tuple[Counter | None, list[str]]:
             r"\{nullptr\};", after
         )
         kind_argument = re.search(
-            r"\b(?:raiseNet\(\s*|failPark\(\s*\w+\s*,\s*)out\.$", before
+            r"\b(?:raiseNet\(\s*|failWait\(\s*\w+\s*,\s*)out\.$", before
         ) and re.match(r"\s*[,)]", after)
         if function_at[number] != "setFault" and not declaration and not kind_argument:
             problems.append(f"line {number}: faultKind is used outside setFault")

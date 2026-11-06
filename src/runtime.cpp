@@ -825,7 +825,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                                   : Chunk::const_iterator{};
         WakeResult wake = WakeResult::Run;
         // The coroutine that holds the suspended call is the one at the end
-        // of the chain; a parked call's fault is raised there.
+        // of the chain; a waiting call's fault is raised there.
         const bool innermost = co->waitingInner == nullptr;
         if (!innermost) {
             wake = resumeWaitingInner(co, entry);
@@ -1077,8 +1077,8 @@ bool Runtime::raiseResumeFault(int entry) {
     // reach a suspend point, and the task switch after it must not raise the
     // same fault again.
     m_faultTask = nullptr;
-    // The native that made the call returned when the task parked, so the
-    // value that the resume put on the stack is not a result: a handler
+    // The native that made the call returned when the task began to wait, so
+    // the value that the resume put on the stack is not a result: a handler
     // truncates the stack, and the other outcomes reset it.
     switch (raiseThrowableError(kind.c_str(), message.c_str(), entry)) {
     case ThrowOutcome::HandledContinue:
@@ -1155,7 +1155,7 @@ void Runtime::waitTask(ObjTask* task) {
     }
 }
 
-void Runtime::releasePark(ObjTask* task) {
+void Runtime::releaseWait(ObjTask* task) {
     if (task->parkReason == ParkReason::NONE) {
         return;
     }
@@ -1176,7 +1176,7 @@ void Runtime::releasePark(ObjTask* task) {
     task->parkToken = 0;
 }
 
-void Runtime::rearmPark(ObjTask* task, int fd) {
+void Runtime::rearmWait(ObjTask* task, int fd) {
     m_waitingTasks.erase(task->parkToken);
     const auto interest = task->parkReason == ParkReason::FD_WRITE
                               ? Poller::Interest::Write
@@ -1187,7 +1187,7 @@ void Runtime::rearmPark(ObjTask* task, int fd) {
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
         task->parkToken = 0;
-        failPark(task, "NetworkError", message.c_str());
+        failWait(task, "NetworkError", message.c_str());
         return;
     }
     task->parkToken = token;
@@ -1208,31 +1208,31 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
     }
 }
 
-void Runtime::unparkTask(ObjTask* task) {
+void Runtime::waitEndTask(ObjTask* task) {
     if (task->state != TaskState::WAITING) {
         return;
     }
-    releasePark(task);
+    releaseWait(task);
     task->state = TaskState::READY;
     m_runQueue.push_back(task);
 }
 
-void Runtime::completePark(ObjTask* task, Value value) {
+void Runtime::completeWait(ObjTask* task, Value value) {
     if (task->state != TaskState::WAITING) {
         return;
     }
     task->pendingValue = value;
-    unparkTask(task);
+    waitEndTask(task);
 }
 
-void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
+void Runtime::failWait(ObjTask* task, const char* kind, const char* msg) {
     if (task->state != TaskState::WAITING) {
         return;
     }
     task->hasPendingFault = true;
     task->faultKind = kind;
     task->faultMessage = msg;
-    unparkTask(task);
+    waitEndTask(task);
 }
 
 void Runtime::pollWhileBusy() {
@@ -1268,7 +1268,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             m_parkTimers.erase(limit);
             task->parkTimerToken = 0;
             const std::string message = task->io.timeoutMessage;
-            failPark(task, "NetworkError", message.c_str());
+            failWait(task, "NetworkError", message.c_str());
             continue;
         }
         auto found = m_waitingTasks.find(token);
@@ -1281,7 +1281,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         } else if (task->inStateReceiving()) {
             limitTask(task);
         } else {
-            completePark(task, from<Nil>(Nil{}));
+            completeWait(task, from<Nil>(Nil{}));
         }
     }
     if (m_pollHandler) {
@@ -1339,7 +1339,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->hasPendingFault = false;
     task->io = ParkedIo{};
     task->sel = ObjTask::SelectiveReceive{};
-    releasePark(task);
+    releaseWait(task);
     m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
@@ -1379,7 +1379,7 @@ void Runtime::messageTask(ObjTask* task) {
     } else {
         // A receive_* call with a limit: the message ends the wait of the
         // limit, and the call tests the message when the task runs.
-        unparkTask(task);
+        waitEndTask(task);
     }
 }
 
@@ -1387,7 +1387,7 @@ void Runtime::limitTask(ObjTask* task) {
     // The call tests the messages that arrived with the limit first, and
     // raises TimeoutError only if none is selected.
     task->sel.timedOut = true;
-    completePark(task, from<Nil>(Nil{}));
+    completeWait(task, from<Nil>(Nil{}));
 }
 
 bool Runtime::sendMessage(ObjTask* task, Value msg) {
@@ -1570,7 +1570,7 @@ bool Runtime::resumeTask(ObjTask* task) {
             received = task->mailbox.front();
             task->mailbox.pop_front();
         } else if (task->hasPendingFault) {
-            // The flag is cleared here, and only failPark sets it, with the
+            // The flag is cleared here, and only failWait sets it, with the
             // kind and the message. A fault that nothing raises therefore
             // leaves nothing behind for a later resume to read.
             task->hasPendingFault = false;
@@ -1642,7 +1642,7 @@ void Runtime::endTasks() {
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
     for (const auto& parked : m_waitingTasks) {
         left.push_back(parked.second);
-        // No deferred call will close the descriptor of a parked call.
+        // No deferred call will close the descriptor of a waiting call.
         if (parked.second->io.op != IoOp::NONE) {
             closeParkedDescriptor(*this, parked.second);
         }
@@ -1653,7 +1653,7 @@ void Runtime::endTasks() {
         } else {
             // The main task of a session survives the line, but its wait does
             // not: nothing would end it once m_waitingTasks is cleared below.
-            releasePark(task);
+            releaseWait(task);
             task->io = ParkedIo{};
             task->pendingValue = Value{};
             task->hasPendingFault = false;
