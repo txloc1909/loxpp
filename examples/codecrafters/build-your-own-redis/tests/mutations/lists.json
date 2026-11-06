@@ -1,0 +1,163 @@
+[
+ {
+  "name": "BLPOP serves the newest waiter",
+  "old": "        this.waiters.pushRight(w);",
+  "new": "        this.waiters.pushLeft(w);",
+  "cases": [
+   "lists-10 the first waiter is served"
+  ]
+ },
+ {
+  "name": "push does not serve waiters",
+  "old": "    serveWaiters(argv[1]);\n",
+  "new": "",
+  "cases": [
+   "lists-10 BLPOP gets the element"
+  ]
+ },
+ {
+  "name": "BLPOP limit ignored",
+  "old": "            msg = task.receive_where_within(isWake, block.timeout);",
+  "new": "            msg = task.receive_where(isWake);",
+  "cases": [
+   "lists-11 BLPOP times out with a null array"
+  ]
+ },
+ {
+  "name": "timed-out waiter stays active",
+  "old": "    w.active = false;\n    for (var key in keys) {",
+  "new": "    for (var key in keys) {",
+  "cases": [
+   "local: the push skips the timed-out waiter"
+  ]
+ },
+ {
+  "name": "client close does not end a wait",
+  "old": "        case Msg.Closed => true\n",
+  "new": "",
+  "cases": [
+   "local: a closed waiter takes no element"
+  ]
+ },
+ {
+  "name": "served key counted out twice",
+  "old": "        w.servedBy = key;\n",
+  "new": "",
+  "cases": [
+   "local: the second waiter gets the next push"
+  ]
+ },
+ {
+  "name": "LRANGE negative start not mapped",
+  "old": "    if (start < 0) {\n        start = n + start;\n    }\n",
+  "new": "",
+  "cases": [
+   "lists-05 LRANGE -2 -1"
+  ]
+ },
+ {
+  "name": "LPUSH keeps argument order",
+  "old": "            entry.value.pushLeft(argv[i]);",
+  "new": "            entry.value.pushRight(argv[i]);",
+  "cases": [
+   "lists-06 LPUSH order"
+  ]
+ },
+ {
+  "name": "LLEN of a missing list not 0",
+  "old": "        return integerReply(0);",
+  "new": "        return NULL_BULK;",
+  "cases": [
+   "lists-07 LLEN missing list"
+  ]
+ },
+ {
+  "name": "LPOP count pops one less",
+  "old": "    var out = entry.value.takeLeft(count);",
+  "new": "    var out = entry.value.takeLeft(count - 1);",
+  "cases": [
+   "lists-09 LPOP 2"
+  ]
+ },
+ {
+  "name": "empty list kept",
+  "old": "    if (entry.value.size() == 0) {\n        store.del(key);\n    }\n",
+  "new": "",
+  "cases": [
+   "local: LPOP on the emptied list is a null bulk string"
+  ]
+ },
+ {
+  "name": "push on a string key",
+  "old": "    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (entry == nil) {\n        entry = newList(argv[1]);",
+  "new": "    if (entry == nil) {\n        entry = newList(argv[1]);",
+  "cases": [
+   "local: LPUSH on a string key is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "GET of a list key",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
+  "new": "    return bulk(entry.value);",
+  "cases": [
+   "local: GET on a list key is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "LPUSH grows the front by one slot",
+  "old": "        var gap = this.size();\n        if (gap < 8) {\n            gap = 8;\n        }",
+  "new": "        var gap = 1;",
+  "cases": [
+   "local: LPUSH of 100000 elements is fast"
+  ]
+ },
+ {
+  "name": "array reply joined left to right",
+  "old": "        var stop = i + ELEMENTS_PER_YIELD;\n        if (stop > len(items)) {\n            stop = len(items);\n        }\n        var parts = [];\n        for (var s in items[i:stop]) {\n            parts.append(bulk(s));\n        }\n        conn.sock.write(joinRange(parts, 0, len(parts)));",
+  "new": "        var stop = len(items);\n        var out = \"\";\n        for (var s in items) {\n            out = out + bulk(s);\n        }\n        conn.sock.write(out);",
+  "cases": [
+   "local: LRANGE of RPUSH of 100000 elements is fast"
+  ]
+ },
+ {
+  "name": "L16 no yield while a long array reply is written",
+  "old": "        i = stop;\n        if (i < len(items)) {\n            yield nil;\n        }",
+  "new": "        i = stop;",
+  "cases": [
+   "local: P7 LRANGE of 2097146 elements stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "L17 array reply in steps drops the last step",
+  "old": "        if (stop > len(items)) {\n            stop = len(items);\n        }",
+  "new": "        if (stop > len(items)) {\n            return;\n        }",
+  "cases": [
+   "local: P7 LRANGE of 2097146 elements gives every element"
+  ]
+ },
+ {
+  "name": "L18 session does not wake a reader that waits for credit",
+  "old": "        task.send(conn.reader, Msg.Blocked());\n",
+  "new": "",
+  "cases": [
+   "local: BLPOP on 1100 keys with no limit ends when its client goes after 100 more commands"
+  ]
+ },
+ {
+  "name": "L19 no limit on commands during BLPOP",
+  "old": "            if (credits <= -HOLD) {\n                return false;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: a client that sends 2000 commands during one BLPOP is closed"
+  ]
+ },
+ {
+  "name": "L20 reader does not read on during BLPOP",
+  "old": "        if (conn.blocked) {\n            if (credits <= -HOLD) {",
+  "new": "        if (false) {\n            if (credits <= -HOLD) {",
+  "cases": [
+   "local: BLPOP with no limit ends when its client goes after 100 more commands",
+   "local: a client that sends 2000 commands during one BLPOP is closed"
+  ]
+ }
+]

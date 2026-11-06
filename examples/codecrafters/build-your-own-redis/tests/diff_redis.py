@@ -73,6 +73,32 @@ SCRIPTS = {
         ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
                      ["NOSUCH", "x" * 200, "y"], ["PING"]]),
     ],
+    "lists": [
+        ("push-and-range", [
+            ["RPUSH", "l", "a", "b", "c"], ["LPUSH", "l", "z", "y"],
+            ["LRANGE", "l", "0", "-1"], ["LRANGE", "l", "1", "2"],
+            ["LRANGE", "l", "-3", "-2"], ["LRANGE", "l", "-100", "100"],
+            ["LRANGE", "l", "4", "2"], ["LRANGE", "l", "10", "20"],
+            ["LRANGE", "missing", "0", "-1"], ["LLEN", "l"], ["LLEN", "missing"],
+        ]),
+        ("pop", [
+            ["RPUSH", "l", "1", "2", "3", "4"], ["LPOP", "l"], ["LPOP", "l", "2"],
+            ["LPOP", "l", "0"], ["LPOP", "l", "5"], ["LPOP", "l"], ["LLEN", "l"],
+            ["LPOP", "missing"], ["LPOP", "missing", "2"],
+        ]),
+        ("blpop-no-wait", [
+            ["RPUSH", "b", "x", "y"], ["BLPOP", "missing", "b", "0"],
+            ["BLPOP", "b", "0.01"], ["BLPOP", "b", "0.01"],
+        ]),
+        ("errors", [
+            ["SET", "s", "v"], ["RPUSH", "s", "x"], ["LPUSH", "s", "x"],
+            ["LLEN", "s"], ["LRANGE", "s", "0", "1"], ["LPOP", "s"],
+            ["BLPOP", "s", "0"], ["RPUSH", "l", "x"], ["GET", "l"],
+            ["LRANGE", "l", "a", "1"], ["LPOP", "l", "-1"], ["LPOP", "l", "x"],
+            ["BLPOP", "l", "-1"], ["BLPOP", "l", "abc"], ["RPUSH", "l"],
+            ["LLEN"], ["LRANGE", "l", "0"],
+        ]),
+    ],
 }
 
 

@@ -24,7 +24,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | Group | Stages | Status |
 |---|---|---|
 | base | 7 | pass |
-| lists | 11 | not started |
+| lists | 11 | pass |
 | streams | 13 | not started |
 | transactions | 11 | not started |
 | optimistic-locking | 8 | not started |
@@ -81,6 +81,31 @@ takes the arguments of the command out of its message first (this step
 yields, see rule 2), and the socket write comes after the command. So each
 command is atomic, as in Redis.
 
+### Lists and BLPOP
+
+A list key holds a deque over a Lox++ List (`class Deque`): a pop from the
+left moves a head index, and a push to the left fills free slots before it,
+so each push and pop costs a constant time on average. An empty list is
+never stored: the key goes away with its last element, as in Redis.
+
+`BLPOP` puts a `Waiter` for the session in a first-in first-out queue for
+each of its keys, then waits in `task.receive_where_within` (or
+`task.receive_where` for no time limit) for `Msg.Served` or `Msg.Closed`.
+A push serves the oldest waiters at the end of the push command: it pops
+one element for each and sends it in `Msg.Served(key, value)`. The pusher
+does the pop, so the element is not given to two clients, and the waiter
+gets it with no other command between the push and the pop. The commands
+that the client sends during the wait stay in the mailbox and run after it,
+as Redis queues the commands of a blocked client.
+
+### Large replies
+
+`LRANGE` and `LPOP` with a count take their elements from the keyspace with
+one slice, into a new List. The session then encodes and writes the reply
+in steps of 1024 elements and yields between the steps (`class Bulks`,
+`writeBulks`). The command stays atomic, because its keyspace work is the
+one slice; the other clients go on while a long reply is written.
+
 ### Expiry
 
 Lazy, as in Redis: a read compares the deadline of the key with
@@ -112,6 +137,8 @@ printed.
   - two bytes other than CRLF after a bulk string (Redis 7.0 does not check
     them);
   - an array header above 1048576 (Redis waits for the arguments).
+- A client that sends more than 960 commands during one `BLPOP` is closed.
+  Redis keeps them in its query buffer, up to `client-query-buffer-limit`.
 
 ### One client must not stop the other clients
 
@@ -144,6 +171,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
    When the session ends, it closes the socket and sends `Stop` to the
    reader, so a reader that waits for credit does not outlive its
    connection.
+   While the session waits in `BLPOP`, it gives no credit, but the reader
+   must read on to see the end of the stream: a wait with no time limit
+   would otherwise outlive a client that has gone. So during a wait the
+   reader may send `HOLD` (960) commands past its credit, and the mailbox
+   holds at most 1024 messages. The session sets `conn.blocked` and sends
+   `Msg.Blocked`, which wakes a reader that already waits for credit. A
+   client that sends more than `HOLD` commands during one wait is closed.
 5. **A command is atomic, and its work is linear** (atomic: no suspend point
    between the start of its keyspace work and its reply), as in the Redis
    documentation of the command. `upper` gives a word longer than any
@@ -161,13 +195,20 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | P4: four such arrays at the same time | PING within 0.2 s, which holds the yield of `toArgs` and the yield of `fromArgs` one by one (without one of them: 0.38–0.68 s) | 0.054–0.074 s |
 | P5: an inline line of 65536 bytes (the limit) | PING within 0.5 s | 0.016–0.020 s |
 | P6: 4 clients send only empty lines for 3 s | PING within 0.5 s | 0.002 s |
+| P7: `LRANGE 0 -1` of a list of 2097146 elements | every byte of the reply; PING within 0.2 s (without the yield of `writeBulks`: about 1.1 s) | as required; 0.004–0.005 s |
+| Group `lists`: `BLPOP k 0` and 100 more commands, then the client closes (also with 1100 keys, where the reader already waits for credit) | the tasks of the connection end (`connected_clients` back) | as required |
+| Group `lists`: `BLPOP k 0` and 2000 more commands | the client is closed, its tasks end | as required |
+| Group `lists`: `BLPOP k 5` and 900 more commands, then a push | the 900 replies come after the `BLPOP` reply, in order | as required |
+| Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.11 s / 0.25 s |
+| Not in the suite: `LPOP k 2000000` of a list of 2097146 elements | PING within 1.0 s | 0.05 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
 
 Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
-probe has a mutation in `tests/mutations/base.json` that removes its guard.
+probe has a mutation in `tests/mutations/base.json` or
+`tests/mutations/lists.json` that removes its guard.
 
 Known residuals, each with its own issue:
 
@@ -203,6 +244,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/redis.lox \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
+# the same with tests/mutations/lists.json for the lists group
 ```
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the

@@ -98,14 +98,14 @@ class Server:
 
 
 def encode(*args):
-    out = b"*%d\r\n" % len(args)
+    out = [b"*%d\r\n" % len(args)]
     for a in args:
         if isinstance(a, int):
             a = str(a)
         if isinstance(a, str):
             a = a.encode("latin-1")
-        out += b"$%d\r\n%s\r\n" % (len(a), a)
-    return out
+        out.append(b"$%d\r\n%s\r\n" % (len(a), a))
+    return b"".join(out)
 
 
 TIMEOUT = "<no reply within the limit>"
@@ -584,6 +584,41 @@ def stages_fairness(prog):
         check("local: P6 4 clients that send only empty lines, PING within 0.5 s",
               worst <= 0.5 and not wrong, "worst %.3f s" % worst)
 
+        # P7: a reply of 2097146 elements. The session writes it in steps
+        # and yields between them, so the other clients go on. Without the
+        # yield the stall is about 1.1 s.
+        n = 1048573
+        c = srv.client()
+        c.send_raw(encode("RPUSH", "p7", *(["abcd"] * n)))
+        first = c.try_read(30)
+        c.send_raw(encode("RPUSH", "p7", *(["abcd"] * n)))
+        second = c.try_read(30)
+        check("local: P7 two RPUSH of 1048573 elements",
+              first == n and second == 2 * n, "%r %r" % (first, second))
+        expected = b"*%d\r\n" % (2 * n) + b"$4\r\nabcd\r\n" * (2 * n)
+        got = [b""]
+
+        def lrange_all():
+            c.sock.settimeout(30)
+            c.sock.sendall(encode("LRANGE", "p7", "0", "-1"))
+            parts, size = [], 0
+            while size < len(expected):
+                try:
+                    chunk = c.sock.recv(1 << 20)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                parts.append(chunk)
+                size += len(chunk)
+            got[0] = b"".join(parts)
+        worst, wrong, _ = measure_while(srv, lrange_all)
+        check("local: P7 LRANGE of 2097146 elements gives every element",
+              got[0] == expected, "got %d bytes of %d" % (len(got[0]), len(expected)))
+        check("local: P7 LRANGE of 2097146 elements stalls PING at most 0.2 s",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        c.close()
+
         # 1000 clients that send more than a window of commands and reset
         # the connection without reading. Each connection's tasks must end:
         # the session closes its socket, so the open files of the server go
@@ -635,8 +670,307 @@ def stages_fairness(prog):
         srv.stop()
 
 
+def stages_lists(prog):
+    srv = Server(prog, [])
+    try:
+        check("lists: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+
+        key = rand_word()
+        check("lists-01 RPUSH creates a list", c.call("RPUSH", key, "element") == 1)
+
+        key = rand_word()
+        check("lists-02 RPUSH appends (1)", c.call("RPUSH", key, "element1") == 1)
+        check("lists-02 RPUSH appends (2)", c.call("RPUSH", key, "element2") == 2)
+
+        key = rand_word()
+        check("lists-03 RPUSH many (3)", c.call("RPUSH", key, "e1", "e2", "e3") == 3)
+        check("lists-03 RPUSH many (5)", c.call("RPUSH", key, "e4", "e5") == 5)
+        check("local: RPUSH keeps the order",
+              c.call("LRANGE", key, "0", "-1") == ["e1", "e2", "e3", "e4", "e5"])
+
+        key = rand_word()
+        c.call("RPUSH", key, "a", "b", "c", "d", "e")
+        check("lists-04 LRANGE 0 2", c.call("LRANGE", key, "0", "2") == ["a", "b", "c"])
+        check("lists-04 LRANGE 1 3", c.call("LRANGE", key, "1", "3") == ["b", "c", "d"])
+        check("lists-04 LRANGE stop past the end",
+              c.call("LRANGE", key, "2", "10") == ["c", "d", "e"])
+        check("lists-04 LRANGE start past the end",
+              c.call("LRANGE", key, "7", "9") == [])
+        check("lists-04 LRANGE start > stop", c.call("LRANGE", key, "3", "1") == [])
+        check("lists-04 LRANGE missing list",
+              c.call("LRANGE", rand_word(), "0", "1") == [])
+
+        check("lists-05 LRANGE 2 -1", c.call("LRANGE", key, "2", "-1") == ["c", "d", "e"])
+        check("lists-05 LRANGE -2 -1", c.call("LRANGE", key, "-2", "-1") == ["d", "e"])
+        check("lists-05 LRANGE -9 1 (clamped)",
+              c.call("LRANGE", key, "-9", "1") == ["a", "b"])
+        check("lists-05 LRANGE 0 -9", c.call("LRANGE", key, "0", "-9") == [])
+
+        key = rand_word()
+        check("lists-06 LPUSH (1)", c.call("LPUSH", key, "c") == 1)
+        check("lists-06 LPUSH (3)", c.call("LPUSH", key, "b", "a") == 3)
+        check("lists-06 LPUSH order",
+              c.call("LRANGE", key, "0", "-1") == ["a", "b", "c"])
+
+        key = rand_word()
+        n = random.randint(3, 9)
+        c.call("RPUSH", key, *[rand_word(3) for _ in range(n)])
+        check("lists-07 LLEN", c.call("LLEN", key) == n)
+        check("lists-07 LLEN missing list", c.call("LLEN", rand_word()) == 0)
+
+        key = rand_word()
+        c.call("RPUSH", key, "one", "two", "three", "four", "five")
+        check("lists-08 LPOP", c.call("LPOP", key) == "one")
+        check("lists-08 LRANGE after LPOP",
+              c.call("LRANGE", key, "0", "-1") == ["two", "three", "four", "five"])
+        check("local: LPOP missing list is a null bulk string",
+              c.call("LPOP", rand_word()) is None)
+
+        key = rand_word()
+        c.call("RPUSH", key, "one", "two", "three", "four", "five")
+        check("lists-09 LPOP 2", c.call("LPOP", key, "2") == ["one", "two"])
+        check("lists-09 LRANGE after LPOP 2",
+              c.call("LRANGE", key, "0", "-1") == ["three", "four", "five"])
+        check("local: LPOP count past the end",
+              c.call("LPOP", key, "9") == ["three", "four", "five"])
+        check("local: the empty list is removed", c.call("LLEN", key) == 0)
+        check("local: LPOP on the emptied list is a null bulk string",
+              c.call("LPOP", key) is None)
+        c.call("SET", key, "now-a-string")
+        check("local: the emptied key can hold a string",
+              c.call("GET", key) == "now-a-string")
+
+        # lists-10: BLPOP with no limit, served when another client pushes.
+        key = rand_word()
+        blocked = srv.client()
+        blocked.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.2)
+        pusher = srv.client()
+        check("lists-10 RPUSH to a waited list replies 1",
+              pusher.call("RPUSH", key, "foo") == 1)
+        check("lists-10 BLPOP gets the element", blocked.try_read() == [key, "foo"])
+        check("local: the served element left the list", c.call("LLEN", key) == 0)
+
+        # lists-10: the client that waited first is served first.
+        key = rand_word()
+        first, second = srv.client(), srv.client()
+        first.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        second.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        pusher.call("RPUSH", key, "foo")
+        check("lists-10 the first waiter is served", first.try_read() == [key, "foo"])
+        got = second.try_read(0.3)
+        check("lists-10 the second waiter still waits", got is TIMEOUT, repr(got))
+        pusher.call("RPUSH", key, "bar")
+        check("local: the second waiter gets the next push",
+              second.try_read() == [key, "bar"])
+
+        # lists-11: BLPOP with a limit.
+        key = rand_word()
+        start = time.time()
+        blocked.send_raw(encode("BLPOP", key, "0.1"))
+        got = blocked.try_read(2)
+        took = time.time() - start
+        check("lists-11 BLPOP times out with a null array", got is None, repr(got))
+        check("lists-11 the wait lasts about the limit", 0.09 <= took < 1.0,
+              "%.3f s" % took)
+        key = rand_word()
+        blocked.send_raw(encode("BLPOP", key, "0.5"))
+        time.sleep(0.1)
+        pusher.call("RPUSH", key, "foo")
+        check("lists-11 BLPOP before the limit gets the element",
+              blocked.try_read() == [key, "foo"])
+
+        # local: a waiter that timed out is not served later.
+        key = rand_word()
+        check("local: timed-out BLPOP", blocked.call("BLPOP", key, "0.05") is None)
+        pusher.call("RPUSH", key, "kept")
+        check("local: a timed-out waiter takes no element",
+              c.call("LRANGE", key, "0", "-1") == ["kept"])
+
+        # local: a waiter that timed out is skipped while another waiter of
+        # the same key still waits.
+        key = rand_word()
+        blocked.send_raw(encode("BLPOP", key, "0.05"))
+        time.sleep(0.02)
+        second.send_raw(encode("BLPOP", key, "0"))
+        check("local: the first waiter times out", blocked.try_read() is None)
+        pusher.call("RPUSH", key, "x")
+        check("local: the push skips the timed-out waiter",
+              second.try_read() == [key, "x"])
+
+        # local: a waiter whose client goes away takes no element.
+        key = rand_word()
+        gone = srv.client()
+        gone.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        gone.close()
+        time.sleep(0.1)
+        pusher.call("RPUSH", key, "kept")
+        check("local: a closed waiter takes no element",
+              c.call("LRANGE", key, "0", "-1") == ["kept"])
+
+        # local: commands sent after BLPOP wait until it is served.
+        key = rand_word()
+        blocked.send_raw(encode("BLPOP", key, "0") + encode("PING"))
+        time.sleep(0.1)
+        pusher.call("RPUSH", key, "x")
+        check("local: BLPOP reply comes before the next reply",
+              blocked.try_read() == [key, "x"] and blocked.try_read() == "PONG")
+
+        # local: BLPOP on many keys takes the first one with an element.
+        k1, k2 = rand_word(), rand_word()
+        c.call("RPUSH", k2, "v2")
+        check("local: BLPOP on two keys", c.call("BLPOP", k1, k2, "0") == [k2, "v2"])
+
+        key = rand_word()
+        c.call("SET", key, "s")
+        got = c.call("LPUSH", key, "x")
+        check("local: LPUSH on a string key is WRONGTYPE",
+              isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        c.call("RPUSH", "L" + key, "x")
+        got = c.call("GET", "L" + key)
+        check("local: GET on a list key is WRONGTYPE",
+              isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+
+        # Bug class of #1123: the work of a list command stays linear, so a
+        # long list does not stop the other clients.
+        n = 100000
+        for name, build in [
+            ("RPUSH of 100000 elements", lambda k: c.send_raw(encode("RPUSH", k, *["x"] * n))),
+            ("LPUSH of 100000 elements", lambda k: c.send_raw(encode("LPUSH", k, *["x"] * n))),
+        ]:
+            key = rand_word()
+            start = time.time()
+            build(key)
+            got = c.try_read(30)
+            check("local: %s is fast" % name,
+                  got == n and time.time() - start < 5,
+                  "%r after %.1f s" % (got, time.time() - start))
+            start = time.time()
+            c.send_raw(encode("LRANGE", key, "0", "-1"))
+            got = c.try_read(30)
+            check("local: LRANGE of %s is fast" % name,
+                  isinstance(got, list) and len(got) == n and time.time() - start < 5,
+                  "%.1f s" % (time.time() - start))
+            start = time.time()
+            c.send_raw(encode("LPOP", key, str(n)))
+            got = c.try_read(30)
+            check("local: LPOP %d after %s is fast" % (n, name),
+                  isinstance(got, list) and len(got) == n and time.time() - start < 5,
+                  "%.1f s" % (time.time() - start))
+        key = rand_word()
+        start = time.time()
+        for i in range(2000):
+            c.send_raw(encode("LPUSH", key, "x"))
+        for i in range(2000):
+            c.read()
+        for i in range(2000):
+            c.send_raw(encode("LPOP", key))
+        for i in range(2000):
+            c.read()
+        check("local: 2000 single LPUSH then 2000 LPOP are fast",
+              time.time() - start < 5 and c.call("LLEN", key) == 0,
+              "%.1f s" % (time.time() - start))
+
+        # Many waits that time out on one key do not grow its queue without
+        # bound: the next push still serves the next live waiter.
+        key = rand_word()
+        for _ in range(50):
+            blocked.call("BLPOP", key, "0.01")
+        blocked.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        pusher.call("RPUSH", key, "after-timeouts")
+        check("local: a waiter after 50 time-outs is served",
+              blocked.try_read() == [key, "after-timeouts"])
+
+        # A waiter on two keys, served by one, is counted out of the other.
+        k1, k2 = rand_word(), rand_word()
+        blocked.send_raw(encode("BLPOP", k1, k2, k1, "0"))
+        time.sleep(0.1)
+        pusher.call("RPUSH", k2, "v")
+        check("local: BLPOP on k1 k2 k1 served by k2",
+              blocked.try_read() == [k2, "v"])
+        pusher.call("RPUSH", k1, "stays")
+        check("local: no waiter remains on k1",
+              c.call("LRANGE", k1, "0", "-1") == ["stays"])
+
+        # While a session waits in BLPOP, its reader reads on past its
+        # credit, so that it sees a client that goes.
+        def clients_now():
+            info = c.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        def clients_back_to(count):
+            deadline = time.time() + 5
+            now = clients_now()
+            while time.time() < deadline and now != count:
+                time.sleep(0.05)
+                now = clients_now()
+            return now
+
+        base = clients_now()
+        key = rand_word()
+        gone = srv.client()
+        gone.send_raw(encode("BLPOP", key, "0") + encode("PING") * 100)
+        time.sleep(0.2)
+        gone.close()
+        now = clients_back_to(base)
+        check("local: BLPOP with no limit ends when its client goes after 100 more commands",
+              now == base, "connected_clients %d, before %d" % (now, base))
+
+        # The same, when the reader already waits for credit as the session
+        # starts to wait: the session yields while it takes the 1100 keys
+        # of this BLPOP out of its message, and the reader has used its
+        # credit by then.
+        gone = srv.client()
+        gone.send_raw(encode("BLPOP", *[rand_word() for _ in range(1100)], "0")
+                      + encode("PING") * 100)
+        time.sleep(0.3)
+        gone.close()
+        now = clients_back_to(base)
+        check("local: BLPOP on 1100 keys with no limit ends when its client goes after 100 more commands",
+              now == base, "connected_clients %d, before %d" % (now, base))
+
+        key = rand_word()
+        flood = srv.client()
+        flood.send_raw(encode("BLPOP", key, "0") + encode("PING") * 2000)
+        check("local: a client that sends 2000 commands during one BLPOP is closed",
+              flood.try_read(5) is CLOSED)
+        flood.close()
+        now = clients_back_to(base)
+        check("local: that client's tasks end",
+              now == base, "connected_clients %d, before %d" % (now, base))
+
+        key = rand_word()
+        waiting = srv.client()
+        waiting.send_raw(encode("BLPOP", key, "5") + encode("PING") * 900)
+        time.sleep(0.2)
+        pusher.call("RPUSH", key, "v")
+        got = waiting.try_read(5)
+        pongs = 0
+        while pongs < 900 and waiting.try_read(5) == "PONG":
+            pongs += 1
+        check("local: 900 commands sent during BLPOP run after it, in order",
+              got == [key, "v"] and pongs == 900, "%r, %d PONG" % (got, pongs))
+        waiting.close()
+
+        for cl in (c, blocked, pusher, first, second):
+            cl.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
+    ("lists", stages_lists),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]

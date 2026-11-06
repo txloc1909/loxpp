@@ -179,11 +179,51 @@ fun bulk(s) {
 }
 
 var NULL_BULK = "$-1\r\n";
+var NULL_ARRAY = "*-1\r\n";
 var NOT_INTEGER = "-ERR value is not an integer or out of range\r\n";
 
 fun integerReply(n) {
     return ":" + str(n) + "\r\n";
 }
+
+// Joins parts[lo:hi] by halves, so each byte is copied about log2(n) times;
+// a left-to-right join would copy it n times.
+fun joinRange(parts, lo, hi) {
+    if (hi - lo == 0) {
+        return "";
+    }
+    if (hi - lo == 1) {
+        return parts[lo];
+    }
+    var mid = lo + (hi - lo - (hi - lo) % 2) / 2;
+    return joinRange(parts, lo, mid) + joinRange(parts, mid, hi);
+}
+
+// items holds replies that are already encoded.
+fun arrayReply(items) {
+    return "*" + str(len(items)) + "\r\n" + joinRange(items, 0, len(items));
+}
+
+// A reply of many bulks: the session encodes and writes it in steps of
+// ELEMENTS_PER_YIELD elements and yields between the steps. items is a new
+// List that the command took from the keyspace in one step, so the command
+// stays atomic, and a long list does not stop the other clients while its
+// reply is encoded.
+class Bulks {
+    init(items) {
+        this.items = items;
+    }
+}
+
+fun bulkArray(strings) {
+    var items = [];
+    for (var s in strings) {
+        items.append(bulk(s));
+    }
+    return arrayReply(items);
+}
+
+var WRONGTYPE = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n";
 
 fun wrongArgs(name) {
     return errorReply("ERR wrong number of arguments for '" + name + "' command");
@@ -199,9 +239,11 @@ fun wrongArgs(name) {
 enum Args { Cons(head, tail) Empty }
 // Reader to session: Cmd, Fail, Closed. Fail(text) carries a protocol error:
 // the session replies with it and ends the connection, as Redis does.
-// Session to reader: Credit after each command it has done, and Stop when it
-// ends.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Stop }
+// Session to reader: Credit after each command it has done, Blocked when it
+// starts to wait in BLPOP, and Stop when it ends.
+// Served(key, value), from a pusher to a session that waits in BLPOP,
+// hands it a popped element.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) }
 
 // Both run over up to ARRAY_MAX arguments, so they yield as the reader does
 // (rule 2 of the README). toArgs runs in the reader and fromArgs in the
@@ -249,8 +291,12 @@ fun fromArgs(args) {
 // Keyspace
 // ===========================================================================
 
+// kind is "string" or "list". A list key holds a Lox++ List, and an empty
+// list is never stored: the key goes away with its last element, as in
+// Redis.
 class Entry {
-    init(value, expiresAt) {
+    init(kind, value, expiresAt) {
+        this.kind = kind;
         this.value = value;
         // Milliseconds since the epoch, or nil for a key with no expiry.
         this.expiresAt = expiresAt;
@@ -332,6 +378,9 @@ fun cmdSet(argv) {
         }
     }
     var old = lookup(key);
+    if (returnOld and old != nil and old.kind != "string") {
+        return WRONGTYPE;
+    }
     var reply = simple("OK");
     if (returnOld) {
         reply = NULL_BULK;
@@ -348,7 +397,7 @@ fun cmdSet(argv) {
     if (keepTtl and old != nil) {
         expiresAt = old.expiresAt;
     }
-    store[key] = Entry(argv[2], expiresAt);
+    store[key] = Entry("string", argv[2], expiresAt);
     return reply;
 }
 
@@ -380,6 +429,9 @@ fun cmdGet(argv) {
     if (entry == nil) {
         return NULL_BULK;
     }
+    if (entry.kind != "string") {
+        return WRONGTYPE;
+    }
     return bulk(entry.value);
 }
 
@@ -396,36 +448,560 @@ fun unknownCommand(argv) {
                       + "', with args beginning with: " + shown);
 }
 
-fun execute(argv) {
+
+// ===========================================================================
+// Lists
+// ===========================================================================
+
+// A double-ended queue over a List. The live elements are
+// items[head:len(items)]. A pop from the left moves head; a push to the left
+// fills the free slots before head and, when there are none, grows the free
+// space to the size of the queue. So each push and pop costs a constant time
+// on average, and a long LPUSH or LPOP series stays linear.
+class Deque {
+    init() {
+        this.items = [];
+        this.head = 0;
+    }
+
+    size() {
+        return len(this.items) - this.head;
+    }
+
+    at(i) {
+        return this.items[this.head + i];
+    }
+
+    slice(start, stop) {
+        return this.items[this.head + start:this.head + stop];
+    }
+
+    pushRight(v) {
+        this.items.append(v);
+    }
+
+    pushLeft(v) {
+        if (this.head == 0) {
+            this.growLeft();
+        }
+        this.head = this.head - 1;
+        this.items[this.head] = v;
+    }
+
+    // Removes the first k elements (k <= size()) and returns them as a new
+    // List, with one slice.
+    takeLeft(k) {
+        var out = this.slice(0, k);
+        this.head = this.head + k;
+        if (this.head * 2 > len(this.items)) {
+            this.items = this.items[this.head:len(this.items)];
+            this.head = 0;
+        }
+        return out;
+    }
+
+    popLeft() {
+        var v = this.items[this.head];
+        this.items[this.head] = nil;
+        this.head = this.head + 1;
+        if (this.head > 32 and this.head * 2 > len(this.items)) {
+            this.items = this.items[this.head:len(this.items)];
+            this.head = 0;
+        }
+        return v;
+    }
+
+    growLeft() {
+        var gap = this.size();
+        if (gap < 8) {
+            gap = 8;
+        }
+        var grown = [];
+        var i = 0;
+        while (i < gap) {
+            grown.append(nil);
+            i = i + 1;
+        }
+        for (var v in this.slice(0, this.size())) {
+            grown.append(v);
+        }
+        this.items = grown;
+        this.head = gap;
+    }
+}
+
+// A session that waits in BLPOP. active turns false when the waiter is
+// served, times out, or its client goes away. servedBy is the key whose
+// pusher served it: that queue already counted it out.
+class Waiter {
+    init(handle) {
+        this.handle = handle;
+        this.active = true;
+        this.servedBy = nil;
+    }
+}
+
+// The waiters of one key, oldest first, in a Deque. A waiter that is no
+// longer active stays until a pusher or a compaction removes it. live counts
+// the active ones: when the queue holds more than twice that, a compaction
+// drops the others, so many waits that time out do not grow it without
+// bound.
+class WaitQueue {
+    init() {
+        this.waiters = Deque();
+        this.live = 0;
+    }
+
+    add(w) {
+        this.waiters.pushRight(w);
+        this.live = this.live + 1;
+    }
+
+    // Called once for each waiter that leaves without a pusher.
+    left() {
+        this.live = this.live - 1;
+        if (this.waiters.size() > 2 * this.live + 16) {
+            var kept = Deque();
+            for (var w in this.waiters.slice(0, this.waiters.size())) {
+                if (w.active) {
+                    kept.pushRight(w);
+                }
+            }
+            this.waiters = kept;
+        }
+    }
+
+    // Returns the oldest active waiter and removes it, or nil.
+    takeOldest() {
+        while (this.waiters.size() > 0) {
+            var w = this.waiters.popLeft();
+            if (w.active) {
+                this.live = this.live - 1;
+                return w;
+            }
+        }
+        return nil;
+    }
+}
+
+// key -> WaitQueue.
+var waiters = {};
+
+// Returns the list entry of key, nil when the key is missing, or false when
+// the key holds another kind.
+fun listEntry(key) {
+    var entry = lookup(key);
+    if (entry == nil) {
+        return nil;
+    }
+    if (entry.kind != "list") {
+        return false;
+    }
+    return entry;
+}
+
+fun newList(key) {
+    var entry = Entry("list", Deque(), nil);
+    store[key] = entry;
+    return entry;
+}
+
+fun popLeft(key, entry) {
+    var v = entry.value.popLeft();
+    if (entry.value.size() == 0) {
+        store.del(key);
+    }
+    return v;
+}
+
+// Hands elements of key to the oldest waiters, while both remain. It runs at
+// the end of a push, after the push computed its reply, so the pusher sees
+// the length before any pop, as in Redis.
+fun serveWaiters(key) {
+    var queue = waiters[key];
+    if (queue == nil) {
+        return;
+    }
+    while (true) {
+        var entry = listEntry(key);
+        if (entry == nil or entry == false) {
+            break;
+        }
+        var w = queue.takeOldest();
+        if (w == nil) {
+            break;
+        }
+        var value = popLeft(key, entry);
+        w.active = false;
+        w.servedBy = key;
+        try {
+            task.send(w.handle, Msg.Served(key, value));
+        } catch (e) {
+            // The waiter's task ended without leaving the queue: give the
+            // element back.
+            var back = listEntry(key);
+            if (back == nil) {
+                back = newList(key);
+            }
+            back.value.pushLeft(value);
+        }
+    }
+    if (queue.live == 0) {
+        waiters.del(key);
+    }
+}
+
+fun cmdPush(argv, left) {
+    var name = "rpush";
+    if (left) {
+        name = "lpush";
+    }
+    if (len(argv) < 3) {
+        return wrongArgs(name);
+    }
+    var entry = listEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        entry = newList(argv[1]);
+    }
+    var i = 2;
+    while (i < len(argv)) {
+        if (left) {
+            entry.value.pushLeft(argv[i]);
+        } else {
+            entry.value.pushRight(argv[i]);
+        }
+        i = i + 1;
+    }
+    var n = entry.value.size();
+    serveWaiters(argv[1]);
+    return integerReply(n);
+}
+
+fun cmdRpush(ctx, argv) {
+    return cmdPush(argv, false);
+}
+
+fun cmdLpush(ctx, argv) {
+    return cmdPush(argv, true);
+}
+
+fun cmdLlen(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("llen");
+    }
+    var entry = listEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    return integerReply(entry.value.size());
+}
+
+fun cmdLrange(ctx, argv) {
+    if (len(argv) != 4) {
+        return wrongArgs("lrange");
+    }
+    var start = parseInteger(argv[2]);
+    var stop = parseInteger(argv[3]);
+    if (start == nil or stop == nil) {
+        return NOT_INTEGER;
+    }
+    var entry = listEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return arrayReply([]);
+    }
+    var n = entry.value.size();
+    if (start < 0) {
+        start = n + start;
+    }
+    if (stop < 0) {
+        stop = n + stop;
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (stop >= n) {
+        stop = n - 1;
+    }
+    if (start > stop) {
+        return arrayReply([]);
+    }
+    return Bulks(entry.value.slice(start, stop + 1));
+}
+
+fun cmdLpop(ctx, argv) {
+    if (len(argv) != 2 and len(argv) != 3) {
+        return wrongArgs("lpop");
+    }
+    var count = nil;
+    if (len(argv) == 3) {
+        count = parseInteger(argv[2]);
+        if (count == nil or count < 0) {
+            return errorReply("ERR value is out of range, must be positive");
+        }
+    }
+    var entry = listEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        if (count == nil) {
+            return NULL_BULK;
+        }
+        return NULL_ARRAY;
+    }
+    if (count == nil) {
+        return bulk(popLeft(argv[1], entry));
+    }
+    if (count > entry.value.size()) {
+        count = entry.value.size();
+    }
+    var out = entry.value.takeLeft(count);
+    if (entry.value.size() == 0) {
+        store.del(argv[1]);
+    }
+    return Bulks(out);
+}
+
+fun isDigits(s) {
+    if (len(s) == 0) {
+        return false;
+    }
+    for (var c in s) {
+        if (ord(c) < 48 or ord(c) > 57) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Returns the Number that s names, or nil. s is an optional sign, then
+// digits with an optional fraction ("1", "0.5", ".5", "5."). float() of a
+// String of another form is a halting fault, not a catchable one, so the
+// form is checked first. Redis also accepts an exponent; this does not.
+fun parseDecimal(s) {
+    if (len(s) > 64) {
+        return nil;
+    }
+    var body = s;
+    var sign = "";
+    if (len(body) > 0 and (body[0] == "-" or body[0] == "+")) {
+        sign = body[0];
+        body = body[1:len(body)];
+    }
+    if (body == "" or body == ".") {
+        return nil;
+    }
+    var whole = body;
+    var frac = nil;
+    var i = 0;
+    while (i < len(body)) {
+        if (body[i] == ".") {
+            whole = body[0:i];
+            frac = body[i + 1:len(body)];
+            break;
+        }
+        i = i + 1;
+    }
+    if (whole == "") {
+        whole = "0";
+    }
+    if (frac == "") {
+        frac = "0";
+    }
+    if (!isDigits(whole) or (frac != nil and !isDigits(frac))) {
+        return nil;
+    }
+    if (frac == nil) {
+        return float(sign + whole);
+    }
+    return float(sign + whole + "." + frac);
+}
+
+// Parses a BLPOP timeout in seconds. Returns a Number, or an error reply.
+fun parseTimeout(s) {
+    var t = parseDecimal(s);
+    if (t == nil) {
+        return errorReply("ERR timeout is not a float or out of range");
+    }
+    if (t < 0) {
+        return errorReply("ERR timeout is negative");
+    }
+    return t;
+}
+
+// The result of a command that must wait: the session waits, then replies.
+class Block {
+    init(keys, timeout) {
+        this.keys = keys;
+        this.timeout = timeout;
+    }
+}
+
+fun cmdBlpop(ctx, argv) {
+    if (len(argv) < 3) {
+        return wrongArgs("blpop");
+    }
+    var timeout = parseTimeout(argv[len(argv) - 1]);
+    if (type(timeout) == "String") {
+        return timeout;
+    }
+    var keys = argv[1:len(argv) - 1];
+    for (var key in keys) {
+        var entry = listEntry(key);
+        if (entry == false) {
+            return WRONGTYPE;
+        }
+        if (entry != nil) {
+            return bulkArray([key, popLeft(key, entry)]);
+        }
+    }
+    return Block(keys, timeout);
+}
+
+fun isWake(msg) {
+    return match msg {
+        case Msg.Served(key, value) => true
+        case Msg.Closed => true
+        case _ => false
+    };
+}
+
+// Counts the waiter out of the queue of each of its keys, except the queue
+// whose pusher served it.
+fun leaveQueues(w, keys) {
+    w.active = false;
+    for (var key in keys) {
+        var queue = waiters[key];
+        if (key != w.servedBy and queue != nil) {
+            queue.left();
+            if (queue.live == 0) {
+                waiters.del(key);
+            }
+        }
+    }
+}
+
+fun distinct(strings) {
+    var seen = {};
+    var out = [];
+    for (var s in strings) {
+        if (!seen.has(s)) {
+            seen[s] = true;
+            out.append(s);
+        }
+    }
+    return out;
+}
+
+// Waits for a pusher or for the limit. Returns the reply, or nil when the
+// client went away while the session waited.
+fun waitForElement(conn, block) {
+    var w = Waiter(task.self());
+    var keys = distinct(block.keys);
+    for (var key in keys) {
+        var queue = waiters[key];
+        if (queue == nil) {
+            queue = WaitQueue();
+            waiters[key] = queue;
+        }
+        queue.add(w);
+    }
+    var msg = nil;
+    conn.blocked = true;
+    try {
+        // A reader that waits for credit must wake to read on.
+        task.send(conn.reader, Msg.Blocked());
+    } catch (ignored) {
+        // The reader has ended; its Closed message ends this wait.
+    }
+    try {
+        if (block.timeout == 0) {
+            msg = task.receive_where(isWake);
+        } else {
+            msg = task.receive_where_within(isWake, block.timeout);
+        }
+    } catch (e) {
+        conn.blocked = false;
+        leaveQueues(w, keys);
+        if (faultKind(e) == "TimeoutError") {
+            return NULL_ARRAY;
+        }
+        throw e;
+    }
+    conn.blocked = false;
+    leaveQueues(w, keys);
+    return match msg {
+        case Msg.Served(key, value) => bulkArray([key, value])
+        case _ => nil
+    };
+}
+
+// ===========================================================================
+// Command table
+// ===========================================================================
+
+fun cmdPing(ctx, argv) {
+    if (len(argv) == 1) {
+        return simple("PONG");
+    }
+    if (len(argv) == 2) {
+        return bulk(argv[1]);
+    }
+    return wrongArgs("ping");
+}
+
+fun cmdEcho(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("echo");
+    }
+    return bulk(argv[1]);
+}
+
+fun cmdSetEntry(ctx, argv) {
+    return cmdSet(argv);
+}
+
+fun cmdGetEntry(ctx, argv) {
+    return cmdGet(argv);
+}
+
+fun cmdInfoEntry(ctx, argv) {
+    return cmdInfo(argv);
+}
+
+var COMMANDS = {
+    "PING": cmdPing,
+    "ECHO": cmdEcho,
+    "SET": cmdSetEntry,
+    "GET": cmdGetEntry,
+    "INFO": cmdInfoEntry,
+    "RPUSH": cmdRpush,
+    "LPUSH": cmdLpush,
+    "LLEN": cmdLlen,
+    "LRANGE": cmdLrange,
+    "LPOP": cmdLpop,
+    "BLPOP": cmdBlpop
+};
+
+// Returns an encoded reply, "" for no reply, or a Block.
+fun execute(ctx, argv) {
     if (len(argv) == 0) {
         return "";
     }
-    var name = upper(argv[0]);
-    if (name == "PING") {
-        if (len(argv) == 1) {
-            return simple("PONG");
-        }
-        if (len(argv) == 2) {
-            return bulk(argv[1]);
-        }
-        return wrongArgs("ping");
+    var run = COMMANDS[upper(argv[0])];
+    if (run == nil) {
+        return unknownCommand(argv);
     }
-    if (name == "ECHO") {
-        if (len(argv) != 2) {
-            return wrongArgs("echo");
-        }
-        return bulk(argv[1]);
-    }
-    if (name == "SET") {
-        return cmdSet(argv);
-    }
-    if (name == "INFO") {
-        return cmdInfo(argv);
-    }
-    if (name == "GET") {
-        return cmdGet(argv);
-    }
-    return unknownCommand(argv);
+    return run(ctx, argv);
 }
 
 // ===========================================================================
@@ -550,6 +1126,9 @@ class Conn {
         this.reader = nil;
         // The tasks of this connection that have not ended.
         this.liveTasks = 2;
+        // True while the session waits in BLPOP. The reader reads on then,
+        // past its credit, so that it sees the end of the stream.
+        this.blocked = false;
     }
 }
 
@@ -572,28 +1151,59 @@ fun taskEnded(conn) {
 // the worker from running.
 var WINDOW = 64;
 
-// Waits until the session gives back at least one credit. Returns the new
-// number of credits, or nil when the session has ended.
+// While the session waits in BLPOP it gives no credit, but the reader must
+// read on: the end of the stream comes after the bytes before it, and
+// without it a wait with no time limit outlives a client that has gone. So
+// during a wait the reader may send HOLD commands past its credit, which
+// keeps the session mailbox at most WINDOW + HOLD = 1024 messages. A client
+// that sends more during one wait is closed. Redis keeps such commands in
+// the query buffer of the client up to client-query-buffer-limit.
+var HOLD = 1024 - WINDOW;
+
+// Waits until the session gives back at least one credit or starts a wait
+// in BLPOP. Returns the credits that it got (0 for Blocked alone), or nil
+// when the session has ended.
 fun awaitCredit() {
     var credits = 0;
     var msg = task.receive();
     while (true) {
-        var stop = match msg {
-            case Msg.Credit => false
-            case Msg.Stop => true
+        var got = match msg {
+            case Msg.Credit => 1
+            case Msg.Blocked => 0
+            case Msg.Stop => -1
             // Only the session sends to the reader, and it sends only these
-            // two.
-            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed => true
+            // three.
+            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) => -1
         };
-        if (stop) {
+        if (got < 0) {
             return nil;
         }
-        credits = credits + 1;
+        credits = credits + got;
         if (task.pending() == 0) {
             return credits;
         }
         msg = task.receive();
     }
+}
+
+// Returns the credits with which the reader reads the next command, nil
+// when the session has ended, or false when the client sent more than HOLD
+// commands during one wait in BLPOP.
+fun creditGate(conn, credits) {
+    while (credits <= 0) {
+        if (conn.blocked) {
+            if (credits <= -HOLD) {
+                return false;
+            }
+            return credits;
+        }
+        var more = awaitCredit();
+        if (more == nil) {
+            return nil;
+        }
+        credits = credits + more;
+    }
+    return credits;
 }
 
 fun readLoop(conn) {
@@ -613,13 +1223,14 @@ fun readLoop(conn) {
                 sinceYield = 0;
                 yield nil;
             }
-            if (credits == 0) {
-                var more = awaitCredit();
-                if (more == nil) {
-                    return;
-                }
-                credits = more;
+            var next = creditGate(conn, credits);
+            if (next == nil) {
+                return;
             }
+            if (next == false) {
+                break;
+            }
+            credits = next;
         }
     } catch (e) {
         var kind = faultKind(e);
@@ -641,14 +1252,46 @@ fun readLoop(conn) {
     }
 }
 
-// Returns true: the session goes on after a command.
+// Returns true while the session goes on. A Block reply waits in the
+// session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv) {
-    var reply = execute(argv);
+    var reply = execute(nil, argv);
+    if (type(reply) == "Instance" and hasField(reply, "items")) {
+        writeBulks(conn, reply.items);
+        giveCredit(conn);
+        return true;
+    }
+    if (type(reply) != "String") {
+        reply = waitForElement(conn, reply);
+        if (reply == nil) {
+            return false;
+        }
+    }
     if (reply != "") {
         conn.sock.write(reply);
     }
     giveCredit(conn);
     return true;
+}
+
+fun writeBulks(conn, items) {
+    conn.sock.write("*" + str(len(items)) + "\r\n");
+    var i = 0;
+    while (i < len(items)) {
+        var stop = i + ELEMENTS_PER_YIELD;
+        if (stop > len(items)) {
+            stop = len(items);
+        }
+        var parts = [];
+        for (var s in items[i:stop]) {
+            parts.append(bulk(s));
+        }
+        conn.sock.write(joinRange(parts, 0, len(parts)));
+        i = stop;
+        if (i < len(items)) {
+            yield nil;
+        }
+    }
 }
 
 fun giveCredit(conn) {
@@ -689,7 +1332,10 @@ fun sessionLoop(conn) {
                 case Msg.Closed => false
                 // Only the reader sends to the session, and it never sends
                 // these.
-                case Msg.Credit or Msg.Stop => true
+                case Msg.Credit or Msg.Blocked or Msg.Stop => true
+                // A pusher sends Served only to a session that waits in
+                // waitForElement, which takes it there.
+                case Msg.Served(_, _) => true
             };
         }
     } catch (e) {
