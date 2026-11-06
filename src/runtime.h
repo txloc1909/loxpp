@@ -1384,10 +1384,6 @@ class Runtime {
     // The tasks that wait in task.receive(), rooted so the deadlock report
     // can name each one.
     std::unordered_set<ObjTask*> m_receivingTasks;
-    // Greater than 0 while a `want` function of a receive_where call runs. A
-    // receive in it would remove a message from the mailbox that the call
-    // is testing.
-    int m_selectDepth{0};
     // What requestWait asked for, until runTask carries it out.
     struct ParkRequest {
         ParkReason reason{ParkReason::NONE};

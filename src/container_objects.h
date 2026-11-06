@@ -539,6 +539,10 @@ struct TaskOwned {
     // STACK_MAX plus the reserve): the second overflow stays fatal, it is
     // never handed to the same handler a second time.
     bool unwindingStackOverflow{false};
+    // Greater than 0 while a `want` function of a receive_where call runs. A
+    // receive in it would remove a message from the mailbox that the call
+    // is testing.
+    int selectDepth{0};
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

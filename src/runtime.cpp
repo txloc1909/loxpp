@@ -1417,7 +1417,7 @@ bool Runtime::sendMessage(ObjTask* task, Value msg) {
 
 bool Runtime::receiveFromNative(Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1441,7 +1441,7 @@ bool Runtime::receiveFromNative(Value* out) {
 bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
                                double seconds, Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1473,12 +1473,12 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         push(msg);
         Value verdict;
         bool ok;
-        ++m_selectDepth;
+        ++m_owned->selectDepth;
         {
             SynchronousRun run(*this);
             ok = invokeCallableFromNative(1, &verdict);
         }
-        --m_selectDepth;
+        --m_owned->selectDepth;
         if (!ok) {
             task->sel = ObjTask::SelectiveReceive{};
             return false;
@@ -2674,7 +2674,7 @@ void Runtime::resetStack() {
     m_currentCoroutine = nullptr;
     m_yieldedValue = Value{};
     m_stackOverflow = false;
-    m_selectDepth = 0;
+    m_owned->selectDepth = 0;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {
         deferList.clear();
