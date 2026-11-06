@@ -1031,19 +1031,24 @@ class Runtime {
     // worker. The main worker only, after waitForWork() returned Deadlock.
     void reportDeadlock();
     void describeReceivingTasks(std::vector<std::string>& out) const;
-    // A task of this worker ended or was abandoned.
-    void markTaskDead(ObjTask* task);
-    // markTaskDead, unless `task` is the main task of a session: the end of a
-    // line ends its script, not the task (spec/04-semantics.md, A Session).
-    void endTaskOrLine(ObjTask* task);
+    // A task of this worker ended or was abandoned: the part that the `end`
+    // and `abandon` moves share.
+    void retireTask(ObjTask* task);
+    // The `end` move: retireTask, unless `task` is the main task of a session:
+    // the end of a line ends its script, not the task
+    // (spec/04-semantics.md, A Session).
+    void endTask(ObjTask* task);
     // Compiles `source` with `options`, then as loadSource().
     // `sourceId` names the source in a declarations-only compile (a worker);
     // loadSource() ignores it and appends a new source.
     ObjClosure* loadProgram(const std::string& source, DiagnosticSink* sink,
                             bool declarationsOnly, int sourceId = -1);
 
-    // Abandons every task but the main task: the run of the program ended.
-    void endTasks();
+    // The `abandon` move for every task that is not ENDED: the run of the
+    // program ended. abandonTask does one task; the main task of a session
+    // survives.
+    void abandonTasks();
+    void abandonTask(ObjTask* task);
 
     // The `wait` move: the task that a wait request suspended becomes
     // WAITING, and its wait is registered. Called by runTask after the

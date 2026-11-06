@@ -1328,7 +1328,9 @@ bool Runtime::taskEnded(const ObjTask* task) const {
            (task != m_mainTask && task->epoch != m_taskEpoch);
 }
 
-void Runtime::markTaskDead(ObjTask* task) {
+// The state change that the `end` and the `abandon` moves share: the task is
+// ENDED, and it holds nothing.
+void Runtime::retireTask(ObjTask* task) {
     if (task->state != TaskState::ENDED) {
         --m_liveTasks;
     }
@@ -1345,7 +1347,9 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->ended.store(true, std::memory_order_release);
 }
 
-void Runtime::endTaskOrLine(ObjTask* task) {
+// The `end` move. In a session, the end of the script of a line is not the end
+// of the main task.
+void Runtime::endTask(ObjTask* task) {
     if (m_sessionMode && m_isMainWorker && task == m_mainTask) {
         // The line's script ended, but the session's main task did not: it
         // keeps its handle and its mailbox for the next line
@@ -1355,7 +1359,7 @@ void Runtime::endTaskOrLine(ObjTask* task) {
         task->receiving = false;
         return;
     }
-    markTaskDead(task);
+    retireTask(task);
 }
 
 void Runtime::deliverMessage(ObjTask* task, Value msg) {
@@ -1606,7 +1610,7 @@ bool Runtime::runTask(ObjTask* task) {
     m_faultTask = nullptr;
 
     if (!ok) {
-        endTaskOrLine(task);
+        endTask(task);
         if (outcome != OpResult::Fatal) {
             // No frame lies below a task, so no handler outside it can catch.
             runtimeError("BUG: a task ended through a handler outside it.");
@@ -1617,7 +1621,7 @@ bool Runtime::runTask(ObjTask* task) {
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
-        endTaskOrLine(task);
+        endTask(task);
         return true;
     }
     if (m_taskSwitchPending) {
@@ -1657,7 +1661,21 @@ void Runtime::yieldTask(ObjTask* task) {
     m_runQueue.push_back(task);
 }
 
-void Runtime::endTasks() {
+// The `abandon` move for one task that is READY, RECEIVING or WAITING.
+void Runtime::abandonTask(ObjTask* task) {
+    if (task != m_mainTask || !m_isMainWorker) {
+        retireTask(task);
+        return;
+    }
+    // The main task of a session survives the line, but its wait does not:
+    // nothing would end it once m_waitingTasks is cleared.
+    releaseWait(task);
+    task->io = ParkedIo{};
+    task->pendingValue = Value{};
+    task->hasPendingFault = false;
+}
+
+void Runtime::abandonTasks() {
     // spec/04-semantics.md, Ending: every other task is abandoned, as an
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
@@ -1670,16 +1688,7 @@ void Runtime::endTasks() {
         }
     }
     for (ObjTask* task : left) {
-        if (task != m_mainTask || !m_isMainWorker) {
-            markTaskDead(task);
-        } else {
-            // The main task of a session survives the line, but its wait does
-            // not: nothing would end it once m_waitingTasks is cleared below.
-            releaseWait(task);
-            task->io = ParkedIo{};
-            task->pendingValue = Value{};
-            task->hasPendingFault = false;
-        }
+        abandonTask(task);
     }
     m_runQueue.clear();
     m_receivingTasks.clear();
@@ -1928,7 +1937,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     // Every line's script is its own coroutine, and the session makes the next
     // one. Kept here, it would root this line's script for the whole session.
     m_mainTask->co = nullptr;
-    endTasks();
+    abandonTasks();
     if (!m_sessionMode) {
         m_group->removeWorker(&inbox);
         m_group->end();
@@ -2126,7 +2135,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
 #else
     InterpretResult result = schedule();
 #endif
-    endTasks();
+    abandonTasks();
     return result;
 }
 
