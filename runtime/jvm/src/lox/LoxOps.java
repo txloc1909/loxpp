@@ -93,19 +93,18 @@ public final class LoxOps {
      * that path, the same reason runDefers needed a second call site for
      * defer-using functions, see emitChunk's defer catch-all handler).
      *
-     * <p>One counter per worker (LoxWorker.handlerDepth), like native's
-     * m_handlerStack.size() in its one Runtime per worker. A resumed
-     * coroutine's handler records sit above the resumer's, so a coroutine
-     * sees the resumer's live handlers; it hides its own while suspended
-     * (see LoxCoroutine's snapshot). Each task has its own count, which a
-     * task switch saves and puts back.
+     * <p>One counter per task (LoxTask.Owned.handlerDepth), like native's
+     * m_handlerStack.size() for the task. A resumed coroutine's handler
+     * records sit above the resumer's, so a coroutine sees the resumer's
+     * live handlers; it hides its own while suspended (see LoxCoroutine's
+     * snapshot).
      */
-    public static void enterHandler() { LoxWorker.current().handlerDepth++; }
+    public static void enterHandler() { LoxWorker.current().owned().handlerDepth++; }
 
-    public static void exitHandler() { LoxWorker.current().handlerDepth--; }
+    public static void exitHandler() { LoxWorker.current().owned().handlerDepth--; }
 
     public static boolean isHandlerLive() {
-        return LoxWorker.current().handlerDepth > 0;
+        return LoxWorker.current().owned().handlerDepth > 0;
     }
 
     /**
@@ -123,18 +122,18 @@ public final class LoxOps {
      * #319, reviewer round 2).
      */
     public static Object getHandlerDepth() {
-        return LoxWorker.current().handlerDepth;
+        return LoxWorker.current().owned().handlerDepth;
     }
 
     public static void restoreHandlerDepth(Object depth) {
-        LoxWorker.current().handlerDepth = (Integer)depth;
+        LoxWorker.current().owned().handlerDepth = (Integer)depth;
     }
 
     // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
-    static int handlerDepthValue() { return LoxWorker.current().handlerDepth; }
+    static int handlerDepthValue() { return LoxWorker.current().owned().handlerDepth; }
 
     static void setHandlerDepthValue(int depth) {
-        LoxWorker.current().handlerDepth = depth;
+        LoxWorker.current().owned().handlerDepth = depth;
     }
 
     // ------------------------------------------------------------------
@@ -1569,7 +1568,7 @@ public final class LoxOps {
     // not heap objects there and never reach the guard) — so the check
     // below runs after those three branches, to land on the same boundary
     // per value shape.
-    // The current depth is LoxWorker.stringifyDepth, one per worker.
+    // The current depth is LoxTask.Owned.stringifyDepth.
     private static final int MAX_STRINGIFY_DEPTH = 200;
 
     public static String stringify(Object v) {
@@ -1587,18 +1586,18 @@ public final class LoxOps {
         if (v instanceof Double) {
             return formatNumber((Double)v);
         }
-        LoxWorker w = LoxWorker.current();
-        if (w.stringifyDepth == MAX_STRINGIFY_DEPTH) {
+        LoxTask.Owned owned = LoxWorker.current().owned();
+        if (owned.stringifyDepth == MAX_STRINGIFY_DEPTH) {
             // A raw, valueless LoxError is uncatchable, even inside a
             // try/catch (spec/04-semantics.md's Halting Faults
             // section) — matching native's own fatal disposition here.
             throw new LoxError("Value nesting is too deep.");
         }
-        w.stringifyDepth++;
+        owned.stringifyDepth++;
         try {
             return stringifyObj(v);
         } finally {
-            w.stringifyDepth--;
+            owned.stringifyDepth--;
         }
     }
 

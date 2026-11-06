@@ -103,7 +103,7 @@ static std::string hostPort(const std::string& host, int port) {
     return host + ":" + std::to_string(port);
 }
 
-static Value runIo(ParkedIo io);
+static Value runIo(WaitingCall io);
 
 // The state of a connect() between its attempts. The descriptor of the attempt
 // in progress belongs to it: no Socket exists yet, so no close can reach it,
@@ -133,8 +133,8 @@ void setConnectTestHooks(const ConnectTestHooks* hooks) {
 }
 
 // Resolves the name on the worker, and runs the connect from the first
-// address. The TCP connect is nonblocking: the call parks where it can.
-// `withLimit` says that argv[2] is the limit of connect_within.
+// address. The TCP connect is nonblocking: the call suspends its task where it
+// can. `withLimit` says that argv[2] is the limit of connect_within.
 static Value connectCommon(Value* argv, bool withLimit) {
     std::string host;
     if (!asStringArg(argv[0], host)) {
@@ -196,7 +196,7 @@ static Value connectCommon(Value* argv, bool withLimit) {
         s_connectHooks->addresses(state->addrs);
     }
 
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::CONNECT;
     io.method = "connect";
     io.hasDeadline = hasLimit;
@@ -329,7 +329,7 @@ static bool holds(const ObjTask* task, const Obj* target, Side side) {
 
 // The slot that finds the holder of the side that `io` waits on, or null for
 // a call that has no side (connect).
-static ObjTask** holderSlot(const ParkedIo& io) {
+static ObjTask** holderSlot(const WaitingCall& io) {
     switch (sideOf(io.op)) {
     case Side::Read:
         return &asObjSocket(io.target)->readHolder;
@@ -397,12 +397,12 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
 // Size of one read from the descriptor.
 static constexpr size_t kReadChunk = 4096;
 
-// Every read-side call is a step function over the socket and a ParkedIo. A
+// Every read-side call is a step function over the socket and a WaitingCall. A
 // step does as much as it can without waiting and reports one of three
 // outcomes. The caller decides what waiting means: a task that cannot suspend
-// waits in the kernel, and a task that can suspend parks and runs the step
+// waits in the kernel, and a task that can suspend waits and runs the step
 // again when the descriptor is ready. A step keeps what it has done in the
-// ParkedIo and in the socket, so a call that waits many times loses nothing.
+// WaitingCall and in the socket, so a call that waits many times loses nothing.
 struct IoOutcome {
     enum class Kind : unsigned char { Done, Wait, Fault };
     Kind kind{Kind::Wait};
@@ -508,14 +508,14 @@ static void fillToEof(ObjSocket* s, const char* method, IoOutcome& out) {
     }
 }
 
-static void stepRead(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+static void stepRead(ObjSocket* s, WaitingCall& io, IoOutcome& out) {
     fillToEof(s, io.method, out);
     if (out.kind == IoOutcome::Kind::Done) {
         setDone(out, takeInput(s, s->inbuf.size()));
     }
 }
 
-static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+static void stepReadBytes(ObjSocket* s, WaitingCall& io, IoOutcome& out) {
     size_t take = std::min(s->inbuf.size(), io.want - io.buf.size());
     if (take > 0) {
         if (io.buf.empty()) {
@@ -551,7 +551,7 @@ static void stepReadBytes(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
 // Returns the bytes that are there and does not wait for more. The input
 // buffer goes first, so the result does not depend on what an earlier readline
 // left in it. The descriptor is read once, and only when the buffer is empty.
-static void stepReadSome(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+static void stepReadSome(ObjSocket* s, WaitingCall& io, IoOutcome& out) {
     if (!s->inbuf.empty()) {
         setDone(out, takeInput(s, std::min(s->inbuf.size(), io.want)));
         return;
@@ -572,7 +572,7 @@ static void stepReadSome(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
     }
 }
 
-static void stepReadline(ObjSocket* s, ParkedIo& io, IoOutcome& out) {
+static void stepReadline(ObjSocket* s, WaitingCall& io, IoOutcome& out) {
     // The scan resumes at `noNewlineLen`, not at the front: a line that
     // arrives in small pieces would otherwise be scanned again in full at
     // each wake-up, and the total cost would grow with the square of the line
@@ -628,7 +628,7 @@ enum class Ended : unsigned char { No, Yes, Failed };
 
 // Whether the connect in progress on `fd` has ended, with success or with an
 // error. A zero timeout: the answer never waits. On loopback the handshake is
-// over before connect(2) returns, so the call then does not park. A failure of
+// over before connect(2) returns, so the call then does not wait. A failure of
 // poll(2) says nothing about the connect, so it is reported as Failed with
 // errno kept.
 static Ended attemptEnded(int fd) {
@@ -740,9 +740,9 @@ static void stepConnect(ConnectState& c, IoOutcome& out) {
                  "': " + std::strerror(c.lastErrno));
 }
 
-static void stepWrite(int fd, ParkedIo& io, IoOutcome& out);
+static void stepWrite(int fd, WaitingCall& io, IoOutcome& out);
 
-static void step(ParkedIo& io, IoOutcome& out) {
+static void step(WaitingCall& io, IoOutcome& out) {
     if (io.op == IoOp::CONNECT) {
         stepConnect(*io.connect, out);
         return;
@@ -786,7 +786,7 @@ static void step(ParkedIo& io, IoOutcome& out) {
     }
 }
 
-static int descriptorOf(const ParkedIo& io) {
+static int descriptorOf(const WaitingCall& io) {
     if (io.op == IoOp::CONNECT) {
         return io.connect->fd;
     }
@@ -795,7 +795,7 @@ static int descriptorOf(const ParkedIo& io) {
 }
 
 // The value of a finished call.
-static Value finish(const ParkedIo& io, IoOutcome& out) {
+static Value finish(const WaitingCall& io, IoOutcome& out) {
     MemoryManager* mm = getActiveMM();
     if (io.op == IoOp::ACCEPT || io.op == IoOp::CONNECT) {
         ObjSocket* sock = mm->create<ObjSocket>(s_socketClass);
@@ -866,8 +866,8 @@ static bool waitFd(int fd, short events, std::string& err) {
     return waitFd(fd, events, err, false, {}, timedOut);
 }
 
-// Runs a call to its end, or to the point where the task parks.
-static Value runIo(ParkedIo io) {
+// Runs a call to its end, or to the point where the task waits.
+static Value runIo(WaitingCall io) {
     Runtime* rt = getActiveRuntime();
     for (;;) {
         IoOutcome out;
@@ -882,14 +882,14 @@ static Value runIo(ParkedIo io) {
             break;
         }
         // The task leaves the run queue; the poller reports the descriptor and
-        // resumeParkedIo goes on. The record moves to the task, because this
+        // resumeWaitingCall goes on. The record moves to the task, because this
         // frame is gone by then, and the call holds its side from here. A
         // task that cannot suspend waits here and holds no side: no other
         // task of the worker runs meanwhile.
         const int fd = descriptorOf(io);
         const bool writes = io.op == IoOp::CONNECT || io.op == IoOp::WRITE;
-        if (rt->parkCurrentTask(
-                writes ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
+        if (rt->requestWait(writes ? WaitEvent::FD_WRITE : WaitEvent::FD_READ,
+                            fd)) {
             ObjTask* task = rt->currentTask();
             if (ObjTask** slot = holderSlot(io)) {
                 *slot = task;
@@ -911,19 +911,19 @@ static Value runIo(ParkedIo io) {
     }
 }
 
-void resumeParkedIo(Runtime& rt, ObjTask* task) {
-    ParkedIo& io = task->io;
+void resumeWaitingCall(Runtime& rt, ObjTask* task) {
+    WaitingCall& io = task->io;
     IoOutcome out;
     step(io, out);
     switch (out.kind) {
     case IoOutcome::Kind::Done:
-        rt.completePark(task, finish(io, out));
+        rt.completeWait(task, finish(io, out));
         return;
     case IoOutcome::Kind::Fault:
-        rt.failPark(task, out.faultKind, out.faultMessage.c_str());
+        rt.failWait(task, out.faultKind, out.faultMessage.c_str());
         return;
     case IoOutcome::Kind::Wait:
-        rt.rearmPark(task, descriptorOf(io));
+        rt.rearmWait(task, descriptorOf(io));
         return;
     }
 }
@@ -933,7 +933,7 @@ static Value socketReadNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::READ;
     io.target = s;
     io.method = "read";
@@ -949,7 +949,7 @@ static Value socketReadBytesNative(int /*argc*/, Value* args) {
     if (!asByteCount(args[0], "read_bytes", n)) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::READ_BYTES;
     io.target = s;
     io.method = "read_bytes";
@@ -966,7 +966,7 @@ static Value socketReadSomeNative(int /*argc*/, Value* args) {
     if (!asByteCount(args[0], "read_some", n, 1)) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::READ_SOME;
     io.target = s;
     io.method = "read_some";
@@ -979,7 +979,7 @@ static Value socketReadlineNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::READLINE;
     io.target = s;
     io.method = "readline";
@@ -991,7 +991,7 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
     if (s == nullptr) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::READLINES;
     io.target = s;
     io.method = "readlines";
@@ -1003,7 +1003,7 @@ static Value socketReadlinesNative(int /*argc*/, Value* args) {
 // makes a peer that stopped reading fail with EPIPE and no signal. A
 // descriptor has no error flag, so a failed write leaves nothing that a later
 // read could see.
-static void stepWrite(int fd, ParkedIo& io, IoOutcome& out) {
+static void stepWrite(int fd, WaitingCall& io, IoOutcome& out) {
     auto* str = asObjString(io.text);
     const std::string_view text(str->chars.data(), str->chars.size());
     const size_t total = text.size() + (io.newline ? 1 : 0);
@@ -1055,7 +1055,7 @@ static Value socketWriteCall(Value* args, const char* method, bool newline) {
         nativeRuntimeError(msg.c_str());
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::WRITE;
     io.target = s;
     io.method = method;
@@ -1080,7 +1080,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
         // read that waits on the same descriptor keeps its wait.
         s->writeClosed = true;
         if (ObjTask* task = s->writeHolder; holds(task, s, Side::Write)) {
-            getActiveRuntime()->failPark(task, kSocketClosedError,
+            getActiveRuntime()->failWait(task, kSocketClosedError,
                                          kWriteAfterCloseWrite);
         }
         shutdown(s->fd, SHUT_WR);
@@ -1090,7 +1090,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
 
 // Closes a descriptor that tasks of this worker may wait on. The waits end
 // before the descriptor does: epoll keeps its reference to the open file after
-// close(2), and the next socket can get the same number. Each parked call
+// close(2), and the next socket can get the same number. Each waiting call
 // fails with the fault of a call on a closed socket, in the order the calls
 // began to wait.
 static void closeDescriptor(int& fd, const char* noun) {
@@ -1100,12 +1100,12 @@ static void closeDescriptor(int& fd, const char* noun) {
     ::close(fd);
     fd = -1;
     for (ObjTask* task : waiting) {
-        rt->failPark(task, kSocketClosedError,
+        rt->failWait(task, kSocketClosedError,
                      closedMessage(task->io.method, noun).c_str());
     }
 }
 
-void closeParkedDescriptor(Runtime& rt, ObjTask* task) {
+void closeWaitingDescriptor(Runtime& rt, ObjTask* task) {
     if (task->io.op == IoOp::CONNECT) {
         // The attempt has no Socket. The end of the task closes it.
         return;
@@ -1138,7 +1138,7 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
     if (!sideFree(s->acceptHolder, s, Side::Accept, "accept", "accept side")) {
         return from<Nil>(Nil{});
     }
-    ParkedIo io;
+    WaitingCall io;
     io.op = IoOp::ACCEPT;
     io.target = s;
     io.method = "accept";

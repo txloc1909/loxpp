@@ -11,7 +11,7 @@ import java.nio.channels.SocketChannel;
 /**
  * Mirrors src/stdlib/net_api.cpp's ObjServer over a {@link
  * ServerSocketChannel}. The channel is nonblocking, so a task that finds no
- * connection parks and the other tasks of its worker run ({@link
+ * connection waits and the other tasks of its worker run ({@link
  * LoxWorker#waitChannel}).
  */
 public final class LoxServer {

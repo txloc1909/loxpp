@@ -14,7 +14,7 @@ import java.util.TreeSet;
 /**
  * The wait set of one worker: the channels its waiting tasks wait on and the
  * timers they wait for (spec/04-semantics.md, Scheduling). The worker creates
- * it on its first park, so a program that never parks pays nothing.
+ * it on its first wait, so a program that never waits pays nothing.
  *
  * <p>Every method except {@link #select} and {@link #wake} runs with
  * {@link LoxWorker#LOCK} held, on the thread that schedules the worker.

@@ -177,16 +177,17 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     // opened after it has already passed FRAMES_MAX would never see an exact
     // match again.
     if (m_frameCount >= FRAMES_MAX && !m_handlerStack.empty() &&
-        !m_unwindingStackOverflow) {
-        // See m_unwindingStackOverflow's own comment (runtime.h) and this
-        // guard's own matching one in push(): a deferred call drained by the
-        // handleThrow() below can itself reach this same guard again. Hold
-        // the flag for exactly this call, so a nested hit falls through to
-        // the hard ceiling below instead of recursing.
-        m_unwindingStackOverflow = true;
+        !m_owned->unwindingStackOverflow) {
+        // See TaskOwned::unwindingStackOverflow's own comment
+        // (container_objects.h) and this guard's own matching one in push(): a
+        // deferred call drained by the handleThrow() below can itself reach
+        // this same guard again. Hold the flag for exactly this call, so a
+        // nested hit falls through to the hard ceiling below instead of
+        // recursing.
+        m_owned->unwindingStackOverflow = true;
         ThrowOutcome outcome = raiseThrowableError(
             "StackOverflowError", "Stack overflow.", stopAtFrameCount);
-        m_unwindingStackOverflow = false;
+        m_owned->unwindingStackOverflow = false;
         // Uncaught falls through to this same return unchanged:
         // raiseThrowableError() already reported it, and m_frameCount is
         // reset to 0 by then (see runtimeError()/resetStack()), so
@@ -195,14 +196,15 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     }
     // No handler active: the true hard ceiling, unaffected by the reserve,
     // same depth as before the reserve existed. While unwinding a
-    // StackOverflowError (m_unwindingStackOverflow), the ceiling moves out to
-    // FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
+    // StackOverflowError (m_owned->unwindingStackOverflow), the ceiling moves
+    // out to FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
     // m_frames[] actually has — so a deferred call drained during that
     // unwind can use the reserve; past that, it stays fatal rather than
     // recursing into the same handler again.
-    if (m_frameCount >=
-        FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
+    if (m_frameCount >= FRAMES_MAX &&
+        m_frameCount >= FRAMES_MAX + (m_owned->unwindingStackOverflow
+                                          ? STACK_OVERFLOW_FRAME_RESERVE
+                                          : 0)) {
         runtimeError("Stack overflow.");
         return ThrowOutcome::Uncaught;
     }
@@ -616,22 +618,24 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // raises a catchable StackOverflowError instead of writing past
         // m_frames[]/stack[]. The ceilings mirror call()/checkStackOverflow().
         const std::ptrdiff_t frameCeiling =
-            FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0);
+            FRAMES_MAX + (m_owned->unwindingStackOverflow
+                              ? STACK_OVERFLOW_FRAME_RESERVE
+                              : 0);
         const std::ptrdiff_t stackCeiling =
-            STACK_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+            STACK_MAX + (m_owned->unwindingStackOverflow
+                             ? STACK_OVERFLOW_STACK_RESERVE
+                             : 0);
         if (static_cast<std::ptrdiff_t>(entry) +
                     static_cast<std::ptrdiff_t>(co->frames.size()) >
                 frameCeiling ||
             static_cast<std::ptrdiff_t>(base - stack) +
                     static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
                 stackCeiling) {
-            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
-                m_unwindingStackOverflow = true;
+            if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
+                m_owned->unwindingStackOverflow = true;
                 ThrowOutcome outcome = raiseThrowableError(
                     "StackOverflowError", "Stack overflow.", boundary);
-                m_unwindingStackOverflow = false;
+                m_owned->unwindingStackOverflow = false;
                 m_reentrantOutcome = fromThrow(outcome);
             } else {
                 runtimeError("Stack overflow.");
@@ -654,12 +658,12 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     // deeper) or from ITER_HAS_NEXT, the scheduler, or resumeWaitingInner (no
     // native deeper). Any other native in between would hold a C++
     // continuation that a task switch cannot keep.
-    const int savedCleanDepth = m_cleanNativeDepth;
-    const int linkNatives = m_nativeDepth - savedCleanDepth;
-    m_cleanNativeDepth =
+    const int savedCleanDepth = m_owned->cleanNativeDepth;
+    const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
+    m_owned->cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
-         m_reentrantRunDepth == m_cleanReentrantDepth)
-            ? m_nativeDepth
+         m_reentrantRunDepth == m_owned->cleanReentrantDepth)
+            ? m_owned->nativeDepth
             : -1;
 
 #ifdef LOXPP_PROFILE
@@ -689,9 +693,9 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // A native entry leaves no frame to rebuild after a task switch, so
         // the entry itself breaks the clean chain from the task's base. A
         // task.receive reached below it must raise YieldAcrossNativeError,
-        // not park a coroutine that has no frame to resume.
+        // not suspend a coroutine that has no frame to resume.
         if (nativeEntry) {
-            m_cleanNativeDepth = -1;
+            m_owned->cleanNativeDepth = -1;
         }
         // A compiled entry (QBE coroutine mode) must be pushed, not run:
         // opCall's own invokeClosure branches on m_resumableMode, and
@@ -825,7 +829,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                                   : Chunk::const_iterator{};
         WakeResult wake = WakeResult::Run;
         // The coroutine that holds the suspended call is the one at the end
-        // of the chain; a parked call's fault is raised there.
+        // of the chain; a waiting call's fault is raised there.
         const bool innermost = co->waitingInner == nullptr;
         if (!innermost) {
             wake = resumeWaitingInner(co, entry);
@@ -872,7 +876,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
 #ifdef LOXPP_PROFILE
     m_activeProfiler = savedProfiler;
 #endif
-    m_cleanNativeDepth = savedCleanDepth;
+    m_owned->cleanNativeDepth = savedCleanDepth;
     m_currentCoroutine = parent;
     if (parent != nullptr) {
         parent->state = CoroutineState::RUNNING;
@@ -1077,8 +1081,8 @@ bool Runtime::raiseResumeFault(int entry) {
     // reach a suspend point, and the task switch after it must not raise the
     // same fault again.
     m_faultTask = nullptr;
-    // The native that made the call returned when the task parked, so the
-    // value that the resume put on the stack is not a result: a handler
+    // The native that made the call returned when the task began to wait, so
+    // the value that the resume put on the stack is not a result: a handler
     // truncates the stack, and the other outcomes reset it.
     switch (raiseThrowableError(kind.c_str(), message.c_str(), entry)) {
     case ThrowOutcome::HandledContinue:
@@ -1094,32 +1098,32 @@ bool Runtime::raiseResumeFault(int entry) {
     return false;
 }
 
-bool Runtime::parkCurrentTask(ParkReason reason, int fd,
-                              Poller::Clock::time_point deadline) {
-    if (!taskCanSuspend()) {
+bool Runtime::requestWait(WaitEvent reason, int fd,
+                          Poller::Clock::time_point deadline) {
+    if (workerState() == WorkerState::BLOCKED) {
         return false;
     }
-    m_parkRequest = ParkRequest{reason, fd, deadline};
+    m_waitRequest = WaitRequest{reason, fd, deadline};
     m_taskSwitchPending = true;
     m_taskSwitchInner = nullptr;
     return true;
 }
 
-void Runtime::parkTask(ObjTask* task) {
-    const ParkRequest request = m_parkRequest;
-    m_parkRequest = ParkRequest{};
+void Runtime::waitTask(ObjTask* task) {
+    const WaitRequest request = m_waitRequest;
+    m_waitRequest = WaitRequest{};
     Poller::Token token = 0;
     switch (request.reason) {
-    case ParkReason::TIMER:
+    case WaitEvent::TIMER:
         token = poller().waitUntil(request.deadline);
         break;
-    case ParkReason::FD_READ:
+    case WaitEvent::FD_READ:
         token = poller().waitFd(request.fd, Poller::Interest::Read);
         break;
-    case ParkReason::FD_WRITE:
+    case WaitEvent::FD_WRITE:
         token = poller().waitFd(request.fd, Poller::Interest::Write);
         break;
-    case ParkReason::NONE:
+    case WaitEvent::NONE:
         break;
     }
     task->pendingValue = Value{};
@@ -1129,7 +1133,7 @@ void Runtime::parkTask(ObjTask* task) {
         // read.
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         task->hasPendingFault = true;
         task->faultKind = "NetworkError";
         task->faultMessage = message;
@@ -1145,52 +1149,52 @@ void Runtime::parkTask(ObjTask* task) {
         return;
     }
     task->state = TaskState::WAITING;
-    task->parkReason = request.reason;
-    task->parkToken = token;
+    task->waitEvent = request.reason;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
-        task->parkTimerToken = timer;
-        m_parkTimers.emplace(timer, task);
+        task->waitTimerToken = timer;
+        m_waitTimers.emplace(timer, task);
     }
 }
 
-void Runtime::releasePark(ObjTask* task) {
-    if (task->parkReason == ParkReason::NONE) {
+void Runtime::releaseWait(ObjTask* task) {
+    if (task->waitEvent == WaitEvent::NONE) {
         return;
     }
     // A wait that the poller reported is gone already; cancel() is then a
     // no-op that returns false.
     if (m_poller != nullptr) {
-        m_poller->cancel(task->parkToken);
+        m_poller->cancel(task->waitToken);
     }
-    m_waitingTasks.erase(task->parkToken);
-    if (task->parkTimerToken != 0) {
+    m_waitingTasks.erase(task->waitToken);
+    if (task->waitTimerToken != 0) {
         if (m_poller != nullptr) {
-            m_poller->cancel(task->parkTimerToken);
+            m_poller->cancel(task->waitTimerToken);
         }
-        m_parkTimers.erase(task->parkTimerToken);
-        task->parkTimerToken = 0;
+        m_waitTimers.erase(task->waitTimerToken);
+        task->waitTimerToken = 0;
     }
-    task->parkReason = ParkReason::NONE;
-    task->parkToken = 0;
+    task->waitEvent = WaitEvent::NONE;
+    task->waitToken = 0;
 }
 
-void Runtime::rearmPark(ObjTask* task, int fd) {
-    m_waitingTasks.erase(task->parkToken);
-    const auto interest = task->parkReason == ParkReason::FD_WRITE
+void Runtime::rearmWait(ObjTask* task, int fd) {
+    m_waitingTasks.erase(task->waitToken);
+    const auto interest = task->waitEvent == WaitEvent::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
     // The call began to wait at its first wait, so it keeps that token.
-    const Poller::Token token = poller().waitFd(fd, interest, task->parkToken);
+    const Poller::Token token = poller().waitFd(fd, interest, task->waitToken);
     if (token == 0) {
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->parkToken = 0;
-        failPark(task, "NetworkError", message.c_str());
+        task->waitToken = 0;
+        failWait(task, "NetworkError", message.c_str());
         return;
     }
-    task->parkToken = token;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
 }
 
@@ -1208,31 +1212,31 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
     }
 }
 
-void Runtime::unparkTask(ObjTask* task) {
+void Runtime::waitEndTask(ObjTask* task) {
     if (task->state != TaskState::WAITING) {
         return;
     }
-    releasePark(task);
+    releaseWait(task);
     task->state = TaskState::READY;
     m_runQueue.push_back(task);
 }
 
-void Runtime::completePark(ObjTask* task, Value value) {
+void Runtime::completeWait(ObjTask* task, Value value) {
     if (task->state != TaskState::WAITING) {
         return;
     }
     task->pendingValue = value;
-    unparkTask(task);
+    waitEndTask(task);
 }
 
-void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
+void Runtime::failWait(ObjTask* task, const char* kind, const char* msg) {
     if (task->state != TaskState::WAITING) {
         return;
     }
     task->hasPendingFault = true;
     task->faultKind = kind;
     task->faultMessage = msg;
-    unparkTask(task);
+    waitEndTask(task);
 }
 
 void Runtime::pollWhileBusy() {
@@ -1262,13 +1266,13 @@ void Runtime::pollWhileBusy() {
 
 void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
     for (Poller::Token token : ready) {
-        auto limit = m_parkTimers.find(token);
-        if (limit != m_parkTimers.end()) {
+        auto limit = m_waitTimers.find(token);
+        if (limit != m_waitTimers.end()) {
             ObjTask* task = limit->second;
-            m_parkTimers.erase(limit);
-            task->parkTimerToken = 0;
+            m_waitTimers.erase(limit);
+            task->waitTimerToken = 0;
             const std::string message = task->io.timeoutMessage;
-            failPark(task, "NetworkError", message.c_str());
+            failWait(task, "NetworkError", message.c_str());
             continue;
         }
         auto found = m_waitingTasks.find(token);
@@ -1277,10 +1281,11 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         }
         ObjTask* task = found->second;
         if (task->io.op != IoOp::NONE) {
-            resumeParkedIo(*this, task);
+            resumeWaitingCall(*this, task);
+        } else if (task->inStateReceiving()) {
+            limitTask(task);
         } else {
-            task->sel.timedOut = task->sel.pendingRetry;
-            completePark(task, from<Nil>(Nil{}));
+            completeWait(task, from<Nil>(Nil{}));
         }
     }
     if (m_pollHandler) {
@@ -1293,11 +1298,31 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
     reg.defineGlobal(name, fn, arity);
 }
 
+Runtime::WorkerState Runtime::workerState() const {
+    // A session line is over when the main task's script ended, which leaves
+    // the task itself alive for the next line.
+    const bool mainTaskDone =
+        m_mainTask != nullptr &&
+        (m_mainTask->state == TaskState::ENDED || m_mainLineDone);
+    if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
+        return WorkerState::FINISHED;
+    }
+    if (m_currentTask != nullptr) {
+        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
+    }
+    // Without a scheduler (runTasks never ran) the program runs on the thread
+    // alone, outside every task, and a call that waits blocks the worker.
+    if (m_group == nullptr) {
+        return WorkerState::BLOCKED;
+    }
+    return m_runQueue.empty() ? WorkerState::IDLE : WorkerState::ACTIVE;
+}
+
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
-    return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
-           m_nativeDepth == m_cleanNativeDepth + 1 &&
-           m_reentrantRunDepth == m_cleanReentrantDepth;
+    return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
+           m_owned->nativeDepth == m_owned->cleanNativeDepth + 1 &&
+           m_reentrantRunDepth == m_owned->cleanReentrantDepth;
 }
 
 void Runtime::raiseFromNative(const char* kind, const char* msg) {
@@ -1305,6 +1330,7 @@ void Runtime::raiseFromNative(const char* kind, const char* msg) {
         fromThrow(raiseThrowableError(kind, msg, m_nativeStopAtFrameCount));
 }
 
+// The `spawn` move.
 ObjTask* Runtime::spawnTask(Value fn) {
     auto* co = m_mm.create<ObjCoroutine>(m_coroutineClass, fn,
                                          VmAllocator<Value>{&m_mm});
@@ -1326,7 +1352,9 @@ bool Runtime::taskEnded(const ObjTask* task) const {
            (task != m_mainTask && task->epoch != m_taskEpoch);
 }
 
-void Runtime::markTaskDead(ObjTask* task) {
+// The state change that the `end` and the `abandon` moves share: the task is
+// ENDED, and it holds nothing.
+void Runtime::retireTask(ObjTask* task) {
     if (task->state != TaskState::ENDED) {
         --m_liveTasks;
     }
@@ -1336,14 +1364,16 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->startArg = Value{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
-    task->io = ParkedIo{};
+    task->io = WaitingCall{};
     task->sel = ObjTask::SelectiveReceive{};
-    releasePark(task);
+    releaseWait(task);
     m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
 
-void Runtime::endTaskOrLine(ObjTask* task) {
+// The `end` move. In a session, the end of the script of a line is not the end
+// of the main task.
+void Runtime::endTask(ObjTask* task) {
     if (m_sessionMode && m_isMainWorker && task == m_mainTask) {
         // The line's script ended, but the session's main task did not: it
         // keeps its handle and its mailbox for the next line
@@ -1353,7 +1383,7 @@ void Runtime::endTaskOrLine(ObjTask* task) {
         task->receiving = false;
         return;
     }
-    markTaskDead(task);
+    retireTask(task);
 }
 
 void Runtime::deliverMessage(ObjTask* task, Value msg) {
@@ -1365,15 +1395,28 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     m_mm.pushTempRoot(task);
     task->mailbox.push_back(msg);
     m_mm.popTempRoot();
+    if (task->inStateReceiving()) {
+        messageTask(task);
+    }
+}
+
+void Runtime::messageTask(ObjTask* task) {
     if (task->state == TaskState::RECEIVING) {
         task->state = TaskState::READY;
         m_receivingTasks.erase(task);
         m_runQueue.push_back(task);
-    } else if (task->state == TaskState::WAITING && task->sel.pendingRetry) {
+    } else {
         // A receive_* call with a limit: the message ends the wait of the
         // limit, and the call tests the message when the task runs.
-        unparkTask(task);
+        waitEndTask(task);
     }
+}
+
+void Runtime::limitTask(ObjTask* task) {
+    // The call tests the messages that arrived with the limit first, and
+    // raises TimeoutError only if none is selected.
+    task->sel.timedOut = true;
+    completeWait(task, from<Nil>(Nil{}));
 }
 
 bool Runtime::sendMessage(ObjTask* task, Value msg) {
@@ -1395,7 +1438,7 @@ bool Runtime::sendMessage(ObjTask* task, Value msg) {
 
 bool Runtime::receiveFromNative(Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1406,7 +1449,7 @@ bool Runtime::receiveFromNative(Value* out) {
         task->mailbox.pop_front();
         return true;
     }
-    if (!taskCanSuspend()) {
+    if (workerState() == WorkerState::BLOCKED) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
         return false;
@@ -1419,7 +1462,7 @@ bool Runtime::receiveFromNative(Value* out) {
 bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
                                double seconds, Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1451,12 +1494,12 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         push(msg);
         Value verdict;
         bool ok;
-        ++m_selectDepth;
+        ++m_owned->selectDepth;
         {
             SynchronousRun run(*this);
             ok = invokeCallableFromNative(1, &verdict);
         }
-        --m_selectDepth;
+        --m_owned->selectDepth;
         if (!ok) {
             task->sel = ObjTask::SelectiveReceive{};
             return false;
@@ -1475,14 +1518,14 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         raiseFromNative("TimeoutError", "The limit of the receive passed.");
         return false;
     }
-    if (!taskCanSuspend()) {
+    if (workerState() == WorkerState::BLOCKED) {
         task->sel = ObjTask::SelectiveReceive{};
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
         return false;
     }
     if (sel.limited) {
-        m_parkRequest = ParkRequest{ParkReason::TIMER, -1, sel.deadline};
+        m_waitRequest = WaitRequest{WaitEvent::TIMER, -1, sel.deadline};
     }
     sel.pendingRetry = true;
     m_taskSwitchPending = true;
@@ -1501,10 +1544,10 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
     m_nativeStopAtFrameCount = entry;
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result;
     bool ok = selectStep(task, &result);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -1528,15 +1571,18 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
     }
 }
 
-bool Runtime::resumeTask(ObjTask* task) {
+// The `run` move: the scheduler took `task` from the head of the run queue.
+// The task runs until it suspends or ends, and then makes the move that its
+// exit names: `yield`, `receive`, `wait` or `end`.
+bool Runtime::runTask(ObjTask* task) {
     ObjCoroutine* co = task->co;
     task->state = TaskState::RUNNING;
-    m_currentTask = task;
+    enterTask(task);
 
     // The resume window: for a first resume, the slot the stored callee goes
     // into, and the message of task.spawn_worker for a worker's first task;
     // later, the one value the pending suspend point evaluates to. A task
-    // that waits in receive gets the head of its mailbox, which the send
+    // that is receiving gets the head of its mailbox, which the send
     // that woke it put there; a `yield` gets nil.
     int argCount = 0;
     if (!co->started) {
@@ -1550,13 +1596,13 @@ bool Runtime::resumeTask(ObjTask* task) {
     } else {
         // The network call that the task waited in returns or raises now, so
         // from here on it holds no side.
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         Value received = from<Nil>(Nil{});
         if (!task->mailbox.empty() && task->receiving) {
             received = task->mailbox.front();
             task->mailbox.pop_front();
         } else if (task->hasPendingFault) {
-            // The flag is cleared here, and only failPark sets it, with the
+            // The flag is cleared here, and only failWait sets it, with the
             // kind and the message. A fault that nothing raises therefore
             // leaves nothing behind for a later resume to read.
             task->hasPendingFault = false;
@@ -1574,21 +1620,21 @@ bool Runtime::resumeTask(ObjTask* task) {
     m_reentrantOutcome = OpResult::OK;
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
-    m_cleanNativeDepth = m_nativeDepth;
-    m_cleanReentrantDepth = m_reentrantRunDepth;
+    m_owned->cleanNativeDepth = m_owned->nativeDepth;
+    m_owned->cleanReentrantDepth = m_reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
     OpResult outcome = m_reentrantOutcome;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     // A fault the resumed coroutine did not raise must not reach the next
     // resume.
     m_faultTask = nullptr;
 
     if (!ok) {
-        endTaskOrLine(task);
+        endTask(task);
         if (outcome != OpResult::Fatal) {
             // No frame lies below a task, so no handler outside it can catch.
             runtimeError("BUG: a task ended through a handler outside it.");
@@ -1599,63 +1645,85 @@ bool Runtime::resumeTask(ObjTask* task) {
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
-        endTaskOrLine(task);
+        endTask(task);
         return true;
     }
     if (m_taskSwitchPending) {
         m_taskSwitchPending = false;
         m_taskSwitchInner = nullptr;
-        if (m_parkRequest.reason != ParkReason::NONE) {
-            parkTask(task);
-            return true;
+        // A receive with a limit asks for a wait on its timer, and it is a
+        // receive all the same.
+        if (task->sel.pendingRetry || m_waitRequest.reason == WaitEvent::NONE) {
+            receiveTask(task);
+        } else {
+            waitTask(task);
         }
-        task->state = TaskState::RECEIVING;
-        task->receiving = !task->sel.pendingRetry;
-        m_receivingTasks.insert(task);
         return true;
     }
-    // A `yield` outside every coroutine the task resumed: the yielded value
-    // is discarded, and the task joins the back of the run queue.
-    task->state = TaskState::READY;
-    m_runQueue.push_back(task);
+    yieldTask(task);
     return true;
 }
 
-void Runtime::endTasks() {
+// The `receive` move: the task found no message to take.
+void Runtime::receiveTask(ObjTask* task) {
+    if (m_waitRequest.reason != WaitEvent::NONE) {
+        // The receive has a limit: it waits on the timer of the limit, so the
+        // task is WAITING (see ObjTask::inStateReceiving).
+        waitTask(task);
+        return;
+    }
+    task->state = TaskState::RECEIVING;
+    task->receiving = !task->sel.pendingRetry;
+    m_receivingTasks.insert(task);
+}
+
+// The `yield` move: a `yield` outside every coroutine the task resumed. The
+// yielded value is discarded, and the task joins the back of the run queue.
+void Runtime::yieldTask(ObjTask* task) {
+    task->state = TaskState::READY;
+    m_runQueue.push_back(task);
+}
+
+// The `abandon` move for one task that is READY, RECEIVING or WAITING.
+void Runtime::abandonTask(ObjTask* task) {
+    if (task != m_mainTask || !m_isMainWorker) {
+        retireTask(task);
+        return;
+    }
+    // The main task of a session survives the line, but its wait does not:
+    // nothing would end it once m_waitingTasks is cleared.
+    releaseWait(task);
+    task->io = WaitingCall{};
+    task->pendingValue = Value{};
+    task->hasPendingFault = false;
+}
+
+void Runtime::abandonTasks() {
     // spec/04-semantics.md, Ending: every other task is abandoned, as an
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_waitingTasks) {
-        left.push_back(parked.second);
-        // No deferred call will close the descriptor of a parked call.
-        if (parked.second->io.op != IoOp::NONE) {
-            closeParkedDescriptor(*this, parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        left.push_back(entry.second);
+        // No deferred call will close the descriptor of a waiting call.
+        if (entry.second->io.op != IoOp::NONE) {
+            closeWaitingDescriptor(*this, entry.second);
         }
     }
     for (ObjTask* task : left) {
-        if (task != m_mainTask || !m_isMainWorker) {
-            markTaskDead(task);
-        } else {
-            // The main task of a session survives the line, but its wait does
-            // not: nothing would end it once m_waitingTasks is cleared below.
-            releasePark(task);
-            task->io = ParkedIo{};
-            task->pendingValue = Value{};
-            task->hasPendingFault = false;
-        }
+        abandonTask(task);
     }
     m_runQueue.clear();
     m_receivingTasks.clear();
     m_waitingTasks.clear();
-    m_parkTimers.clear();
-    m_parkRequest = ParkRequest{};
+    m_waitTimers.clear();
+    m_waitRequest = WaitRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     m_taskSwitchPending = false;
     m_taskSwitchInner = nullptr;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     ++m_taskEpoch;
 }
 
@@ -1807,11 +1875,7 @@ void Runtime::reportDeadlock() {
 
 InterpretResult Runtime::schedule() {
     for (;;) {
-        // A session line is over when the main task's script ended, which
-        // leaves the task itself alive for the next line.
-        const bool mainTaskDone =
-            m_mainTask->state == TaskState::ENDED || m_mainLineDone;
-        if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
+        if (workerState() == WorkerState::FINISHED) {
             return InterpretResult::OK;
         }
         if (!m_isMainWorker && m_group->ended.load(std::memory_order_relaxed)) {
@@ -1821,7 +1885,7 @@ InterpretResult Runtime::schedule() {
         if (m_poller != nullptr && !m_runQueue.empty()) {
             pollWhileBusy();
         }
-        if (m_runQueue.empty()) {
+        if (workerState() == WorkerState::IDLE) {
             switch (waitForWork()) {
             case WaitResult::Work:
                 continue;
@@ -1834,7 +1898,7 @@ InterpretResult Runtime::schedule() {
         }
         ObjTask* task = m_runQueue.front();
         m_runQueue.pop_front();
-        if (!resumeTask(task)) {
+        if (!runTask(task)) {
             return InterpretResult::RUNTIME_ERROR;
         }
     }
@@ -1892,7 +1956,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     // Every line's script is its own coroutine, and the session makes the next
     // one. Kept here, it would root this line's script for the whole session.
     m_mainTask->co = nullptr;
-    endTasks();
+    abandonTasks();
     if (!m_sessionMode) {
         m_group->removeWorker(&inbox);
         m_group->end();
@@ -1958,6 +2022,8 @@ void workerMain(WorkerStart start) {
 
 } // namespace
 
+// The `spawn-worker` move: the new task is READY from its start. It joins the
+// run queue of the new worker as that worker's first task (runWorker).
 ObjTask* Runtime::spawnWorker(ObjClosure* entry, Value msg) {
     int number = 0;
     {
@@ -2070,6 +2136,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
                                          VmAllocator<Value>{&m_mm});
     m_mm.popTempRoot();
     m_mm.popTempRoot();
+    // The `spawn-worker` move ends here: the task is the first of this worker.
     task->serial = m_nextTaskSerial++;
     task->state = TaskState::READY;
     m_runQueue.push_back(task);
@@ -2087,7 +2154,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
 #else
     InterpretResult result = schedule();
 #endif
-    endTasks();
+    abandonTasks();
     return result;
 }
 
@@ -2123,8 +2190,8 @@ Runtime::~Runtime() {
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_waitingTasks) {
-        left.push_back(parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        left.push_back(entry.second);
     }
     if (m_mainTask != nullptr) {
         left.push_back(m_mainTask);
@@ -2452,9 +2519,9 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     // instead of trying to drive a frame the native's C stack cannot expose.
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result = native->function(argCount, stackTop - argCount);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -2604,8 +2671,8 @@ void Runtime::markRoots() {
     for (ObjTask* task : m_receivingTasks) {
         m_mm.markObject(task);
     }
-    for (const auto& parked : m_waitingTasks) {
-        m_mm.markObject(parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        m_mm.markObject(entry.second);
     }
     if (m_taskSwitchInner != nullptr) {
         m_mm.markObject(m_taskSwitchInner);
@@ -2623,7 +2690,7 @@ void Runtime::resetStack() {
     m_currentCoroutine = nullptr;
     m_yieldedValue = Value{};
     m_stackOverflow = false;
-    m_selectDepth = 0;
+    m_owned->selectDepth = 0;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {
         deferList.clear();
@@ -3849,7 +3916,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // raises while a native runs or a C++ caller waits for the result of
         // Lox code (a SynchronousRun: a map key's __hash__ or __eq__, a
         // __str__, a deferred call).
-        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0) {
+        if (m_owned->nativeDepth > 0 || m_reentrantRunDepth > 0) {
             return fromThrow(raiseThrowableError(
                 "YieldAcrossNativeError",
                 "Cannot yield across a native callback.", stopAtFrameCount));

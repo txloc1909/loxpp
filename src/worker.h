@@ -89,11 +89,11 @@ struct Inbox {
     std::shared_ptr<WorkerGroup> group;
     Runtime* runtime{nullptr};
     int workerNumber{0};
-    // Guarded by `mutex`. The poller of this worker, null until its first
-    // park (src/poller.h), and true while the worker sleeps in it. A sender
-    // that sees `polling` also wakes the poller, as `wake` does not reach a
-    // thread that waits in epoll. The worker clears `polling` and `poller`
-    // under `mutex` before it destroys the poller.
+    // Guarded by `mutex`. The poller of this worker, null until a task of
+    // this worker first waits (src/poller.h), and true while the worker
+    // sleeps in it. A sender that sees `polling` also wakes the poller, as
+    // `wake` does not reach a thread that waits in epoll. The worker clears
+    // `polling` and `poller` under `mutex` before it destroys the poller.
     Poller* poller{nullptr};
     bool polling{false};
     // A hint that `queue` is not empty, so a worker reads one atomic between

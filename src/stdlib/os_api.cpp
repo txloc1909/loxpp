@@ -112,7 +112,7 @@ static Value sleepNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     const auto deadline = Poller::deadlineAfter(seconds);
-    if (getActiveRuntime()->parkCurrentTask(ParkReason::TIMER, -1, deadline)) {
+    if (getActiveRuntime()->requestWait(WaitEvent::TIMER, -1, deadline)) {
         return from<Nil>(Nil{});
     }
     // The task cannot suspend here, so the worker waits in the kernel.

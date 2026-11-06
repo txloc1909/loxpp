@@ -1,13 +1,15 @@
-// test_park.cpp — a task that suspends in a native call that waits for time or
-// a descriptor (Runtime::parkCurrentTask).
+// test_task_wait.cpp — a task that is `waiting` (spec/04-semantics.md, The
+// Task Machine): it suspends in a native call that waits for time or a
+// descriptor (Runtime::requestWait).
 //
 // The spec probes 260, 279, 282, 283 and 272 to 277 pin what a program sees of
-// `sleep`. These tests look inside the park: the pending value and the
-// pending fault of a parked task, the roots, the mailbox, the end of the
+// `sleep`. These tests look inside the wait: the pending value and the
+// pending fault of a waiting task, the roots, the mailbox, the end of the
 // program, and the idle count of a worker. The tests use a native
-// `park_far()` that parks the current task for 30 seconds, and a host timer
-// that ends the park from the poll handler, because only the host can inject
-// a value or a fault. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
+// `park_far()` that makes the current task wait for 30 seconds, and a host
+// timer that ends the wait from the poll handler, because only the host can
+// inject a value or a fault. The `_gc` twin runs the suite under
+// LOXPP_STRESS_GC.
 
 #include "memory_manager.h"
 #include "objects.h"
@@ -44,8 +46,8 @@ int g_writeFd = -1;
 Value parkFarNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::TIMER, -1,
-                             PClock::now() + std::chrono::seconds(30))) {
+    if (!rt->requestWait(WaitEvent::TIMER, -1,
+                         PClock::now() + std::chrono::seconds(30))) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -55,7 +57,7 @@ Value parkFarNative(int /*argc*/, Value* /*argv*/) {
 Value parkFdNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::FD_READ, g_parkFd)) {
+    if (!rt->requestWait(WaitEvent::FD_READ, g_parkFd)) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -158,13 +160,13 @@ class ParkRig {
 
 } // namespace
 
-class ParkTest : public ::testing::Test {};
+class TaskWaitTest : public ::testing::Test {};
 
 // A fault that a parked call carries is raised in the task when it runs
 // again, and `catch` of the task receives it.
-TEST_F(ParkTest, PendingFaultReachesCatchInTheTask) {
+TEST_F(TaskWaitTest, PendingFaultReachesCatchInTheTask) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "the wait failed");
+        rt.failWait(task, "SocketClosedError", "the wait failed");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -190,12 +192,12 @@ TEST_F(ParkTest, PendingFaultReachesCatchInTheTask) {
 // The fault leaves the innermost coroutine and is caught in the task's own
 // frame, through a generator that holds the parked call. No deferred call
 // runs at the park: the defer runs while the fault unwinds, after the park.
-TEST_F(ParkTest, PendingFaultCrossesACoroutineAndRunsDefersThenNotBefore) {
+TEST_F(TaskWaitTest, PendingFaultCrossesACoroutineAndRunsDefersThenNotBefore) {
     std::string atPark = "<unset>";
     ParkRig rig([&](Runtime& rt, ObjTask* task) {
         auto log = rt.getGlobal("log");
         atPark = log.has_value() ? stringify(*log) : "<undefined>";
-        rt.failPark(task, "SocketClosedError", "gone");
+        rt.failWait(task, "SocketClosedError", "gone");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var log = "";
@@ -225,9 +227,9 @@ TEST_F(ParkTest, PendingFaultCrossesACoroutineAndRunsDefersThenNotBefore) {
 
 // A fault with no handler ends the program with the message, and not with an
 // internal error.
-TEST_F(ParkTest, PendingFaultWithNoHandlerEndsTheProgram) {
+TEST_F(TaskWaitTest, PendingFaultWithNoHandlerEndsTheProgram) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "nobody catches this");
+        rt.failWait(task, "SocketClosedError", "nobody catches this");
     });
     testing::internal::CaptureStderr();
     InterpretResult result = rig.vm().interpret(R"(
@@ -245,9 +247,9 @@ TEST_F(ParkTest, PendingFaultWithNoHandlerEndsTheProgram) {
 // A handler in the coroutine that resumed the generator catches a fault that
 // the generator's parked call raised: the fault crosses a coroutine boundary
 // and the resume of the chain continues.
-TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
+TEST_F(TaskWaitTest, PendingFaultIsCaughtByAnOuterCoroutine) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "outer");
+        rt.failWait(task, "SocketClosedError", "outer");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -273,9 +275,10 @@ TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
 // A handler that catches the fault and then resumes a coroutine raises
 // nothing else: the fault is consumed before it is raised, so the resume of
 // the inner coroutine inside the handler does not find it still pending.
-TEST_F(ParkTest, AHandlerThatResumesACoroutineAfterTheFaultRaisesNothingElse) {
+TEST_F(TaskWaitTest,
+       AHandlerThatResumesACoroutineAfterTheFaultRaisesNothingElse) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "the wait failed");
+        rt.failWait(task, "SocketClosedError", "the wait failed");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var log = "";
@@ -303,13 +306,13 @@ TEST_F(ParkTest, AHandlerThatResumesACoroutineAfterTheFaultRaisesNothingElse) {
 // The pending value is the result of the parked call, through a generator
 // that holds the call, and under collection: the value is a new string that
 // only the task refers to.
-TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
+TEST_F(TaskWaitTest, PendingValueIsTheResultOfTheCall) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
         // Only the parked set refers to the task now.
         rt.memoryManager().collectGarbage();
         Value text{static_cast<Obj*>(
             rt.memoryManager().makeString("value from the host"))};
-        rt.completePark(task, text);
+        rt.completeWait(task, text);
         // Only the task refers to the string now.
         rt.memoryManager().collectGarbage();
     });
@@ -333,15 +336,15 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
 // task.pending() reads the mailbox only: the pending result is not a
 // message. A message that arrives while the task is parked does not wake it,
 // and it is still in the mailbox when the park ends.
-TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
+TEST_F(TaskWaitTest, ASendDoesNotWakeAWaitingTask) {
     ParkRig rig(
         [](Runtime& rt, ObjTask* task) {
             // The send ran during the park. It left the task parked, with the
             // message in its mailbox.
             EXPECT_EQ(task->state, TaskState::WAITING);
             EXPECT_EQ(task->mailbox.size(), 1u);
-            EXPECT_NE(task->parkReason, ParkReason::NONE);
-            rt.completePark(task, from<Number>(42.0));
+            EXPECT_NE(task->waitEvent, WaitEvent::NONE);
+            rt.completeWait(task, from<Number>(42.0));
         },
         [](ObjTask* task) { return task->mailbox.size() == 1u; });
     ASSERT_EQ(rig.vm().interpret(R"(
@@ -371,7 +374,7 @@ TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
 }
 
 // Where the task cannot suspend, park_far() returns at once with no park.
-TEST_F(ParkTest, ParkWhereTheTaskCannotSuspendReturnsFalse) {
+TEST_F(TaskWaitTest, ParkWhereTheTaskCannotSuspendReturnsFalse) {
     ParkRig rig([](Runtime&, ObjTask*) { FAIL() << "nothing is parked"; });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -384,7 +387,7 @@ TEST_F(ParkTest, ParkWhereTheTaskCannotSuspendReturnsFalse) {
 
 // When the main task ends, a task that is still parked is abandoned and its
 // wait is cancelled: the worker holds no wait afterwards.
-TEST_F(ParkTest, TheEndOfTheProgramAbandonsParkedTasksAndTheirWaits) {
+TEST_F(TaskWaitTest, TheEndOfTheProgramAbandonsParkedTasksAndTheirWaits) {
     VM vm;
     const auto start = PClock::now();
     ASSERT_EQ(vm.interpret(R"(
@@ -412,7 +415,7 @@ TEST_F(ParkTest, TheEndOfTheProgramAbandonsParkedTasksAndTheirWaits) {
 // (about 190 ns), so 2 million messages take more than 200 ms. A slower host
 // needs fewer messages for the same time, so the count cannot fail a correct
 // build.
-TEST_F(ParkTest, ARunnableTaskDoesNotStarveASleeper) {
+TEST_F(TaskWaitTest, ARunnableTaskDoesNotStarveASleeper) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var me = task.self();
@@ -451,7 +454,7 @@ TEST_F(ParkTest, ARunnableTaskDoesNotStarveASleeper) {
 
 // The wait on a descriptor: the task leaves the run queue until the
 // descriptor is readable, and the call continues then.
-TEST_F(ParkTest, ADescriptorWaitEndsWhenTheDescriptorIsReadable) {
+TEST_F(TaskWaitTest, ADescriptorWaitEndsWhenTheDescriptorIsReadable) {
     int fds[2];
     ASSERT_EQ(::pipe2(fds, O_CLOEXEC | O_NONBLOCK), 0);
     g_parkFd = fds[0];
@@ -488,12 +491,12 @@ TEST_F(ParkTest, ADescriptorWaitEndsWhenTheDescriptorIsReadable) {
 // the first switch after the poll interval (1 ms) has passed, and the task
 // then runs after the one task ahead of it. With a clock that adds 1 ms per
 // read, every switch polls.
-TEST_F(ParkTest, AWaitThatIsOverIsSeenAtTheNextSwitchWhenAnIntervalPassed) {
+TEST_F(TaskWaitTest, AWaitThatIsOverIsSeenAtTheNextSwitchWhenAnIntervalPassed) {
     EXPECT_LE(switchesUntilResume(std::chrono::milliseconds(1)), 2);
 }
 
 // A clock that adds 250 us per read lets four switches pass between two polls.
-TEST_F(ParkTest, AWaitThatIsOverIsSeenWithinOneIntervalOfSwitches) {
+TEST_F(TaskWaitTest, AWaitThatIsOverIsSeenWithinOneIntervalOfSwitches) {
     const double passes = switchesUntilResume(std::chrono::microseconds(250));
     EXPECT_LE(passes, 2 + 4);
     // The lower bound: the poll must not run before the interval has passed.
@@ -502,7 +505,7 @@ TEST_F(ParkTest, AWaitThatIsOverIsSeenWithinOneIntervalOfSwitches) {
 
 // epoll refuses a regular file. Such a descriptor is always ready, so the
 // call continues at once and does not hang.
-TEST_F(ParkTest, ADescriptorThatEpollRefusesContinuesAtOnce) {
+TEST_F(TaskWaitTest, ADescriptorThatEpollRefusesContinuesAtOnce) {
     char path[] = "/tmp/loxpp-park-XXXXXX";
     int file = ::mkstemp(path);
     ASSERT_GE(file, 0);
@@ -541,7 +544,7 @@ void expectWorkerSleepsWithoutSpinning(const std::string& program) {
 
 // A sleep where the task cannot suspend blocks the worker in the kernel: no
 // CPU use, and the thread is in the sleep state.
-TEST_F(ParkTest, ABlockingSleepDoesNotSpin) {
+TEST_F(TaskWaitTest, ABlockingSleepDoesNotSpin) {
     expectWorkerSleepsWithoutSpinning(R"(
         class Slow { __str__() { sleep(1.5); return "late"; } }
         fun slow(main) { task.send(main, str(Slow())); }
@@ -551,7 +554,7 @@ TEST_F(ParkTest, ABlockingSleepDoesNotSpin) {
 }
 
 // A sleep that parks leaves the worker in the poller, again without CPU use.
-TEST_F(ParkTest, AParkedSleepDoesNotSpin) {
+TEST_F(TaskWaitTest, AParkedSleepDoesNotSpin) {
     expectWorkerSleepsWithoutSpinning(R"(
         fun slow(main) { sleep(1.5); task.send(main, "late"); }
         task.spawn_worker(slow, task.self());
@@ -562,7 +565,7 @@ TEST_F(ParkTest, AParkedSleepDoesNotSpin) {
 // C7: a worker with a parked task can continue, so the group is not
 // deadlocked while the main task waits in receive. The parked task is on a
 // worker that is not the main one.
-TEST_F(ParkTest, AWorkerWithAParkedTaskIsNotCountedIdle) {
+TEST_F(TaskWaitTest, AWorkerWithAParkedTaskIsNotCountedIdle) {
     VM vm;
     testing::internal::CaptureStderr();
     InterpretResult result = vm.interpret(R"(
@@ -579,7 +582,7 @@ TEST_F(ParkTest, AWorkerWithAParkedTaskIsNotCountedIdle) {
 // The deadlock report names the tasks that wait in receive. A parked task is
 // not one of them, and it ends the report's cause: the program is deadlocked
 // only when the sleep is over.
-TEST_F(ParkTest, TheDeadlockReportDoesNotNameAParkedTask) {
+TEST_F(TaskWaitTest, TheDeadlockReportDoesNotNameAParkedTask) {
     VM vm;
     testing::internal::CaptureStderr();
     InterpretResult result = vm.interpret(R"(
@@ -603,7 +606,7 @@ TEST_F(ParkTest, TheDeadlockReportDoesNotNameAParkedTask) {
 // In a session the main task outlives a line that ended with a fault. If it
 // was parked then, its wait ends with the line: the next line reports a real
 // deadlock at once and does not wait for the old timer.
-TEST_F(ParkTest, ASessionMainTaskThatWasParkedLeavesNoWaitBehind) {
+TEST_F(TaskWaitTest, ASessionMainTaskThatWasParkedLeavesNoWaitBehind) {
     VMTestHarness h;
     h.setSession(true);
     ASSERT_EQ(h.run("fun boom() { sleep(0.1); var x = nil; x.foo(); }"),
@@ -628,7 +631,7 @@ TEST_F(ParkTest, ASessionMainTaskThatWasParkedLeavesNoWaitBehind) {
 // A sleep of zero, of a negative duration, and of a fraction of a nanosecond
 // that rounds to zero return at once: no other task runs, and no park makes
 // a poller.
-TEST_F(ParkTest, ASleepWithNoDurationDoesNotPark) {
+TEST_F(TaskWaitTest, ASleepWithNoDurationDoesNotPark) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var me = task.self();
@@ -656,7 +659,7 @@ TEST_F(ParkTest, ASleepWithNoDurationDoesNotPark) {
 // A very long sleep waits and does not overflow the clock or end early. The
 // task would sleep for the rest of the clock's range: the main task ends
 // first, and the sleeper never woke.
-TEST_F(ParkTest, AVeryLongSleepDoesNotEndEarly) {
+TEST_F(TaskWaitTest, AVeryLongSleepDoesNotEndEarly) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var woke = 0;
