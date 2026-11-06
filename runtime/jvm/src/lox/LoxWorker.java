@@ -98,6 +98,10 @@ final class LoxWorker {
     final int number;
     LoxGlobals globals;
 
+    // The frame count that native keeps in its Runtime, one Runtime per
+    // worker. LoxClosure and LoxCoroutine read and write it.
+    int frameCount = 1;
+
     // Guarded by LOCK.
     private final ArrayDeque<LoxTask> runQueue = new ArrayDeque<>();
     private final Condition work = LOCK.newCondition();
@@ -112,16 +116,20 @@ final class LoxWorker {
     // control, before its thread wakes this one.
     LoxTask current;
 
-    /** The record of the state that belongs to the task that runs now. */
-    LoxTask.Owned owned() { return current.owned; }
+    // The record of the state that belongs to the task that runs now. It is
+    // `current.owned`, kept in a field of its own because the call path reads
+    // it often.
+    private LoxTask.Owned owned;
+
+    LoxTask.Owned owned() { return owned; }
 
     private LoxWorker(int number) {
         this.number = number;
         LoxTask first = new LoxTask(this);
         first.state = LoxTask.State.RUNNING;
         first.started = true;
-        first.owned.frameCount = 1;
         current = first;
+        owned = first.owned;
     }
 
     // ------------------------------------------------------------------
@@ -405,7 +413,7 @@ final class LoxWorker {
             LoxRuntime.runDeclarations();
             // The declarations ran as the script frame; the entry is the
             // first frame of the task, as native's scheduler runs it.
-            task.owned.frameCount = 0;
+            frameCount = 0;
             LoxClosure fn = (LoxClosure)entryClass
                                 .getConstructor(Object[][].class)
                                 .newInstance((Object)new Object[0][]);
@@ -485,6 +493,7 @@ final class LoxWorker {
         if (state == LoxTask.State.READY) {
             runQueue.addLast(self);
         }
+        self.savedFrameCount = frameCount;
         LoxTask next = takeNext();
         if (next == self) {
             runTask(self);
@@ -747,7 +756,9 @@ final class LoxWorker {
     // of `task`.
     private void runTask(LoxTask task) {
         current = task;
+        owned = task.owned;
         task.state = LoxTask.State.RUNNING;
+        frameCount = task.savedFrameCount;
     }
 
     // Caller holds LOCK. spec/04-semantics.md, Deadlock: no task on any

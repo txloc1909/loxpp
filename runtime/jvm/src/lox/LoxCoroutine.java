@@ -53,8 +53,9 @@ public final class LoxCoroutine {
     private boolean started;
     private Object[] firstArgs;
 
-    // The frame budget and the handler-liveness count are one count each per
-    // task, like native's m_frameCount and m_handlerStack.size(): a
+    // The frame budget is one count per worker (LoxWorker.frameCount), the
+    // handler-liveness count one per task (LoxTask.Owned.handlerDepth), like
+    // native's m_frameCount and m_handlerStack.size(): a
     // resumed coroutine's frames and handler records sit above the resumer's.
     // These hold the resumer's value and this coroutine's own contribution, so
     // the coroutine can hide its slice while suspended and re-add it on resume.
