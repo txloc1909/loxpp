@@ -1780,7 +1780,7 @@ void Runtime::describeReceivingTasks(std::vector<std::string>& out) const {
 }
 
 void Runtime::reportDeadlock() {
-    // Every worker is idle: each one wrote its list of waiting tasks before
+    // Every worker is idle: each one wrote its list of tasks in receive before
     // it released its inbox lock to wait, and none runs again, so the list
     // is read under that lock.
     std::vector<std::string> lines;
