@@ -452,7 +452,7 @@ enum class TaskState : std::uint8_t {
     RUNNING,   // the scheduler resumed it and it has not suspended yet
     RECEIVING, // suspended in task.receive() on an empty mailbox
     WAITING,   // suspended in a native call that waits for time or a descriptor
-    DEAD,      // its function returned, or the program ended it
+    ENDED,     // its function returned, or the program ended it
 };
 
 // What a parked task waits for. The wait is one wait of the worker's Poller.

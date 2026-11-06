@@ -1322,15 +1322,15 @@ bool Runtime::taskEnded(const ObjTask* task) const {
     if (task->heapId != m_mm.heapId()) {
         return task->ended.load(std::memory_order_acquire);
     }
-    return task->state == TaskState::DEAD ||
+    return task->state == TaskState::ENDED ||
            (task != m_mainTask && task->epoch != m_taskEpoch);
 }
 
 void Runtime::markTaskDead(ObjTask* task) {
-    if (task->state != TaskState::DEAD) {
+    if (task->state != TaskState::ENDED) {
         --m_liveTasks;
     }
-    task->state = TaskState::DEAD;
+    task->state = TaskState::ENDED;
     task->co = nullptr;
     task->mailbox.clear();
     task->startArg = Value{};
@@ -1809,7 +1809,7 @@ InterpretResult Runtime::schedule() {
         // A session line is over when the main task's script ended, which
         // leaves the task itself alive for the next line.
         const bool mainTaskDone =
-            m_mainTask->state == TaskState::DEAD || m_mainLineDone;
+            m_mainTask->state == TaskState::ENDED || m_mainLineDone;
         if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
             return InterpretResult::OK;
         }
@@ -1880,7 +1880,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     m_liveTasks = 1;
     InterpretResult result = schedule();
     if (!m_sessionMode) {
-        m_mainTask->state = TaskState::DEAD;
+        m_mainTask->state = TaskState::ENDED;
         m_mainTask->ended.store(true, std::memory_order_release);
     } else {
         // Between two lines the main task is alive but runs nothing: a message
