@@ -34,6 +34,12 @@ public final class LoxTask {
          * See the comment at the top of {@code LoxClosure}.
          */
         boolean unwindingStackOverflow;
+        /**
+         * The error whose delivery to a catch block ends the unwind that
+         * {@code unwindingStackOverflow} marks. See the comment at the top of
+         * {@code LoxClosure}.
+         */
+        LoxError overflowInFlight;
     }
 
     final LoxWorker worker;

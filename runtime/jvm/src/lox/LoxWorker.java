@@ -101,7 +101,6 @@ final class LoxWorker {
     // The runtime counters that native keeps in its Runtime, one Runtime per
     // worker. LoxClosure, LoxOps, and LoxCoroutine read and write them.
     int frameCount = 1;
-    LoxError overflowInFlight;
     int handlerDepth;
     int stringifyDepth;
 
