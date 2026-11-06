@@ -1569,7 +1569,7 @@ public final class LoxOps {
     // not heap objects there and never reach the guard) — so the check
     // below runs after those three branches, to land on the same boundary
     // per value shape.
-    // The current depth is LoxWorker.stringifyDepth, one per worker.
+    // The current depth is LoxTask.Owned.stringifyDepth.
     private static final int MAX_STRINGIFY_DEPTH = 200;
 
     public static String stringify(Object v) {
@@ -1587,18 +1587,18 @@ public final class LoxOps {
         if (v instanceof Double) {
             return formatNumber((Double)v);
         }
-        LoxWorker w = LoxWorker.current();
-        if (w.stringifyDepth == MAX_STRINGIFY_DEPTH) {
+        LoxTask.Owned owned = LoxWorker.current().owned();
+        if (owned.stringifyDepth == MAX_STRINGIFY_DEPTH) {
             // A raw, valueless LoxError is uncatchable, even inside a
             // try/catch (spec/04-semantics.md's Halting Faults
             // section) — matching native's own fatal disposition here.
             throw new LoxError("Value nesting is too deep.");
         }
-        w.stringifyDepth++;
+        owned.stringifyDepth++;
         try {
             return stringifyObj(v);
         } finally {
-            w.stringifyDepth--;
+            owned.stringifyDepth--;
         }
     }
 

@@ -102,7 +102,6 @@ final class LoxWorker {
     // worker. LoxClosure, LoxOps, and LoxCoroutine read and write them.
     int frameCount = 1;
     int handlerDepth;
-    int stringifyDepth;
 
     // Guarded by LOCK.
     private final ArrayDeque<LoxTask> runQueue = new ArrayDeque<>();

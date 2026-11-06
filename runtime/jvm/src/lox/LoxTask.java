@@ -40,6 +40,8 @@ public final class LoxTask {
          * {@code LoxClosure}.
          */
         LoxError overflowInFlight;
+        /** The nesting depth of the stringify call that runs now. */
+        int stringifyDepth;
     }
 
     final LoxWorker worker;
