@@ -965,6 +965,22 @@ jobs:
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
 
+      - name: Build your own Kafka - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-kafka/tests/run_stages.py
+
+      - name: Build your own Kafka - independent record and log format check
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 examples/codecrafters/build-your-own-kafka/tests/check_format.py
+
   managed-toolchains:
     name: Managed toolchains (JVM)
     runs-on: ubuntu-latest
