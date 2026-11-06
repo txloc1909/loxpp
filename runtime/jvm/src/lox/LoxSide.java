@@ -47,7 +47,7 @@ final class LoxSide {
      * nothing (rule 5).
      */
     void await(SelectableChannel channel, int interest) {
-        if (LoxWorker.canWait()) {
+        if (!LoxWorker.blocked()) {
             holder = LoxWorker.runningTask();
         }
         LoxWorker.waitChannel(channel, interest);

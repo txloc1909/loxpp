@@ -1100,7 +1100,7 @@ bool Runtime::raiseResumeFault(int entry) {
 
 bool Runtime::requestWait(ParkReason reason, int fd,
                           Poller::Clock::time_point deadline) {
-    if (!taskCanSuspend()) {
+    if (workerState() == WorkerState::BLOCKED) {
         return false;
     }
     m_parkRequest = ParkRequest{reason, fd, deadline};
@@ -1298,6 +1298,26 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
     reg.defineGlobal(name, fn, arity);
 }
 
+Runtime::WorkerState Runtime::workerState() const {
+    // A session line is over when the main task's script ended, which leaves
+    // the task itself alive for the next line.
+    const bool mainTaskDone =
+        m_mainTask != nullptr &&
+        (m_mainTask->state == TaskState::ENDED || m_mainLineDone);
+    if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
+        return WorkerState::FINISHED;
+    }
+    if (m_currentTask != nullptr) {
+        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
+    }
+    // Without a scheduler (runTasks never ran) the program runs on the thread
+    // alone, outside every task, and a call that waits blocks the worker.
+    if (m_group == nullptr) {
+        return WorkerState::BLOCKED;
+    }
+    return m_runQueue.empty() ? WorkerState::IDLE : WorkerState::ACTIVE;
+}
+
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
     return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
@@ -1429,7 +1449,7 @@ bool Runtime::receiveFromNative(Value* out) {
         task->mailbox.pop_front();
         return true;
     }
-    if (!taskCanSuspend()) {
+    if (workerState() == WorkerState::BLOCKED) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
         return false;
@@ -1498,7 +1518,7 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         raiseFromNative("TimeoutError", "The limit of the receive passed.");
         return false;
     }
-    if (!taskCanSuspend()) {
+    if (workerState() == WorkerState::BLOCKED) {
         task->sel = ObjTask::SelectiveReceive{};
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
@@ -1856,11 +1876,7 @@ void Runtime::reportDeadlock() {
 
 InterpretResult Runtime::schedule() {
     for (;;) {
-        // A session line is over when the main task's script ended, which
-        // leaves the task itself alive for the next line.
-        const bool mainTaskDone =
-            m_mainTask->state == TaskState::ENDED || m_mainLineDone;
-        if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
+        if (workerState() == WorkerState::FINISHED) {
             return InterpretResult::OK;
         }
         if (!m_isMainWorker && m_group->ended.load(std::memory_order_relaxed)) {
@@ -1870,7 +1886,7 @@ InterpretResult Runtime::schedule() {
         if (m_poller != nullptr && !m_runQueue.empty()) {
             pollWhileBusy();
         }
-        if (m_runQueue.empty()) {
+        if (workerState() == WorkerState::IDLE) {
             switch (waitForWork()) {
             case WaitResult::Work:
                 continue;

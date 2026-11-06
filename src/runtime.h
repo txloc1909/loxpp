@@ -1026,6 +1026,12 @@ class Runtime {
     // Delivers every envelope in the inbound queue to its task's mailbox.
     void drainInbox();
     enum class WaitResult : std::uint8_t { Work, Deadlock, Ended };
+    // The states of a worker (spec/04-semantics.md, The Task Machine).
+    enum class WorkerState : std::uint8_t { ACTIVE, BLOCKED, IDLE, FINISHED };
+    // Derived from the tasks of the worker: nothing stores it. BLOCKED holds
+    // for the running task in a call that cannot suspend, so it is true only
+    // inside a call of class suspends.
+    [[nodiscard]] WorkerState workerState() const;
     // No task is ready: waits until a message arrives, a wait of the poller
     // is reported, the program ends, or (main worker only) every worker
     // waits.
