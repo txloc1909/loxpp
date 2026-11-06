@@ -1385,9 +1385,9 @@ class Runtime {
     // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). Not the same as
     // m_receivingTasks: those wait for a message, not for time or a descriptor.
-    std::unordered_map<Poller::Token, ObjTask*> m_parkedTasks;
+    std::unordered_map<Poller::Token, ObjTask*> m_waitingTasks;
     // The limit timers of parked connect calls, by Poller token. A task is
-    // in m_parkedTasks once, whatever waits it has.
+    // in m_waitingTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
     // The task whose pending fault this resume raises before it runs on, or
     // null. resumeTask sets it and clears it on every switch, so a fault that

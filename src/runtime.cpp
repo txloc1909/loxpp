@@ -1147,7 +1147,7 @@ void Runtime::parkTask(ObjTask* task) {
     task->state = TaskState::WAITING;
     task->parkReason = request.reason;
     task->parkToken = token;
-    m_parkedTasks.emplace(token, task);
+    m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
         task->parkTimerToken = timer;
@@ -1164,7 +1164,7 @@ void Runtime::releasePark(ObjTask* task) {
     if (m_poller != nullptr) {
         m_poller->cancel(task->parkToken);
     }
-    m_parkedTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->parkToken);
     if (task->parkTimerToken != 0) {
         if (m_poller != nullptr) {
             m_poller->cancel(task->parkTimerToken);
@@ -1177,7 +1177,7 @@ void Runtime::releasePark(ObjTask* task) {
 }
 
 void Runtime::rearmPark(ObjTask* task, int fd) {
-    m_parkedTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->parkToken);
     const auto interest = task->parkReason == ParkReason::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
@@ -1191,7 +1191,7 @@ void Runtime::rearmPark(ObjTask* task, int fd) {
         return;
     }
     task->parkToken = token;
-    m_parkedTasks.emplace(token, task);
+    m_waitingTasks.emplace(token, task);
 }
 
 void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
@@ -1201,8 +1201,8 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
     std::vector<Poller::Token> cancelled;
     m_poller->cancelFd(fd, cancelled);
     for (Poller::Token token : cancelled) {
-        auto found = m_parkedTasks.find(token);
-        if (found != m_parkedTasks.end()) {
+        auto found = m_waitingTasks.find(token);
+        if (found != m_waitingTasks.end()) {
             tasks.push_back(found->second);
         }
     }
@@ -1271,8 +1271,8 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             failPark(task, "NetworkError", message.c_str());
             continue;
         }
-        auto found = m_parkedTasks.find(token);
-        if (found == m_parkedTasks.end()) {
+        auto found = m_waitingTasks.find(token);
+        if (found == m_waitingTasks.end()) {
             continue;
         }
         ObjTask* task = found->second;
@@ -1626,7 +1626,7 @@ void Runtime::endTasks() {
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_parkedTasks) {
+    for (const auto& parked : m_waitingTasks) {
         left.push_back(parked.second);
         // No deferred call will close the descriptor of a parked call.
         if (parked.second->io.op != IoOp::NONE) {
@@ -1638,7 +1638,7 @@ void Runtime::endTasks() {
             markTaskDead(task);
         } else {
             // The main task of a session survives the line, but its wait does
-            // not: nothing would end it once m_parkedTasks is cleared below.
+            // not: nothing would end it once m_waitingTasks is cleared below.
             releasePark(task);
             task->io = ParkedIo{};
             task->pendingValue = Value{};
@@ -1647,7 +1647,7 @@ void Runtime::endTasks() {
     }
     m_runQueue.clear();
     m_receivingTasks.clear();
-    m_parkedTasks.clear();
+    m_waitingTasks.clear();
     m_parkTimers.clear();
     m_parkRequest = ParkRequest{};
     m_faultTask = nullptr;
@@ -2123,7 +2123,7 @@ Runtime::~Runtime() {
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_parkedTasks) {
+    for (const auto& parked : m_waitingTasks) {
         left.push_back(parked.second);
     }
     if (m_mainTask != nullptr) {
@@ -2604,7 +2604,7 @@ void Runtime::markRoots() {
     for (ObjTask* task : m_receivingTasks) {
         m_mm.markObject(task);
     }
-    for (const auto& parked : m_parkedTasks) {
+    for (const auto& parked : m_waitingTasks) {
         m_mm.markObject(parked.second);
     }
     if (m_taskSwitchInner != nullptr) {
