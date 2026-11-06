@@ -1118,8 +1118,9 @@ class Runtime {
     // YieldAcrossNativeError: the interpreter counts the same run in
     // runReentrantFrame(), but callCompiled() runs a compiled callee with no
     // such run. Every site that clears m_resumableMode for a synchronous
-    // result must use it; only callNative() does not, because m_nativeDepth
-    // counts a native, and the receive native itself must not count.
+    // result must use it; only callNative() does not, because
+    // TaskOwned::nativeDepth counts a native, and the receive native itself
+    // must not count.
     class SynchronousRun {
       public:
         explicit SynchronousRun(Runtime& rt)
@@ -1435,9 +1436,7 @@ class Runtime {
     std::vector<std::shared_ptr<const std::string>> m_sources;
     // See setSessionMode().
     bool m_sessionMode{false};
-    // Number of natives running now (callNative), innermost included.
-    int m_nativeDepth{0};
-    // m_nativeDepth at which the frames of m_currentCoroutine run, while the
+    // nativeDepth at which the frames of m_currentCoroutine run, while the
     // chain from the running task's base to that coroutine is clean: each
     // link is a `resume` native that its parent's loop called (one native
     // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run

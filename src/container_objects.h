@@ -543,6 +543,8 @@ struct TaskOwned {
     // receive in it would remove a message from the mailbox that the call
     // is testing.
     int selectDepth{0};
+    // Number of natives running now (callNative), innermost included.
+    int nativeDepth{0};
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

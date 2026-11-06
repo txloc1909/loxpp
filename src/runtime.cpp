@@ -658,11 +658,11 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     // native deeper). Any other native in between would hold a C++
     // continuation that a task switch cannot keep.
     const int savedCleanDepth = m_cleanNativeDepth;
-    const int linkNatives = m_nativeDepth - savedCleanDepth;
+    const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
     m_cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
          m_reentrantRunDepth == m_cleanReentrantDepth)
-            ? m_nativeDepth
+            ? m_owned->nativeDepth
             : -1;
 
 #ifdef LOXPP_PROFILE
@@ -1300,7 +1300,7 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
     return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
-           m_nativeDepth == m_cleanNativeDepth + 1 &&
+           m_owned->nativeDepth == m_cleanNativeDepth + 1 &&
            m_reentrantRunDepth == m_cleanReentrantDepth;
 }
 
@@ -1523,10 +1523,10 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
     m_nativeStopAtFrameCount = entry;
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result;
     bool ok = selectStep(task, &result);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -1599,7 +1599,7 @@ bool Runtime::runTask(ObjTask* task) {
     m_reentrantOutcome = OpResult::OK;
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
-    m_cleanNativeDepth = m_nativeDepth;
+    m_cleanNativeDepth = m_owned->nativeDepth;
     m_cleanReentrantDepth = m_reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
@@ -2503,9 +2503,9 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     // instead of trying to drive a frame the native's C stack cannot expose.
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result = native->function(argCount, stackTop - argCount);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -3900,7 +3900,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // raises while a native runs or a C++ caller waits for the result of
         // Lox code (a SynchronousRun: a map key's __hash__ or __eq__, a
         // __str__, a deferred call).
-        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0) {
+        if (m_owned->nativeDepth > 0 || m_reentrantRunDepth > 0) {
             return fromThrow(raiseThrowableError(
                 "YieldAcrossNativeError",
                 "Cannot yield across a native callback.", stopAtFrameCount));
