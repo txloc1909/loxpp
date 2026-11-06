@@ -1103,15 +1103,15 @@ bool Runtime::requestWait(WaitEvent reason, int fd,
     if (workerState() == WorkerState::BLOCKED) {
         return false;
     }
-    m_parkRequest = WaitRequest{reason, fd, deadline};
+    m_waitRequest = WaitRequest{reason, fd, deadline};
     m_taskSwitchPending = true;
     m_taskSwitchInner = nullptr;
     return true;
 }
 
 void Runtime::waitTask(ObjTask* task) {
-    const WaitRequest request = m_parkRequest;
-    m_parkRequest = WaitRequest{};
+    const WaitRequest request = m_waitRequest;
+    m_waitRequest = WaitRequest{};
     Poller::Token token = 0;
     switch (request.reason) {
     case WaitEvent::TIMER:
@@ -1525,7 +1525,7 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         return false;
     }
     if (sel.limited) {
-        m_parkRequest = WaitRequest{WaitEvent::TIMER, -1, sel.deadline};
+        m_waitRequest = WaitRequest{WaitEvent::TIMER, -1, sel.deadline};
     }
     sel.pendingRetry = true;
     m_taskSwitchPending = true;
@@ -1653,7 +1653,7 @@ bool Runtime::runTask(ObjTask* task) {
         m_taskSwitchInner = nullptr;
         // A receive with a limit asks for a wait on its timer, and it is a
         // receive all the same.
-        if (task->sel.pendingRetry || m_parkRequest.reason == WaitEvent::NONE) {
+        if (task->sel.pendingRetry || m_waitRequest.reason == WaitEvent::NONE) {
             receiveTask(task);
         } else {
             waitTask(task);
@@ -1666,7 +1666,7 @@ bool Runtime::runTask(ObjTask* task) {
 
 // The `receive` move: the task found no message to take.
 void Runtime::receiveTask(ObjTask* task) {
-    if (m_parkRequest.reason != WaitEvent::NONE) {
+    if (m_waitRequest.reason != WaitEvent::NONE) {
         // The receive has a limit: it waits on the timer of the limit, so the
         // task is WAITING (see ObjTask::inStateReceiving).
         waitTask(task);
@@ -1717,7 +1717,7 @@ void Runtime::abandonTasks() {
     m_receivingTasks.clear();
     m_waitingTasks.clear();
     m_waitTimers.clear();
-    m_parkRequest = WaitRequest{};
+    m_waitRequest = WaitRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
     enterTask(nullptr);

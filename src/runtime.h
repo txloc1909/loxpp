@@ -1397,7 +1397,7 @@ class Runtime {
         int fd{-1};
         Poller::Clock::time_point deadline{};
     };
-    WaitRequest m_parkRequest;
+    WaitRequest m_waitRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). It includes a
     // receive with a limit, which waits on its timer. m_receivingTasks holds
