@@ -386,12 +386,15 @@ class Out {
 // version outside it gets UNSUPPORTED_VERSION or a loud close.
 // ===========================================================================
 
+// The range of each API is the version this broker serves, so no client asks
+// for a version the broker would refuse. ApiVersions keeps 0-4 because its
+// stage requires that range, and this broker serves every one of those.
 fun apiVersionsTable() {
     return [
-        {"key": 0, "min": 0, "max": 11},  // Produce
-        {"key": 1, "min": 0, "max": 16},  // Fetch
-        {"key": 18, "min": 0, "max": 4},  // ApiVersions
-        {"key": 75, "min": 0, "max": 0}   // DescribeTopicPartitions
+        {"key": 0, "min": 11, "max": 11},  // Produce
+        {"key": 1, "min": 16, "max": 16},  // Fetch
+        {"key": 18, "min": 0, "max": 4},   // ApiVersions
+        {"key": 75, "min": 0, "max": 0}    // DescribeTopicPartitions
     ];
 }
 

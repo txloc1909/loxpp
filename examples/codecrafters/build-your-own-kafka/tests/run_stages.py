@@ -579,6 +579,13 @@ def case_base(prog):
               len(entry) == 1 and entry[0]["min"] == 0 and entry[0]["max"] >= 4,
               str(entry))
         check("base-05 no extra bytes", resp["left"] == 0, str(resp["left"]))
+        # Every other API advertises exactly the version this broker serves,
+        # so no client is invited to ask for a version it would refuse.
+        for key, served in ((0, 11), (1, 16), (75, 0)):
+            entry = [k for k in resp["keys"] if k["key"] == key]
+            check("base-05 API %d advertises exactly version %d" % (key, served),
+                  len(entry) == 1 and entry[0]["min"] == served
+                  and entry[0]["max"] == served, str(entry))
 
 
 # ---------------------------------------------------------------------------

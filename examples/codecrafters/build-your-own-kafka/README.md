@@ -56,7 +56,7 @@ All twenty-five stages of the challenge pass.
 
 Two published request examples are internally inconsistent: base-05 and
 listing-partitions-01 repeat the 39-byte frame of base-03 but declare a
-`message_size` of 26. A broker that trusts the declared size reads 10 bytes
+`message_size` of 26. A broker that trusts the declared size reads 9 bytes
 of the next frame. Those two cases build the request from the encoder
 instead, with the correlation ids the stage descriptions name. Every other
 published hex string is used as written.
@@ -103,10 +103,13 @@ requests as the client sends.
 | Fetch | 1 | 16 | v2 | v1 |
 | DescribeTopicPartitions | 75 | 0 | v2 | v1 |
 
-ApiVersions advertises exactly these four entries, with the ranges above.
-A version outside a served range is refused: ApiVersions answers error 35 as
-its stage requires, and the other three print a line naming the API key and
-version and close the connection.
+ApiVersions advertises exactly these four entries, with the version this
+broker serves as both ends of each range: Produce 11-11, Fetch 16-16,
+DescribeTopicPartitions 0-0, and ApiVersions 0-4, the range its stage
+requires. No client is invited to ask for a version the broker would refuse.
+A version outside a served range is still refused: ApiVersions answers error
+35 as its stage requires, and the other three print a line naming the API key
+and version and close the connection.
 
 ### Metadata
 
@@ -213,10 +216,13 @@ layout rather than from `kafka.lox`:
 - the offset the Produce response claims against the record count on disk;
 - the PartitionRecord versions 0, 1 and 2.
 
-Each check was proved able to fail: five mutations of `kafka.lox` were run,
-each failed the case that names it, and each was restored. The five: the
-offset formula, the PartitionRecord v1 directory field, the topic name check,
-the base-02 compatibility path, and the Produce request header's tag buffer.
+Each check was proved able to fail: six mutations of `kafka.lox` were run,
+each failed the case that names it, and each was restored. The six: the
+offset formula, the PartitionRecord v1 directory field, the advertised
+version range, the topic name check, the base-02 compatibility path, and the
+Produce request header's tag buffer. `check_format.py` guards each group, so
+a mutation that makes a decode raise fails the group by name instead of
+ending the battery.
 
 ## One gap this example found
 

@@ -174,19 +174,16 @@ def check_batches(label, data, expected_values, expected_base):
           all(r["headers"] == [] and r["key"] is None for r in decoded["records"]))
 
 
-def main():
-    program = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROG
-    if not os.path.exists(program):
-        print("check_format.py: no program at %s" % program)
-        return 2
+def run_section(label, fn, *args):
+    """A case that raises is a failed case, not an aborted battery."""
+    try:
+        fn(*args)
+    except Exception as exc:  # a decode error, a dead broker, a timeout
+        check("%s reached its end" % label, False,
+              "%s: %s" % (type(exc).__name__, exc))
 
-    print("record format")
 
-    # The harness's own CRC32C must be right before it can judge the broker's.
-    check("CRC32C of \"123456789\" is 0xE3069283",
-          fixtures.crc32c(b"123456789") == 0xE3069283,
-          "%08x" % fixtures.crc32c(b"123456789"))
-
+def record_format(program):
     topics = rs.ONE_TOPIC
     with rs.Broker(program, topics) as b:
         values = [b"alpha", b"\x00\x01\x02", b""]
@@ -246,25 +243,43 @@ def main():
               len(rs.split_batches(final)) == 3,
               str(len(rs.split_batches(final))))
 
+def metadata_version(program, version):
+    fixture = {"foo": (fixtures.topic_uuid("foo"), [0, 1])}
+    with rs.Broker(program, None) as b:
+        fixtures.write_metadata_log(
+            b.log_dir, fixture, partition_version=version)
+        resp = rs.decode_describe(b.call(rs.describe_v0(74 + version, [b"foo"])))
+        topic = resp["topics"][0]
+        check("PartitionRecord version %d: topic found" % version,
+              topic["error"] == 0 and topic["id"] == fixtures.topic_uuid("foo"),
+              str(topic))
+        check("PartitionRecord version %d: both partitions" % version,
+              [p["index"] for p in topic["partitions"]] == [0, 1],
+              str([p["index"] for p in topic["partitions"]]))
+        check("PartitionRecord version %d: replicas and isr" % version,
+              all(p["replicas"] == [1] and p["isr"] == [1]
+                  for p in topic["partitions"]),
+              str(topic["partitions"]))
+
+
+def main():
+    program = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROG
+    if not os.path.exists(program):
+        print("check_format.py: no program at %s" % program)
+        return 2
+
+    # The harness's own CRC32C must be right before it can judge the broker's.
+    check("CRC32C of \"123456789\" is 0xE3069283",
+          fixtures.crc32c(b"123456789") == 0xE3069283,
+          "%08x" % fixtures.crc32c(b"123456789"))
+
+    print("record format")
+    run_section("the record format group", record_format, program)
+
     print("metadata records")
     for version in (0, 1, 2):
-        fixture = {"foo": (fixtures.topic_uuid("foo"), [0, 1])}
-        with rs.Broker(program, None) as b:
-            fixtures.write_metadata_log(
-                b.log_dir, fixture, partition_version=version)
-            resp = rs.decode_describe(b.call(rs.describe_v0(74 + version,
-                                                            [b"foo"])))
-            topic = resp["topics"][0]
-            check("PartitionRecord version %d: topic found" % version,
-                  topic["error"] == 0 and topic["id"] == fixtures.topic_uuid("foo"),
-                  str(topic))
-            check("PartitionRecord version %d: both partitions" % version,
-                  [p["index"] for p in topic["partitions"]] == [0, 1],
-                  str([p["index"] for p in topic["partitions"]]))
-            check("PartitionRecord version %d: replicas and isr" % version,
-                  all(p["replicas"] == [1] and p["isr"] == [1]
-                      for p in topic["partitions"]),
-                  str(topic["partitions"]))
+        run_section("the PartitionRecord version %d group" % version,
+                    metadata_version, program, version)
 
     print()
     print("%d passed, %d failed" % (PASS, FAIL))
