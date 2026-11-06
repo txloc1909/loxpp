@@ -93,19 +93,18 @@ public final class LoxOps {
      * that path, the same reason runDefers needed a second call site for
      * defer-using functions, see emitChunk's defer catch-all handler).
      *
-     * <p>One counter per worker (LoxWorker.handlerDepth), like native's
-     * m_handlerStack.size() in its one Runtime per worker. A resumed
-     * coroutine's handler records sit above the resumer's, so a coroutine
-     * sees the resumer's live handlers; it hides its own while suspended
-     * (see LoxCoroutine's snapshot). Each task has its own count, which a
-     * task switch saves and puts back.
+     * <p>One counter per task (LoxTask.Owned.handlerDepth), like native's
+     * m_handlerStack.size() for the task. A resumed coroutine's handler
+     * records sit above the resumer's, so a coroutine sees the resumer's
+     * live handlers; it hides its own while suspended (see LoxCoroutine's
+     * snapshot).
      */
-    public static void enterHandler() { LoxWorker.current().handlerDepth++; }
+    public static void enterHandler() { LoxWorker.current().owned().handlerDepth++; }
 
-    public static void exitHandler() { LoxWorker.current().handlerDepth--; }
+    public static void exitHandler() { LoxWorker.current().owned().handlerDepth--; }
 
     public static boolean isHandlerLive() {
-        return LoxWorker.current().handlerDepth > 0;
+        return LoxWorker.current().owned().handlerDepth > 0;
     }
 
     /**
@@ -123,18 +122,18 @@ public final class LoxOps {
      * #319, reviewer round 2).
      */
     public static Object getHandlerDepth() {
-        return LoxWorker.current().handlerDepth;
+        return LoxWorker.current().owned().handlerDepth;
     }
 
     public static void restoreHandlerDepth(Object depth) {
-        LoxWorker.current().handlerDepth = (Integer)depth;
+        LoxWorker.current().owned().handlerDepth = (Integer)depth;
     }
 
     // Package-private read/write for LoxCoroutine's suspend/resume snapshot.
-    static int handlerDepthValue() { return LoxWorker.current().handlerDepth; }
+    static int handlerDepthValue() { return LoxWorker.current().owned().handlerDepth; }
 
     static void setHandlerDepthValue(int depth) {
-        LoxWorker.current().handlerDepth = depth;
+        LoxWorker.current().owned().handlerDepth = depth;
     }
 
     // ------------------------------------------------------------------

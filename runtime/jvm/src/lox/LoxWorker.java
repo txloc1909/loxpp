@@ -98,10 +98,6 @@ final class LoxWorker {
     final int number;
     LoxGlobals globals;
 
-    // The runtime counter that native keeps in its Runtime, one Runtime per
-    // worker. LoxClosure, LoxOps, and LoxCoroutine read and write it.
-    int handlerDepth;
-
     // Guarded by LOCK.
     private final ArrayDeque<LoxTask> runQueue = new ArrayDeque<>();
     private final Condition work = LOCK.newCondition();
@@ -489,7 +485,6 @@ final class LoxWorker {
         if (state == LoxTask.State.READY) {
             runQueue.addLast(self);
         }
-        self.savedHandlerDepth = handlerDepth;
         LoxTask next = takeNext();
         if (next == self) {
             runTask(self);
@@ -748,12 +743,11 @@ final class LoxWorker {
         }
     }
 
-    // The `run` move. Caller holds LOCK. Each task has its own frame count and
-    // handler depth, as each native task resumes from an empty frame stack.
+    // The `run` move. Caller holds LOCK. From here owned() names the record
+    // of `task`.
     private void runTask(LoxTask task) {
         current = task;
         task.state = LoxTask.State.RUNNING;
-        handlerDepth = task.savedHandlerDepth;
     }
 
     // Caller holds LOCK. spec/04-semantics.md, Deadlock: no task on any

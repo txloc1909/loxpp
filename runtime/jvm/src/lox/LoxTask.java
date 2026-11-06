@@ -55,6 +55,11 @@ public final class LoxTask {
          * frame of the top-level script.
          */
         int frameCount;
+        /**
+         * The number of try/catch handlers that this task has open. It is
+         * native's m_handlerStack.size() for the task.
+         */
+        int handlerDepth;
     }
 
     final LoxWorker worker;
@@ -83,10 +88,6 @@ public final class LoxTask {
     // The number of the first wait of the call that the task is in (see
     // LoxPoller.addFd); 0 before the first wait of a call.
     long waitSeq;
-
-    // The handler depth of this task while another task of the worker runs
-    // (see LoxWorker.switchTo).
-    int savedHandlerDepth;
 
     // A thread of this task waits here while the task is suspended. Only
     // one thread of a task runs at a time, so one permit wakes the right
