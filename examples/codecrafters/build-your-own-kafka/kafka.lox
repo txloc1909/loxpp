@@ -468,7 +468,6 @@ fun portFromListeners(value) {
             return -1;
         }
     }
-    return -1;
 }
 
 fun argValue(a, flag) {
@@ -610,12 +609,13 @@ fun applyMetadataRecord(value, meta) {
         var leader = r.i32();
         var leaderEpoch = r.i32();
         r.i32();
-        var directories = [];
+        // v1 added `directories` before the tag buffer. Neither it nor the
+        // tags are needed here, but both must be walked to stay in step.
         if (version >= 1) {
             var n = r.compactArrayLen();
             var i = 0;
             while (i < n) {
-                directories.append(r.uuid());
+                r.uuid();
                 i = i + 1;
             }
         }
@@ -827,9 +827,7 @@ fun handleApiVersions(apiVersion, correlationId, r, flexible) {
     if (!supported) {
         body.i16(35);
         apiKeysBody(body, flexible);
-        if (apiVersion >= 1 or !supported) {
-            body.i32(0);
-        }
+        body.i32(0);
     } else {
         body.i16(0);
         apiKeysBody(body, flexible);
@@ -1087,7 +1085,7 @@ fun sortByName(topics) {
     return out;
 }
 
-fun describeTopics(ctx, meta, names, limit) {
+fun describeTopics(meta, names, limit) {
     var topics = [];
     for (var name in names) {
         var topic = nil;
@@ -1179,7 +1177,7 @@ fun handleDescribeTopicPartitions(correlationId, r, ctx) {
         limit = 2000;
     }
     var meta = loadMetadata(ctx["logDir"]);
-    return writeDescribeResponse(correlationId, describeTopics(ctx, meta, names, limit));
+    return writeDescribeResponse(correlationId, describeTopics(meta, names, limit));
 }
 
 // ===========================================================================
@@ -1202,7 +1200,7 @@ fun handleRequest(data, ctx) {
     var apiKey = r.i16();
     var apiVersion = r.i16();
     var correlationId = r.i32();
-    var clientId = r.string();
+    r.string();
     var flexible = headerIsFlexible(apiKey, apiVersion);
     if (flexible) {
         r.tags();
