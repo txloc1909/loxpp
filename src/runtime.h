@@ -1392,12 +1392,12 @@ class Runtime {
     // can name each one.
     std::unordered_set<ObjTask*> m_receivingTasks;
     // What requestWait asked for, until runTask carries it out.
-    struct ParkRequest {
+    struct WaitRequest {
         WaitEvent reason{WaitEvent::NONE};
         int fd{-1};
         Poller::Clock::time_point deadline{};
     };
-    ParkRequest m_parkRequest;
+    WaitRequest m_parkRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). It includes a
     // receive with a limit, which waits on its timer. m_receivingTasks holds

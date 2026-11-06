@@ -1103,15 +1103,15 @@ bool Runtime::requestWait(WaitEvent reason, int fd,
     if (workerState() == WorkerState::BLOCKED) {
         return false;
     }
-    m_parkRequest = ParkRequest{reason, fd, deadline};
+    m_parkRequest = WaitRequest{reason, fd, deadline};
     m_taskSwitchPending = true;
     m_taskSwitchInner = nullptr;
     return true;
 }
 
 void Runtime::waitTask(ObjTask* task) {
-    const ParkRequest request = m_parkRequest;
-    m_parkRequest = ParkRequest{};
+    const WaitRequest request = m_parkRequest;
+    m_parkRequest = WaitRequest{};
     Poller::Token token = 0;
     switch (request.reason) {
     case WaitEvent::TIMER:
@@ -1525,7 +1525,7 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         return false;
     }
     if (sel.limited) {
-        m_parkRequest = ParkRequest{WaitEvent::TIMER, -1, sel.deadline};
+        m_parkRequest = WaitRequest{WaitEvent::TIMER, -1, sel.deadline};
     }
     sel.pendingRetry = true;
     m_taskSwitchPending = true;
@@ -1717,7 +1717,7 @@ void Runtime::abandonTasks() {
     m_receivingTasks.clear();
     m_waitingTasks.clear();
     m_waitTimers.clear();
-    m_parkRequest = ParkRequest{};
+    m_parkRequest = WaitRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
     enterTask(nullptr);
