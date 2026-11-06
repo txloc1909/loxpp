@@ -661,7 +661,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
     m_owned->cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
-         m_reentrantRunDepth == m_cleanReentrantDepth)
+         m_reentrantRunDepth == m_owned->cleanReentrantDepth)
             ? m_owned->nativeDepth
             : -1;
 
@@ -1301,7 +1301,7 @@ bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
     return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
            m_owned->nativeDepth == m_owned->cleanNativeDepth + 1 &&
-           m_reentrantRunDepth == m_cleanReentrantDepth;
+           m_reentrantRunDepth == m_owned->cleanReentrantDepth;
 }
 
 void Runtime::raiseFromNative(const char* kind, const char* msg) {
@@ -1600,7 +1600,7 @@ bool Runtime::runTask(ObjTask* task) {
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
     m_owned->cleanNativeDepth = m_owned->nativeDepth;
-    m_cleanReentrantDepth = m_reentrantRunDepth;
+    m_owned->cleanReentrantDepth = m_reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
     OpResult outcome = m_reentrantOutcome;

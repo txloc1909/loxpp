@@ -553,6 +553,8 @@ struct TaskOwned {
     // or no task runs. resumeCoroutine() sets it for its own run and restores
     // it.
     int cleanNativeDepth{-1};
+    // Runtime::m_reentrantRunDepth when the scheduler resumed the task.
+    int cleanReentrantDepth{0};
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

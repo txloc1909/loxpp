@@ -1436,8 +1436,6 @@ class Runtime {
     std::vector<std::shared_ptr<const std::string>> m_sources;
     // See setSessionMode().
     bool m_sessionMode{false};
-    // m_reentrantRunDepth when the scheduler resumed the running task.
-    int m_cleanReentrantDepth{0};
 
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
