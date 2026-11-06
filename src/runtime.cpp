@@ -1339,7 +1339,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->io = ParkedIo{};
     task->sel = ObjTask::SelectiveReceive{};
     releasePark(task);
-    m_waitingTasks.erase(task);
+    m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
 
@@ -1367,7 +1367,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     m_mm.popTempRoot();
     if (task->state == TaskState::RECEIVING) {
         task->state = TaskState::READY;
-        m_waitingTasks.erase(task);
+        m_receivingTasks.erase(task);
         m_runQueue.push_back(task);
     } else if (task->state == TaskState::WAITING && task->sel.pendingRetry) {
         // A receive_* call with a limit: the message ends the wait of the
@@ -1611,7 +1611,7 @@ bool Runtime::resumeTask(ObjTask* task) {
         }
         task->state = TaskState::RECEIVING;
         task->receiving = !task->sel.pendingRetry;
-        m_waitingTasks.insert(task);
+        m_receivingTasks.insert(task);
         return true;
     }
     // A `yield` outside every coroutine the task resumed: the yielded value
@@ -1625,7 +1625,7 @@ void Runtime::endTasks() {
     // spec/04-semantics.md, Ending: every other task is abandoned, as an
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
-    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
     for (const auto& parked : m_parkedTasks) {
         left.push_back(parked.second);
         // No deferred call will close the descriptor of a parked call.
@@ -1646,7 +1646,7 @@ void Runtime::endTasks() {
         }
     }
     m_runQueue.clear();
-    m_waitingTasks.clear();
+    m_receivingTasks.clear();
     m_parkedTasks.clear();
     m_parkTimers.clear();
     m_parkRequest = ParkRequest{};
@@ -1752,8 +1752,9 @@ Runtime::WaitResult Runtime::waitForWork() {
     return WaitResult::Ended;
 }
 
-void Runtime::describeWaitingTasks(std::vector<std::string>& out) const {
-    std::vector<ObjTask*> tasks(m_waitingTasks.begin(), m_waitingTasks.end());
+void Runtime::describeReceivingTasks(std::vector<std::string>& out) const {
+    std::vector<ObjTask*> tasks(m_receivingTasks.begin(),
+                                m_receivingTasks.end());
     std::sort(tasks.begin(), tasks.end(),
               [](const ObjTask* a, const ObjTask* b) {
                   return a->serial < b->serial;
@@ -1783,7 +1784,7 @@ void Runtime::reportDeadlock() {
     // it released its inbox lock to wait, and none runs again, so the list
     // is read under that lock.
     std::vector<std::string> lines;
-    describeWaitingTasks(lines);
+    describeReceivingTasks(lines);
     {
         std::lock_guard<std::mutex> groupLock(m_group->mutex);
         for (Inbox* inbox : m_group->inboxes) {
@@ -1792,7 +1793,7 @@ void Runtime::reportDeadlock() {
             }
             std::lock_guard<std::mutex> lock(inbox->mutex);
             if (inbox->runtime != nullptr) {
-                inbox->runtime->describeWaitingTasks(lines);
+                inbox->runtime->describeReceivingTasks(lines);
             }
         }
     }
@@ -2121,7 +2122,7 @@ Runtime::~Runtime() {
         m_mm.inbox().polling = false;
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
-    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
+    left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
     for (const auto& parked : m_parkedTasks) {
         left.push_back(parked.second);
     }
@@ -2600,7 +2601,7 @@ void Runtime::markRoots() {
     for (ObjTask* task : m_runQueue) {
         m_mm.markObject(task);
     }
-    for (ObjTask* task : m_waitingTasks) {
+    for (ObjTask* task : m_receivingTasks) {
         m_mm.markObject(task);
     }
     for (const auto& parked : m_parkedTasks) {

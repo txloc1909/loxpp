@@ -1018,7 +1018,7 @@ class Runtime {
     // Reports DeadlockError with every task that waits in receive, on every
     // worker. The main worker only, after waitForWork() returned Deadlock.
     void reportDeadlock();
-    void describeWaitingTasks(std::vector<std::string>& out) const;
+    void describeReceivingTasks(std::vector<std::string>& out) const;
     // A task of this worker ended or was abandoned.
     void markTaskDead(ObjTask* task);
     // markTaskDead, unless `task` is the main task of a session: the end of a
@@ -1370,7 +1370,7 @@ class Runtime {
     ObjCoroutine* m_taskSwitchInner{nullptr};
     // The tasks that wait in task.receive(), rooted so the deadlock report
     // can name each one.
-    std::unordered_set<ObjTask*> m_waitingTasks;
+    std::unordered_set<ObjTask*> m_receivingTasks;
     // Greater than 0 while a `want` function of a receive_where call runs. A
     // receive in it would remove a message from the mailbox that the call
     // is testing.
@@ -1384,7 +1384,7 @@ class Runtime {
     ParkRequest m_parkRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). Not the same as
-    // m_waitingTasks: those wait for a message, not for time or a descriptor.
+    // m_receivingTasks: those wait for a message, not for time or a descriptor.
     std::unordered_map<Poller::Token, ObjTask*> m_parkedTasks;
     // The limit timers of parked connect calls, by Poller token. A task is
     // in m_parkedTasks once, whatever waits it has.
