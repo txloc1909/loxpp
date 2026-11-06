@@ -10,7 +10,7 @@
 // Process for deterministic cleanup. A child still running when its process
 // object is collected is not killed; it is reaped only if already exited.
 // A descriptor has a registered wait only while a task waits on it, and
-// that task keeps the object alive through ParkedIo::target. Every wait ends
+// that task keeps the object alive through WaitingCall::target. Every wait ends
 // before the task does (releaseWait), and a close cancels its waits first. So
 // no wait exists when a destructor runs, and a closed number cannot meet a
 // stale one.

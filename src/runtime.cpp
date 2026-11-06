@@ -1098,32 +1098,32 @@ bool Runtime::raiseResumeFault(int entry) {
     return false;
 }
 
-bool Runtime::requestWait(ParkReason reason, int fd,
+bool Runtime::requestWait(WaitEvent reason, int fd,
                           Poller::Clock::time_point deadline) {
     if (workerState() == WorkerState::BLOCKED) {
         return false;
     }
-    m_parkRequest = ParkRequest{reason, fd, deadline};
+    m_waitRequest = WaitRequest{reason, fd, deadline};
     m_taskSwitchPending = true;
     m_taskSwitchInner = nullptr;
     return true;
 }
 
 void Runtime::waitTask(ObjTask* task) {
-    const ParkRequest request = m_parkRequest;
-    m_parkRequest = ParkRequest{};
+    const WaitRequest request = m_waitRequest;
+    m_waitRequest = WaitRequest{};
     Poller::Token token = 0;
     switch (request.reason) {
-    case ParkReason::TIMER:
+    case WaitEvent::TIMER:
         token = poller().waitUntil(request.deadline);
         break;
-    case ParkReason::FD_READ:
+    case WaitEvent::FD_READ:
         token = poller().waitFd(request.fd, Poller::Interest::Read);
         break;
-    case ParkReason::FD_WRITE:
+    case WaitEvent::FD_WRITE:
         token = poller().waitFd(request.fd, Poller::Interest::Write);
         break;
-    case ParkReason::NONE:
+    case WaitEvent::NONE:
         break;
     }
     task->pendingValue = Value{};
@@ -1133,7 +1133,7 @@ void Runtime::waitTask(ObjTask* task) {
         // read.
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         task->hasPendingFault = true;
         task->faultKind = "NetworkError";
         task->faultMessage = message;
@@ -1149,52 +1149,52 @@ void Runtime::waitTask(ObjTask* task) {
         return;
     }
     task->state = TaskState::WAITING;
-    task->parkReason = request.reason;
-    task->parkToken = token;
+    task->waitEvent = request.reason;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
-        task->parkTimerToken = timer;
-        m_parkTimers.emplace(timer, task);
+        task->waitTimerToken = timer;
+        m_waitTimers.emplace(timer, task);
     }
 }
 
 void Runtime::releaseWait(ObjTask* task) {
-    if (task->parkReason == ParkReason::NONE) {
+    if (task->waitEvent == WaitEvent::NONE) {
         return;
     }
     // A wait that the poller reported is gone already; cancel() is then a
     // no-op that returns false.
     if (m_poller != nullptr) {
-        m_poller->cancel(task->parkToken);
+        m_poller->cancel(task->waitToken);
     }
-    m_waitingTasks.erase(task->parkToken);
-    if (task->parkTimerToken != 0) {
+    m_waitingTasks.erase(task->waitToken);
+    if (task->waitTimerToken != 0) {
         if (m_poller != nullptr) {
-            m_poller->cancel(task->parkTimerToken);
+            m_poller->cancel(task->waitTimerToken);
         }
-        m_parkTimers.erase(task->parkTimerToken);
-        task->parkTimerToken = 0;
+        m_waitTimers.erase(task->waitTimerToken);
+        task->waitTimerToken = 0;
     }
-    task->parkReason = ParkReason::NONE;
-    task->parkToken = 0;
+    task->waitEvent = WaitEvent::NONE;
+    task->waitToken = 0;
 }
 
 void Runtime::rearmWait(ObjTask* task, int fd) {
-    m_waitingTasks.erase(task->parkToken);
-    const auto interest = task->parkReason == ParkReason::FD_WRITE
+    m_waitingTasks.erase(task->waitToken);
+    const auto interest = task->waitEvent == WaitEvent::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
     // The call began to wait at its first wait, so it keeps that token.
-    const Poller::Token token = poller().waitFd(fd, interest, task->parkToken);
+    const Poller::Token token = poller().waitFd(fd, interest, task->waitToken);
     if (token == 0) {
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->parkToken = 0;
+        task->waitToken = 0;
         failWait(task, "NetworkError", message.c_str());
         return;
     }
-    task->parkToken = token;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
 }
 
@@ -1266,11 +1266,11 @@ void Runtime::pollWhileBusy() {
 
 void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
     for (Poller::Token token : ready) {
-        auto limit = m_parkTimers.find(token);
-        if (limit != m_parkTimers.end()) {
+        auto limit = m_waitTimers.find(token);
+        if (limit != m_waitTimers.end()) {
             ObjTask* task = limit->second;
-            m_parkTimers.erase(limit);
-            task->parkTimerToken = 0;
+            m_waitTimers.erase(limit);
+            task->waitTimerToken = 0;
             const std::string message = task->io.timeoutMessage;
             failWait(task, "NetworkError", message.c_str());
             continue;
@@ -1281,7 +1281,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         }
         ObjTask* task = found->second;
         if (task->io.op != IoOp::NONE) {
-            resumeParkedIo(*this, task);
+            resumeWaitingCall(*this, task);
         } else if (task->inStateReceiving()) {
             limitTask(task);
         } else {
@@ -1364,7 +1364,7 @@ void Runtime::retireTask(ObjTask* task) {
     task->startArg = Value{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
-    task->io = ParkedIo{};
+    task->io = WaitingCall{};
     task->sel = ObjTask::SelectiveReceive{};
     releaseWait(task);
     m_receivingTasks.erase(task);
@@ -1525,7 +1525,7 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         return false;
     }
     if (sel.limited) {
-        m_parkRequest = ParkRequest{ParkReason::TIMER, -1, sel.deadline};
+        m_waitRequest = WaitRequest{WaitEvent::TIMER, -1, sel.deadline};
     }
     sel.pendingRetry = true;
     m_taskSwitchPending = true;
@@ -1596,7 +1596,7 @@ bool Runtime::runTask(ObjTask* task) {
     } else {
         // The network call that the task waited in returns or raises now, so
         // from here on it holds no side.
-        task->io = ParkedIo{};
+        task->io = WaitingCall{};
         Value received = from<Nil>(Nil{});
         if (!task->mailbox.empty() && task->receiving) {
             received = task->mailbox.front();
@@ -1653,8 +1653,7 @@ bool Runtime::runTask(ObjTask* task) {
         m_taskSwitchInner = nullptr;
         // A receive with a limit asks for a wait on its timer, and it is a
         // receive all the same.
-        if (task->sel.pendingRetry ||
-            m_parkRequest.reason == ParkReason::NONE) {
+        if (task->sel.pendingRetry || m_waitRequest.reason == WaitEvent::NONE) {
             receiveTask(task);
         } else {
             waitTask(task);
@@ -1667,7 +1666,7 @@ bool Runtime::runTask(ObjTask* task) {
 
 // The `receive` move: the task found no message to take.
 void Runtime::receiveTask(ObjTask* task) {
-    if (m_parkRequest.reason != ParkReason::NONE) {
+    if (m_waitRequest.reason != WaitEvent::NONE) {
         // The receive has a limit: it waits on the timer of the limit, so the
         // task is WAITING (see ObjTask::inStateReceiving).
         waitTask(task);
@@ -1694,7 +1693,7 @@ void Runtime::abandonTask(ObjTask* task) {
     // The main task of a session survives the line, but its wait does not:
     // nothing would end it once m_waitingTasks is cleared.
     releaseWait(task);
-    task->io = ParkedIo{};
+    task->io = WaitingCall{};
     task->pendingValue = Value{};
     task->hasPendingFault = false;
 }
@@ -1708,7 +1707,7 @@ void Runtime::abandonTasks() {
         left.push_back(entry.second);
         // No deferred call will close the descriptor of a waiting call.
         if (entry.second->io.op != IoOp::NONE) {
-            closeParkedDescriptor(*this, entry.second);
+            closeWaitingDescriptor(*this, entry.second);
         }
     }
     for (ObjTask* task : left) {
@@ -1717,8 +1716,8 @@ void Runtime::abandonTasks() {
     m_runQueue.clear();
     m_receivingTasks.clear();
     m_waitingTasks.clear();
-    m_parkTimers.clear();
-    m_parkRequest = ParkRequest{};
+    m_waitTimers.clear();
+    m_waitRequest = WaitRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
     enterTask(nullptr);

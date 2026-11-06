@@ -458,7 +458,7 @@ enum class TaskState : std::uint8_t {
 };
 
 // What a WAITING task waits for. The wait is one wait of the worker's Poller.
-enum class ParkReason : std::uint8_t {
+enum class WaitEvent : std::uint8_t {
     NONE,
     FD_READ,
     FD_WRITE,
@@ -490,7 +490,7 @@ enum class IoOp : std::uint8_t {
 // descriptor of the attempt in progress and closes it when the record dies.
 struct ConnectState;
 
-struct ParkedIo {
+struct WaitingCall {
     IoOp op{IoOp::NONE};
     // The Socket or Server the call waits on. GC-tracked through the task.
     Obj* target{nullptr};
@@ -576,11 +576,11 @@ struct ObjTask : public Obj {
     // Set while the task is WAITING: what it waits for and the Poller token of
     // that wait. A WAITING task keeps its result and its fault here, not in the
     // mailbox, so task.pending() never sees them.
-    ParkReason parkReason{ParkReason::NONE};
-    std::uint64_t parkToken{0};
+    WaitEvent waitEvent{WaitEvent::NONE};
+    std::uint64_t waitToken{0};
     // The Poller token of the limit of a connect call that waits for a
     // descriptor, or 0. The limit is a second wait of the same task.
-    std::uint64_t parkTimerToken{0};
+    std::uint64_t waitTimerToken{0};
     // The value of the waiting call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
@@ -588,7 +588,7 @@ struct ObjTask : public Obj {
     // of the call and kept until the task runs again, so it also names the
     // call while the task is READY after its wait ended: such a call still
     // holds its side (spec/04-semantics.md, The Task Machine, Sides, rule 1).
-    ParkedIo io;
+    WaitingCall io;
     // The state of a receive_within, receive_where, or receive_where_within
     // call (spec/04-semantics.md, task.receive_within). A task that waits in
     // one has no result to hand over when it runs again: the runtime runs the

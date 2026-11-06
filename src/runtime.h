@@ -444,7 +444,7 @@ class Runtime {
     // (taskCanSuspend()), nothing changed, and the native waits in place
     // without spinning, then returns its result. `fd` is read only for FD_READ
     // and FD_WRITE; `deadline` only for TIMER.
-    bool requestWait(ParkReason reason, int fd = -1,
+    bool requestWait(WaitEvent reason, int fd = -1,
                      Poller::Clock::time_point deadline = {});
     // The `wait-end` move for a WAITING task of this worker, on the owner
     // thread. The task joins the back of the run queue and its call returns
@@ -1392,12 +1392,12 @@ class Runtime {
     // can name each one.
     std::unordered_set<ObjTask*> m_receivingTasks;
     // What requestWait asked for, until runTask carries it out.
-    struct ParkRequest {
-        ParkReason reason{ParkReason::NONE};
+    struct WaitRequest {
+        WaitEvent reason{WaitEvent::NONE};
         int fd{-1};
         Poller::Clock::time_point deadline{};
     };
-    ParkRequest m_parkRequest;
+    WaitRequest m_waitRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). It includes a
     // receive with a limit, which waits on its timer. m_receivingTasks holds
@@ -1405,7 +1405,7 @@ class Runtime {
     std::unordered_map<Poller::Token, ObjTask*> m_waitingTasks;
     // The limit timers of waiting connect calls, by Poller token. A task is
     // in m_waitingTasks once, whatever waits it has.
-    std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
+    std::unordered_map<Poller::Token, ObjTask*> m_waitTimers;
     // The task whose pending fault this resume raises before it runs on, or
     // null. runTask sets it and clears it on every switch, so a fault that
     // the resume never reaches is dropped there and cannot reach the next
