@@ -1,5 +1,5 @@
-// test_park.cpp — a task that suspends in a native call that waits for time or
-// a descriptor (Runtime::requestWait).
+// test_task_wait.cpp — a task that suspends in a native call that waits for
+// time or a descriptor (Runtime::requestWait).
 //
 // The spec probes 260, 279, 282, 283 and 272 to 277 pin what a program sees of
 // `sleep`. These tests look inside the park: the pending value and the

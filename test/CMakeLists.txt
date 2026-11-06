@@ -138,8 +138,8 @@ loxpp_add_test(test_coroutine_gc    test_coroutine.cpp       CORE loxpp_test_cor
 loxpp_add_test(test_task            test_task.cpp            CORE loxpp_test_core PROBE)
 loxpp_add_test(test_task_gc         test_task.cpp            CORE loxpp_test_core PROBE)
 loxpp_add_test(test_poller          test_poller.cpp          CORE loxpp_test_core)
-loxpp_add_test(test_park            test_park.cpp            CORE loxpp_test_core)
-loxpp_add_test(test_park_gc         test_park.cpp            CORE loxpp_test_core)
+loxpp_add_test(test_task_wait       test_task_wait.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_task_wait_gc    test_task_wait.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_socket_park     test_socket_park.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_socket_park_gc  test_socket_park.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_connect_park    test_connect_park.cpp    CORE loxpp_test_core)
@@ -499,7 +499,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
     test_table_gc test_allocator_gc test_net_process_gc test_coroutine_gc
-    test_task_gc test_park_gc test_socket_park_gc test_connect_park_gc
+    test_task_gc test_task_wait_gc test_socket_park_gc test_connect_park_gc
     test_worker_gc
     test_repl_gc)
 
@@ -519,7 +519,8 @@ set(LOXPP_GTEST_TARGETS
     test_operator_overload
     test_or_pattern test_or_pattern_gc test_seq_destructure test_list_pattern
     test_list_pattern_gc test_at_binding test_at_binding_gc test_profiler
-    test_coroutine test_coroutine_gc test_task test_task_gc test_poller test_park test_park_gc
+    test_coroutine test_coroutine_gc test_task test_task_gc test_poller
+    test_task_wait test_task_wait_gc
     test_socket_park test_socket_park_gc test_connect_park test_connect_park_gc
     test_worker
     test_worker_gc test_repl test_repl_gc
@@ -537,7 +538,7 @@ endif()
 # A park test that fails by sleeping for ever never returns. A ctest TIMEOUT
 # ends it. The limit is far above the run time of any park test on a loaded
 # host, so only a hang reaches it.
-set(LOXPP_HANG_GUARDED_TARGETS test_park test_park_gc)
+set(LOXPP_HANG_GUARDED_TARGETS test_task_wait test_task_wait_gc)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     set(props "")
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
