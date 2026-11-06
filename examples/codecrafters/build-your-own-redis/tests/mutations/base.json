@@ -10,7 +10,7 @@
  },
  {
   "name": "connections served in the accept task",
-  "old": "    task.spawn(runReader);\n",
+  "old": "    conn.reader = task.spawn(runReader);\n",
   "new": "    runReader();\n",
   "cases": [
    "base-04 concurrent clients"
@@ -115,7 +115,7 @@
  },
  {
   "name": "no array length limit",
-  "old": "if (count == nil or count > 1048576) {",
+  "old": "if (count == nil or count > ARRAY_MAX) {",
   "new": "if (count == nil) {",
   "cases": [
    "local: array too long is a protocol error"
@@ -123,8 +123,8 @@
  },
  {
   "name": "upper on a long word",
-  "old": "    if (len(s) > MAX_KEYWORD) {\n        return s;\n    }\n",
-  "new": "",
+  "old": "fun upper(s) {\n    if (len(s) > MAX_KEYWORD) {\n        return s;\n    }\n",
+  "new": "fun upper(s) {\n",
   "cases": [
    "local: a 256 KB command name does not stop other clients"
   ]
@@ -134,7 +134,7 @@
   "old": "                words.append(s[start:i]);",
   "new": "                var w = \"\";\n                for (var ch in s[start:i]) {\n                    w = w + ch;\n                }\n                words.append(w);",
   "cases": [
-   "local: a 256 KB inline word does not stop other clients"
+   "local: a 65000-byte inline word does not stop other clients"
   ]
  },
  {

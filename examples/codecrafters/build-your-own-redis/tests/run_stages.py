@@ -301,7 +301,9 @@ def stages_base(prog):
         # must not stop the other clients for long.
         for name, raw in [
             ("a 256 KB command name", encode("A" * 262144)),
-            ("a 256 KB inline word", b"PING " + b"a" * 262144 + b"\r\n"),
+            # Just under the 64 KB inline limit, where splitWords still runs:
+            # a split that grows a word byte by byte takes about 4.7 s here.
+            ("a 65000-byte inline word", b"ECHO " + b"a" * 65000 + b"\r\n"),
         ]:
             m = srv.client()
             m.send_raw(raw)
@@ -312,7 +314,7 @@ def stages_base(prog):
             got = other.try_read(10)
             took = time.time() - start
             check("local: %s does not stop other clients" % name,
-                  got == "PONG" and took < 3.0, "%r after %.1f s" % (got, took))
+                  got == "PONG" and took < 1.0, "%r after %.1f s" % (got, took))
             m.close()
             other.close()
 
