@@ -435,13 +435,13 @@ class Runtime {
 
     // A native that waits for time or a descriptor calls this instead of
     // waiting. True: the current task suspends when the native returns, and
-    // the native returns a placeholder; the task is WAITING and leaves the run
-    // queue. False: the task cannot suspend here (taskCanSuspend()), nothing
-    // changed, and the native waits in place without spinning, then returns
-    // its result. `fd` is read only for FD_READ and FD_WRITE; `deadline` only
-    // for TIMER.
-    bool parkCurrentTask(ParkReason reason, int fd = -1,
-                         Poller::Clock::time_point deadline = {});
+    // the native returns a placeholder; the task then makes the `wait` move
+    // (waitTask) and leaves the run queue. False: the task cannot suspend here
+    // (taskCanSuspend()), nothing changed, and the native waits in place
+    // without spinning, then returns its result. `fd` is read only for FD_READ
+    // and FD_WRITE; `deadline` only for TIMER.
+    bool requestWait(ParkReason reason, int fd = -1,
+                     Poller::Clock::time_point deadline = {});
     // Ends the wait of a WAITING task of this worker, on the owner thread. The
     // task joins the back of the run queue and its call returns `value`
     // (completePark) or raises a catchable fault of `kind` (failPark) when it
@@ -1040,10 +1040,10 @@ class Runtime {
     // Abandons every task but the main task: the run of the program ended.
     void endTasks();
 
-    // Puts the task that a park request suspended into the parked set and
-    // registers its wait. Called by resumeTask after the task's frames
-    // unwound.
-    void parkTask(ObjTask* task);
+    // The `wait` move: the task that a wait request suspended becomes
+    // WAITING, and its wait is registered. Called by resumeTask after the
+    // frames of the task unwound.
+    void waitTask(ObjTask* task);
     // Cancels the wait of a parked task and erases it from the parked set.
     // No-op for a task that is not parked. It keeps ObjTask::io: the call
     // holds its side until the task runs again (resumeTask clears it).
@@ -1382,7 +1382,7 @@ class Runtime {
     // receive in it would remove a message from the mailbox that the call
     // is testing.
     int m_selectDepth{0};
-    // What parkCurrentTask asked for, until resumeTask carries it out.
+    // What requestWait asked for, until resumeTask carries it out.
     struct ParkRequest {
         ParkReason reason{ParkReason::NONE};
         int fd{-1};

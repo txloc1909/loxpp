@@ -1,5 +1,5 @@
 // test_park.cpp — a task that suspends in a native call that waits for time or
-// a descriptor (Runtime::parkCurrentTask).
+// a descriptor (Runtime::requestWait).
 //
 // The spec probes 260, 279, 282, 283 and 272 to 277 pin what a program sees of
 // `sleep`. These tests look inside the park: the pending value and the
@@ -44,8 +44,8 @@ int g_writeFd = -1;
 Value parkFarNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::TIMER, -1,
-                             PClock::now() + std::chrono::seconds(30))) {
+    if (!rt->requestWait(ParkReason::TIMER, -1,
+                         PClock::now() + std::chrono::seconds(30))) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -55,7 +55,7 @@ Value parkFarNative(int /*argc*/, Value* /*argv*/) {
 Value parkFdNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::FD_READ, g_parkFd)) {
+    if (!rt->requestWait(ParkReason::FD_READ, g_parkFd)) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});

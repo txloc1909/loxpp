@@ -888,8 +888,8 @@ static Value runIo(ParkedIo io) {
         // task of the worker runs meanwhile.
         const int fd = descriptorOf(io);
         const bool writes = io.op == IoOp::CONNECT || io.op == IoOp::WRITE;
-        if (rt->parkCurrentTask(
-                writes ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
+        if (rt->requestWait(writes ? ParkReason::FD_WRITE : ParkReason::FD_READ,
+                            fd)) {
             ObjTask* task = rt->currentTask();
             if (ObjTask** slot = holderSlot(io)) {
                 *slot = task;

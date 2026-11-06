@@ -1094,8 +1094,8 @@ bool Runtime::raiseResumeFault(int entry) {
     return false;
 }
 
-bool Runtime::parkCurrentTask(ParkReason reason, int fd,
-                              Poller::Clock::time_point deadline) {
+bool Runtime::requestWait(ParkReason reason, int fd,
+                          Poller::Clock::time_point deadline) {
     if (!taskCanSuspend()) {
         return false;
     }
@@ -1105,7 +1105,7 @@ bool Runtime::parkCurrentTask(ParkReason reason, int fd,
     return true;
 }
 
-void Runtime::parkTask(ObjTask* task) {
+void Runtime::waitTask(ObjTask* task) {
     const ParkRequest request = m_parkRequest;
     m_parkRequest = ParkRequest{};
     Poller::Token token = 0;
@@ -1620,7 +1620,7 @@ bool Runtime::resumeTask(ObjTask* task) {
         m_taskSwitchPending = false;
         m_taskSwitchInner = nullptr;
         if (m_parkRequest.reason != ParkReason::NONE) {
-            parkTask(task);
+            waitTask(task);
             return true;
         }
         task->state = TaskState::RECEIVING;
