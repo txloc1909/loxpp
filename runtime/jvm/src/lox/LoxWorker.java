@@ -159,7 +159,7 @@ final class LoxWorker {
                                        "Cannot send to a task that has ended.");
             }
             target.deliver(msg);
-            if (target.state == LoxTask.State.WAITING) {
+            if (target.state == LoxTask.State.RECEIVING) {
                 target.worker.makeReady(target);
             } else if (target.state == LoxTask.State.PARKED &&
                        target.limitedWait) {
@@ -189,7 +189,7 @@ final class LoxWorker {
                         "YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
                 }
-                suspend(self, LoxTask.State.WAITING);
+                suspend(self, LoxTask.State.RECEIVING);
             }
             return self.takeMessage();
         } finally {
@@ -287,7 +287,7 @@ final class LoxWorker {
                                    "Cannot receive across a native callback.");
         }
         if (!limited) {
-            suspend(self, LoxTask.State.WAITING);
+            suspend(self, LoxTask.State.RECEIVING);
             return false;
         }
         ensurePoller().addTimer(self, deadline);

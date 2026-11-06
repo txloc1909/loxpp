@@ -14,7 +14,7 @@ public final class LoxTask {
     enum State {
         READY,   // in the run queue of its worker, or not started yet
         RUNNING, // the current task of its worker
-        WAITING, // in task.receive() on an empty mailbox
+        RECEIVING, // in task.receive() on an empty mailbox
         PARKED,  // in a call that waits for a channel or for time
         DEAD,
     }
