@@ -205,13 +205,15 @@ fun arrayReply(items) {
 }
 
 // A reply of many bulks: the session encodes and writes it in steps of
-// ELEMENTS_PER_YIELD elements and yields between the steps. items is a new
-// List that the command took from the keyspace in one step, so the command
-// stays atomic, and a long list does not stop the other clients while its
-// reply is encoded.
+// ELEMENTS_PER_YIELD elements and yields between the steps. The elements are
+// the elements of rev from last to first, then the elements of fwd in order.
+// rev and fwd are new Lists that the command took from the keyspace in one
+// step, so the command stays atomic, and a long list does not stop the other
+// clients while its reply is encoded.
 class Bulks {
-    init(items) {
-        this.items = items;
+    init(rev, fwd) {
+        this.rev = rev;
+        this.fwd = fwd;
     }
 }
 
@@ -453,80 +455,98 @@ fun unknownCommand(argv) {
 // Lists
 // ===========================================================================
 
-// A double-ended queue over a List. The live elements are
-// items[head:len(items)]. A pop from the left moves head; a push to the left
-// fills the free slots before head and, when there are none, grows the free
-// space to the size of the queue. So each push and pop costs a constant time
-// on average, and a long LPUSH or LPOP series stays linear.
+// A double-ended queue over two Lists. front holds the elements pushed to
+// the left, last pushed at its end, so the first element is the last of
+// front. back[head:len(back)] holds the others in order. Each push is one
+// append, so no push copies the queue. A pop takes from the end of front, or
+// moves head; when head passes the middle of back, one slice drops the free
+// slots. So a long LPUSH, RPUSH or LPOP series stays linear.
 class Deque {
     init() {
-        this.items = [];
+        this.front = [];
+        this.back = [];
         this.head = 0;
     }
 
     size() {
-        return len(this.items) - this.head;
+        return len(this.front) + len(this.back) - this.head;
     }
 
     at(i) {
-        return this.items[this.head + i];
+        var f = len(this.front);
+        if (i < f) {
+            return this.front[f - 1 - i];
+        }
+        return this.back[this.head + i - f];
     }
 
-    slice(start, stop) {
-        return this.items[this.head + start:this.head + stop];
+    // The elements start..stop-1 (0 <= start <= stop <= size()), as a Bulks
+    // reply, with one slice of each List.
+    range(start, stop) {
+        var f = len(this.front);
+        var rev = [];
+        if (start < f) {
+            var end = stop;
+            if (end > f) {
+                end = f;
+            }
+            rev = this.front[f - end:f - start];
+        }
+        var fwd = [];
+        if (stop > f) {
+            var first = start;
+            if (first < f) {
+                first = f;
+            }
+            fwd = this.back[this.head + first - f:this.head + stop - f];
+        }
+        return Bulks(rev, fwd);
     }
 
     pushRight(v) {
-        this.items.append(v);
+        this.back.append(v);
     }
 
     pushLeft(v) {
-        if (this.head == 0) {
-            this.growLeft();
-        }
-        this.head = this.head - 1;
-        this.items[this.head] = v;
+        this.front.append(v);
     }
 
-    // Removes the first k elements (k <= size()) and returns them as a new
-    // List, with one slice.
+    // Removes the first k elements (k <= size()) and returns them as a
+    // Bulks reply. The cost grows with k, not with the size of the queue.
     takeLeft(k) {
-        var out = this.slice(0, k);
-        this.head = this.head + k;
-        if (this.head * 2 > len(this.items)) {
-            this.items = this.items[this.head:len(this.items)];
-            this.head = 0;
+        var reply = this.range(0, k);
+        var f = len(this.front);
+        var m = len(reply.rev);
+        if (m * 2 >= f) {
+            this.front = this.front[0:f - m];
+        } else {
+            var i = 0;
+            while (i < m) {
+                this.front.pop();
+                i = i + 1;
+            }
         }
-        return out;
+        this.head = this.head + len(reply.fwd);
+        this.compact();
+        return reply;
     }
 
     popLeft() {
-        var v = this.items[this.head];
-        this.items[this.head] = nil;
-        this.head = this.head + 1;
-        if (this.head > 32 and this.head * 2 > len(this.items)) {
-            this.items = this.items[this.head:len(this.items)];
-            this.head = 0;
+        if (len(this.front) > 0) {
+            return this.front.pop();
         }
+        var v = this.back[this.head];
+        this.back[this.head] = nil;
+        this.head = this.head + 1;
+        this.compact();
         return v;
     }
 
-    growLeft() {
-        var gap = this.size();
-        if (gap < 8) {
-            gap = 8;
+    compact() {
+        if (this.head > 32 and this.head * 2 > len(this.back)) {
+            this.back = this.back[this.head:len(this.back)];
+            this.head = 0;
         }
-        var grown = [];
-        var i = 0;
-        while (i < gap) {
-            grown.append(nil);
-            i = i + 1;
-        }
-        for (var v in this.slice(0, this.size())) {
-            grown.append(v);
-        }
-        this.items = grown;
-        this.head = gap;
     }
 }
 
@@ -541,40 +561,65 @@ class Waiter {
     }
 }
 
-// The waiters of one key, oldest first, in a Deque. A waiter that is no
-// longer active stays until a pusher or a compaction removes it. live counts
-// the active ones: when the queue holds more than twice that, a compaction
-// drops the others, so many waits that time out do not grow it without
-// bound.
+// The waiters of one key, oldest first: items[head:len(items)]. A waiter
+// that is no longer active stays until a pusher or a compaction removes it.
+// live counts the active ones: when the queue holds more than twice that, a
+// compaction drops the others, so many waits that time out do not grow it
+// without bound. A key with one waiter maps to the Waiter itself, and gets
+// a WaitQueue at the second waiter, because BLPOP on many keys joins all of
+// them in one step.
 class WaitQueue {
-    init() {
-        this.waiters = Deque();
-        this.live = 0;
+    init(first, second) {
+        this.items = [first, second];
+        this.head = 0;
+        this.live = 2;
     }
 
+    size() {
+        return len(this.items) - this.head;
+    }
+
+    // Adds w, and returns false when w is already the newest waiter: a
+    // BLPOP that names a key twice waits in its queue once.
     add(w) {
-        this.waiters.pushRight(w);
+        if (this.size() > 0 and this.items[len(this.items) - 1] == w) {
+            return false;
+        }
+        this.items.append(w);
         this.live = this.live + 1;
+        return true;
     }
 
     // Called once for each waiter that leaves without a pusher.
     left() {
         this.live = this.live - 1;
-        if (this.waiters.size() > 2 * this.live + 16) {
-            var kept = Deque();
-            for (var w in this.waiters.slice(0, this.waiters.size())) {
+        if (this.size() > 2 * this.live + 16) {
+            var kept = [];
+            for (var w in this.items[this.head:len(this.items)]) {
                 if (w.active) {
-                    kept.pushRight(w);
+                    kept.append(w);
                 }
             }
-            this.waiters = kept;
+            this.items = kept;
+            this.head = 0;
         }
+    }
+
+    next() {
+        var w = this.items[this.head];
+        this.items[this.head] = nil;
+        this.head = this.head + 1;
+        if (this.head > 32 and this.head * 2 > len(this.items)) {
+            this.items = this.items[this.head:len(this.items)];
+            this.head = 0;
+        }
+        return w;
     }
 
     // Returns the oldest active waiter and removes it, or nil.
     takeOldest() {
-        while (this.waiters.size() > 0) {
-            var w = this.waiters.popLeft();
+        while (this.size() > 0) {
+            var w = this.next();
             if (w.active) {
                 this.live = this.live - 1;
                 return w;
@@ -584,7 +629,7 @@ class WaitQueue {
     }
 }
 
-// key -> WaitQueue.
+// key -> Waiter or WaitQueue.
 var waiters = {};
 
 // Returns the list entry of key, nil when the key is missing, or false when
@@ -618,16 +663,12 @@ fun popLeft(key, entry) {
 // the end of a push, after the push computed its reply, so the pusher sees
 // the length before any pop, as in Redis.
 fun serveWaiters(key) {
-    var queue = waiters[key];
-    if (queue == nil) {
-        return;
-    }
     while (true) {
         var entry = listEntry(key);
         if (entry == nil or entry == false) {
             break;
         }
-        var w = queue.takeOldest();
+        var w = takeWaiter(key);
         if (w == nil) {
             break;
         }
@@ -646,9 +687,31 @@ fun serveWaiters(key) {
             back.value.pushLeft(value);
         }
     }
+}
+
+fun isWaiter(x) {
+    return hasField(x, "handle");
+}
+
+// Removes the oldest active waiter of key and returns it, or nil.
+fun takeWaiter(key) {
+    var queue = waiters[key];
+    if (queue == nil) {
+        return nil;
+    }
+    if (isWaiter(queue)) {
+        if (!queue.active) {
+            // It is leaving, and removes the key itself.
+            return nil;
+        }
+        waiters.del(key);
+        return queue;
+    }
+    var w = queue.takeOldest();
     if (queue.live == 0) {
         waiters.del(key);
     }
+    return w;
 }
 
 fun cmdPush(argv, left) {
@@ -734,7 +797,7 @@ fun cmdLrange(ctx, argv) {
     if (start > stop) {
         return arrayReply([]);
     }
-    return Bulks(entry.value.slice(start, stop + 1));
+    return entry.value.range(start, stop + 1);
 }
 
 fun cmdLpop(ctx, argv) {
@@ -764,11 +827,11 @@ fun cmdLpop(ctx, argv) {
     if (count > entry.value.size()) {
         count = entry.value.size();
     }
-    var out = entry.value.takeLeft(count);
+    var reply = entry.value.takeLeft(count);
     if (entry.value.size() == 0) {
         store.del(argv[1]);
     }
-    return Bulks(out);
+    return reply;
 }
 
 fun isDigits(s) {
@@ -876,45 +939,57 @@ fun isWake(msg) {
 }
 
 // Counts the waiter out of the queue of each of its keys, except the queue
-// whose pusher served it.
+// whose pusher served it. The waiter is no longer active, so no pusher
+// takes it while this yields between steps.
 fun leaveQueues(w, keys) {
     w.active = false;
+    var i = 0;
     for (var key in keys) {
         var queue = waiters[key];
         if (key != w.servedBy and queue != nil) {
-            queue.left();
-            if (queue.live == 0) {
+            if (queue == w) {
                 waiters.del(key);
+            } else if (!isWaiter(queue)) {
+                queue.left();
+                if (queue.live == 0) {
+                    waiters.del(key);
+                }
             }
+        }
+        i = i + 1;
+        if (i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
         }
     }
 }
 
-fun distinct(strings) {
-    var seen = {};
-    var out = [];
-    for (var s in strings) {
-        if (!seen.has(s)) {
-            seen[s] = true;
-            out.append(s);
+// Puts w in the queue of each key, and returns the keys without repeats.
+// It has no suspend point: a push between two keys would not see w in the
+// queues that come after.
+fun joinQueues(w, keys) {
+    var joined = [];
+    for (var key in keys) {
+        var queue = waiters[key];
+        if (queue == nil) {
+            waiters[key] = w;
+            joined.append(key);
+        } else if (queue == w) {
+            // A repeated key: w already waits on it.
+        } else if (isWaiter(queue)) {
+            waiters[key] = WaitQueue(queue, w);
+            joined.append(key);
+        } else if (queue.add(w)) {
+            joined.append(key);
         }
     }
-    return out;
+    return joined;
 }
 
 // Waits for a pusher or for the limit. Returns the reply, or nil when the
 // client went away while the session waited.
 fun waitForElement(conn, block) {
     var w = Waiter(task.self());
-    var keys = distinct(block.keys);
-    for (var key in keys) {
-        var queue = waiters[key];
-        if (queue == nil) {
-            queue = WaitQueue();
-            waiters[key] = queue;
-        }
-        queue.add(w);
-    }
+    var keys = joinQueues(w, block.keys);
     var msg = nil;
     conn.blocked = true;
     try {
@@ -923,6 +998,7 @@ fun waitForElement(conn, block) {
     } catch (ignored) {
         // The reader has ended; its Closed message ends this wait.
     }
+    var timedOut = false;
     try {
         if (block.timeout == 0) {
             msg = task.receive_where(isWake);
@@ -930,19 +1006,75 @@ fun waitForElement(conn, block) {
             msg = task.receive_where_within(isWake, block.timeout);
         }
     } catch (e) {
-        conn.blocked = false;
-        leaveQueues(w, keys);
-        if (faultKind(e) == "TimeoutError") {
-            return NULL_ARRAY;
+        if (faultKind(e) != "TimeoutError") {
+            conn.blocked = false;
+            leaveQueues(w, keys);
+            throw e;
         }
-        throw e;
+        timedOut = true;
     }
     conn.blocked = false;
+    var served = msg;
+    if (!isServed(msg) and w.servedBy != nil) {
+        // A pusher served w after Closed came or after the limit, but
+        // before this task ran: the element is in the mailbox.
+        served = task.receive_where(isServed);
+    }
     leaveQueues(w, keys);
-    return match msg {
-        case Msg.Served(key, value) => bulkArray([key, value])
+    if (!isServed(served)) {
+        if (timedOut) {
+            return NULL_ARRAY;
+        }
+        return nil;
+    }
+    var closed = !timedOut and !isServed(msg);
+    return match served {
+        case Msg.Served(key, value) => replyServed(conn, key, value, closed)
         case _ => nil
     };
+}
+
+fun isServed(msg) {
+    if (msg == nil) {
+        return false;
+    }
+    return match msg {
+        case Msg.Served(key, value) => true
+        case _ => false
+    };
+}
+
+// Writes the element that a pusher handed to this client. When the client
+// is gone, the element goes back to the head of its key, as if no pusher had
+// taken it. Returns "" (the reply is written), or nil when the client is
+// gone.
+fun replyServed(conn, key, value, closed) {
+    if (closed) {
+        giveBack(key, value);
+        return nil;
+    }
+    try {
+        conn.sock.write(bulkArray([key, value]));
+    } catch (e) {
+        giveBack(key, value);
+        throw e;
+    }
+    return "";
+}
+
+// Puts value back at the head of key and hands it to the next waiter. When
+// a command replaced the key with another kind meanwhile, no list remains to
+// take the value, and it is dropped.
+fun giveBack(key, value) {
+    var entry = listEntry(key);
+    if (entry == false) {
+        return;
+    }
+    if (entry == nil) {
+        entry = newList(key);
+    }
+    entry.value.pushLeft(value);
+    serveWaiters(key);
 }
 
 // ===========================================================================
@@ -1256,8 +1388,8 @@ fun readLoop(conn) {
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv) {
     var reply = execute(nil, argv);
-    if (type(reply) == "Instance" and hasField(reply, "items")) {
-        writeBulks(conn, reply.items);
+    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
+        writeBulks(conn, reply);
         giveCredit(conn);
         return true;
     }
@@ -1274,21 +1406,27 @@ fun runCommand(conn, argv) {
     return true;
 }
 
-fun writeBulks(conn, items) {
-    conn.sock.write("*" + str(len(items)) + "\r\n");
+fun writeBulks(conn, reply) {
+    var r = len(reply.rev);
+    var n = r + len(reply.fwd);
+    conn.sock.write("*" + str(n) + "\r\n");
     var i = 0;
-    while (i < len(items)) {
+    while (i < n) {
         var stop = i + ELEMENTS_PER_YIELD;
-        if (stop > len(items)) {
-            stop = len(items);
+        if (stop > n) {
+            stop = n;
         }
         var parts = [];
-        for (var s in items[i:stop]) {
-            parts.append(bulk(s));
+        while (i < stop) {
+            if (i < r) {
+                parts.append(bulk(reply.rev[r - 1 - i]));
+            } else {
+                parts.append(bulk(reply.fwd[i - r]));
+            }
+            i = i + 1;
         }
         conn.sock.write(joinRange(parts, 0, len(parts)));
-        i = stop;
-        if (i < len(items)) {
+        if (i < n) {
             yield nil;
         }
     }

@@ -617,6 +617,56 @@ def stages_fairness(prog):
               got[0] == expected, "got %d bytes of %d" % (len(got[0]), len(expected)))
         check("local: P7 LRANGE of 2097146 elements stalls PING at most 0.2 s",
               worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+
+        # P8: the first LPUSH on a long list that RPUSH built. A push that
+        # copies the list stalls about 0.36 s at 4194292 elements.
+        c.send_raw(encode("RPUSH", "p7", *(["abcd"] * n)))
+        third = c.try_read(30)
+        c.send_raw(encode("RPUSH", "p7", *(["abcd"] * n)))
+        fourth = c.try_read(30)
+        pushed = [None]
+
+        def lpush_one():
+            time.sleep(0.1)
+            c.send_raw(encode("LPUSH", "p7", "head"))
+            pushed[0] = c.try_read(30)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, lpush_one)
+        c.send_raw(encode("LRANGE", "p7", "0", "1"))
+        top = c.try_read(30)
+        check("local: P8 LPUSH on a list of 4194292 elements gives the new length",
+              third == 3 * n and fourth == 4 * n and pushed[0] == 4 * n + 1
+              and top == ["head", "abcd"],
+              "%r %r %r %r" % (third, fourth, pushed[0], top))
+        check("local: P8 LPUSH on a list of 4194292 elements stalls PING at most 0.1 s",
+              worst <= 0.1 and not wrong, "worst %.3f s" % worst)
+
+        # P9: BLPOP on 1048574 keys, the most that one command can name.
+        # Joining the queues of all keys is one step, as in Redis
+        # (redis-server 7.0 stalls about 0.6 s). Leaving them yields between
+        # steps.
+        keys = ["p9-%d" % i for i in range(1048574)]
+        many = srv.client()
+
+        def blpop_many():
+            many.send_raw(encode("BLPOP", *keys, "0"))
+            time.sleep(5)
+        worst, wrong, _ = measure_while(srv, blpop_many)
+        check("local: P9 BLPOP on 1048574 keys stalls PING at most 1 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+        served = [None]
+
+        def serve_many():
+            c.send_raw(encode("RPUSH", keys[-1], "v"))
+            c.try_read(30)
+            served[0] = many.try_read(30)
+            time.sleep(0.3)
+        worst, wrong, _ = measure_while(srv, serve_many)
+        check("local: P9 an RPUSH serves it", served[0] == [keys[-1], "v"],
+              "%r" % (served[0],))
+        check("local: P9 it leaves the other 1048573 queues and PING waits at most 0.2 s",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        many.close()
         c.close()
 
         # 1000 clients that send more than a window of commands and reset
@@ -961,6 +1011,25 @@ def stages_lists(prog):
         check("local: 900 commands sent during BLPOP run after it, in order",
               got == [key, "v"] and pongs == 900, "%r, %d PONG" % (got, pongs))
         waiting.close()
+
+        # A waiter that resets its connection just before a push. The
+        # pusher can serve it after its reader saw the reset; the element
+        # then goes back to the list.
+        rounds, kept = 300, 0
+        keys = ["gone-%s-%d" % (rand_word(), i) for i in range(rounds)]
+        for key in keys:
+            w = socket.create_connection(("127.0.0.1", srv.port))
+            w.sendall(encode("BLPOP", key, "0"))
+            time.sleep(0.005)
+            w.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            w.close()
+            pusher.call("RPUSH", key, "v")
+        time.sleep(0.3)
+        for key in keys:
+            if pusher.call("LLEN", key) == 1:
+                kept += 1
+        check("local: an element pushed as its waiter resets stays in the list (300 rounds)",
+              kept == rounds, "%d of %d kept" % (kept, rounds))
 
         for cl in (c, blocked, pusher, first, second):
             cl.close()

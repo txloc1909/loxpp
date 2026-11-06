@@ -83,10 +83,12 @@ command is atomic, as in Redis.
 
 ### Lists and BLPOP
 
-A list key holds a deque over a Lox++ List (`class Deque`): a pop from the
-left moves a head index, and a push to the left fills free slots before it,
-so each push and pop costs a constant time on average. An empty list is
-never stored: the key goes away with its last element, as in Redis.
+A list key holds a deque over two Lox++ Lists (`class Deque`). `LPUSH`
+appends to the first List, which holds the left part from right to left;
+`RPUSH` appends to the second. A pop takes from the end of the first List,
+or moves a head index in the second. So no push copies the list, and each
+push and pop costs a constant time on average. An empty list is never
+stored: the key goes away with its last element, as in Redis.
 
 `BLPOP` puts a `Waiter` for the session in a first-in first-out queue for
 each of its keys, then waits in `task.receive_where_within` (or
@@ -98,10 +100,21 @@ gets it with no other command between the push and the pop. The commands
 that the client sends during the wait stay in the mailbox and run after it,
 as Redis queues the commands of a blocked client.
 
+A key with one waiter maps to the `Waiter` itself; a `WaitQueue` comes with
+the second waiter. So a `BLPOP` on many keys makes one object for each key
+in its one step. When the waiter leaves, it yields between steps of 1024
+keys: it is no longer active, so no pusher serves it meanwhile.
+
+A pusher can serve a waiter whose client has gone, or whose time limit has
+passed, before the session of the waiter runs. The element is then in the
+mailbox of the session. The session finds it there (`w.servedBy` is set),
+and puts it back at the head of its key for the next waiter. It does the
+same when the write of the reply fails.
+
 ### Large replies
 
 `LRANGE` and `LPOP` with a count take their elements from the keyspace with
-one slice, into a new List. The session then encodes and writes the reply
+at most one slice of each List of the deque. The session then encodes and writes the reply
 in steps of 1024 elements and yields between the steps (`class Bulks`,
 `writeBulks`). The command stays atomic, because its keyspace work is the
 one slice; the other clients go on while a long reply is written.
@@ -139,6 +152,16 @@ printed.
   - an array header above 1048576 (Redis waits for the arguments).
 - A client that sends more than 960 commands during one `BLPOP` is closed.
   Redis keeps them in its query buffer, up to `client-query-buffer-limit`.
+- A malformed request during `BLPOP` closes the client at once, with no
+  reply, and the `BLPOP` takes no element. Redis keeps the client blocked,
+  serves it, then sends the error and closes it.
+- The `BLPOP` time-out is a decimal number. Redis also accepts exponents
+  (`1e3`) and hexadecimal (`0x10`), gives other error text for `inf`, gives
+  "timeout is negative" for a value that overflows its milliseconds, and
+  reads a small negative value such as `-0.0001` as 0 (no limit). This
+  server gives an error for the first two forms, waits with no limit for a
+  value whose milliseconds overflow, and gives "timeout is negative" for
+  every negative value.
 
 ### One client must not stop the other clients
 
@@ -199,8 +222,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Group `lists`: `BLPOP k 0` and 100 more commands, then the client closes (also with 1100 keys, where the reader already waits for credit) | the tasks of the connection end (`connected_clients` back) | as required |
 | Group `lists`: `BLPOP k 0` and 2000 more commands | the client is closed, its tasks end | as required |
 | Group `lists`: `BLPOP k 5` and 900 more commands, then a push | the 900 replies come after the `BLPOP` reply, in order | as required |
-| Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.11 s / 0.25 s |
-| Not in the suite: `LPOP k 2000000` of a list of 2097146 elements | PING within 1.0 s | 0.05 s |
+| P8: the first `LPUSH` on a list of 4194292 elements that `RPUSH` built | PING within 0.1 s (when the push copies the list: 0.32 s) | 0.001 s |
+| P9: `BLPOP` on 1048574 keys, the most that one command can name | PING within 1.0 s while it joins the queue of each key in one step (before the change: 1.51 s; redis-server 7.0: 0.62 s) | 0.55–0.63 s |
+| P9: an `RPUSH` serves it, and it leaves the other 1048573 queues | PING within 0.2 s (without the yield of `leaveQueues`: 0.48 s) | 0.002 s |
+| Group `lists`: 300 waiters that reset the connection just before a push | each element stays in its list | as required (before the change: 249–283 lost) |
+| Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.13 s / 0.11–0.13 s |
+| Not in the suite: `LPOP k 2000000` of a list of 2097146 elements, from the right part / `LPOP k 1048000` from the left part | PING within 1.0 s | 0.08–0.09 s / 0.08 s |
+| Not in the suite: `LRANGE 0 -1` of a list of 1049146 elements that `LPUSH` built | PING within 0.2 s | 0.07–0.08 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
@@ -208,7 +236,11 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json` or
-`tests/mutations/lists.json` that removes its guard.
+`tests/mutations/lists.json` that removes its guard. One guard has no
+probe: the give-back after a failed write of a `BLPOP` reply. The write
+fails only when the reset arrives after the session gets its element and
+before it writes, inside one step of the worker, and no client timing
+forces that order.
 
 Known residuals, each with its own issue:
 
