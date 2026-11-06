@@ -1144,10 +1144,10 @@ void Runtime::parkTask(ObjTask* task) {
         m_runQueue.push_back(task);
         return;
     }
-    task->state = TaskState::PARKED;
+    task->state = TaskState::WAITING;
     task->parkReason = request.reason;
     task->parkToken = token;
-    m_parkedTasks.emplace(token, task);
+    m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
         task->parkTimerToken = timer;
@@ -1164,7 +1164,7 @@ void Runtime::releasePark(ObjTask* task) {
     if (m_poller != nullptr) {
         m_poller->cancel(task->parkToken);
     }
-    m_parkedTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->parkToken);
     if (task->parkTimerToken != 0) {
         if (m_poller != nullptr) {
             m_poller->cancel(task->parkTimerToken);
@@ -1177,7 +1177,7 @@ void Runtime::releasePark(ObjTask* task) {
 }
 
 void Runtime::rearmPark(ObjTask* task, int fd) {
-    m_parkedTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->parkToken);
     const auto interest = task->parkReason == ParkReason::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
@@ -1191,7 +1191,7 @@ void Runtime::rearmPark(ObjTask* task, int fd) {
         return;
     }
     task->parkToken = token;
-    m_parkedTasks.emplace(token, task);
+    m_waitingTasks.emplace(token, task);
 }
 
 void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
@@ -1201,15 +1201,15 @@ void Runtime::cancelFdWaits(int fd, std::vector<ObjTask*>& tasks) {
     std::vector<Poller::Token> cancelled;
     m_poller->cancelFd(fd, cancelled);
     for (Poller::Token token : cancelled) {
-        auto found = m_parkedTasks.find(token);
-        if (found != m_parkedTasks.end()) {
+        auto found = m_waitingTasks.find(token);
+        if (found != m_waitingTasks.end()) {
             tasks.push_back(found->second);
         }
     }
 }
 
 void Runtime::unparkTask(ObjTask* task) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     releasePark(task);
@@ -1218,7 +1218,7 @@ void Runtime::unparkTask(ObjTask* task) {
 }
 
 void Runtime::completePark(ObjTask* task, Value value) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     task->pendingValue = value;
@@ -1226,7 +1226,7 @@ void Runtime::completePark(ObjTask* task, Value value) {
 }
 
 void Runtime::failPark(ObjTask* task, const char* kind, const char* msg) {
-    if (task->state != TaskState::PARKED) {
+    if (task->state != TaskState::WAITING) {
         return;
     }
     task->hasPendingFault = true;
@@ -1271,8 +1271,8 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             failPark(task, "NetworkError", message.c_str());
             continue;
         }
-        auto found = m_parkedTasks.find(token);
-        if (found == m_parkedTasks.end()) {
+        auto found = m_waitingTasks.find(token);
+        if (found == m_waitingTasks.end()) {
             continue;
         }
         ObjTask* task = found->second;
@@ -1322,15 +1322,15 @@ bool Runtime::taskEnded(const ObjTask* task) const {
     if (task->heapId != m_mm.heapId()) {
         return task->ended.load(std::memory_order_acquire);
     }
-    return task->state == TaskState::DEAD ||
+    return task->state == TaskState::ENDED ||
            (task != m_mainTask && task->epoch != m_taskEpoch);
 }
 
 void Runtime::markTaskDead(ObjTask* task) {
-    if (task->state != TaskState::DEAD) {
+    if (task->state != TaskState::ENDED) {
         --m_liveTasks;
     }
-    task->state = TaskState::DEAD;
+    task->state = TaskState::ENDED;
     task->co = nullptr;
     task->mailbox.clear();
     task->startArg = Value{};
@@ -1339,7 +1339,7 @@ void Runtime::markTaskDead(ObjTask* task) {
     task->io = ParkedIo{};
     task->sel = ObjTask::SelectiveReceive{};
     releasePark(task);
-    m_waitingTasks.erase(task);
+    m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
 }
 
@@ -1365,11 +1365,11 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     m_mm.pushTempRoot(task);
     task->mailbox.push_back(msg);
     m_mm.popTempRoot();
-    if (task->state == TaskState::WAITING) {
+    if (task->state == TaskState::RECEIVING) {
         task->state = TaskState::READY;
-        m_waitingTasks.erase(task);
+        m_receivingTasks.erase(task);
         m_runQueue.push_back(task);
-    } else if (task->state == TaskState::PARKED && task->sel.pendingRetry) {
+    } else if (task->state == TaskState::WAITING && task->sel.pendingRetry) {
         // A receive_* call with a limit: the message ends the wait of the
         // limit, and the call tests the message when the task runs.
         unparkTask(task);
@@ -1609,9 +1609,9 @@ bool Runtime::resumeTask(ObjTask* task) {
             parkTask(task);
             return true;
         }
-        task->state = TaskState::WAITING;
+        task->state = TaskState::RECEIVING;
         task->receiving = !task->sel.pendingRetry;
-        m_waitingTasks.insert(task);
+        m_receivingTasks.insert(task);
         return true;
     }
     // A `yield` outside every coroutine the task resumed: the yielded value
@@ -1625,8 +1625,8 @@ void Runtime::endTasks() {
     // spec/04-semantics.md, Ending: every other task is abandoned, as an
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
-    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
-    for (const auto& parked : m_parkedTasks) {
+    left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
+    for (const auto& parked : m_waitingTasks) {
         left.push_back(parked.second);
         // No deferred call will close the descriptor of a parked call.
         if (parked.second->io.op != IoOp::NONE) {
@@ -1638,7 +1638,7 @@ void Runtime::endTasks() {
             markTaskDead(task);
         } else {
             // The main task of a session survives the line, but its wait does
-            // not: nothing would end it once m_parkedTasks is cleared below.
+            // not: nothing would end it once m_waitingTasks is cleared below.
             releasePark(task);
             task->io = ParkedIo{};
             task->pendingValue = Value{};
@@ -1646,8 +1646,8 @@ void Runtime::endTasks() {
         }
     }
     m_runQueue.clear();
+    m_receivingTasks.clear();
     m_waitingTasks.clear();
-    m_parkedTasks.clear();
     m_parkTimers.clear();
     m_parkRequest = ParkRequest{};
     m_faultTask = nullptr;
@@ -1732,7 +1732,7 @@ Runtime::WaitResult Runtime::waitForWork() {
         }
     }
     if (m_group->goIdle(inbox) && m_isMainWorker) {
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
         return WaitResult::Deadlock;
     }
     // The thread sleeps here: an idle worker uses no CPU.
@@ -1746,14 +1746,15 @@ Runtime::WaitResult Runtime::waitForWork() {
         return WaitResult::Work;
     }
     if (m_isMainWorker) {
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
         return WaitResult::Deadlock;
     }
     return WaitResult::Ended;
 }
 
-void Runtime::describeWaitingTasks(std::vector<std::string>& out) const {
-    std::vector<ObjTask*> tasks(m_waitingTasks.begin(), m_waitingTasks.end());
+void Runtime::describeReceivingTasks(std::vector<std::string>& out) const {
+    std::vector<ObjTask*> tasks(m_receivingTasks.begin(),
+                                m_receivingTasks.end());
     std::sort(tasks.begin(), tasks.end(),
               [](const ObjTask* a, const ObjTask* b) {
                   return a->serial < b->serial;
@@ -1779,11 +1780,11 @@ void Runtime::describeWaitingTasks(std::vector<std::string>& out) const {
 }
 
 void Runtime::reportDeadlock() {
-    // Every worker is idle: each one wrote its list of waiting tasks before
+    // Every worker is idle: each one wrote its list of tasks in receive before
     // it released its inbox lock to wait, and none runs again, so the list
     // is read under that lock.
     std::vector<std::string> lines;
-    describeWaitingTasks(lines);
+    describeReceivingTasks(lines);
     {
         std::lock_guard<std::mutex> groupLock(m_group->mutex);
         for (Inbox* inbox : m_group->inboxes) {
@@ -1792,7 +1793,7 @@ void Runtime::reportDeadlock() {
             }
             std::lock_guard<std::mutex> lock(inbox->mutex);
             if (inbox->runtime != nullptr) {
-                inbox->runtime->describeWaitingTasks(lines);
+                inbox->runtime->describeReceivingTasks(lines);
             }
         }
     }
@@ -1809,7 +1810,7 @@ InterpretResult Runtime::schedule() {
         // A session line is over when the main task's script ended, which
         // leaves the task itself alive for the next line.
         const bool mainTaskDone =
-            m_mainTask->state == TaskState::DEAD || m_mainLineDone;
+            m_mainTask->state == TaskState::ENDED || m_mainLineDone;
         if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
             return InterpretResult::OK;
         }
@@ -1851,7 +1852,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
         m_group->addWorker(&inbox);
         std::lock_guard<std::mutex> lock(inbox.mutex);
         inbox.group = m_group;
-        inbox.idle = false;
+        inbox.waitReason = WaitReason::None;
     } else {
         m_group->beginLine(inbox);
     }
@@ -1880,7 +1881,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     m_liveTasks = 1;
     InterpretResult result = schedule();
     if (!m_sessionMode) {
-        m_mainTask->state = TaskState::DEAD;
+        m_mainTask->state = TaskState::ENDED;
         m_mainTask->ended.store(true, std::memory_order_release);
     } else {
         // Between two lines the main task is alive but runs nothing: a message
@@ -2121,8 +2122,8 @@ Runtime::~Runtime() {
         m_mm.inbox().polling = false;
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
-    left.insert(left.end(), m_waitingTasks.begin(), m_waitingTasks.end());
-    for (const auto& parked : m_parkedTasks) {
+    left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
+    for (const auto& parked : m_waitingTasks) {
         left.push_back(parked.second);
     }
     if (m_mainTask != nullptr) {
@@ -2600,10 +2601,10 @@ void Runtime::markRoots() {
     for (ObjTask* task : m_runQueue) {
         m_mm.markObject(task);
     }
-    for (ObjTask* task : m_waitingTasks) {
+    for (ObjTask* task : m_receivingTasks) {
         m_mm.markObject(task);
     }
-    for (const auto& parked : m_parkedTasks) {
+    for (const auto& parked : m_waitingTasks) {
         m_mm.markObject(parked.second);
     }
     if (m_taskSwitchInner != nullptr) {

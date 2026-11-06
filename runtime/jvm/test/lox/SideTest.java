@@ -97,7 +97,7 @@ public final class SideTest {
         Object[] got = {null};
         LoxTask holder = spawn("holder", () -> got[0] = conn.readline());
         LoxOps.yield(null);
-        checkEquals(LoxTask.State.PARKED, holder.state,
+        checkEquals(LoxTask.State.WAITING, holder.state,
                     "the holder parks in readline");
         pair[0].write("ab");
         checkEquals("BusyError", kindRaisedBy(() -> conn.read()), "read");
@@ -141,7 +141,7 @@ public final class SideTest {
             return null;
         }));
         LoxOps.yield(null);
-        checkEquals(LoxTask.State.PARKED, writer.state,
+        checkEquals(LoxTask.State.WAITING, writer.state,
                     "the writer waits for room");
         checkEquals("BusyError", kindRaisedBy(() -> {
             conn.write("");
@@ -165,7 +165,7 @@ public final class SideTest {
         LoxTask acceptor =
             spawn("acceptor", () -> kind[0] = kindRaisedBy(server::accept));
         LoxOps.yield(null);
-        checkEquals(LoxTask.State.PARKED, acceptor.state,
+        checkEquals(LoxTask.State.WAITING, acceptor.state,
                     "the acceptor parks");
         checkEquals("BusyError", kindRaisedBy(server::accept),
                     "a second accept raises");
@@ -263,12 +263,12 @@ public final class SideTest {
         }));
         LoxTask reader = spawn("reader", () -> got[0] = conn.readline());
         LoxOps.yield(null);
-        checkEquals(LoxTask.State.PARKED, writer.state, "the writer waits");
-        checkEquals(LoxTask.State.PARKED, reader.state, "the reader waits");
+        checkEquals(LoxTask.State.WAITING, writer.state, "the writer waits");
+        checkEquals(LoxTask.State.WAITING, reader.state, "the reader waits");
         conn.closeWrite();
         checkEquals(LoxTask.State.READY, writer.state,
                     "close_write() ends the wait of the writer at the call");
-        checkEquals(LoxTask.State.PARKED, reader.state,
+        checkEquals(LoxTask.State.WAITING, reader.state,
                     "close_write() keeps the wait of the reader");
         checkEquals("SocketClosedError", kindRaisedBy(() -> {
             conn.write("z");

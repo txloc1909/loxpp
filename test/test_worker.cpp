@@ -22,10 +22,27 @@
 #include <dirent.h>
 #include <fstream>
 #include <mutex>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+// gtest prints an enum of this scope as its underlying byte otherwise, and the
+// value of the wait a broken scheduler records is what these tests report on.
+void PrintTo(WaitReason reason, std::ostream* os) {
+    switch (reason) {
+    case WaitReason::None:
+        *os << "WaitReason::None";
+        break;
+    case WaitReason::Inbox:
+        *os << "WaitReason::Inbox";
+        break;
+    case WaitReason::Poller:
+        *os << "WaitReason::Poller";
+        break;
+    }
+}
 
 namespace {
 
@@ -459,11 +476,20 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(300));
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
-        // C7: the worker holds a wait, so it never counted itself idle.
-        // This is the test that ties waitForWork to WaitReason::Poller.
+        // C7: the worker holds a registered wait, so it stays in the group's
+        // count and says which wait that is. This is what ties
+        // Runtime::waitForWork() to WorkerGroup::goIdle(inbox,
+        // WaitReason::Poller). Both halves are read because each one alone
+        // goes green on a break: the count stays 1 when waitForWork() never
+        // records its wait at all, and a wait recorded as Poller keeps the
+        // count only while goIdle() takes no decrement for it.
         Inbox& inbox = rt.memoryManager().inbox();
-        EXPECT_FALSE(inbox.idle);
-        EXPECT_EQ(inbox.group->busy.load(), 1);
+        {
+            std::lock_guard<std::mutex> lock(inbox.mutex);
+            EXPECT_FALSE(inbox.idle());
+            EXPECT_EQ(inbox.waitReason, WaitReason::Poller);
+            EXPECT_EQ(inbox.group->busy.load(), 1);
+        }
         auto me = vm.getGlobal("me");
         ASSERT_TRUE(me.has_value());
         ASSERT_TRUE(postEnvelope(
@@ -614,7 +640,7 @@ std::unique_lock<std::mutex> lockIdleHeap(MemoryManager* heap) {
         std::chrono::steady_clock::now() + std::chrono::seconds(60);
     for (;;) {
         std::unique_lock<std::mutex> lock(heap->inbox().mutex);
-        if (heap->inbox().idle || std::chrono::steady_clock::now() > end) {
+        if (heap->inbox().idle() || std::chrono::steady_clock::now() > end) {
             return lock;
         }
         lock.unlock();

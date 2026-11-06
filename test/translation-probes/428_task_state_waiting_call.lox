@@ -1,0 +1,43 @@
+// Invariant I1, the waiting call (spec/04-semantics.md, The Task Machine, the table
+// of task-owned state): the call in which a task waits, with its limit, belongs to
+// that task. `t1` waits in task.receive_within(0.4) and `t2` waits in
+// task.receive_within(30). Main suspends for 0.8 seconds, so the limit of `t1` ends
+// and the limit of `t2` does not. `t1` gets TimeoutError and then waits again in a
+// receive without a limit. Main then sends `t2` a message and `t1` another. Each
+// task gets only the message that is sent to it. The probe assumes that the times
+// between the sleep and the limit are within 0.3 seconds of the times asked.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t1: TimeoutError
+// CHECK: t2: late2
+// CHECK: t1 again: late1
+var me = task.self();
+fun t1() {
+    try {
+        task.send(me, "t1: " + task.receive_within(0.4));
+    } catch (e) {
+        task.send(me, "t1: " + e.kind);
+    }
+    task.send(me, "t1 again: " + task.receive());
+}
+fun t2() {
+    try {
+        task.send(me, "t2: " + task.receive_within(30));
+    } catch (e) {
+        task.send(me, "t2: " + e.kind);
+    }
+}
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+sleep(0.8);
+task.send(h2, "late2");
+print task.receive_within(5);
+task.send(h1, "late1");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

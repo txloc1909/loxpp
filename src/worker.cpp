@@ -70,10 +70,10 @@ bool postEnvelope(Inbox& target, const Envelope& env) {
         }
         target.queue.push_back(env);
         target.nonEmpty.store(true, std::memory_order_release);
-        if (target.idle) {
+        if (target.idle()) {
             // The sender is busy, so the count is above zero here and cannot
             // reach zero while this message is on its way.
-            target.idle = false;
+            target.waitReason = WaitReason::None;
             target.group->busy.fetch_add(1);
         }
         // Inside the lock: the poller is alive while `polling` is set.
@@ -107,10 +107,10 @@ void WorkerGroup::removeWorker(Inbox* inbox) {
 }
 
 bool WorkerGroup::goIdle(Inbox& inbox, WaitReason reason) {
-    if (reason == WaitReason::Poller) {
+    inbox.waitReason = reason;
+    if (reason != WaitReason::Inbox) {
         return false;
     }
-    inbox.idle = true;
     if (busy.fetch_sub(1) != 1) {
         return false;
     }
@@ -130,15 +130,15 @@ void WorkerGroup::beginLine(Inbox& inbox) {
         busy.fetch_add(1);
     }
     std::lock_guard<std::mutex> lock(inbox.mutex);
-    inbox.idle = false;
+    inbox.waitReason = WaitReason::None;
 }
 
 bool WorkerGroup::leave(Inbox& inbox) {
     bool wasIdle = false;
     {
         std::lock_guard<std::mutex> lock(inbox.mutex);
-        wasIdle = inbox.idle;
-        inbox.idle = false;
+        wasIdle = inbox.idle();
+        inbox.waitReason = WaitReason::None;
     }
     removeWorker(&inbox);
     if (wasIdle || busy.fetch_sub(1) != 1) {

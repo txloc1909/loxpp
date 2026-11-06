@@ -1,0 +1,39 @@
+// Invariant I1, the mailbox (spec/04-semantics.md, The Task Machine, the table of
+// task-owned state): the messages of a task are its own, and so is the position
+// of its scan. Tasks `t1` and `t2` call task.receive_where(want) on an empty
+// mailbox, and `want` selects only the messages "y1" and "y2". Main then sends
+// `t2` a message that `want` does not select and `t1` the one that it selects,
+// then `t2` the one that it selects and `t1` the one that it does not select. The
+// first message goes to `t2`, so the `message` move of `t2` comes first (The Task
+// Machine). The wanted message is at index 1 of the mailbox of `t2` and at index 0
+// of the mailbox of `t1`. Each task takes its own selected message, then takes its
+// own message that `want` skipped, which stayed in its mailbox. A task that sees the
+// messages of the other, or that starts its scan where the other stopped, misses
+// its own message and prints another line, or none.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2: y2 x2
+// CHECK: t1: y1 x1
+var me = task.self();
+fun want(m) { return m == "y1" or m == "y2"; }
+fun run(name) {
+    var y = task.receive_where(want);
+    var x = task.receive();
+    task.send(me, name + ": " + y + " " + x);
+}
+fun t1() { run("t1"); }
+fun t2() { run("t2"); }
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+task.send(h2, "x2");
+task.send(h1, "y1");
+task.send(h2, "y2");
+task.send(h1, "x1");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

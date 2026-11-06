@@ -159,9 +159,9 @@ final class LoxWorker {
                                        "Cannot send to a task that has ended.");
             }
             target.deliver(msg);
-            if (target.state == LoxTask.State.WAITING) {
+            if (target.state == LoxTask.State.RECEIVING) {
                 target.worker.makeReady(target);
-            } else if (target.state == LoxTask.State.PARKED &&
+            } else if (target.state == LoxTask.State.WAITING &&
                        target.limitedWait) {
                 // A message ends the wait of a receive_* call with a limit.
                 target.worker.poller.cancelTimer(target);
@@ -189,7 +189,7 @@ final class LoxWorker {
                         "YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
                 }
-                suspend(self, LoxTask.State.WAITING);
+                suspend(self, LoxTask.State.RECEIVING);
             }
             return self.takeMessage();
         } finally {
@@ -287,14 +287,14 @@ final class LoxWorker {
                                    "Cannot receive across a native callback.");
         }
         if (!limited) {
-            suspend(self, LoxTask.State.WAITING);
+            suspend(self, LoxTask.State.RECEIVING);
             return false;
         }
         ensurePoller().addTimer(self, deadline);
         self.limitedWait = true;
         self.messageEndedWait = false;
         try {
-            suspend(self, LoxTask.State.PARKED);
+            suspend(self, LoxTask.State.WAITING);
         } finally {
             self.limitedWait = false;
         }
@@ -485,7 +485,7 @@ final class LoxWorker {
         LOCK.lock();
         // spec/04-semantics.md, Ending: the messages still in the mailbox
         // are discarded.
-        task.state = LoxTask.State.DEAD;
+        task.state = LoxTask.State.ENDED;
         task.ended = true;
         task.discardMessages();
         liveTasks--;
@@ -619,7 +619,7 @@ final class LoxWorker {
     }
 
     /**
-     * A close wakes every task parked on {@code channel}: the holder of each
+     * A close wakes every task waiting on {@code channel}: the holder of each
      * side, in the order in which their calls began to wait. Each joins the
      * back of the run queue now. Call it before the channel closes.
      */
@@ -641,7 +641,7 @@ final class LoxWorker {
     }
 
     /**
-     * Ends the wait of the task parked on {@code channel} for {@code
+     * Ends the wait of the task waiting on {@code channel} for {@code
      * interest}, if one is: it joins the back of the run queue now, and the
      * other waits on the channel stay.
      */
@@ -670,7 +670,7 @@ final class LoxWorker {
             self.waitSeq = ensurePoller().addFd(self, channel, interest,
                                                 self.waitSeq, timed,
                                                 deadlineNanos);
-            suspend(self, LoxTask.State.PARKED);
+            suspend(self, LoxTask.State.WAITING);
         } catch (ClosedChannelException e) {
             // The channel closed before the wait began; the caller sees it.
         } finally {
@@ -683,7 +683,7 @@ final class LoxWorker {
         LOCK.lock();
         try {
             ensurePoller().addTimer(self, deadline);
-            suspend(self, LoxTask.State.PARKED);
+            suspend(self, LoxTask.State.WAITING);
         } finally {
             LOCK.unlock();
         }

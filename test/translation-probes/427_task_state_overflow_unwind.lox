@@ -1,0 +1,35 @@
+// Invariant I1, the overflow unwind (spec/04-semantics.md, The Task Machine, the
+// table of task-owned state; the rule that a second StackOverflowError during an
+// unwind is a halting fault): whether a StackOverflowError of a task is unwinding is
+// a state of that task. A task cannot park while its unwind runs, so this probe
+// checks the part that a program can see: each task catches its own overflow, parks,
+// and when it runs again it catches a second one, and the unwind of one task
+// leaves no mark on the other. A task that kept the mark of the unwind into
+// its next overflow, or into the overflow of the other task, would halt the
+// program. Main wakes `t1` first.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t1 first StackOverflowError
+// CHECK: t2 first StackOverflowError
+// CHECK: t1 second StackOverflowError
+// CHECK: t2 second StackOverflowError
+var me = task.self();
+fun f(n) { return 1 + f(n + 1); }
+fun overflow() {
+    try { f(0); return "no fault"; } catch (e) { return e.kind; }
+}
+fun run(name) {
+    task.send(me, name + " first " + overflow());
+    task.receive();
+    task.send(me, name + " second " + overflow());
+}
+fun t1() { run("t1"); }
+fun t2() { run("t2"); }
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+print task.receive_within(5);
+print task.receive_within(5);
+task.send(h1, "go");
+task.send(h2, "go");
+print task.receive_within(5);
+print task.receive_within(5);

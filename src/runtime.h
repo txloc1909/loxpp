@@ -435,20 +435,20 @@ class Runtime {
 
     // A native that waits for time or a descriptor calls this instead of
     // waiting. True: the current task suspends when the native returns, and
-    // the native returns a placeholder; the task is PARKED and leaves the run
+    // the native returns a placeholder; the task is WAITING and leaves the run
     // queue. False: the task cannot suspend here (taskCanSuspend()), nothing
     // changed, and the native waits in place without spinning, then returns
     // its result. `fd` is read only for FD_READ and FD_WRITE; `deadline` only
     // for TIMER.
     bool parkCurrentTask(ParkReason reason, int fd = -1,
                          Poller::Clock::time_point deadline = {});
-    // Ends the wait of a PARKED task of this worker, on the owner thread. The
+    // Ends the wait of a WAITING task of this worker, on the owner thread. The
     // task joins the back of the run queue and its call returns `value`
     // (completePark) or raises a catchable fault of `kind` (failPark) when it
     // runs again. Both cancel the wait if it is still registered.
     void completePark(ObjTask* task, Value value);
     void failPark(ObjTask* task, const char* kind, const char* msg);
-    // Waits again for the descriptor of a PARKED task whose wait was reported
+    // Waits again for the descriptor of a WAITING task whose wait was reported
     // but whose call is not done (only part of the call is done, or the
     // descriptor had nothing for the call after all). The task keeps its place
     // as a parked task and its call state; a refused registration fails the
@@ -456,7 +456,7 @@ class Runtime {
     void rearmPark(ObjTask* task, int fd);
     // Removes every wait on `fd` before the caller closes it, and appends the
     // tasks that were parked on it in the order their calls began to wait.
-    // They stay PARKED: the caller ends each wait with failPark.
+    // They stay WAITING: the caller ends each wait with failPark.
     void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.
@@ -1018,7 +1018,7 @@ class Runtime {
     // Reports DeadlockError with every task that waits in receive, on every
     // worker. The main worker only, after waitForWork() returned Deadlock.
     void reportDeadlock();
-    void describeWaitingTasks(std::vector<std::string>& out) const;
+    void describeReceivingTasks(std::vector<std::string>& out) const;
     // A task of this worker ended or was abandoned.
     void markTaskDead(ObjTask* task);
     // markTaskDead, unless `task` is the main task of a session: the end of a
@@ -1044,7 +1044,7 @@ class Runtime {
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.
     void pollWhileBusy();
-    // Moves a PARKED task to the back of the run queue.
+    // Moves a WAITING task to the back of the run queue.
     void unparkTask(ObjTask* task);
     // Handles the tokens that one wait of the poller reported: wakes the
     // parked tasks they name, then calls the handler of setPollHandler().
@@ -1370,7 +1370,7 @@ class Runtime {
     ObjCoroutine* m_taskSwitchInner{nullptr};
     // The tasks that wait in task.receive(), rooted so the deadlock report
     // can name each one.
-    std::unordered_set<ObjTask*> m_waitingTasks;
+    std::unordered_set<ObjTask*> m_receivingTasks;
     // Greater than 0 while a `want` function of a receive_where call runs. A
     // receive in it would remove a message from the mailbox that the call
     // is testing.
@@ -1382,12 +1382,12 @@ class Runtime {
         Poller::Clock::time_point deadline{};
     };
     ParkRequest m_parkRequest;
-    // The PARKED tasks of this worker by the token of their wait, rooted for
+    // The WAITING tasks of this worker by the token of their wait, rooted for
     // the collector (pushTempRoot cannot span a suspension). Not the same as
-    // m_waitingTasks: those wait for a message, not for time or a descriptor.
-    std::unordered_map<Poller::Token, ObjTask*> m_parkedTasks;
+    // m_receivingTasks: those wait for a message, not for time or a descriptor.
+    std::unordered_map<Poller::Token, ObjTask*> m_waitingTasks;
     // The limit timers of parked connect calls, by Poller token. A task is
-    // in m_parkedTasks once, whatever waits it has.
+    // in m_waitingTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
     // The task whose pending fault this resume raises before it runs on, or
     // null. resumeTask sets it and clears it on every switch, so a fault that

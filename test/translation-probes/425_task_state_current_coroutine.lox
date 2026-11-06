@@ -1,0 +1,37 @@
+// Invariant I1, the current coroutine (spec/04-semantics.md, The Task Machine, the
+// table of task-owned state): the coroutine that a task resumed last and that has
+// not suspended or returned belongs to that task. `t1` and `t2` each resume a
+// coroutine whose body waits in task.receive(). The status of each coroutine is
+// "running" for the whole wait, and a resume of it from another task raises
+// RunningCoroutineError. Main wakes `t2` first. The return of each coroutine goes
+// to the task that resumed it, with the message of that task.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: running running
+// CHECK: RunningCoroutineError RunningCoroutineError
+// CHECK: t2: c2 got go2
+// CHECK: t1: c1 got go1
+var me = task.self();
+fun body1() { return "c1 got " + task.receive(); }
+fun body2() { return "c2 got " + task.receive(); }
+var c1 = coroutine.create(body1);
+var c2 = coroutine.create(body2);
+fun t1() { task.send(me, "t1: " + c1.resume()); }
+fun t2() { task.send(me, "t2: " + c2.resume()); }
+fun kind(c) {
+    try { c.resume(); return "no fault"; } catch (e) { return e.kind; }
+}
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+print c1.status() + " " + c2.status();
+print kind(c1) + " " + kind(c2);
+task.send(h2, "go2");
+task.send(h1, "go1");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

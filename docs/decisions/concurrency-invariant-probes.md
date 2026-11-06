@@ -43,15 +43,15 @@ One row for each case. `tools/check_invariant_probes.py` reads this table:
 
 | Id | Case | Probes |
 |---|---|---|
-| I1 | the mailbox | — |
-| I1 | the current task | — |
-| I1 | the call frames | — |
-| I1 | the deferred calls | — |
-| I1 | the handlers | — |
-| I1 | the current coroutine | — |
-| I1 | the contexts | — |
-| I1 | the overflow unwind | — |
-| I1 | the waiting call | — |
+| I1 | the mailbox | `420_task_state_mailbox` |
+| I1 | the current task | `421_task_state_current_task` |
+| I1 | the call frames | `422_task_state_call_frames` |
+| I1 | the deferred calls | `423_task_state_deferred_calls` |
+| I1 | the handlers | `424_task_state_handlers` |
+| I1 | the current coroutine | `425_task_state_current_coroutine` |
+| I1 | the contexts | `426_task_state_contexts` |
+| I1 | the overflow unwind | `427_task_state_overflow_unwind` |
+| I1 | the waiting call | `428_task_state_waiting_call` |
 | I2 | `task.receive()` | `380_receive_message_held_does_not_suspend` |
 | I2 | `task.receive_within(seconds)` | `381_receive_within_message_held_does_not_suspend` |
 | I2 | `task.receive_where(want)` | `382_receive_where_selected_message_held_does_not_suspend` |
@@ -122,3 +122,61 @@ script, N2 I3 probes, N3 I1 probes, N4 close. N1 to N3 run in parallel.
   without wall-clock time. If N2 finds a case that needs a limit to pass, N2
   uses `clock()` as rule 1 allows and states why.
 - Does QBE need a replacement probe for the coroutine field of I1? N3 decides.
+
+## Shipped
+
+Mission #1098 ran this decision as a DAG of five nodes, one pull request per
+node. The nodes merged on 2026-11-05. The retrospective is
+`docs/records/concurrency-invariant-probes-retro.md`.
+
+| Node | Issue | Pull request | What shipped |
+|---|---|---|---|
+| N0 | #1098 | #1096 | This decision |
+| N1 | #1099 | #1104 | Probes 380 to 395 (I2) and `tools/check_invariant_probes.py` |
+| N2 | #1100 | #1108 | Probes 400 to 402 (I3) |
+| N3 | #1101 | #1126 | Probes 420 to 428 (I1) |
+| N4 | #1102 | this change | `--strict` in CI, this section, the retrospective |
+
+Every row of the table "Probes" names a probe. CI runs
+`tools/check_invariant_probes.py --strict`, so a row with `—` fails.
+All four backends pass every probe with an empty expected-failure list.
+
+### Mutation evidence
+
+For each probe, a temporary mutation made the property false. The probe failed
+on native, JVM, QBE and the bootstrap, except where the table says otherwise.
+The patches are not in the repository. The pull request of each node holds the
+list of probes that failed for each mutation.
+
+| Invariant | Mutations | Pull request | Where a probe does not single out the case |
+|---|---|---|---|
+| I2 | 14: one for each call kind, and one for each closed side | #1104 | None. Each mutation failed only the probe of its case |
+| I3 | 3: a wait that waits again gets a new place, a new call keeps an old place, a receive that waits again restarts its limit | #1108 | None |
+| I1 | 9: one for each row of the task-owned state table, and 3 finer ones for the mailbox and the call frames rows: a scan position that tasks share, a message delivered to another task, and at most five saved frames | #1126, #1128 | The coarse mutations of the mailbox and of the call frames fail all nine probes, but the finer ones fail one probe each (420, 420, 422). The JVM counters change no probe result (accepted, #1129) |
+
+### What the probes cannot show
+
+- The rows "the contexts" and "the overflow unwind" of the task-owned state
+  table cannot be seen to leak at a park, because a task does not park while
+  either is active. Probes 426 and 427 check the part a program can see.
+- A socket probe with held bytes depends on the network, as the spec says in
+  Suspend Points. Such a probe assumes that the bytes of a write on the local
+  host arrive within 0.5 seconds, as probe 358 does. The scheduler clock seam
+  (#999, #1044) is C++ only, so no `.lox` probe uses it.
+- Probes 400 to 402 use real time: a computation of 0.5 seconds with no suspend
+  point, and for probe 402 real limits.
+- The write side of a call that waits again (issue #933) has no probe. It
+  needs two writers whose waits end at one point and a reader on another
+  worker, with timing that was not stable (#1127, closed as not planned).
+- On the JVM a task is a virtual thread, so its frames, handlers, deferred
+  calls and current coroutine are per task. The per-worker counters
+  `frameCount` and `handlerDepth` change only the depth at which a stack
+  overflow is caught, and no program sees them leak (#1129, closed as not
+  planned). A defect is reachable in `LoxWorker.suspend` and `makeCurrent`.
+
+### Follow-ups
+
+| Issue | What |
+|---|---|
+| #1128 | Probes that single out the mailbox row and the call frames row of I1. Done: probe 420 starts the scan of the two tasks at different places, and three finer mutations fail one probe each |
+| #1068 | The refactor of the runtimes. The strong tests it needs are ready |
