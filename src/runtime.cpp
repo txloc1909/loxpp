@@ -689,7 +689,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // A native entry leaves no frame to rebuild after a task switch, so
         // the entry itself breaks the clean chain from the task's base. A
         // task.receive reached below it must raise YieldAcrossNativeError,
-        // not park a coroutine that has no frame to resume.
+        // not suspend a coroutine that has no frame to resume.
         if (nativeEntry) {
             m_cleanNativeDepth = -1;
         }
@@ -1558,7 +1558,7 @@ bool Runtime::runTask(ObjTask* task) {
     // The resume window: for a first resume, the slot the stored callee goes
     // into, and the message of task.spawn_worker for a worker's first task;
     // later, the one value the pending suspend point evaluates to. A task
-    // that waits in receive gets the head of its mailbox, which the send
+    // that is receiving gets the head of its mailbox, which the send
     // that woke it put there; a `yield` gets nil.
     int argCount = 0;
     if (!co->started) {
@@ -1680,11 +1680,11 @@ void Runtime::abandonTasks() {
     // abandoned coroutine is. Its pending deferred calls do not run.
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_waitingTasks) {
-        left.push_back(parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        left.push_back(entry.second);
         // No deferred call will close the descriptor of a waiting call.
-        if (parked.second->io.op != IoOp::NONE) {
-            closeParkedDescriptor(*this, parked.second);
+        if (entry.second->io.op != IoOp::NONE) {
+            closeParkedDescriptor(*this, entry.second);
         }
     }
     for (ObjTask* task : left) {
@@ -2171,8 +2171,8 @@ Runtime::~Runtime() {
     }
     std::vector<ObjTask*> left(m_runQueue.begin(), m_runQueue.end());
     left.insert(left.end(), m_receivingTasks.begin(), m_receivingTasks.end());
-    for (const auto& parked : m_waitingTasks) {
-        left.push_back(parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        left.push_back(entry.second);
     }
     if (m_mainTask != nullptr) {
         left.push_back(m_mainTask);
@@ -2652,8 +2652,8 @@ void Runtime::markRoots() {
     for (ObjTask* task : m_receivingTasks) {
         m_mm.markObject(task);
     }
-    for (const auto& parked : m_waitingTasks) {
-        m_mm.markObject(parked.second);
+    for (const auto& entry : m_waitingTasks) {
+        m_mm.markObject(entry.second);
     }
     if (m_taskSwitchInner != nullptr) {
         m_mm.markObject(m_taskSwitchInner);

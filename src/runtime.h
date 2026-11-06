@@ -1027,7 +1027,7 @@ class Runtime {
     // is reported, the program ends, or (main worker only) every worker
     // waits.
     WaitResult waitForWork();
-    // Reports DeadlockError with every task that waits in receive, on every
+    // Reports DeadlockError with every task that is receiving, on every
     // worker. The main worker only, after waitForWork() returned Deadlock.
     void reportDeadlock();
     void describeReceivingTasks(std::vector<std::string>& out) const;
