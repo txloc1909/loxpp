@@ -7,7 +7,7 @@ import java.nio.channels.SelectableChannel;
  * Sides): the read side or the write side of a {@link LoxSocket}, or the
  * accept side of a {@link LoxServer}. A side holds at most one call. A call
  * holds its side from its first wait until it returns or raises, also while
- * its task is ready after the wait ended. A call that never parks never holds
+ * its task is ready after the wait ended. A call that never waits as a task never holds
  * its side.
  *
  * <p>Only the running task of the worker that owns the value reads or writes
@@ -42,12 +42,12 @@ final class LoxSide {
 
     /**
      * Waits for {@code channel} as {@link LoxWorker#waitChannel} does. A call
-     * that parks holds the side from here. A call that cannot suspend blocks
+     * that waits as a task holds the side from here. A call that cannot suspend blocks
      * its worker, so no other task can find the side held, and it holds
      * nothing (rule 5).
      */
     void await(SelectableChannel channel, int interest) {
-        if (LoxWorker.canPark()) {
+        if (LoxWorker.canWait()) {
             holder = LoxWorker.runningTask();
         }
         LoxWorker.waitChannel(channel, interest);

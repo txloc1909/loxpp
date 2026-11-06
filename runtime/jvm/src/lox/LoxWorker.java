@@ -27,7 +27,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * runs at a time: a task that suspends gives control to the head of the
  * run queue directly ({@link #switchTo}), and no scheduler thread exists.
  *
- * <p><b>Parking.</b> A call that waits for the network or for time suspends
+ * <p><b>Waiting.</b> A call that waits for the network or for time suspends
  * its task in the {@link LoxPoller} of the worker, and the other tasks run
  * (spec/04-semantics.md, Suspend Points). The thread that finds the run
  * queue empty polls for the end of a wait; no scheduler thread exists. A
@@ -111,7 +111,7 @@ final class LoxWorker {
     private final Condition work = LOCK.newCondition();
     private boolean idle;
     private int liveTasks = 1;
-    // Null until the first park. `inPoll` is true while a thread of this
+    // Null until the first wait. `inPoll` is true while a thread of this
     // worker sleeps in poller.select() with LOCK released.
     private LoxPoller poller;
     private boolean inPoll;
@@ -132,7 +132,10 @@ final class LoxWorker {
     // The task module (spec/05-stdlib.md, task)
     // ------------------------------------------------------------------
 
-    /** task.spawn: the new task joins the back of the run queue. */
+    /**
+     * task.spawn (the `spawn` move): the new task joins the back of the run
+     * queue.
+     */
     LoxTask spawn(Object callee) {
         LoxTask task = new LoxTask(this);
         task.body = () -> runSpawned(task, callee);
@@ -159,18 +162,34 @@ final class LoxWorker {
                                        "Cannot send to a task that has ended.");
             }
             target.deliver(msg);
-            if (target.state == LoxTask.State.RECEIVING) {
-                target.worker.makeReady(target);
-            } else if (target.state == LoxTask.State.WAITING &&
-                       target.limitedWait) {
-                // A message ends the wait of a receive_* call with a limit.
-                target.worker.poller.cancelTimer(target);
-                target.messageEndedWait = true;
-                target.worker.makeReady(target);
+            if (target.inStateReceiving()) {
+                target.worker.messageTask(target);
             }
         } finally {
             LOCK.unlock();
         }
+    }
+
+    // The `message` move. Caller holds LOCK.
+    private void messageTask(LoxTask task) {
+        if (task.state == LoxTask.State.WAITING) {
+            // A message ends the wait of a receive_* call with a limit.
+            poller.cancelTimer(task);
+            task.messageEndedWait = true;
+        }
+        makeReady(task);
+    }
+
+    // The `limit` move: the limit of the receive of a `receiving` task passed.
+    // Caller holds LOCK.
+    private void limitTask(LoxTask task) {
+        makeReady(task);
+    }
+
+    // The `wait-end` move: the wait of a `waiting` task ended. Caller holds
+    // LOCK.
+    private void waitEndTask(LoxTask task) {
+        makeReady(task);
     }
 
     /**
@@ -189,7 +208,7 @@ final class LoxWorker {
                         "YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
                 }
-                suspend(self, LoxTask.State.RECEIVING);
+                receiveTask(self, false, 0);
             }
             return self.takeMessage();
         } finally {
@@ -286,9 +305,16 @@ final class LoxWorker {
             throw LoxOps.makeError("YieldAcrossNativeError",
                                    "Cannot receive across a native callback.");
         }
+        receiveTask(self, limited, deadline);
+        return limited && !self.messageEndedWait;
+    }
+
+    // The `receive` move. Caller holds LOCK. A receive with a limit waits on
+    // its timer, so the task is WAITING (see LoxTask.inStateReceiving).
+    private void receiveTask(LoxTask self, boolean limited, long deadline) {
         if (!limited) {
             suspend(self, LoxTask.State.RECEIVING);
-            return false;
+            return;
         }
         ensurePoller().addTimer(self, deadline);
         self.limitedWait = true;
@@ -298,7 +324,6 @@ final class LoxWorker {
         } finally {
             self.limitedWait = false;
         }
-        return !self.messageEndedWait;
     }
 
     int pending() {
@@ -310,7 +335,10 @@ final class LoxWorker {
         }
     }
 
-    /** A yield outside every coroutine of the task: back of the run queue. */
+    /**
+     * The `yield` move: a yield outside every coroutine of the task. The task
+     * joins the back of the run queue.
+     */
     void yieldTask() {
         LOCK.lock();
         try {
@@ -321,7 +349,8 @@ final class LoxWorker {
     }
 
     /**
-     * task.spawn_worker. The caller has checked that {@code entry} is a
+     * task.spawn_worker (the `spawn-worker` move; runFirstTask makes the new
+     * task the first of its worker). The caller has checked that {@code entry} is a
      * function of a top-level fun declaration and that {@code msg} is a
      * message.
      */
@@ -409,7 +438,7 @@ final class LoxWorker {
         }
     }
 
-    /** {@link LoxPoller#selectReturns} of this worker; 0 before its first park. */
+    /** {@link LoxPoller#selectReturns} of this worker; 0 before its first wait. */
     long selectReturns() {
         LOCK.lock();
         try {
@@ -419,7 +448,7 @@ final class LoxWorker {
         }
     }
 
-    /** {@link LoxPoller#keyCount} of this worker; 0 before its first park. */
+    /** {@link LoxPoller#keyCount} of this worker; 0 before its first wait. */
     int selectorKeyCount() {
         LOCK.lock();
         try {
@@ -468,7 +497,7 @@ final class LoxWorker {
         self.savedHandlerDepth = handlerDepth;
         LoxTask next = takeNext();
         if (next == self) {
-            makeCurrent(self);
+            runTask(self);
             return;
         }
         switchTo(next);
@@ -479,6 +508,9 @@ final class LoxWorker {
         }
     }
 
+    // The `end` move. The `abandon` move has no code: the program ends when
+    // the main task ends, and the threads of the other tasks stop with the
+    // process.
     // On the thread of the task that ended, which then exits. Nothing below
     // throws, so LOCK needs no try block: switchTo releases it.
     private void endTask(LoxTask task) {
@@ -510,7 +542,11 @@ final class LoxWorker {
                 ArrayList<LoxTask> woken = new ArrayList<>();
                 poller.drainReady(woken);
                 for (LoxTask t : woken) {
-                    makeReady(t);
+                    if (t.inStateReceiving()) {
+                        limitTask(t);
+                    } else {
+                        waitEndTask(t);
+                    }
                 }
             }
             if (!runQueue.isEmpty()) {
@@ -546,7 +582,8 @@ final class LoxWorker {
      * Returns when {@code channel} may be ready for {@code interest} (a
      * {@link java.nio.channels.SelectionKey} operation), or when it closed.
      * The caller tries its operation again, and checks that it is open. The
-     * task parks if it can suspend; otherwise the worker waits in place.
+     * task waits as a task if it can suspend; otherwise the worker waits in
+     * place.
      */
     static void waitChannel(SelectableChannel channel, int interest) {
         waitChannel(channel, interest, false, 0);
@@ -559,8 +596,8 @@ final class LoxWorker {
      */
     static void waitChannel(SelectableChannel channel, int interest,
                             boolean timed, long deadlineNanos) {
-        if (canPark()) {
-            current().parkOnChannel(channel, interest, timed, deadlineNanos);
+        if (canWait()) {
+            current().waitOnChannel(channel, interest, timed, deadlineNanos);
             return;
         }
         try (Selector own = Selector.open()) {
@@ -579,10 +616,10 @@ final class LoxWorker {
     }
 
     /**
-     * True when a wait of the running task parks it. False while a native
+     * True when a wait of the running task suspends it. False while a native
      * callback is on the call chain: then the wait blocks the worker.
      */
-    static boolean canPark() { return LoxOps.callbackDepthOfChain() == 0; }
+    static boolean canWait() { return LoxOps.callbackDepthOfChain() == 0; }
 
     /** The running task of the worker of this thread. */
     static LoxTask runningTask() { return current().current; }
@@ -604,7 +641,7 @@ final class LoxWorker {
         // Capped so that the deadline cannot overflow nanoTime's range.
         long span = Math.min(nanos, 1L << 60);
         if (LoxOps.callbackDepthOfChain() == 0) {
-            current().parkUntil(System.nanoTime() + span);
+            current().waitUntil(System.nanoTime() + span);
             return;
         }
         long end = System.nanoTime() + span;
@@ -633,7 +670,7 @@ final class LoxWorker {
             ArrayList<LoxTask> woken = new ArrayList<>();
             worker.poller.cancelChannel(channel, woken);
             for (LoxTask t : woken) {
-                worker.makeReady(t);
+                worker.waitEndTask(t);
             }
         } finally {
             LOCK.unlock();
@@ -655,14 +692,14 @@ final class LoxWorker {
             ArrayList<LoxTask> woken = new ArrayList<>();
             worker.poller.cancelInterest(channel, interest, woken);
             for (LoxTask t : woken) {
-                worker.makeReady(t);
+                worker.waitEndTask(t);
             }
         } finally {
             LOCK.unlock();
         }
     }
 
-    private void parkOnChannel(SelectableChannel channel, int interest,
+    private void waitOnChannel(SelectableChannel channel, int interest,
                                boolean timed, long deadlineNanos) {
         LoxTask self = current;
         LOCK.lock();
@@ -670,7 +707,7 @@ final class LoxWorker {
             self.waitSeq = ensurePoller().addFd(self, channel, interest,
                                                 self.waitSeq, timed,
                                                 deadlineNanos);
-            suspend(self, LoxTask.State.WAITING);
+            waitTask(self);
         } catch (ClosedChannelException e) {
             // The channel closed before the wait began; the caller sees it.
         } finally {
@@ -678,15 +715,20 @@ final class LoxWorker {
         }
     }
 
-    private void parkUntil(long deadline) {
+    private void waitUntil(long deadline) {
         LoxTask self = current;
         LOCK.lock();
         try {
             ensurePoller().addTimer(self, deadline);
-            suspend(self, LoxTask.State.WAITING);
+            waitTask(self);
         } finally {
             LOCK.unlock();
         }
+    }
+
+    // The `wait` move. Caller holds LOCK, and has registered the wait.
+    private void waitTask(LoxTask self) {
+        suspend(self, LoxTask.State.WAITING);
     }
 
     // Caller holds LOCK.
@@ -700,7 +742,7 @@ final class LoxWorker {
     // Caller holds LOCK, and stops running Lox code after this call. Hands
     // the worker to `next`; releases LOCK.
     private void switchTo(LoxTask next) {
-        makeCurrent(next);
+        runTask(next);
         boolean start = !next.started;
         next.started = true;
         LOCK.unlock();
@@ -711,9 +753,9 @@ final class LoxWorker {
         }
     }
 
-    // Caller holds LOCK. Each task has its own frame count and handler
-    // depth, as each native task resumes from an empty frame stack.
-    private void makeCurrent(LoxTask task) {
+    // The `run` move. Caller holds LOCK. Each task has its own frame count and
+    // handler depth, as each native task resumes from an empty frame stack.
+    private void runTask(LoxTask task) {
         current = task;
         task.state = LoxTask.State.RUNNING;
         frameCount = task.savedFrameCount;

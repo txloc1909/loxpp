@@ -63,6 +63,16 @@ public final class LoxTask {
     LoxTask(LoxWorker worker) { this.worker = worker; }
 
     /**
+     * True when the task is {@code receiving} in the Task Machine of the spec
+     * (spec/04-semantics.md, The Task Machine). A receive with a limit waits
+     * on the timer of its limit, so its task is {@code WAITING} here, and
+     * {@code receiving} in the spec.
+     */
+    boolean inStateReceiving() {
+        return state == State.RECEIVING || (state == State.WAITING && limitedWait);
+    }
+
+    /**
      * The message rule of spec/03-types.md, Messages. An enum value carries
      * the result in its own bit, fixed when it was made, so the check never
      * walks the fields.
