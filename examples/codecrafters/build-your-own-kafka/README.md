@@ -202,6 +202,7 @@ It covers the 25 stages plus these `local:` cases:
 | an unsupported API version | the same, without a crash |
 | a truncated request, and `message_size` 0 | no handler runs on a short frame |
 | a Produce for a partition the metadata lacks | error 3, nothing written |
+| every advertised ApiVersions version, and one past the end | the advertised range is served, and only it |
 | a metadata topic name with `../` | nothing is created outside the log root |
 
 `tests/check_format.py` decodes what the broker wrote, from the published
@@ -216,13 +217,14 @@ layout rather than from `kafka.lox`:
 - the offset the Produce response claims against the record count on disk;
 - the PartitionRecord versions 0, 1 and 2.
 
-Each check was proved able to fail: six mutations of `kafka.lox` were run,
-each failed the case that names it, and each was restored. The six: the
-offset formula, the PartitionRecord v1 directory field, the advertised
-version range, the topic name check, the base-02 compatibility path, and the
-Produce request header's tag buffer. `check_format.py` guards each group, so
-a mutation that makes a decode raise fails the group by name instead of
-ending the battery.
+Each check was proved able to fail: eight mutations of `kafka.lox` were run,
+each failed the case that names it, and each was restored. The eight: the
+offset formula, the PartitionRecord v1 directory field, the exact range of
+the Produce entry, the exact range of the ApiVersions entry, one ApiVersions
+version served fewer than advertised, the topic name check, the base-02
+compatibility path, and the Produce request header's tag buffer.
+`check_format.py` guards each group, so a mutation that makes a decode raise
+fails the group by name instead of ending the battery.
 
 ## One gap this example found
 

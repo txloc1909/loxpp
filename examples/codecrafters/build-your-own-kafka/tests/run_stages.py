@@ -208,20 +208,21 @@ def describe_v0(correlation, names, limit=2000):
 # ---------------------------------------------------------------------------
 
 
-def decode_api_versions(frame, flexible=True):
-    # ApiVersions always uses response header v0: the correlation id alone.
+def decode_api_versions(frame, version=4):
+    """ApiVersions always uses response header v0: the correlation id alone."""
+    flexible = version >= 3
     r = R(frame)
     size = r.i32()
     corr = r.i32()
     error = r.i16()
     count = r.compact_len() if flexible else r.i32()
     keys = []
-    for _ in range(count):
+    for _ in range(max(count, 0)):
         entry = {"key": r.i16(), "min": r.i16(), "max": r.i16()}
         if flexible:
             r.tags()
         keys.append(entry)
-    throttle = r.i32()
+    throttle = r.i32() if version >= 1 else 0
     if flexible:
         r.tags()
     return {"corr": corr, "error": error, "keys": keys,
@@ -579,13 +580,13 @@ def case_base(prog):
               len(entry) == 1 and entry[0]["min"] == 0 and entry[0]["max"] >= 4,
               str(entry))
         check("base-05 no extra bytes", resp["left"] == 0, str(resp["left"]))
-        # Every other API advertises exactly the version this broker serves,
-        # so no client is invited to ask for a version it would refuse.
-        for key, served in ((0, 11), (1, 16), (75, 0)):
+        # Each range is exactly the range this broker serves, so no client is
+        # invited to ask for a version it would refuse.
+        for key, low, high in ((0, 11, 11), (1, 16, 16), (18, 0, 4), (75, 0, 0)):
             entry = [k for k in resp["keys"] if k["key"] == key]
-            check("base-05 API %d advertises exactly version %d" % (key, served),
-                  len(entry) == 1 and entry[0]["min"] == served
-                  and entry[0]["max"] == served, str(entry))
+            check("base-05 API %d advertises exactly %d-%d" % (key, low, high),
+                  len(entry) == 1 and entry[0]["min"] == low
+                  and entry[0]["max"] == high, str(entry))
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +945,29 @@ def case_local(prog):
         c.close()
         check("local: two requests in one segment",
               first["corr"] == 302 and second["corr"] == 303)
+
+    with Broker(prog, ONE_TOPIC) as b:
+        # local: every version the broker advertises for ApiVersions is served,
+        # and one past the end is refused. This is the property behind the
+        # advertised range, not the range's literal value.
+        first = decode_api_versions(b.call(api_versions_v4(317)))
+        entry = [k for k in first["keys"] if k["key"] == 18][0]
+        served = []
+        for version in range(entry["min"], entry["max"] + 1):
+            if version >= 3:
+                body = W().compact_str(b"kafka-cli").compact_str(b"0.1").tags().buf()
+                req = request(18, version, 400 + version, body)
+            else:
+                req = request(18, version, 400 + version, b"", flexible=False)
+            resp = decode_api_versions(b.call(req), version)
+            served.append((version, resp["error"]))
+        check("local: every advertised ApiVersions version is served",
+              all(error == 0 for _, error in served), str(served))
+        past = entry["max"] + 1
+        body = W().compact_str(b"kafka-cli").compact_str(b"0.1").tags().buf()
+        resp = decode_api_versions(b.call(request(18, past, 419, body)))
+        check("local: one version past the advertised end is refused",
+              resp["error"] == 35, str(resp["error"]))
 
     with Broker(prog, ONE_TOPIC) as b:
         # local: a topic created while the broker runs is visible at once.
