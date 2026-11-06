@@ -479,6 +479,9 @@ fun readCommand(sock) {
             if (len(raw) > INLINE_MAX) {
                 throw ProtocolError("Protocol error: too big inline request");
             }
+            if (nbytes > QUERY_MAX) {
+                throw QueryLimit();
+            }
             return [splitWords(line), nbytes];
         }
         var count = parseInteger(line[1:len(line)]);
@@ -511,15 +514,20 @@ fun readCommand(sock) {
             if (nbytes + size + 2 > QUERY_MAX) {
                 throw QueryLimit();
             }
-            var data = sock.read_bytes(size + 2);
-            if (len(data) < size + 2) {
+            // Two reads, so that a large bulk is not copied by a slice.
+            var data = sock.read_bytes(size);
+            if (len(data) < size) {
                 return nil;
             }
-            if (data[size:size + 2] != "\r\n") {
+            var end = sock.read_bytes(2);
+            if (len(end) < 2) {
+                return nil;
+            }
+            if (end != "\r\n") {
                 throw ProtocolError("Protocol error: bulk string not followed by CRLF");
             }
             nbytes = nbytes + size + 2;
-            argv.append(data[0:size]);
+            argv.append(data);
             i = i + 1;
         }
         return [argv, nbytes];

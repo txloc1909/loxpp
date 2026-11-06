@@ -75,8 +75,8 @@
  },
  {
   "name": "bulk read by line",
-  "old": "            var data = sock.read_bytes(size + 2);",
-  "new": "            var data = sock.readline() + \"\\n\";",
+  "old": "            var data = sock.read_bytes(size);",
+  "new": "            var data = sock.readline();",
   "cases": [
    "local: ECHO keeps every byte value"
   ]
@@ -107,7 +107,7 @@
  },
  {
   "name": "no CRLF check after the bulk",
-  "old": "if (data[size:size + 2] != \"\\r\\n\") {",
+  "old": "if (end != \"\\r\\n\") {",
   "new": "if (false) {",
   "cases": [
    "local: no CRLF after the bulk is a protocol error"
@@ -150,7 +150,7 @@
   "old": "            credits = credits - 1;\n",
   "new": "",
   "cases": [
-   "local: P2 server RSS stays at most 64 MB"
+   "local: P2 a client that does not read can send at most 32 MB"
   ]
  },
  {
@@ -198,7 +198,7 @@
   "old": "        i = i - 1;\n        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
   "new": "        i = i - 1;\n        if (false) {",
   "cases": [
-   "local: P4 the arguments are handed over in steps (at most 0.2 s)"
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
   ]
  },
  {
@@ -206,7 +206,7 @@
   "old": "    if (count % ELEMENTS_PER_YIELD == 0) {\n        yield nil;\n    }\n    return false;",
   "new": "    return false;",
   "cases": [
-   "local: P4 the arguments are handed over in steps (at most 0.2 s)"
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
   ]
  },
  {
@@ -215,6 +215,14 @@
   "new": "            if (false) {",
   "cases": [
    "local: a command over the query limit closes the client"
+  ]
+ },
+ {
+  "name": "M11 inline command not counted against the query limit",
+  "old": "            if (nbytes > QUERY_MAX) {\n                throw QueryLimit();\n            }\n            return [splitWords(line), nbytes];",
+  "new": "            return [splitWords(line), nbytes];",
+  "cases": [
+   "local: an inline command over the query limit closes the client"
   ]
  }
 ]

@@ -448,6 +448,39 @@ def send_all(port, raw):
     return run
 
 
+def parallel(actions):
+    def run():
+        ths = [threading.Thread(target=a) for a in actions]
+        for t in ths:
+            t.start()
+        for t in ths:
+            t.join()
+    return run
+
+
+def send_until_stalled(port, chunk, most, quiet, seconds):
+    """Sends chunk again and again, without reading, until the server has
+    taken `most` bytes, or takes nothing for `quiet` seconds, or `seconds`
+    pass. Returns the count of bytes taken."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(0.2)
+    sent = off = 0
+    deadline = time.time() + seconds
+    last = time.time()
+    while sent < most and time.time() < deadline and time.time() - last < quiet:
+        try:
+            n = sock.send(chunk[off:])
+        except socket.timeout:
+            continue
+        except OSError:
+            break
+        sent += n
+        off = (off + n) % len(chunk)
+        last = time.time()
+    sock.close()
+    return sent
+
+
 def stages_query_limit(prog):
     # A small limit, so that the probe sends little: Redis's default is 1 GB.
     srv = Server(prog, ["--client-query-buffer-limit", "1048576"])
@@ -471,6 +504,24 @@ def stages_query_limit(prog):
         d.close()
     finally:
         srv.stop()
+    # An inline command also counts against the limit. Only a limit under
+    # the inline limit of 64 KB can show it.
+    srv = Server(prog, ["--client-query-buffer-limit", "100"])
+    try:
+        check("query limit 100: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        c.send_raw(b"ECHO " + b"a" * 200 + b"\r\n")
+        check("local: an inline command over the query limit closes the client",
+              c.try_read(5) is CLOSED)
+        c.close()
+        d = srv.client()
+        check("local: an inline command under the query limit runs",
+              d.call("ECHO", "short") == "short")
+        d.close()
+    finally:
+        srv.stop()
 
 
 def stages_fairness(prog):
@@ -490,6 +541,14 @@ def stages_fairness(prog):
         check("local: P2 server RSS stays at most 64 MB",
               peak <= 64 * 1024, "peak %d KiB" % peak)
 
+        # The bytes, not the time, decide this check, so a slow host does
+        # not hide a reader that has no credit bound: such a reader takes
+        # every byte that the client sends.
+        accepted = send_until_stalled(srv.port, encode("PING") * 1000,
+                                      32 << 20, 2.0, 30.0)
+        check("local: P2 a client that does not read can send at most 32 MB",
+              accepted < 32 << 20, "accepted %d bytes" % accepted)
+
         c = srv.client()
         c.send_raw(b"PING " + b"a" * 65532 + b"\r\n")
         got = c.try_read(5)
@@ -507,11 +566,13 @@ def stages_fairness(prog):
             srv, send_all(srv.port, b"*1048576\r\n" + b"$0\r\n\r\n" * 1048576))
         check("local: P4 an array of 1048576 empty bulks stalls PING at most 1.0 s",
               worst <= 1.0 and not wrong, "worst %.3f s" % worst)
-        # The ruling's limit is 1.0 s. With a yield in toArgs and fromArgs
-        # the stall is about 0.02 s, and about 0.3-0.45 s without, so a
-        # tighter limit holds those yields.
-        check("local: P4 the arguments are handed over in steps (at most 0.2 s)",
-              worst <= 0.2, "worst %.3f s" % worst)
+        # The ruling's limit is 1.0 s. Four such arrays at the same time hold
+        # the yields of toArgs and fromArgs one by one: with both yields the
+        # stall is about 0.05-0.07 s, with one of them removed 0.38-0.68 s.
+        worst, wrong, _ = measure_while(srv, parallel(
+            [send_all(srv.port, b"*1048576\r\n" + b"$0\r\n\r\n" * 1048576)] * 4))
+        check("local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
 
         worst, wrong, _ = measure_while(
             srv, send_all(srv.port, b"PING " + b"a" * 65529 + b"\r\n"))

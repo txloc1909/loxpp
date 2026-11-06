@@ -76,8 +76,10 @@ offsets.
 ### Keyspace and atomic commands
 
 The keyspace is a global Map that every task of the worker shares. The code
-that runs one command has no suspend point: the socket write comes after the
-command. So each command is atomic, as in Redis.
+that runs one command on the keyspace has no suspend point: the session
+takes the arguments of the command out of its message first (this step
+yields, see rule 2), and the socket write comes after the command. So each
+command is atomic, as in Redis.
 
 ### Expiry
 
@@ -142,7 +144,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
    When the session ends, it closes the socket and sends `Stop` to the
    reader, so a reader that waits for credit does not outlive its
    connection.
-5. **A command is atomic, and its work is linear**, as in the Redis
+5. **A command is atomic, and its work is linear** (atomic: no suspend point
+   between the start of its keyspace work and its reply), as in the Redis
    documentation of the command. `upper` gives a word longer than any
    keyword back unchanged, and `splitWords` slices.
 6. **Each limit and its measured stall** are in the table below.
@@ -151,15 +154,19 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 |---|---|---|
 | P1: 4 clients send PING pipelines for 5 s and read the replies | another client's PING within 0.5 s | 0.006–0.014 s |
 | P2: the same, but the clients never read | PING within 0.5 s; server RSS at most 64 MB | 0.006–0.011 s; 7.5 MB |
+| P2: one client that never reads sends until the server stops taking bytes | at most 32 MB taken | 7.2 MB (the socket buffers) |
 | P3: an inline line of 65537 bytes | protocol error, connection closed | as required |
 | P3: an inline line of 64 MB | PING within 1.0 s | 0.43–0.69 s |
-| P4: an array of 1048576 empty bulks | PING within 1.0 s; also within 0.2 s, which holds the yields of `toArgs` and `fromArgs` | 0.016–0.024 s |
+| P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.016–0.024 s |
+| P4: four such arrays at the same time | PING within 0.2 s, which holds the yield of `toArgs` and the yield of `fromArgs` one by one (without one of them: 0.38–0.68 s) | 0.054–0.074 s |
 | P5: an inline line of 65536 bytes (the limit) | PING within 0.5 s | 0.016–0.020 s |
 | P6: 4 clients send only empty lines for 3 s | PING within 0.5 s | 0.002 s |
-| Group `query limit`: a command above `--client-query-buffer-limit` | client closed, nothing printed, server serves | as required |
+| Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
+| Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
+| Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
 
 Measured in the dev container with the `release` preset, on 16 CPUs; a
-range is the spread between runs on two days. Each
+range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json` that removes its guard.
 
 Known residuals, each with its own issue:
@@ -167,7 +174,10 @@ Known residuals, each with its own issue:
 - The spec does not promise that a task switch lets the worker see ended
   socket waits; rule 2 depends on the native VM doing so (#1131).
 - One socket read of a stream that keeps arriving does not switch tasks, so
-  a 512 MB bulk keeps the other clients waiting while it arrives (#1132).
+  a 512 MB bulk keeps the other clients waiting while it arrives and while
+  the native read makes its String: 1.30–1.50 s in all (#1132, #1134). The
+  reader reads the bulk and its CRLF in two calls, so it does not copy the
+  bulk with a slice (a slice of 512 MB takes 0.79 s).
 - `readline` has no length limit, so the server reads a long inline line
   before it can reject it: the 64 MB line of P3 raises the RSS to about
   140 MB for a moment, and most of the P3 stall is that read (#1133).
@@ -177,7 +187,7 @@ Known residuals, each with its own issue:
   the inline line: a 64 MB header line stalls the other clients for about
   0.8–0.9 s, in the native `readline` (#1133).
 - The number of connections has no limit (Redis has `maxclients`) (#1144).
-- One `SET` with 1048573 options stalls the other clients for 0.94–0.98 s
+- One `SET` with 1048573 options stalls the other clients for 0.70–0.98 s
   (the command takes 3.9 s in all, with yields during the hand-over of the
   arguments). The stall is the command itself, which rule 5 allows; it is
   close to the 1 s of rule 6, and no probe holds it.
