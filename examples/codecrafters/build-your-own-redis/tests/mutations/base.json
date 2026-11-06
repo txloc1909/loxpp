@@ -1,0 +1,228 @@
+[
+ {
+  "name": "PING replies wrong",
+  "old": "return simple(\"PONG\");",
+  "new": "return simple(\"PANG\");",
+  "cases": [
+   "base-02 respond to PING",
+   "base-03 multiple PINGs on one connection"
+  ]
+ },
+ {
+  "name": "connections served in the accept task",
+  "old": "    conn.reader = task.spawn(runReader);\n",
+  "new": "    runReader();\n",
+  "cases": [
+   "base-04 concurrent clients"
+  ]
+ },
+ {
+  "name": "ECHO case-sensitive",
+  "old": "var name = upper(argv[0]);",
+  "new": "var name = argv[0];",
+  "cases": [
+   "base-05 ECHO is case-insensitive"
+  ]
+ },
+ {
+  "name": "SET does not store",
+  "old": "    store[key] = Entry(argv[2], expiresAt);\n",
+  "new": "",
+  "cases": [
+   "base-06 GET"
+  ]
+ },
+ {
+  "name": "expiry ignored",
+  "old": "if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {",
+  "new": "if (false) {",
+  "cases": [
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "PX read as seconds",
+  "old": "        if (expiryUnit == \"EX\" or expiryUnit == \"EXAT\") {",
+  "new": "        if (true) {",
+  "cases": [
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "expiry in seconds (old time())",
+  "old": "    return time() * 1000;",
+  "new": "    var t = time();\n    return (t - t % 1) * 1000;",
+  "cases": [
+   "local: PX 100 expires in each of 5 rounds"
+  ]
+ },
+ {
+  "name": "PX option case-sensitive",
+  "old": "var opt = upper(argv[i]);",
+  "new": "var opt = argv[i];",
+  "cases": [
+   "base-07 SET with PX"
+  ]
+ },
+ {
+  "name": "missing key not null",
+  "old": "        return NULL_BULK;\n    }\n    return bulk(entry.value);",
+  "new": "        return bulk(\"\");\n    }\n    return bulk(entry.value);",
+  "cases": [
+   "local: GET of a missing key is a null bulk string",
+   "base-07 GET after expiry"
+  ]
+ },
+ {
+  "name": "bulk read by line",
+  "old": "            var data = sock.read_bytes(size);",
+  "new": "            var data = sock.readline();",
+  "cases": [
+   "local: ECHO keeps every byte value"
+  ]
+ },
+ {
+  "name": "no inline commands",
+  "old": "            return [splitWords(line), nbytes];",
+  "new": "            throw \"protocol error\";",
+  "cases": [
+   "local: inline command"
+  ]
+ },
+ {
+  "name": "unknown command not an error",
+  "old": "    return unknownCommand(argv);",
+  "new": "    return simple(\"OK\");",
+  "cases": [
+   "local: unknown command is an error"
+  ]
+ },
+ {
+  "name": "protocol error thrown as a String",
+  "old": "throw ProtocolError(\"Protocol error: invalid multibulk length\");",
+  "new": "throw \"Protocol error: invalid multibulk length\";",
+  "cases": [
+   "local: bad array length is a protocol error"
+  ]
+ },
+ {
+  "name": "no CRLF check after the bulk",
+  "old": "if (end != \"\\r\\n\") {",
+  "new": "if (false) {",
+  "cases": [
+   "local: no CRLF after the bulk is a protocol error"
+  ]
+ },
+ {
+  "name": "no array length limit",
+  "old": "if (count == nil or count > ARRAY_MAX) {",
+  "new": "if (count == nil) {",
+  "cases": [
+   "local: array too long is a protocol error"
+  ]
+ },
+ {
+  "name": "upper on a long word",
+  "old": "fun upper(s) {\n    if (len(s) > MAX_KEYWORD) {\n        return s;\n    }\n",
+  "new": "fun upper(s) {\n",
+  "cases": [
+   "local: a 256 KB command name does not stop other clients"
+  ]
+ },
+ {
+  "name": "splitWords grows a word byte by byte",
+  "old": "                words.append(s[start:i]);",
+  "new": "                var w = \"\";\n                for (var ch in s[start:i]) {\n                    w = w + ch;\n                }\n                words.append(w);",
+  "cases": [
+   "local: a 65000-byte inline word does not stop other clients"
+  ]
+ },
+ {
+  "name": "M1 no window and no yield",
+  "old": "var WINDOW = 64;",
+  "new": "var WINDOW = 100000000;",
+  "cases": [
+   "local: P1 4 pipelining clients that read, PING within 0.5 s"
+  ]
+ },
+ {
+  "name": "M2 no credit bound",
+  "old": "            credits = credits - 1;\n",
+  "new": "",
+  "cases": [
+   "local: P2 a client that does not read can send at most 32 MB"
+  ]
+ },
+ {
+  "name": "M3 no inline limit",
+  "old": "            if (len(raw) > INLINE_MAX) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P3 an inline line of 65537 bytes is a protocol error"
+  ]
+ },
+ {
+  "name": "M4 no yield in a long array",
+  "old": "            if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P4 an array of 1048576 empty bulks stalls PING at most 1.0 s"
+  ]
+ },
+ {
+  "name": "M5 session does not close the socket",
+  "old": "    conn.sock.close();\n",
+  "new": "",
+  "cases": [
+   "local: 1000 reset connections leave no open socket"
+  ]
+ },
+ {
+  "name": "M6 session does not stop the reader",
+  "old": "    try {\n        task.send(conn.reader, Msg.Stop());\n    } catch (ignored) {\n    }\n",
+  "new": "",
+  "cases": [
+   "local: 1000 reset connections leave no task"
+  ]
+ },
+ {
+  "name": "M7 no yield on empty lines",
+  "old": "            if (blankLines % WINDOW == 0) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P6 4 clients that send only empty lines, PING within 0.5 s"
+  ]
+ },
+ {
+  "name": "M8 no yield in toArgs",
+  "old": "        i = i - 1;\n        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
+  "new": "        i = i - 1;\n        if (false) {",
+  "cases": [
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
+  ]
+ },
+ {
+  "name": "M9 no yield in fromArgs",
+  "old": "    if (count % ELEMENTS_PER_YIELD == 0) {\n        yield nil;\n    }\n    return false;",
+  "new": "    return false;",
+  "cases": [
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
+  ]
+ },
+ {
+  "name": "M10 no query limit",
+  "old": "            if (nbytes + size + 2 > QUERY_MAX) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: a command over the query limit closes the client"
+  ]
+ },
+ {
+  "name": "M11 inline command not counted against the query limit",
+  "old": "            if (nbytes > QUERY_MAX) {\n                throw QueryLimit();\n            }\n            return [splitWords(line), nbytes];",
+  "new": "            return [splitWords(line), nbytes];",
+  "cases": [
+   "local: an inline command over the query limit closes the client"
+  ]
+ }
+]
