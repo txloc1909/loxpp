@@ -61,7 +61,7 @@ final class LoxSide {
     void leave() { holder = null; }
 
     /**
-     * Ends the wait of the holder now, if it is parked on {@code channel} for
+     * Ends the wait of the holder now, if it is waiting on {@code channel} for
      * {@code interest}: its task joins the back of the run queue at this call
      * (spec/04-semantics.md, The Task Machine, Sides, rule 4). A holder that is ready
      * already sees the new state of the value when it runs.

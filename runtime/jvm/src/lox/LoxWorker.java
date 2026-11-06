@@ -485,7 +485,7 @@ final class LoxWorker {
         LOCK.lock();
         // spec/04-semantics.md, Ending: the messages still in the mailbox
         // are discarded.
-        task.state = LoxTask.State.DEAD;
+        task.state = LoxTask.State.ENDED;
         task.ended = true;
         task.discardMessages();
         liveTasks--;

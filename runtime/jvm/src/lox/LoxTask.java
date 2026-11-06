@@ -16,7 +16,7 @@ public final class LoxTask {
         RUNNING,   // the current task of its worker
         RECEIVING, // in task.receive() on an empty mailbox
         WAITING,   // in a call that waits for a channel or for time
-        DEAD,
+        ENDED,
     }
 
     // The mailbox uses null for an empty place, and nil is a message.
