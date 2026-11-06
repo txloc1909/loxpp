@@ -143,13 +143,14 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 
 | Probe (`tests/run_stages.py`, group `fairness`) | Limit | Measured |
 |---|---|---|
-| P1: 4 clients send PING pipelines for 5 s and read the replies | another client's PING within 0.5 s | 0.006 s |
-| P2: the same, but the clients never read | PING within 0.5 s; server RSS at most 64 MB | 0.006 s; 7.5 MB |
+| P1: 4 clients send PING pipelines for 5 s and read the replies | another client's PING within 0.5 s | 0.006–0.014 s |
+| P2: the same, but the clients never read | PING within 0.5 s; server RSS at most 64 MB | 0.006–0.011 s; 7.5 MB |
 | P3: an inline line of 65537 bytes | protocol error, connection closed | as required |
-| P3: an inline line of 64 MB | PING within 1.0 s | 0.43 s |
-| P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.27 s |
+| P3: an inline line of 64 MB | PING within 1.0 s | 0.43–0.69 s |
+| P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.27–0.45 s |
 
-Measured in the dev container with the `release` preset, on 16 CPUs. Each
+Measured in the dev container with the `release` preset, on 16 CPUs, in
+seven runs on two days; the range is the spread between the runs. Each
 probe has a mutation in `tests/mutations/base.json` that removes its guard.
 
 Known residuals, each with its own issue:
@@ -160,7 +161,7 @@ Known residuals, each with its own issue:
   a 512 MB bulk keeps the other clients waiting while it arrives (#1132).
 - `readline` has no length limit, so the server reads a long inline line
   before it can reject it: the 64 MB line of P3 raises the RSS to about
-  140 MB for a moment (#1133).
+  140 MB for a moment, and most of the P3 stall is that read (#1133).
 - A 512 MB `ECHO` took 5.96 s against 0.19 s in `redis-server`, mostly in
   native String work (#1134).
 - One `SET` with 1048576 options takes about 0.9 s: that is the command
