@@ -1332,10 +1332,6 @@ class Runtime {
     Value stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE];
     Value* stackTop;
     bool m_stackOverflow{false};
-    // The state of the task that runs now, or of no task. Set with
-    // m_currentTask by enterTask().
-    TaskOwned m_noTaskOwned;
-    TaskOwned* m_owned{&m_noTaskOwned};
     Table m_globals;
     std::array<ObjString*, static_cast<std::size_t>(Protocol::Count)>
         m_protocolNames{};
@@ -1367,6 +1363,10 @@ class Runtime {
     // end, or an uncaught fault). The scheduler leaves the line with OK then,
     // while the main task itself stays alive for the next line.
     bool m_mainLineDone{false};
+    // The state of the task that runs now, or of no task. Set with
+    // m_currentTask by enterTask().
+    TaskOwned m_noTaskOwned;
+    TaskOwned* m_owned{&m_noTaskOwned};
     ObjTask* m_currentTask{nullptr};
     void enterTask(ObjTask* task) {
         m_currentTask = task;

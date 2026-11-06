@@ -201,7 +201,8 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     // m_frames[] actually has — so a deferred call drained during that
     // unwind can use the reserve; past that, it stays fatal rather than
     // recursing into the same handler again.
-    if (m_frameCount >= FRAMES_MAX + (m_owned->unwindingStackOverflow
+    if (m_frameCount >= FRAMES_MAX &&
+        m_frameCount >= FRAMES_MAX + (m_owned->unwindingStackOverflow
                                           ? STACK_OVERFLOW_FRAME_RESERVE
                                           : 0)) {
         runtimeError("Stack overflow.");
