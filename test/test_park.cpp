@@ -1,5 +1,5 @@
 // test_park.cpp — a task that suspends in a native call that waits for time or
-// a descriptor (Runtime::parkCurrentTask).
+// a descriptor (Runtime::requestWait).
 //
 // The spec probes 260, 279, 282, 283 and 272 to 277 pin what a program sees of
 // `sleep`. These tests look inside the park: the pending value and the
@@ -44,8 +44,8 @@ int g_writeFd = -1;
 Value parkFarNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::TIMER, -1,
-                             PClock::now() + std::chrono::seconds(30))) {
+    if (!rt->requestWait(ParkReason::TIMER, -1,
+                         PClock::now() + std::chrono::seconds(30))) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -55,7 +55,7 @@ Value parkFarNative(int /*argc*/, Value* /*argv*/) {
 Value parkFdNative(int /*argc*/, Value* /*argv*/) {
     Runtime* rt = getActiveRuntime();
     g_parked = rt->currentTask();
-    if (!rt->parkCurrentTask(ParkReason::FD_READ, g_parkFd)) {
+    if (!rt->requestWait(ParkReason::FD_READ, g_parkFd)) {
         return from<Number>(-1.0);
     }
     return from<Nil>(Nil{});
@@ -164,7 +164,7 @@ class ParkTest : public ::testing::Test {};
 // again, and `catch` of the task receives it.
 TEST_F(ParkTest, PendingFaultReachesCatchInTheTask) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "the wait failed");
+        rt.failWait(task, "SocketClosedError", "the wait failed");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -195,7 +195,7 @@ TEST_F(ParkTest, PendingFaultCrossesACoroutineAndRunsDefersThenNotBefore) {
     ParkRig rig([&](Runtime& rt, ObjTask* task) {
         auto log = rt.getGlobal("log");
         atPark = log.has_value() ? stringify(*log) : "<undefined>";
-        rt.failPark(task, "SocketClosedError", "gone");
+        rt.failWait(task, "SocketClosedError", "gone");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var log = "";
@@ -227,7 +227,7 @@ TEST_F(ParkTest, PendingFaultCrossesACoroutineAndRunsDefersThenNotBefore) {
 // internal error.
 TEST_F(ParkTest, PendingFaultWithNoHandlerEndsTheProgram) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "nobody catches this");
+        rt.failWait(task, "SocketClosedError", "nobody catches this");
     });
     testing::internal::CaptureStderr();
     InterpretResult result = rig.vm().interpret(R"(
@@ -247,7 +247,7 @@ TEST_F(ParkTest, PendingFaultWithNoHandlerEndsTheProgram) {
 // and the resume of the chain continues.
 TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "outer");
+        rt.failWait(task, "SocketClosedError", "outer");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var got = "none";
@@ -275,7 +275,7 @@ TEST_F(ParkTest, PendingFaultIsCaughtByAnOuterCoroutine) {
 // the inner coroutine inside the handler does not find it still pending.
 TEST_F(ParkTest, AHandlerThatResumesACoroutineAfterTheFaultRaisesNothingElse) {
     ParkRig rig([](Runtime& rt, ObjTask* task) {
-        rt.failPark(task, "SocketClosedError", "the wait failed");
+        rt.failWait(task, "SocketClosedError", "the wait failed");
     });
     ASSERT_EQ(rig.vm().interpret(R"(
         var log = "";
@@ -309,7 +309,7 @@ TEST_F(ParkTest, PendingValueIsTheResultOfTheCall) {
         rt.memoryManager().collectGarbage();
         Value text{static_cast<Obj*>(
             rt.memoryManager().makeString("value from the host"))};
-        rt.completePark(task, text);
+        rt.completeWait(task, text);
         // Only the task refers to the string now.
         rt.memoryManager().collectGarbage();
     });
@@ -341,7 +341,7 @@ TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
             EXPECT_EQ(task->state, TaskState::WAITING);
             EXPECT_EQ(task->mailbox.size(), 1u);
             EXPECT_NE(task->parkReason, ParkReason::NONE);
-            rt.completePark(task, from<Number>(42.0));
+            rt.completeWait(task, from<Number>(42.0));
         },
         [](ObjTask* task) { return task->mailbox.size() == 1u; });
     ASSERT_EQ(rig.vm().interpret(R"(

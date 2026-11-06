@@ -385,8 +385,9 @@ class Runtime {
               std::vector<std::shared_ptr<const std::string>> sources,
               int sourceId, int ordinal, ObjTask* task, Value msg);
 
-    // task.spawn_worker after its checks passed: makes the heap and the
-    // first task of a new worker, starts its thread, and returns the handle.
+    // task.spawn_worker after its checks passed (the `spawn-worker` move):
+    // makes the heap and the first task of a new worker, starts its thread,
+    // and returns the handle.
     ObjTask* spawnWorker(ObjClosure* entry, Value msg);
 
     // True when `fn` is a function that a top-level `fun` declaration of a
@@ -398,8 +399,9 @@ class Runtime {
     // rt_call).
     [[nodiscard]] ObjTask* currentTask() const { return m_currentTask; }
 
-    // task.spawn: a new task that calls `fn` (a Function or BoundMethod) with
-    // no arguments when it first runs. It joins the back of the run queue.
+    // task.spawn (the `spawn` move): a new task that calls `fn` (a Function or
+    // BoundMethod) with no arguments when it first runs. It joins the back of
+    // the run queue.
     ObjTask* spawnTask(Value fn);
 
     // True when `task` cannot receive a message again: its function
@@ -407,7 +409,7 @@ class Runtime {
     [[nodiscard]] bool taskEnded(const ObjTask* task) const;
 
     // task.send after its checks passed: appends `msg` to the mailbox of
-    // `task`. A task that waits in task.receive() joins the run queue.
+    // `task`. A task that is `receiving` makes the `message` move.
     void deliverMessage(ObjTask* task, Value msg);
 
     // task.send after its checks passed, for a task of this worker or of
@@ -435,28 +437,28 @@ class Runtime {
 
     // A native that waits for time or a descriptor calls this instead of
     // waiting. True: the current task suspends when the native returns, and
-    // the native returns a placeholder; the task is WAITING and leaves the run
-    // queue. False: the task cannot suspend here (taskCanSuspend()), nothing
-    // changed, and the native waits in place without spinning, then returns
-    // its result. `fd` is read only for FD_READ and FD_WRITE; `deadline` only
-    // for TIMER.
-    bool parkCurrentTask(ParkReason reason, int fd = -1,
-                         Poller::Clock::time_point deadline = {});
-    // Ends the wait of a WAITING task of this worker, on the owner thread. The
-    // task joins the back of the run queue and its call returns `value`
-    // (completePark) or raises a catchable fault of `kind` (failPark) when it
-    // runs again. Both cancel the wait if it is still registered.
-    void completePark(ObjTask* task, Value value);
-    void failPark(ObjTask* task, const char* kind, const char* msg);
+    // the native returns a placeholder; the task then makes the `wait` move
+    // (waitTask) and leaves the run queue. False: the task cannot suspend here
+    // (taskCanSuspend()), nothing changed, and the native waits in place
+    // without spinning, then returns its result. `fd` is read only for FD_READ
+    // and FD_WRITE; `deadline` only for TIMER.
+    bool requestWait(ParkReason reason, int fd = -1,
+                     Poller::Clock::time_point deadline = {});
+    // The `wait-end` move for a WAITING task of this worker, on the owner
+    // thread. The task joins the back of the run queue and its call returns
+    // `value` (completeWait) or raises a catchable fault of `kind` (failWait)
+    // when it runs again. Both cancel the wait if it is still registered.
+    void completeWait(ObjTask* task, Value value);
+    void failWait(ObjTask* task, const char* kind, const char* msg);
     // Waits again for the descriptor of a WAITING task whose wait was reported
     // but whose call is not done (only part of the call is done, or the
     // descriptor had nothing for the call after all). The task keeps its place
-    // as a parked task and its call state; a refused registration fails the
+    // as a WAITING task and its call state; a refused registration fails the
     // call with a NetworkError.
-    void rearmPark(ObjTask* task, int fd);
+    void rearmWait(ObjTask* task, int fd);
     // Removes every wait on `fd` before the caller closes it, and appends the
-    // tasks that were parked on it in the order their calls began to wait.
-    // They stay WAITING: the caller ends each wait with failPark.
+    // tasks that wait on it in the order their calls began to wait.
+    // They stay WAITING: the caller ends each wait with failWait.
     void cancelFdWaits(int fd, std::vector<ObjTask*>& tasks);
     // Adds a global native function. For a host that embeds natives, and for
     // tests that need a native the stdlib does not have.
@@ -906,8 +908,8 @@ class Runtime {
     // and maps with no VM::run() opcode wrapping it (backend/rt_capi.cpp).
     [[nodiscard]] MemoryManager& memoryManager() { return m_mm; }
 
-    // The wait set of this worker. Created by the first call, which a park
-    // makes; a worker that never parks never makes one. Owner thread only.
+    // The wait set of this worker. Created by the first call, which a wait
+    // makes; a worker that never waits never makes one. Owner thread only.
     Poller& poller();
     [[nodiscard]] bool hasPoller() const { return m_poller != nullptr; }
     // Called on the owner thread, outside every lock, with the tokens that
@@ -998,9 +1000,19 @@ class Runtime {
     }
 
   private:
-    // Resumes `task` from the scheduler, once. Returns false on a fatal error
-    // (already reported); the program then ends.
-    bool resumeTask(ObjTask* task);
+    // The `message` move: a message arrived for a `receiving` task. The task
+    // joins the back of the run queue.
+    void messageTask(ObjTask* task);
+    // The `limit` move: the limit of the receive of a `receiving` task passed.
+    // The task joins the back of the run queue, and its call tests the mailbox
+    // before it raises.
+    void limitTask(ObjTask* task);
+    // The `run` move: runs `task` from the scheduler, once. Returns false on a
+    // fatal error (already reported); the program then ends.
+    bool runTask(ObjTask* task);
+    // The moves that a run of a task can end in. waitTask is below.
+    void receiveTask(ObjTask* task);
+    void yieldTask(ObjTask* task);
 
     // The scheduler loop of this worker: drains the inbound queue between
     // tasks, runs the head of the run queue, and waits on the inbound
@@ -1015,39 +1027,47 @@ class Runtime {
     // is reported, the program ends, or (main worker only) every worker
     // waits.
     WaitResult waitForWork();
-    // Reports DeadlockError with every task that waits in receive, on every
+    // Reports DeadlockError with every task that is receiving, on every
     // worker. The main worker only, after waitForWork() returned Deadlock.
     void reportDeadlock();
     void describeReceivingTasks(std::vector<std::string>& out) const;
-    // A task of this worker ended or was abandoned.
-    void markTaskDead(ObjTask* task);
-    // markTaskDead, unless `task` is the main task of a session: the end of a
-    // line ends its script, not the task (spec/04-semantics.md, A Session).
-    void endTaskOrLine(ObjTask* task);
+    // A task of this worker ended or was abandoned: the part that the `end`
+    // and `abandon` moves share.
+    void retireTask(ObjTask* task);
+    // The `end` move: retireTask, unless `task` is the main task of a session:
+    // the end of a line ends its script, not the task
+    // (spec/04-semantics.md, A Session).
+    void endTask(ObjTask* task);
     // Compiles `source` with `options`, then as loadSource().
     // `sourceId` names the source in a declarations-only compile (a worker);
     // loadSource() ignores it and appends a new source.
     ObjClosure* loadProgram(const std::string& source, DiagnosticSink* sink,
                             bool declarationsOnly, int sourceId = -1);
 
-    // Abandons every task but the main task: the run of the program ended.
-    void endTasks();
+    // The `abandon` move for every task that is not ENDED: the run of the
+    // program ended. abandonTask does one task; the main task of a session
+    // survives.
+    void abandonTasks();
+    void abandonTask(ObjTask* task);
 
-    // Puts the task that a park request suspended into the parked set and
-    // registers its wait. Called by resumeTask after the task's frames
-    // unwound.
-    void parkTask(ObjTask* task);
-    // Cancels the wait of a parked task and erases it from the parked set.
-    // No-op for a task that is not parked. It keeps ObjTask::io: the call
-    // holds its side until the task runs again (resumeTask clears it).
-    void releasePark(ObjTask* task);
+    // The `wait` move: the task that a wait request suspended becomes
+    // WAITING, and its wait is registered. Called by runTask after the
+    // frames of the task unwound.
+    void waitTask(ObjTask* task);
+    // Cancels the wait of a task and erases it from m_waitingTasks. No-op for
+    // a task that has no wait registered. It keeps ObjTask::io: the call
+    // holds its side until the task runs again (runTask clears it).
+    void releaseWait(ObjTask* task);
     // Looks at the poller without blocking, at most once per millisecond,
     // between two tasks of a busy worker.
     void pollWhileBusy();
-    // Moves a WAITING task to the back of the run queue.
-    void unparkTask(ObjTask* task);
+    // The step that the `wait-end`, `message` and `limit` moves share for a
+    // WAITING task: it cancels the wait and moves the task to the back of the
+    // run queue.
+    void waitEndTask(ObjTask* task);
     // Handles the tokens that one wait of the poller reported: wakes the
-    // parked tasks they name, then calls the handler of setPollHandler().
+    // WAITING tasks they name (the `wait-end` move, or the `limit` move for a
+    // receive with a limit), then calls the handler of setPollHandler().
     void onPollReady(const std::vector<Poller::Token>& ready);
     // The continuation of a task that resumes with a pending fault: raises it
     // in the innermost coroutine of the task, whose frames are restored and
@@ -1375,7 +1395,7 @@ class Runtime {
     // receive in it would remove a message from the mailbox that the call
     // is testing.
     int m_selectDepth{0};
-    // What parkCurrentTask asked for, until resumeTask carries it out.
+    // What requestWait asked for, until runTask carries it out.
     struct ParkRequest {
         ParkReason reason{ParkReason::NONE};
         int fd{-1};
@@ -1383,14 +1403,15 @@ class Runtime {
     };
     ParkRequest m_parkRequest;
     // The WAITING tasks of this worker by the token of their wait, rooted for
-    // the collector (pushTempRoot cannot span a suspension). Not the same as
-    // m_receivingTasks: those wait for a message, not for time or a descriptor.
+    // the collector (pushTempRoot cannot span a suspension). It includes a
+    // receive with a limit, which waits on its timer. m_receivingTasks holds
+    // the tasks in state RECEIVING: those wait for a message and no timer.
     std::unordered_map<Poller::Token, ObjTask*> m_waitingTasks;
-    // The limit timers of parked connect calls, by Poller token. A task is
+    // The limit timers of waiting connect calls, by Poller token. A task is
     // in m_waitingTasks once, whatever waits it has.
     std::unordered_map<Poller::Token, ObjTask*> m_parkTimers;
     // The task whose pending fault this resume raises before it runs on, or
-    // null. resumeTask sets it and clears it on every switch, so a fault that
+    // null. runTask sets it and clears it on every switch, so a fault that
     // the resume never reaches is dropped there and cannot reach the next
     // resume. raiseResumeFault takes the kind and the message from the task,
     // and clears this before it raises. While it is set the task is

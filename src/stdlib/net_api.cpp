@@ -133,8 +133,8 @@ void setConnectTestHooks(const ConnectTestHooks* hooks) {
 }
 
 // Resolves the name on the worker, and runs the connect from the first
-// address. The TCP connect is nonblocking: the call parks where it can.
-// `withLimit` says that argv[2] is the limit of connect_within.
+// address. The TCP connect is nonblocking: the call waits as a task where it
+// can. `withLimit` says that argv[2] is the limit of connect_within.
 static Value connectCommon(Value* argv, bool withLimit) {
     std::string host;
     if (!asStringArg(argv[0], host)) {
@@ -400,7 +400,7 @@ static constexpr size_t kReadChunk = 4096;
 // Every read-side call is a step function over the socket and a ParkedIo. A
 // step does as much as it can without waiting and reports one of three
 // outcomes. The caller decides what waiting means: a task that cannot suspend
-// waits in the kernel, and a task that can suspend parks and runs the step
+// waits in the kernel, and a task that can suspend waits and runs the step
 // again when the descriptor is ready. A step keeps what it has done in the
 // ParkedIo and in the socket, so a call that waits many times loses nothing.
 struct IoOutcome {
@@ -628,7 +628,7 @@ enum class Ended : unsigned char { No, Yes, Failed };
 
 // Whether the connect in progress on `fd` has ended, with success or with an
 // error. A zero timeout: the answer never waits. On loopback the handshake is
-// over before connect(2) returns, so the call then does not park. A failure of
+// over before connect(2) returns, so the call then does not wait. A failure of
 // poll(2) says nothing about the connect, so it is reported as Failed with
 // errno kept.
 static Ended attemptEnded(int fd) {
@@ -866,7 +866,7 @@ static bool waitFd(int fd, short events, std::string& err) {
     return waitFd(fd, events, err, false, {}, timedOut);
 }
 
-// Runs a call to its end, or to the point where the task parks.
+// Runs a call to its end, or to the point where the task waits.
 static Value runIo(ParkedIo io) {
     Runtime* rt = getActiveRuntime();
     for (;;) {
@@ -888,8 +888,8 @@ static Value runIo(ParkedIo io) {
         // task of the worker runs meanwhile.
         const int fd = descriptorOf(io);
         const bool writes = io.op == IoOp::CONNECT || io.op == IoOp::WRITE;
-        if (rt->parkCurrentTask(
-                writes ? ParkReason::FD_WRITE : ParkReason::FD_READ, fd)) {
+        if (rt->requestWait(writes ? ParkReason::FD_WRITE : ParkReason::FD_READ,
+                            fd)) {
             ObjTask* task = rt->currentTask();
             if (ObjTask** slot = holderSlot(io)) {
                 *slot = task;
@@ -917,13 +917,13 @@ void resumeParkedIo(Runtime& rt, ObjTask* task) {
     step(io, out);
     switch (out.kind) {
     case IoOutcome::Kind::Done:
-        rt.completePark(task, finish(io, out));
+        rt.completeWait(task, finish(io, out));
         return;
     case IoOutcome::Kind::Fault:
-        rt.failPark(task, out.faultKind, out.faultMessage.c_str());
+        rt.failWait(task, out.faultKind, out.faultMessage.c_str());
         return;
     case IoOutcome::Kind::Wait:
-        rt.rearmPark(task, descriptorOf(io));
+        rt.rearmWait(task, descriptorOf(io));
         return;
     }
 }
@@ -1080,7 +1080,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
         // read that waits on the same descriptor keeps its wait.
         s->writeClosed = true;
         if (ObjTask* task = s->writeHolder; holds(task, s, Side::Write)) {
-            getActiveRuntime()->failPark(task, kSocketClosedError,
+            getActiveRuntime()->failWait(task, kSocketClosedError,
                                          kWriteAfterCloseWrite);
         }
         shutdown(s->fd, SHUT_WR);
@@ -1090,7 +1090,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
 
 // Closes a descriptor that tasks of this worker may wait on. The waits end
 // before the descriptor does: epoll keeps its reference to the open file after
-// close(2), and the next socket can get the same number. Each parked call
+// close(2), and the next socket can get the same number. Each waiting call
 // fails with the fault of a call on a closed socket, in the order the calls
 // began to wait.
 static void closeDescriptor(int& fd, const char* noun) {
@@ -1100,7 +1100,7 @@ static void closeDescriptor(int& fd, const char* noun) {
     ::close(fd);
     fd = -1;
     for (ObjTask* task : waiting) {
-        rt->failPark(task, kSocketClosedError,
+        rt->failWait(task, kSocketClosedError,
                      closedMessage(task->io.method, noun).c_str());
     }
 }

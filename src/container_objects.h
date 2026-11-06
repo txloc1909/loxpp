@@ -451,11 +451,13 @@ enum class TaskState : std::uint8_t {
     READY,     // in the run queue
     RUNNING,   // the scheduler resumed it and it has not suspended yet
     RECEIVING, // suspended in task.receive() on an empty mailbox
-    WAITING,   // suspended in a native call that waits for time or a descriptor
+    WAITING,   // suspended in a native call that waits for time or a
+               // descriptor, or in a receive with a limit (the spec calls that
+               // task `receiving`: see ObjTask::inStateReceiving)
     ENDED,     // its function returned, or the program ended it
 };
 
-// What a parked task waits for. The wait is one wait of the worker's Poller.
+// What a WAITING task waits for. The wait is one wait of the worker's Poller.
 enum class ParkReason : std::uint8_t {
     NONE,
     FD_READ,
@@ -532,14 +534,14 @@ struct ObjTask : public Obj {
     // the head of the mailbox as the value of that receive.
     bool receiving{false};
     // Set while the task is WAITING: what it waits for and the Poller token of
-    // that wait. A parked task keeps its result and its fault here, not in the
+    // that wait. A WAITING task keeps its result and its fault here, not in the
     // mailbox, so task.pending() never sees them.
     ParkReason parkReason{ParkReason::NONE};
     std::uint64_t parkToken{0};
     // The Poller token of the limit of a connect call that waits for a
     // descriptor, or 0. The limit is a second wait of the same task.
     std::uint64_t parkTimerToken{0};
-    // The value of the parked call when the task runs again, unless a fault
+    // The value of the waiting call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
     // The network call that the task waits in. It is set at the first wait
@@ -580,6 +582,15 @@ struct ObjTask : public Obj {
     // Set by the owner when the task ends; read by any worker that sends to
     // it (DeadTaskError).
     std::atomic<bool> ended{false};
+
+    // True when the task is `receiving` in the Task Machine of the spec
+    // (spec/04-semantics.md, The Task Machine). A receive with a limit waits
+    // on the timer of its limit, so its task is WAITING here, and `receiving`
+    // in the spec.
+    [[nodiscard]] bool inStateReceiving() const {
+        return state == TaskState::RECEIVING ||
+               (state == TaskState::WAITING && sel.pendingRetry);
+    }
 
     ObjTask(ObjCoroutine* c, std::uint64_t e, VmAllocator<Value> alloc)
         : Obj(ObjType::TASK), co(c), mailbox(alloc), epoch(e) {}
