@@ -203,14 +203,29 @@ enum Args { Cons(head, tail) Empty }
 // ends.
 enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Stop }
 
+// Both run over up to ARRAY_MAX arguments, so they yield as the reader does
+// (rule 2 of the README). toArgs runs in the reader and fromArgs in the
+// session before the command starts, so the command stays atomic.
 fun toArgs(list) {
     var out = Args.Empty();
     var i = len(list) - 1;
     while (i >= 0) {
         out = Args.Cons(list[i], out);
         i = i - 1;
+        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
     }
     return out;
+}
+
+// Yields after each ELEMENTS_PER_YIELD-th element. Returns false, so that a
+// match arm can call it as its last expression.
+fun yieldEvery(count) {
+    if (count % ELEMENTS_PER_YIELD == 0) {
+        yield nil;
+    }
+    return false;
 }
 
 fun fromArgs(args) {
@@ -222,7 +237,7 @@ fun fromArgs(args) {
             case Args.Cons(head, tail) => {
                 out.append(head);
                 rest = tail;
-                false
+                yieldEvery(len(out))
             }
             case Args.Empty => true
         };
@@ -423,6 +438,18 @@ var INLINE_MAX = 65536;
 var ARRAY_MAX = 1048576;
 var BULK_MAX = 536870912;
 
+// The most bytes of one command, as Redis's client-query-buffer-limit
+// (1 GB by default; the flag --client-query-buffer-limit sets it). Redis
+// closes a client that passes it, with no reply, and so does this server.
+var QUERY_MAX = 1073741824;
+
+class QueryLimit {
+    init() {
+        this.kind = "QueryLimit";
+        this.message = "closing a client that reached the query buffer limit";
+    }
+}
+
 // A reader yields after this many array elements, so that one long array
 // does not keep the other tasks of the worker from running.
 var ELEMENTS_PER_YIELD = 1024;
@@ -431,6 +458,7 @@ var ELEMENTS_PER_YIELD = 1024;
 // nbytes counts every byte of the command on the wire: readline() drops the
 // '\n', so each line adds one.
 fun readCommand(sock) {
+    var blankLines = 0;
     while (true) {
         var raw = sock.readline();
         if (raw == nil) {
@@ -439,6 +467,12 @@ fun readCommand(sock) {
         var nbytes = len(raw) + 1;
         var line = trimCR(raw);
         if (line == "") {
+            // An empty line is not a command, but a client can send only
+            // these, so they count for the yield as commands do.
+            blankLines = blankLines + 1;
+            if (blankLines % WINDOW == 0) {
+                yield nil;
+            }
             continue;
         }
         if (line[0] != "*") {
@@ -473,6 +507,9 @@ fun readCommand(sock) {
             var size = parseInteger(header[1:len(header)]);
             if (size == nil or size < 0 or size > BULK_MAX) {
                 throw ProtocolError("Protocol error: invalid bulk length");
+            }
+            if (nbytes + size + 2 > QUERY_MAX) {
+                throw QueryLimit();
             }
             var data = sock.read_bytes(size + 2);
             if (len(data) < size + 2) {
@@ -584,7 +621,7 @@ fun readLoop(conn) {
             } catch (ignored) {
             }
         } else if (kind != "DeadTaskError" and kind != "SocketClosedError"
-                   and kind != "NetworkError") {
+                   and kind != "NetworkError" and kind != "QueryLimit") {
             // A reset by the client is a NetworkError: it is normal, so it
             // is not printed.
             printFault("read fault: ", e);
@@ -689,6 +726,12 @@ fun flagValue(name, fallback) {
 
 fun main() {
     var port = parseInteger(flagValue("--port", "6379"));
+    var queryMax = parseInteger(flagValue("--client-query-buffer-limit", str(QUERY_MAX)));
+    if (queryMax == nil or queryMax < 1) {
+        print "redis.lox: --client-query-buffer-limit needs a positive integer";
+        exit(64);
+    }
+    QUERY_MAX = queryMax;
     if (port == nil) {
         print "redis.lox: --port needs an integer";
         exit(64);

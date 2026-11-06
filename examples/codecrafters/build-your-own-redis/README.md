@@ -120,14 +120,20 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 
 1. **No halting fault from client input.** See "Faults" above.
 2. **Suspend points in the reader.** The reader yields after every 64
-   commands (`WINDOW`) and after every 1024 elements of one array
-   (`ELEMENTS_PER_YIELD`). The native VM looks at the network at each task
-   switch, so the other connections then get their turn.
+   commands (`WINDOW`), after every 64 empty lines, and after every 1024
+   elements of one array (`ELEMENTS_PER_YIELD`). The hand-over of the
+   arguments (`toArgs` in the reader, `fromArgs` in the session before the
+   command starts) also yields every 1024 elements. The native VM looks at
+   the network at each task switch, so the other connections then get
+   their turn.
 3. **The Redis 7.0 limits on sizes.** An inline line has at most 65536 bytes
    (`INLINE_MAX`; above it: `-ERR Protocol error: too big inline request`),
    an array at most 1048576 elements (`ARRAY_MAX`), and a bulk at most
-   512 MB (`BULK_MAX`). Work for each byte in Lox++ code happens only under
-   the inline limit.
+   512 MB (`BULK_MAX`), and one command at most 1 GB in all (`QUERY_MAX`,
+   Redis's `client-query-buffer-limit`; the flag
+   `--client-query-buffer-limit` sets it). Above the last one the server
+   closes the client with no reply, as Redis does. Work for each byte in
+   Lox++ code happens only under the inline limit.
 4. **A bound on each queue that a client fills.** The reader sends at most
    `WINDOW` (64) commands that the session has not done. After each
    command, the session gives one credit back. A client that sends without
@@ -147,10 +153,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | P2: the same, but the clients never read | PING within 0.5 s; server RSS at most 64 MB | 0.006–0.011 s; 7.5 MB |
 | P3: an inline line of 65537 bytes | protocol error, connection closed | as required |
 | P3: an inline line of 64 MB | PING within 1.0 s | 0.43–0.69 s |
-| P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.27–0.45 s |
+| P4: an array of 1048576 empty bulks | PING within 1.0 s; also within 0.2 s, which holds the yields of `toArgs` and `fromArgs` | 0.016–0.024 s |
+| P5: an inline line of 65536 bytes (the limit) | PING within 0.5 s | 0.016–0.020 s |
+| P6: 4 clients send only empty lines for 3 s | PING within 0.5 s | 0.002 s |
+| Group `query limit`: a command above `--client-query-buffer-limit` | client closed, nothing printed, server serves | as required |
 
-Measured in the dev container with the `release` preset, on 16 CPUs, in
-seven runs on two days; the range is the spread between the runs. Each
+Measured in the dev container with the `release` preset, on 16 CPUs; a
+range is the spread between runs on two days. Each
 probe has a mutation in `tests/mutations/base.json` that removes its guard.
 
 Known residuals, each with its own issue:
@@ -162,10 +171,16 @@ Known residuals, each with its own issue:
 - `readline` has no length limit, so the server reads a long inline line
   before it can reject it: the 64 MB line of P3 raises the RSS to about
   140 MB for a moment, and most of the P3 stall is that read (#1133).
-- A 512 MB `ECHO` took 5.96 s against 0.19 s in `redis-server`, mostly in
-  native String work (#1134).
-- One `SET` with 1048576 options takes about 0.9 s: that is the command
-  itself, which rule 5 allows.
+- A 512 MB `ECHO` took 5.96–10.09 s against 0.19 s in `redis-server`,
+  mostly in native String work (#1134).
+- The `*` and `$` header lines have no length limit for the same reason as
+  the inline line: a 64 MB header line stalls the other clients for about
+  0.8–0.9 s, in the native `readline` (#1133).
+- The number of connections has no limit (Redis has `maxclients`) (#1144).
+- One `SET` with 1048573 options stalls the other clients for 0.94–0.98 s
+  (the command takes 3.9 s in all, with yields during the hand-over of the
+  arguments). The stall is the command itself, which rule 5 allows; it is
+  close to the 1 s of rule 6, and no probe holds it.
 
 ## Run
 

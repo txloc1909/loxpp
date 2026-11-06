@@ -184,5 +184,37 @@
   "cases": [
    "local: 1000 reset connections leave no task"
   ]
+ },
+ {
+  "name": "M7 no yield on empty lines",
+  "old": "            if (blankLines % WINDOW == 0) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: P6 4 clients that send only empty lines, PING within 0.5 s"
+  ]
+ },
+ {
+  "name": "M8 no yield in toArgs",
+  "old": "        i = i - 1;\n        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
+  "new": "        i = i - 1;\n        if (false) {",
+  "cases": [
+   "local: P4 the arguments are handed over in steps (at most 0.2 s)"
+  ]
+ },
+ {
+  "name": "M9 no yield in fromArgs",
+  "old": "    if (count % ELEMENTS_PER_YIELD == 0) {\n        yield nil;\n    }\n    return false;",
+  "new": "    return false;",
+  "cases": [
+   "local: P4 the arguments are handed over in steps (at most 0.2 s)"
+  ]
+ },
+ {
+  "name": "M10 no query limit",
+  "old": "            if (nbytes + size + 2 > QUERY_MAX) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: a command over the query limit closes the client"
+  ]
  }
 ]

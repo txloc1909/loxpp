@@ -387,12 +387,13 @@ def measure_while(srv, action):
     return worst[0], wrong, peak[0]
 
 
-def flood(port, seconds, read_replies):
-    """One client that sends pipelines of PING for the given time. It reads
-    and drops the replies, or never reads them."""
+def flood(port, seconds, read_replies, chunk=None):
+    """One client that sends pipelines (of PING, unless chunk says what) for
+    the given time. It reads and drops the replies, or never reads them."""
     sock = socket.create_connection(("127.0.0.1", port), timeout=5)
     sock.settimeout(0.2)
-    chunk = encode("PING") * 1000
+    if chunk is None:
+        chunk = encode("PING") * 1000
     deadline = time.time() + seconds
     done = threading.Event()
 
@@ -423,9 +424,9 @@ def flood(port, seconds, read_replies):
     sock.close()
 
 
-def flooders(port, count, seconds, read_replies):
+def flooders(port, count, seconds, read_replies, chunk=None):
     def run():
-        ths = [threading.Thread(target=flood, args=(port, seconds, read_replies))
+        ths = [threading.Thread(target=flood, args=(port, seconds, read_replies, chunk))
                for _ in range(count)]
         for t in ths:
             t.start()
@@ -445,6 +446,31 @@ def send_all(port, raw):
             pass
         sock.close()
     return run
+
+
+def stages_query_limit(prog):
+    # A small limit, so that the probe sends little: Redis's default is 1 GB.
+    srv = Server(prog, ["--client-query-buffer-limit", "1048576"])
+    try:
+        check("query limit: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        c.send_raw(encode("ECHO", "a" * 600000) + b"*3\r\n$4\r\nECHO\r\n")
+        check("local: a command under the query limit runs",
+              c.try_read(5) == "a" * 600000)
+        c.send_raw(b"$600000\r\n" + b"a" * 600000 + b"\r\n" + b"$600000\r\n")
+        check("local: a command over the query limit closes the client",
+              c.try_read(5) is CLOSED)
+        c.close()
+        d = srv.client()
+        check("local: the server serves after the query limit",
+              d.call("PING") == "PONG")
+        check("local: the query limit is not printed", srv.log_text() == "",
+              srv.log_text()[:200])
+        d.close()
+    finally:
+        srv.stop()
 
 
 def stages_fairness(prog):
@@ -481,6 +507,21 @@ def stages_fairness(prog):
             srv, send_all(srv.port, b"*1048576\r\n" + b"$0\r\n\r\n" * 1048576))
         check("local: P4 an array of 1048576 empty bulks stalls PING at most 1.0 s",
               worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+        # The ruling's limit is 1.0 s. With a yield in toArgs and fromArgs
+        # the stall is about 0.02 s, and about 0.3-0.45 s without, so a
+        # tighter limit holds those yields.
+        check("local: P4 the arguments are handed over in steps (at most 0.2 s)",
+              worst <= 0.2, "worst %.3f s" % worst)
+
+        worst, wrong, _ = measure_while(
+            srv, send_all(srv.port, b"PING " + b"a" * 65529 + b"\r\n"))
+        check("local: P5 an inline line at the 65536-byte limit stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+
+        worst, wrong, _ = measure_while(
+            srv, flooders(srv.port, 4, 3, False, b"\r\n" * 65536))
+        check("local: P6 4 clients that send only empty lines, PING within 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
 
         # 1000 clients that send more than a window of commands and reset
         # the connection without reading. Each connection's tasks must end:
@@ -536,6 +577,7 @@ def stages_fairness(prog):
 GROUPS = [
     ("base", stages_base),
     ("fairness", stages_fairness),
+    ("query limit", stages_query_limit),
 ]
 
 
