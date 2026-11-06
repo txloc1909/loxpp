@@ -340,7 +340,7 @@ TEST_F(ParkTest, ASendDoesNotWakeAParkedTask) {
             // message in its mailbox.
             EXPECT_EQ(task->state, TaskState::WAITING);
             EXPECT_EQ(task->mailbox.size(), 1u);
-            EXPECT_NE(task->parkReason, WaitEvent::NONE);
+            EXPECT_NE(task->waitEvent, WaitEvent::NONE);
             rt.completeWait(task, from<Number>(42.0));
         },
         [](ObjTask* task) { return task->mailbox.size() == 1u; });

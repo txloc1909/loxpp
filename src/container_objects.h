@@ -576,7 +576,7 @@ struct ObjTask : public Obj {
     // Set while the task is WAITING: what it waits for and the Poller token of
     // that wait. A WAITING task keeps its result and its fault here, not in the
     // mailbox, so task.pending() never sees them.
-    WaitEvent parkReason{WaitEvent::NONE};
+    WaitEvent waitEvent{WaitEvent::NONE};
     std::uint64_t parkToken{0};
     // The Poller token of the limit of a connect call that waits for a
     // descriptor, or 0. The limit is a second wait of the same task.

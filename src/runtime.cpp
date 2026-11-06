@@ -1149,7 +1149,7 @@ void Runtime::waitTask(ObjTask* task) {
         return;
     }
     task->state = TaskState::WAITING;
-    task->parkReason = request.reason;
+    task->waitEvent = request.reason;
     task->parkToken = token;
     m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
@@ -1160,7 +1160,7 @@ void Runtime::waitTask(ObjTask* task) {
 }
 
 void Runtime::releaseWait(ObjTask* task) {
-    if (task->parkReason == WaitEvent::NONE) {
+    if (task->waitEvent == WaitEvent::NONE) {
         return;
     }
     // A wait that the poller reported is gone already; cancel() is then a
@@ -1176,13 +1176,13 @@ void Runtime::releaseWait(ObjTask* task) {
         m_parkTimers.erase(task->parkTimerToken);
         task->parkTimerToken = 0;
     }
-    task->parkReason = WaitEvent::NONE;
+    task->waitEvent = WaitEvent::NONE;
     task->parkToken = 0;
 }
 
 void Runtime::rearmWait(ObjTask* task, int fd) {
     m_waitingTasks.erase(task->parkToken);
-    const auto interest = task->parkReason == WaitEvent::FD_WRITE
+    const auto interest = task->waitEvent == WaitEvent::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
     // The call began to wait at its first wait, so it keeps that token.
