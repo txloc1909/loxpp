@@ -1150,7 +1150,7 @@ void Runtime::waitTask(ObjTask* task) {
     }
     task->state = TaskState::WAITING;
     task->waitEvent = request.reason;
-    task->parkToken = token;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
@@ -1166,9 +1166,9 @@ void Runtime::releaseWait(ObjTask* task) {
     // A wait that the poller reported is gone already; cancel() is then a
     // no-op that returns false.
     if (m_poller != nullptr) {
-        m_poller->cancel(task->parkToken);
+        m_poller->cancel(task->waitToken);
     }
-    m_waitingTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->waitToken);
     if (task->parkTimerToken != 0) {
         if (m_poller != nullptr) {
             m_poller->cancel(task->parkTimerToken);
@@ -1177,24 +1177,24 @@ void Runtime::releaseWait(ObjTask* task) {
         task->parkTimerToken = 0;
     }
     task->waitEvent = WaitEvent::NONE;
-    task->parkToken = 0;
+    task->waitToken = 0;
 }
 
 void Runtime::rearmWait(ObjTask* task, int fd) {
-    m_waitingTasks.erase(task->parkToken);
+    m_waitingTasks.erase(task->waitToken);
     const auto interest = task->waitEvent == WaitEvent::FD_WRITE
                               ? Poller::Interest::Write
                               : Poller::Interest::Read;
     // The call began to wait at its first wait, so it keeps that token.
-    const Poller::Token token = poller().waitFd(fd, interest, task->parkToken);
+    const Poller::Token token = poller().waitFd(fd, interest, task->waitToken);
     if (token == 0) {
         const std::string message =
             std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->parkToken = 0;
+        task->waitToken = 0;
         failWait(task, "NetworkError", message.c_str());
         return;
     }
-    task->parkToken = token;
+    task->waitToken = token;
     m_waitingTasks.emplace(token, task);
 }
 
