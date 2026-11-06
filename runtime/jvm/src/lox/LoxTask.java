@@ -22,7 +22,41 @@ public final class LoxTask {
     // The mailbox uses null for an empty place, and nil is a message.
     private static final Object NIL = new Object();
 
+    /**
+     * The state that belongs to one task and that no other task may see
+     * (spec/04-semantics.md, The Task Machine). {@code LoxWorker.owned()}
+     * names the record of the task that runs now.
+     */
+    static final class Owned {
+        /**
+         * True for the dynamic extent between a StackOverflowError that
+         * {@code LoxClosure} raises and the resolution of that same fault.
+         * See the comment at the top of {@code LoxClosure}.
+         */
+        boolean unwindingStackOverflow;
+        /**
+         * The error whose delivery to a catch block ends the unwind that
+         * {@code unwindingStackOverflow} marks. See the comment at the top of
+         * {@code LoxClosure}.
+         */
+        LoxError overflowInFlight;
+        /** The nesting depth of the stringify call that runs now. */
+        int stringifyDepth;
+        /**
+         * Greater than 0 while a {@code want} function of a receive_where
+         * call runs. A receive in it would remove a message that the call is
+         * testing.
+         */
+        int selectDepth;
+        /**
+         * The number of try/catch handlers that this task has open. It is
+         * native's m_handlerStack.size() for the task.
+         */
+        int handlerDepth;
+    }
+
     final LoxWorker worker;
+    final Owned owned = new Owned();
 
     State state = State.READY;
     boolean ended;
@@ -48,12 +82,10 @@ public final class LoxTask {
     // LoxPoller.addFd); 0 before the first wait of a call.
     long waitSeq;
 
-    // The frame count and the handler depth of this task while another
-    // task of the worker runs (see LoxWorker.switchTo). A task starts below
-    // its first call, as native's scheduler resumes each task from an empty
-    // frame stack.
+    // The frame count of this task while another task of the worker runs
+    // (see LoxWorker.switchTo). A task starts below its first call, as
+    // native's scheduler resumes each task from an empty frame stack.
     int savedFrameCount;
-    int savedHandlerDepth;
 
     // A thread of this task waits here while the task is suspended. Only
     // one thread of a task runs at a time, so one permit wakes the right

@@ -177,16 +177,17 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     // opened after it has already passed FRAMES_MAX would never see an exact
     // match again.
     if (m_frameCount >= FRAMES_MAX && !m_handlerStack.empty() &&
-        !m_unwindingStackOverflow) {
-        // See m_unwindingStackOverflow's own comment (runtime.h) and this
-        // guard's own matching one in push(): a deferred call drained by the
-        // handleThrow() below can itself reach this same guard again. Hold
-        // the flag for exactly this call, so a nested hit falls through to
-        // the hard ceiling below instead of recursing.
-        m_unwindingStackOverflow = true;
+        !m_owned->unwindingStackOverflow) {
+        // See TaskOwned::unwindingStackOverflow's own comment
+        // (container_objects.h) and this guard's own matching one in push(): a
+        // deferred call drained by the handleThrow() below can itself reach
+        // this same guard again. Hold the flag for exactly this call, so a
+        // nested hit falls through to the hard ceiling below instead of
+        // recursing.
+        m_owned->unwindingStackOverflow = true;
         ThrowOutcome outcome = raiseThrowableError(
             "StackOverflowError", "Stack overflow.", stopAtFrameCount);
-        m_unwindingStackOverflow = false;
+        m_owned->unwindingStackOverflow = false;
         // Uncaught falls through to this same return unchanged:
         // raiseThrowableError() already reported it, and m_frameCount is
         // reset to 0 by then (see runtimeError()/resetStack()), so
@@ -195,14 +196,15 @@ Runtime::ThrowOutcome Runtime::call(ObjClosure* closure, int argCount,
     }
     // No handler active: the true hard ceiling, unaffected by the reserve,
     // same depth as before the reserve existed. While unwinding a
-    // StackOverflowError (m_unwindingStackOverflow), the ceiling moves out to
-    // FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
+    // StackOverflowError (m_owned->unwindingStackOverflow), the ceiling moves
+    // out to FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE — the physical capacity
     // m_frames[] actually has — so a deferred call drained during that
     // unwind can use the reserve; past that, it stays fatal rather than
     // recursing into the same handler again.
-    if (m_frameCount >=
-        FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0)) {
+    if (m_frameCount >= FRAMES_MAX &&
+        m_frameCount >= FRAMES_MAX + (m_owned->unwindingStackOverflow
+                                          ? STACK_OVERFLOW_FRAME_RESERVE
+                                          : 0)) {
         runtimeError("Stack overflow.");
         return ThrowOutcome::Uncaught;
     }
@@ -616,22 +618,24 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // raises a catchable StackOverflowError instead of writing past
         // m_frames[]/stack[]. The ceilings mirror call()/checkStackOverflow().
         const std::ptrdiff_t frameCeiling =
-            FRAMES_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_FRAME_RESERVE : 0);
+            FRAMES_MAX + (m_owned->unwindingStackOverflow
+                              ? STACK_OVERFLOW_FRAME_RESERVE
+                              : 0);
         const std::ptrdiff_t stackCeiling =
-            STACK_MAX +
-            (m_unwindingStackOverflow ? STACK_OVERFLOW_STACK_RESERVE : 0);
+            STACK_MAX + (m_owned->unwindingStackOverflow
+                             ? STACK_OVERFLOW_STACK_RESERVE
+                             : 0);
         if (static_cast<std::ptrdiff_t>(entry) +
                     static_cast<std::ptrdiff_t>(co->frames.size()) >
                 frameCeiling ||
             static_cast<std::ptrdiff_t>(base - stack) +
                     static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
                 stackCeiling) {
-            if (!m_handlerStack.empty() && !m_unwindingStackOverflow) {
-                m_unwindingStackOverflow = true;
+            if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
+                m_owned->unwindingStackOverflow = true;
                 ThrowOutcome outcome = raiseThrowableError(
                     "StackOverflowError", "Stack overflow.", boundary);
-                m_unwindingStackOverflow = false;
+                m_owned->unwindingStackOverflow = false;
                 m_reentrantOutcome = fromThrow(outcome);
             } else {
                 runtimeError("Stack overflow.");
@@ -654,12 +658,12 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     // deeper) or from ITER_HAS_NEXT, the scheduler, or resumeWaitingInner (no
     // native deeper). Any other native in between would hold a C++
     // continuation that a task switch cannot keep.
-    const int savedCleanDepth = m_cleanNativeDepth;
-    const int linkNatives = m_nativeDepth - savedCleanDepth;
-    m_cleanNativeDepth =
+    const int savedCleanDepth = m_owned->cleanNativeDepth;
+    const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
+    m_owned->cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
-         m_reentrantRunDepth == m_cleanReentrantDepth)
-            ? m_nativeDepth
+         m_reentrantRunDepth == m_owned->cleanReentrantDepth)
+            ? m_owned->nativeDepth
             : -1;
 
 #ifdef LOXPP_PROFILE
@@ -691,7 +695,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // task.receive reached below it must raise YieldAcrossNativeError,
         // not suspend a coroutine that has no frame to resume.
         if (nativeEntry) {
-            m_cleanNativeDepth = -1;
+            m_owned->cleanNativeDepth = -1;
         }
         // A compiled entry (QBE coroutine mode) must be pushed, not run:
         // opCall's own invokeClosure branches on m_resumableMode, and
@@ -872,7 +876,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
 #ifdef LOXPP_PROFILE
     m_activeProfiler = savedProfiler;
 #endif
-    m_cleanNativeDepth = savedCleanDepth;
+    m_owned->cleanNativeDepth = savedCleanDepth;
     m_currentCoroutine = parent;
     if (parent != nullptr) {
         parent->state = CoroutineState::RUNNING;
@@ -1296,9 +1300,9 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
 
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
-    return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
-           m_nativeDepth == m_cleanNativeDepth + 1 &&
-           m_reentrantRunDepth == m_cleanReentrantDepth;
+    return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
+           m_owned->nativeDepth == m_owned->cleanNativeDepth + 1 &&
+           m_reentrantRunDepth == m_owned->cleanReentrantDepth;
 }
 
 void Runtime::raiseFromNative(const char* kind, const char* msg) {
@@ -1414,7 +1418,7 @@ bool Runtime::sendMessage(ObjTask* task, Value msg) {
 
 bool Runtime::receiveFromNative(Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1438,7 +1442,7 @@ bool Runtime::receiveFromNative(Value* out) {
 bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
                                double seconds, Value* out) {
     ObjTask* task = m_currentTask;
-    if (m_selectDepth > 0) {
+    if (m_owned->selectDepth > 0) {
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive in a function that receive_where "
                         "calls.");
@@ -1470,12 +1474,12 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         push(msg);
         Value verdict;
         bool ok;
-        ++m_selectDepth;
+        ++m_owned->selectDepth;
         {
             SynchronousRun run(*this);
             ok = invokeCallableFromNative(1, &verdict);
         }
-        --m_selectDepth;
+        --m_owned->selectDepth;
         if (!ok) {
             task->sel = ObjTask::SelectiveReceive{};
             return false;
@@ -1520,10 +1524,10 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
     m_nativeStopAtFrameCount = entry;
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result;
     bool ok = selectStep(task, &result);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -1553,7 +1557,7 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
 bool Runtime::runTask(ObjTask* task) {
     ObjCoroutine* co = task->co;
     task->state = TaskState::RUNNING;
-    m_currentTask = task;
+    enterTask(task);
 
     // The resume window: for a first resume, the slot the stored callee goes
     // into, and the message of task.spawn_worker for a worker's first task;
@@ -1596,15 +1600,15 @@ bool Runtime::runTask(ObjTask* task) {
     m_reentrantOutcome = OpResult::OK;
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
-    m_cleanNativeDepth = m_nativeDepth;
-    m_cleanReentrantDepth = m_reentrantRunDepth;
+    m_owned->cleanNativeDepth = m_owned->nativeDepth;
+    m_owned->cleanReentrantDepth = m_reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
     OpResult outcome = m_reentrantOutcome;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     // A fault the resumed coroutine did not raise must not reach the next
     // resume.
     m_faultTask = nullptr;
@@ -1697,10 +1701,10 @@ void Runtime::abandonTasks() {
     m_parkRequest = ParkRequest{};
     m_faultTask = nullptr;
     m_liveTasks = 0;
-    m_currentTask = nullptr;
+    enterTask(nullptr);
     m_taskSwitchPending = false;
     m_taskSwitchInner = nullptr;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     ++m_taskEpoch;
 }
 
@@ -2500,9 +2504,9 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     // instead of trying to drive a frame the native's C stack cannot expose.
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
-    ++m_nativeDepth;
+    ++m_owned->nativeDepth;
     Value result = native->function(argCount, stackTop - argCount);
-    --m_nativeDepth;
+    --m_owned->nativeDepth;
     m_resumableMode = savedResumable;
     m_nativeStopAtFrameCount = savedBoundary;
     OpResult outcome = m_reentrantOutcome;
@@ -2671,7 +2675,7 @@ void Runtime::resetStack() {
     m_currentCoroutine = nullptr;
     m_yieldedValue = Value{};
     m_stackOverflow = false;
-    m_selectDepth = 0;
+    m_owned->selectDepth = 0;
     m_handlerStack.clear();
     for (auto& deferList : m_deferLists) {
         deferList.clear();
@@ -3897,7 +3901,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // raises while a native runs or a C++ caller waits for the result of
         // Lox code (a SynchronousRun: a map key's __hash__ or __eq__, a
         // __str__, a deferred call).
-        if (m_nativeDepth > 0 || m_reentrantRunDepth > 0) {
+        if (m_owned->nativeDepth > 0 || m_reentrantRunDepth > 0) {
             return fromThrow(raiseThrowableError(
                 "YieldAcrossNativeError",
                 "Cannot yield across a native callback.", stopAtFrameCount));

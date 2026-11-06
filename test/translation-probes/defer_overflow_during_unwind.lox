@@ -1,9 +1,10 @@
-// Proves runtime/jvm/src/lox/LoxClosure.java's s_unwindingStackOverflow
-// guard: a second StackOverflowError raised by a deferred call while the
-// first one is still unwinding is fatal, not delivered to any catchBlock
-// (spec/04-semantics.md line 1120) — matching native's own
-// m_unwindingStackOverflow guard (src/vm.h). Both sides give empty stdout
-// and a non-zero exit; the JVM stderr names lox.LoxError.
+// Proves the unwindingStackOverflow guard of the per-task record
+// (LoxTask.Owned in runtime/jvm/src/lox/LoxTask.java, TaskOwned in
+// src/container_objects.h): a second StackOverflowError raised by a
+// deferred call while the first one is still unwinding is fatal, not
+// delivered to any catchBlock (spec/04-semantics.md, "Runtime Errors"). Both
+// sides give empty stdout and a non-zero exit; the JVM stderr names
+// lox.LoxError.
 fun deepcall(n) { if (n == 0) return 0; return 1 + deepcall(n - 1); }
 fun boom(n) { deepcall(500); }
 fun f(n) { defer boom(n); f(n + 1); }

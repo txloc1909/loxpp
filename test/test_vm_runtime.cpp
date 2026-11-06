@@ -1400,17 +1400,17 @@ TEST_F(StackOverflowTest,
 // A deferred call that itself recurses far enough to outrun the reserve must
 // not hang or corrupt VM state. This directly exercises the "prove a new
 // check can fail" hazard the frame reserve exists to bound: with the guard
-// in Runtime::call()/push() removed (m_unwindingStackOverflow ignored), this
-// program does not hang — it crashes. Every one of `f`'s ~1000 unwound
-// frames hands its own recorded `boom(n)` to handleThrow()'s unwind loop;
-// boom's own 500-deep recursion reaches the reserve boundary again while the
-// ORIGINAL StackOverflowError's handleThrow() call is still on the C++ call
+// in Runtime::call()/push() removed (TaskOwned::unwindingStackOverflow
+// ignored), this program does not hang — it crashes. Every one of `f`'s ~1000
+// unwound frames hands its own recorded `boom(n)` to handleThrow()'s unwind
+// loop; boom's own 500-deep recursion reaches the reserve boundary again while
+// the ORIGINAL StackOverflowError's handleThrow() call is still on the C++ call
 // stack, and an unguarded second catch attempt there reenters handleThrow()
 // through genuine C++ recursion (run() -> runPendingDefers() ->
 // handleThrow() -> raiseThrowableError() -> a new run()) once per remaining
-// frame — verified directly: reverting m_unwindingStackOverflow's guard at
-// both sites reproduces a real AddressSanitizer stack-overflow abort inside
-// this exact test, not a graceful Lox++-level fault. The fix makes the
+// frame — verified directly: reverting TaskOwned::unwindingStackOverflow's
+// guard at both sites reproduces a real AddressSanitizer stack-overflow abort
+// inside this exact test, not a graceful Lox++-level fault. The fix makes the
 // second overflow "stay fatal" (this row's own original design note) rather
 // than try to catch it again: the outer try/catch below never runs its
 // catchBlock, the whole program halts uncaught, and the check here is that
@@ -1605,7 +1605,7 @@ struct VMTestAccess {
         vm.m_rt.stackTop = vm.m_rt.stack + depth;
     }
     static void setUnwinding(VM& vm, bool v) {
-        vm.m_rt.m_unwindingStackOverflow = v;
+        vm.m_rt.m_owned->unwindingStackOverflow = v;
     }
     static void push(VM& vm, Value v) { vm.m_rt.push(v); }
     static bool overflowFlag(const VM& vm) { return vm.m_rt.m_stackOverflow; }

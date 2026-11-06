@@ -98,13 +98,9 @@ final class LoxWorker {
     final int number;
     LoxGlobals globals;
 
-    // The runtime counters that native keeps in its Runtime, one Runtime per
-    // worker. LoxClosure, LoxOps, and LoxCoroutine read and write them.
+    // The frame count that native keeps in its Runtime, one Runtime per
+    // worker. LoxClosure and LoxCoroutine read and write it.
     int frameCount = 1;
-    boolean unwindingStackOverflow;
-    LoxError overflowInFlight;
-    int handlerDepth;
-    int stringifyDepth;
 
     // Guarded by LOCK.
     private final ArrayDeque<LoxTask> runQueue = new ArrayDeque<>();
@@ -120,12 +116,20 @@ final class LoxWorker {
     // control, before its thread wakes this one.
     LoxTask current;
 
+    // The record of the state that belongs to the task that runs now. It is
+    // `current.owned`, kept in a field of its own because the call path reads
+    // it often.
+    private LoxTask.Owned owned;
+
+    LoxTask.Owned owned() { return owned; }
+
     private LoxWorker(int number) {
         this.number = number;
         LoxTask first = new LoxTask(this);
         first.state = LoxTask.State.RUNNING;
         first.started = true;
         current = first;
+        owned = first.owned;
     }
 
     // ------------------------------------------------------------------
@@ -216,13 +220,8 @@ final class LoxWorker {
         }
     }
 
-    // Greater than 0 while a `want` function of a receive_where call runs. A
-    // receive in it would remove a message that the call is testing. Only
-    // the running task of the worker reads or writes it.
-    private int selectDepth;
-
     private void rejectInWant() {
-        if (selectDepth > 0) {
+        if (owned().selectDepth > 0) {
             throw LoxOps.makeError("YieldAcrossNativeError",
                                    "Cannot receive in a function that "
                                        + "receive_where calls.");
@@ -279,13 +278,14 @@ final class LoxWorker {
     }
 
     private boolean callWant(Object want, Object msg) {
-        selectDepth++;
+        LoxTask.Owned owned = owned();
+        owned.selectDepth++;
         LoxOps.enterCallback();
         try {
             return !LoxOps.isFalsy(LoxOps.call(want, new Object[] {msg}));
         } finally {
             LoxOps.exitCallback();
-            selectDepth--;
+            owned.selectDepth--;
         }
     }
 
@@ -494,7 +494,6 @@ final class LoxWorker {
             runQueue.addLast(self);
         }
         self.savedFrameCount = frameCount;
-        self.savedHandlerDepth = handlerDepth;
         LoxTask next = takeNext();
         if (next == self) {
             runTask(self);
@@ -753,13 +752,13 @@ final class LoxWorker {
         }
     }
 
-    // The `run` move. Caller holds LOCK. Each task has its own frame count and
-    // handler depth, as each native task resumes from an empty frame stack.
+    // The `run` move. Caller holds LOCK. From here owned() names the record
+    // of `task`.
     private void runTask(LoxTask task) {
         current = task;
+        owned = task.owned;
         task.state = LoxTask.State.RUNNING;
         frameCount = task.savedFrameCount;
-        handlerDepth = task.savedHandlerDepth;
     }
 
     // Caller holds LOCK. spec/04-semantics.md, Deadlock: no task on any

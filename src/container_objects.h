@@ -518,6 +518,45 @@ struct ParkedIo {
     std::string timeoutMessage;
 };
 
+// The state that belongs to one task and that no other task may see
+// (spec/04-semantics.md, The Task Machine). The worker keeps one record for
+// the code that runs outside every task, and `Runtime::m_owned` points at the
+// record of the task that runs now.
+struct TaskOwned {
+    // True for the duration of one StackOverflowError's own handleThrow()
+    // call (set and cleared by two plain assignments, at both overflow
+    // guards). Draining a discarded frame's defer runs arbitrary Lox++ code
+    // (runPendingDefers() -> a nested run()), and that code can itself
+    // recurse deep enough to reach either overflow guard again, because the
+    // reserve lets the unwind of a StackOverflowError run deferred calls at
+    // all. Without this flag, each such nested hit re-enters handleThrow()'s
+    // own unwind through genuine C++ recursion (call() ->
+    // raiseThrowableError() -> handleThrow() -> runPendingDefers() -> a
+    // nested run() -> call() -> ...), one level per remaining frame, and
+    // crashes the process with a real native stack overflow instead of a
+    // Lox++-level fault. Both overflow guards skip the catchable path while
+    // this flag is set, and fall to their own hard ceiling (FRAMES_MAX or
+    // STACK_MAX plus the reserve): the second overflow stays fatal, it is
+    // never handed to the same handler a second time.
+    bool unwindingStackOverflow{false};
+    // Greater than 0 while a `want` function of a receive_where call runs. A
+    // receive in it would remove a message from the mailbox that the call
+    // is testing.
+    int selectDepth{0};
+    // Number of natives running now (callNative), innermost included.
+    int nativeDepth{0};
+    // nativeDepth at which the frames of the current coroutine run, while the
+    // chain from the running task's base to that coroutine is clean: each
+    // link is a `resume` native that its parent's loop called (one native
+    // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run
+    // (Runtime::m_reentrantRunDepth) in between. -1 when the chain is not clean
+    // or no task runs. resumeCoroutine() sets it for its own run and restores
+    // it.
+    int cleanNativeDepth{-1};
+    // Runtime::m_reentrantRunDepth when the scheduler resumed the task.
+    int cleanReentrantDepth{0};
+};
+
 // The object lives in the heap of its worker. A handle on another worker is
 // a pointer to this same object, held as a message: that worker reads only
 // `ended` and the heap id, and routes a send through the inbound queue of
@@ -530,6 +569,7 @@ struct ObjTask : public Obj {
     // collect, so the owner roots this task across it (deliverMessage).
     std::deque<Value, VmAllocator<Value>> mailbox;
     TaskState state{TaskState::READY};
+    TaskOwned owned;
     // True while the task waits in task.receive(): its next resume hands it
     // the head of the mailbox as the value of that receive.
     bool receiving{false};
