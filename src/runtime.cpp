@@ -1154,7 +1154,7 @@ void Runtime::waitTask(ObjTask* task) {
     m_waitingTasks.emplace(token, task);
     if (task->io.hasDeadline) {
         const Poller::Token timer = poller().waitUntil(task->io.deadline);
-        task->parkTimerToken = timer;
+        task->waitTimerToken = timer;
         m_parkTimers.emplace(timer, task);
     }
 }
@@ -1169,12 +1169,12 @@ void Runtime::releaseWait(ObjTask* task) {
         m_poller->cancel(task->waitToken);
     }
     m_waitingTasks.erase(task->waitToken);
-    if (task->parkTimerToken != 0) {
+    if (task->waitTimerToken != 0) {
         if (m_poller != nullptr) {
-            m_poller->cancel(task->parkTimerToken);
+            m_poller->cancel(task->waitTimerToken);
         }
-        m_parkTimers.erase(task->parkTimerToken);
-        task->parkTimerToken = 0;
+        m_parkTimers.erase(task->waitTimerToken);
+        task->waitTimerToken = 0;
     }
     task->waitEvent = WaitEvent::NONE;
     task->waitToken = 0;
@@ -1270,7 +1270,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         if (limit != m_parkTimers.end()) {
             ObjTask* task = limit->second;
             m_parkTimers.erase(limit);
-            task->parkTimerToken = 0;
+            task->waitTimerToken = 0;
             const std::string message = task->io.timeoutMessage;
             failWait(task, "NetworkError", message.c_str());
             continue;

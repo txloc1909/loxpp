@@ -580,7 +580,7 @@ struct ObjTask : public Obj {
     std::uint64_t waitToken{0};
     // The Poller token of the limit of a connect call that waits for a
     // descriptor, or 0. The limit is a second wait of the same task.
-    std::uint64_t parkTimerToken{0};
+    std::uint64_t waitTimerToken{0};
     // The value of the waiting call when the task runs again, unless a fault
     // is set. `hasPendingFault` and the strings are plain C++ data.
     Value pendingValue;
