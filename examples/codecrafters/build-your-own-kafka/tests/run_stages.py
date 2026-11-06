@@ -960,9 +960,15 @@ def case_local(prog):
             else:
                 req = request(18, version, 400 + version, b"", flexible=False)
             resp = decode_api_versions(b.call(req), version)
-            served.append((version, resp["error"]))
+            # Shape as well as the error code: a version served with the wrong
+            # layout answers 0 and still leaves the client with a broken frame.
+            served.append((version, resp["error"], resp["size_ok"],
+                           resp["left"], resp["throttle"], len(resp["keys"])))
         check("local: every advertised ApiVersions version is served",
-              all(error == 0 for _, error in served), str(served))
+              all(error == 0 and size_ok and left == 0 and throttle == 0
+                  and keys == 4
+                  for _, error, size_ok, left, throttle, keys in served),
+              str(served))
         past = entry["max"] + 1
         body = W().compact_str(b"kafka-cli").compact_str(b"0.1").tags().buf()
         resp = decode_api_versions(b.call(request(18, past, 419, body)))
