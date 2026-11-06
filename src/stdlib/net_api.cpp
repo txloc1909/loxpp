@@ -882,7 +882,7 @@ static Value runIo(WaitingCall io) {
             break;
         }
         // The task leaves the run queue; the poller reports the descriptor and
-        // resumeParkedIo goes on. The record moves to the task, because this
+        // resumeWaitingCall goes on. The record moves to the task, because this
         // frame is gone by then, and the call holds its side from here. A
         // task that cannot suspend waits here and holds no side: no other
         // task of the worker runs meanwhile.
@@ -911,7 +911,7 @@ static Value runIo(WaitingCall io) {
     }
 }
 
-void resumeParkedIo(Runtime& rt, ObjTask* task) {
+void resumeWaitingCall(Runtime& rt, ObjTask* task) {
     WaitingCall& io = task->io;
     IoOutcome out;
     step(io, out);

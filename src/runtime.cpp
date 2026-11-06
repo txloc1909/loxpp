@@ -1281,7 +1281,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
         }
         ObjTask* task = found->second;
         if (task->io.op != IoOp::NONE) {
-            resumeParkedIo(*this, task);
+            resumeWaitingCall(*this, task);
         } else if (task->inStateReceiving()) {
             limitTask(task);
         } else {
