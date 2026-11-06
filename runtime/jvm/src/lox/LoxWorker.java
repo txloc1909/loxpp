@@ -581,7 +581,7 @@ final class LoxWorker {
      * Returns when {@code channel} may be ready for {@code interest} (a
      * {@link java.nio.channels.SelectionKey} operation), or when it closed.
      * The caller tries its operation again, and checks that it is open. The
-     * task waits as a task if it can suspend; otherwise the worker waits in
+     * task is `waiting` if it can suspend; otherwise the worker waits in
      * place.
      */
     static void waitChannel(SelectableChannel channel, int interest) {

@@ -133,7 +133,7 @@ void setConnectTestHooks(const ConnectTestHooks* hooks) {
 }
 
 // Resolves the name on the worker, and runs the connect from the first
-// address. The TCP connect is nonblocking: the call waits as a task where it
+// address. The TCP connect is nonblocking: the call suspends its task where it
 // can. `withLimit` says that argv[2] is the limit of connect_within.
 static Value connectCommon(Value* argv, bool withLimit) {
     std::string host;
