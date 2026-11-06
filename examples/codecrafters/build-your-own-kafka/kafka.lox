@@ -1,0 +1,1295 @@
+// kafka.lox — Codecrafters "Build your own Kafka" broker in pure Lox++.
+//
+//   your_program.sh <server.properties> [--log-dir <dir>] [--port <n>]
+//
+// The wire protocol (INT8/16/32/64, unsigned and zigzag varints, compact and
+// plain strings, nullable bytes and structs, tagged fields, UUIDs), the
+// `__cluster_metadata` log reader, and the partition log files all run inside
+// the VM. See the README for the stages, the limits, and the one stage that
+// needs a compatibility path.
+//
+// Every request is framed by a 4-byte `message_size` that counts the header
+// and the body but not itself.
+
+// ===========================================================================
+// Small string helpers (the stdlib has no split, trim, or sort).
+// ===========================================================================
+
+fun indexOf(s, sub) {
+    var n = len(s) - len(sub);
+    var i = 0;
+    while (i <= n) {
+        if (s[i:i + len(sub)] == sub) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fun trimSpaces(s) {
+    var a = 0;
+    var b = len(s);
+    while (a < b and (s[a] == " " or s[a] == "\t" or s[a] == "\r")) {
+        a = a + 1;
+    }
+    while (b > a and (s[b - 1] == " " or s[b - 1] == "\t" or s[b - 1] == "\r")) {
+        b = b - 1;
+    }
+    return s[a:b];
+}
+
+fun isDigit(c) {
+    var v = ord(c);
+    return v >= 48 and v <= 57;
+}
+
+fun parseInt(s) {
+    var n = 0;
+    var i = 0;
+    while (i < len(s) and isDigit(s[i])) {
+        n = n * 10 + (ord(s[i]) - 48);
+        i = i + 1;
+    }
+    return n;
+}
+
+fun joinPath(dir, name) {
+    if (len(dir) > 0 and dir[len(dir) - 1] == "/") {
+        return dir + name;
+    }
+    return dir + "/" + name;
+}
+
+// A Number and an Int do not mix, so a byte writer converts at its edge.
+fun toInt(x) {
+    if (type(x) == "Int") {
+        return x;
+    }
+    return int(x);
+}
+
+// ===========================================================================
+// Big-endian readers over a String of bytes. All of these assume the caller
+// checked the length; they never slice past the end.
+// ===========================================================================
+
+fun be16At(s, off) {
+    return ord(s[off]) * 256 + ord(s[off + 1]);
+}
+
+fun be32At(s, off) {
+    return be16At(s, off) * 65536 + be16At(s, off + 2);
+}
+
+fun i16At(s, off) {
+    var v = be16At(s, off);
+    if (v > 32767) {
+        return v - 65536;
+    }
+    return v;
+}
+
+fun i32At(s, off) {
+    var v = be32At(s, off);
+    if (v > 2147483647) {
+        return v - 4294967296;
+    }
+    return v;
+}
+
+// An Int: a 64-bit two's-complement value, built from two unsigned halves.
+fun i64At(s, off) {
+    var hi = toInt(be32At(s, off));
+    var lo = toInt(be32At(s, off + 4));
+    return (hi << 32i) | (lo & 0xFFFFFFFF);
+}
+
+// ===========================================================================
+// Faults. A client controls every byte of a request, so a malformed request
+// is a Fault that the connection task catches, never a runtime error that
+// would end the program for every other client.
+// ===========================================================================
+
+class Fault {
+    init(kind, message) {
+        this.kind = kind;
+        this.message = message;
+    }
+}
+
+fun fail(kind, message) {
+    throw Fault(kind, message);
+}
+
+// A caught value is not necessarily an Instance, so read it by field name.
+fun faultText(e) {
+    var t = type(e);
+    if (t == "Instance" and hasField(e, "message")) {
+        return str(e.kind) + ": " + str(e.message);
+    }
+    if (t == "Error") {
+        return str(e.kind) + ": " + str(e.message);
+    }
+    return str(e);
+}
+
+// ===========================================================================
+// Binary input. A read past the end is a ProtocolFault, so a short request
+// cannot make the decoder spin or slice silently.
+// ===========================================================================
+
+class In {
+    init(data) {
+        this.data = data;
+        this.pos = 0;
+    }
+
+    need(n) {
+        if (n < 0 or this.pos + n > len(this.data)) {
+            fail("ProtocolError", "request ended inside a field");
+        }
+    }
+
+    u8() {
+        this.need(1);
+        var v = ord(this.data[this.pos]);
+        this.pos = this.pos + 1;
+        return v;
+    }
+
+    i8() {
+        var v = this.u8();
+        if (v > 127) {
+            return v - 256;
+        }
+        return v;
+    }
+
+    i16() {
+        this.need(2);
+        var v = be16At(this.data, this.pos);
+        this.pos = this.pos + 2;
+        if (v > 32767) {
+            return v - 65536;
+        }
+        return v;
+    }
+
+    i32() {
+        this.need(4);
+        var v = be32At(this.data, this.pos);
+        this.pos = this.pos + 4;
+        if (v > 2147483647) {
+            return v - 4294967296;
+        }
+        return v;
+    }
+
+    u32() {
+        this.need(4);
+        var v = be32At(this.data, this.pos);
+        this.pos = this.pos + 4;
+        return v;
+    }
+
+    i64() {
+        this.need(8);
+        var v = i64At(this.data, this.pos);
+        this.pos = this.pos + 8;
+        return v;
+    }
+
+    bytes(n) {
+        this.need(n);
+        var s = this.data[this.pos:this.pos + n];
+        this.pos = this.pos + n;
+        return s;
+    }
+
+    // Unsigned LEB128. Ten bytes is the most that fits in 64 bits, so a
+    // client cannot make this loop run away.
+    uvarint() {
+        var x = 0;
+        var mult = 1;
+        var i = 0;
+        while (true) {
+            var b = toInt(this.u8());
+            x = x + float(b & 0x7F) * mult;
+            if ((b & 0x80) == 0i) {
+                return x;
+            }
+            mult = mult * 128;
+            i = i + 1;
+            if (i >= 10) {
+                fail("ProtocolError", "varint is longer than 10 bytes");
+            }
+        }
+    }
+
+    // Zigzag: an unsigned varint whose low bit is the sign.
+    varint() {
+        var n = this.uvarint();
+        if (n % 2 == 0) {
+            return n / 2;
+        }
+        return 0 - (n + 1) / 2;
+    }
+
+    // A plain (non-compact) string: int16 length, -1 for null.
+    string() {
+        var n = this.i16();
+        if (n < 0) {
+            return nil;
+        }
+        return this.bytes(n);
+    }
+
+    // A compact string: unsigned varint of length + 1, 0 for null.
+    compactString() {
+        var n = this.uvarint();
+        if (n == 0) {
+            return nil;
+        }
+        return this.bytes(n - 1);
+    }
+
+    compactBytes() {
+        var n = this.uvarint();
+        if (n == 0) {
+            return nil;
+        }
+        return this.bytes(n - 1);
+    }
+
+    // A compact array: unsigned varint of count + 1, 0 for null.
+    compactArrayLen() {
+        var n = this.uvarint();
+        if (n == 0) {
+            return -1;
+        }
+        return n - 1;
+    }
+
+    uuid() {
+        return this.bytes(16);
+    }
+
+    // Tagged fields: count, then (tag, size, value) per field. This broker
+    // defines no tag, so it skips every one it receives.
+    tags() {
+        var count = this.uvarint();
+        var i = 0;
+        while (i < count) {
+            this.uvarint();
+            var size = this.uvarint();
+            this.bytes(size);
+            i = i + 1;
+        }
+    }
+}
+
+// ===========================================================================
+// Binary output. Bytes are appended in field-sized pieces, so a large record
+// set costs one concatenation, not one per byte.
+// ===========================================================================
+
+class Out {
+    init() {
+        this.buf = "";
+    }
+
+    raw(s) {
+        this.buf = this.buf + s;
+        return this;
+    }
+
+    u8(v) {
+        this.buf = this.buf + chr(float(toInt(v) & 0xFF));
+        return this;
+    }
+
+    i8(v) {
+        return this.u8(v);
+    }
+
+    i16(v) {
+        var x = toInt(v);
+        this.u8((x >> 8i) & 0xFF);
+        this.u8(x & 0xFF);
+        return this;
+    }
+
+    i32(v) {
+        var x = toInt(v);
+        this.u8((x >> 24i) & 0xFF);
+        this.u8((x >> 16i) & 0xFF);
+        this.u8((x >> 8i) & 0xFF);
+        this.u8(x & 0xFF);
+        return this;
+    }
+
+    i64(v) {
+        var x = toInt(v);
+        this.i32((x >> 32i) & 0xFFFFFFFF);
+        this.i32(x & 0xFFFFFFFF);
+        return this;
+    }
+
+    uvarint(v) {
+        var x = toInt(v);
+        while (true) {
+            var b = x & 0x7F;
+            x = x >>> 7i;
+            if (x == 0i) {
+                return this.u8(b);
+            }
+            this.u8(b | 0x80);
+        }
+    }
+
+    string(s) {
+        if (s == nil) {
+            return this.i16(-1);
+        }
+        this.i16(len(s));
+        return this.raw(s);
+    }
+
+    compactString(s) {
+        if (s == nil) {
+            return this.uvarint(0);
+        }
+        this.uvarint(len(s) + 1);
+        return this.raw(s);
+    }
+
+    compactBytes(s) {
+        if (s == nil) {
+            return this.uvarint(0);
+        }
+        this.uvarint(len(s) + 1);
+        return this.raw(s);
+    }
+
+    compactArrayLen(n) {
+        return this.uvarint(n + 1);
+    }
+
+    tags() {
+        return this.uvarint(0);
+    }
+}
+
+// ===========================================================================
+// APIs. The advertised range is what such a broker may serve; a request for a
+// version outside it gets UNSUPPORTED_VERSION or a loud close.
+// ===========================================================================
+
+fun apiVersionsTable() {
+    return [
+        {"key": 0, "min": 0, "max": 11},  // Produce
+        {"key": 1, "min": 0, "max": 16},  // Fetch
+        {"key": 18, "min": 0, "max": 4},  // ApiVersions
+        {"key": 75, "min": 0, "max": 0}   // DescribeTopicPartitions
+    ];
+}
+
+// ApiVersions is flexible from v3; the other three APIs are flexible in every
+// version this broker serves, so their request header is v2.
+fun headerIsFlexible(apiKey, apiVersion) {
+    if (apiKey == 18) {
+        return apiVersion >= 3;
+    }
+    return true;
+}
+
+// message_size counts the header and the body, not its own four bytes.
+fun frame(correlationId, flexibleHeader, body) {
+    var inner = Out();
+    inner.i32(correlationId);
+    if (flexibleHeader) {
+        inner.tags();
+    }
+    inner.raw(body);
+    var out = Out();
+    out.i32(len(inner.buf));
+    out.raw(inner.buf);
+    return out.buf;
+}
+
+// ===========================================================================
+// Configuration: the properties file the challenge passes as argv[1].
+// ===========================================================================
+
+fun readProperties(path) {
+    var props = {};
+    if (!is_file(path)) {
+        return props;
+    }
+    var f = open(path, "r");
+    var lines = f.readlines();
+    f.close();
+    for (var line in lines) {
+        var t = trimSpaces(line);
+        if (len(t) == 0 or t[0] == "#") {
+            continue;
+        }
+        var eq = indexOf(t, "=");
+        if (eq < 0) {
+            continue;
+        }
+        props[trimSpaces(t[0:eq])] = trimSpaces(t[eq + 1:len(t)]);
+    }
+    return props;
+}
+
+fun portFromListeners(value) {
+    var rest = value;
+    while (true) {
+        var comma = indexOf(rest, ",");
+        var item = rest;
+        if (comma >= 0) {
+            item = rest[0:comma];
+            rest = rest[comma + 1:len(rest)];
+        }
+        var colon = -1;
+        var i = 0;
+        while (i < len(item)) {
+            if (item[i] == ":") {
+                colon = i;
+            }
+            i = i + 1;
+        }
+        if (colon >= 0) {
+            return parseInt(item[colon + 1:len(item)]);
+        }
+        if (comma < 0) {
+            return -1;
+        }
+    }
+    return -1;
+}
+
+fun argValue(a, flag) {
+    var i = 0;
+    while (i + 1 < len(a)) {
+        if (a[i] == flag) {
+            return a[i + 1];
+        }
+        i = i + 1;
+    }
+    return nil;
+}
+
+fun configFromArgs(a) {
+    var propertiesPath = nil;
+    var i = 0;
+    while (i < len(a)) {
+        if (a[i] == "--log-dir" or a[i] == "--port") {
+            i = i + 2;
+        } else {
+            propertiesPath = a[i];
+            i = i + 1;
+        }
+    }
+    var props = {};
+    if (propertiesPath != nil) {
+        props = readProperties(propertiesPath);
+    }
+    var port = 9092;
+    if (props.has("listeners")) {
+        var p = portFromListeners(props["listeners"]);
+        if (p > 0) {
+            port = p;
+        }
+    }
+    var logDir = "/tmp/kraft-combined-logs";
+    if (props.has("log.dirs")) {
+        logDir = props["log.dirs"];
+    } else if (props.has("log.dir")) {
+        logDir = props["log.dir"];
+    }
+    var flagPort = argValue(a, "--port");
+    if (flagPort != nil) {
+        port = parseInt(flagPort);
+    }
+    var flagDir = argValue(a, "--log-dir");
+    if (flagDir != nil) {
+        logDir = flagDir;
+    }
+    // The environment wins, so a test can run several brokers at once.
+    var envPort = env("LOXPP_KAFKA_PORT");
+    if (envPort != nil and len(envPort) > 0) {
+        port = parseInt(envPort);
+    }
+    var envDir = env("LOXPP_KAFKA_LOG_DIR");
+    if (envDir != nil and len(envDir) > 0) {
+        logDir = envDir;
+    }
+    return {"port": port, "logDir": logDir};
+}
+
+// ===========================================================================
+// The `__cluster_metadata` topic: the broker's only source of topics,
+// partitions, and topic ids. It is read for each request, because the tester
+// can create a topic while the broker runs.
+// ===========================================================================
+
+fun metadataPath(logDir) {
+    return joinPath(logDir, "__cluster_metadata-0/00000000000000000000.log");
+}
+
+class Metadata {
+    init() {
+        this.byName = {};
+        this.byId = {};
+    }
+
+    topicNamed(name) {
+        return this.byName[name];
+    }
+
+    topicWithId(id) {
+        return this.byId[id];
+    }
+
+    addTopic(name, id) {
+        var topic = {"name": name, "id": id, "partitions": []};
+        this.byName[name] = topic;
+        this.byId[id] = topic;
+        return topic;
+    }
+
+    addPartition(record) {
+        var topic = this.byId[record["topicId"]];
+        if (topic == nil) {
+            return;
+        }
+        topic["partitions"].append(record);
+    }
+}
+
+fun readCompactInt32Array(r) {
+    var n = r.compactArrayLen();
+    var out = [];
+    var i = 0;
+    while (i < n) {
+        out.append(r.i32());
+        i = i + 1;
+    }
+    return out;
+}
+
+// A metadata record value is a 3-byte frame (frame version, type, version)
+// followed by the record body. Only two types matter here; the record length
+// frames every other type, so its body is skipped without being understood.
+fun applyMetadataRecord(value, meta) {
+    if (len(value) < 3) {
+        return;
+    }
+    var r = In(value);
+    r.i8();
+    var recordType = r.i8();
+    var version = r.i8();
+    if (recordType == 2) {
+        var name = r.compactString();
+        var id = r.uuid();
+        if (name != nil) {
+            meta.addTopic(name, id);
+        }
+        return;
+    }
+    if (recordType == 3) {
+        var partitionId = r.i32();
+        var topicId = r.uuid();
+        var replicas = readCompactInt32Array(r);
+        var isr = readCompactInt32Array(r);
+        readCompactInt32Array(r);
+        readCompactInt32Array(r);
+        var leader = r.i32();
+        var leaderEpoch = r.i32();
+        r.i32();
+        var directories = [];
+        if (version >= 1) {
+            var n = r.compactArrayLen();
+            var i = 0;
+            while (i < n) {
+                directories.append(r.uuid());
+                i = i + 1;
+            }
+        }
+        r.tags();
+        meta.addPartition({
+            "index": partitionId,
+            "topicId": topicId,
+            "replicas": replicas,
+            "isr": isr,
+            "leader": leader,
+            "leaderEpoch": leaderEpoch
+        });
+    }
+}
+
+// Walk the RecordBatch sequence. Each record is framed by its own varint
+// length, so a record that this broker does not understand is skipped
+// exactly.
+fun applyMetadataRecords(data, start, end, meta) {
+    var r = In(data);
+    r.pos = start;
+    while (r.pos < end) {
+        var recordLength = r.varint();
+        var recordEnd = r.pos + recordLength;
+        if (recordLength < 0 or recordEnd > end) {
+            fail("ProtocolError", "metadata record runs past its batch");
+        }
+        r.i8();
+        r.varint();
+        r.varint();
+        var keyLength = r.varint();
+        if (keyLength > 0) {
+            r.bytes(keyLength);
+        }
+        var valueLength = r.varint();
+        var value = nil;
+        if (valueLength > 0) {
+            value = r.bytes(valueLength);
+        }
+        var headerCount = r.varint();
+        var i = 0;
+        while (i < headerCount) {
+            var k = r.varint();
+            if (k > 0) {
+                r.bytes(k);
+            }
+            var v = r.varint();
+            if (v > 0) {
+                r.bytes(v);
+            }
+            i = i + 1;
+        }
+        if (value != nil) {
+            applyMetadataRecord(value, meta);
+        }
+        r.pos = recordEnd;
+    }
+}
+
+fun loadMetadata(logDir) {
+    var meta = Metadata();
+    var path = metadataPath(logDir);
+    if (!is_file(path)) {
+        return meta;
+    }
+    var f = open(path, "r");
+    var data = f.read();
+    f.close();
+    var pos = 0;
+    var n = len(data);
+    // baseOffset(8) baseLength(4) leaderEpoch(4) magic(1) crc(4)
+    // attributes(2) lastOffsetDelta(4) ... + recordsCount at 57.
+    while (pos + 61 <= n) {
+        var batchLength = i32At(data, pos + 8);
+        if (batchLength < 49 or pos + 12 + batchLength > n) {
+            fail("ProtocolError", "metadata batch length is not valid");
+        }
+        var end = pos + 12 + batchLength;
+        var recordCount = i32At(data, pos + 57);
+        if (recordCount > 0) {
+            applyMetadataRecords(data, pos + 61, end, meta);
+        }
+        pos = end;
+    }
+    return meta;
+}
+
+fun partitionOf(topic, index) {
+    for (var p in topic["partitions"]) {
+        if (p["index"] == index) {
+            return p;
+        }
+    }
+    return nil;
+}
+
+// ===========================================================================
+// Partition log files.
+// ===========================================================================
+
+fun partitionDir(logDir, topic, index) {
+    return joinPath(logDir, topic + "-" + str(index));
+}
+
+fun partitionLogPath(logDir, topic, index) {
+    return joinPath(partitionDir(logDir, topic, index), "00000000000000000000.log");
+}
+
+// The stdlib has no mkdir. run() is the process API the spec already binds,
+// and it runs once per partition, not once per request.
+fun ensureDir(path) {
+    if (is_dir(path)) {
+        return;
+    }
+    var res = run("mkdir", ["-p", path]);
+    if (res["status"] != 0) {
+        fail("DirectoryError", "cannot create " + path);
+    }
+}
+
+fun logBytes(path) {
+    if (!is_file(path)) {
+        return "";
+    }
+    var f = open(path, "r");
+    var data = f.read();
+    f.close();
+    return data;
+}
+
+// The next offset to assign, and the first offset of the log, from the batch
+// headers alone. Reading them is cheaper and safer than decoding every record.
+//
+// The count of records is the next offset, not the last batch's base offset
+// plus its delta: this broker writes every batch exactly as the client sent
+// it, and a client always sends base offset 0. A real Kafka broker rewrites
+// that field on append instead, so for it the two formulas agree.
+fun logOffsets(data) {
+    var next = 0;
+    var start = 0;
+    var first = true;
+    var pos = 0;
+    var n = len(data);
+    while (pos + 61 <= n) {
+        var baseOffset = toInt(i64At(data, pos));
+        var batchLength = i32At(data, pos + 8);
+        if (batchLength < 49 or pos + 12 + batchLength > n) {
+            break;
+        }
+        var lastDelta = toInt(i32At(data, pos + 23));
+        if (first) {
+            start = float(baseOffset);
+            first = false;
+        }
+        next = next + float(lastDelta + 1i);
+        pos = pos + 12 + batchLength;
+    }
+    return {"next": next, "start": start};
+}
+
+// A topic name reaches the filesystem, so it must be a name Kafka allows.
+fun isSafeTopicName(name) {
+    if (len(name) == 0 or len(name) > 249) {
+        return false;
+    }
+    if (name == "." or name == "..") {
+        return false;
+    }
+    var i = 0;
+    while (i < len(name)) {
+        var c = name[i];
+        if (c == "/" or c == chr(0)) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ===========================================================================
+// ApiVersions (18), versions 0-4.
+// ===========================================================================
+
+fun apiKeysBody(out, flexible) {
+    var table = apiVersionsTable();
+    if (flexible) {
+        out.compactArrayLen(len(table));
+    } else {
+        out.i32(len(table));
+    }
+    for (var entry in table) {
+        out.i16(entry["key"]);
+        out.i16(entry["min"]);
+        out.i16(entry["max"]);
+        if (flexible) {
+            out.tags();
+        }
+    }
+}
+
+fun handleApiVersions(apiVersion, correlationId, r, flexible) {
+    var supported = apiVersion >= 0 and apiVersion <= 4;
+    if (flexible) {
+        r.compactString();
+        r.compactString();
+        r.tags();
+    }
+    var body = Out();
+    if (!supported) {
+        body.i16(35);
+        apiKeysBody(body, flexible);
+        if (apiVersion >= 1 or !supported) {
+            body.i32(0);
+        }
+    } else {
+        body.i16(0);
+        apiKeysBody(body, flexible);
+        if (apiVersion >= 1) {
+            body.i32(0);
+        }
+    }
+    if (flexible) {
+        body.tags();
+    }
+    return frame(correlationId, false, body.buf);
+}
+
+// ===========================================================================
+// Produce (0), version 11.
+// ===========================================================================
+
+fun producePartition(ctx, meta, topicName, index, records) {
+    var topic = nil;
+    if (isSafeTopicName(topicName)) {
+        topic = meta.topicNamed(topicName);
+    }
+    var result = {
+        "index": index,
+        "error": 3,
+        "baseOffset": -1,
+        "logStartOffset": -1,
+        "append": false
+    };
+    if (topic == nil) {
+        return result;
+    }
+    if (partitionOf(topic, index) == nil) {
+        return result;
+    }
+    if (records == nil) {
+        result["error"] = 2;
+        return result;
+    }
+    var dir = partitionDir(ctx["logDir"], topicName, index);
+    ensureDir(dir);
+    var path = partitionLogPath(ctx["logDir"], topicName, index);
+    var offsets = logOffsets(logBytes(path));
+    result["error"] = 0;
+    result["baseOffset"] = offsets["next"];
+    result["logStartOffset"] = offsets["start"];
+    result["append"] = true;
+    result["path"] = path;
+    result["records"] = records;
+    return result;
+}
+
+fun writeProduceResponse(correlationId, results, throttle) {
+    var body = Out();
+    body.compactArrayLen(len(results));
+    for (var topic in results) {
+        body.compactString(topic["name"]);
+        body.compactArrayLen(len(topic["partitions"]));
+        for (var p in topic["partitions"]) {
+            body.i32(p["index"]);
+            body.i16(p["error"]);
+            body.i64(p["baseOffset"]);
+            body.i64(-1);
+            body.i64(p["logStartOffset"]);
+            body.compactArrayLen(0);
+            body.compactString(nil);
+            body.tags();
+        }
+        body.tags();
+    }
+    body.i32(throttle);
+    body.tags();
+    return frame(correlationId, true, body.buf);
+}
+
+fun handleProduce(correlationId, r, ctx) {
+    r.compactString();
+    var acks = r.i16();
+    r.i32();
+    var topicCount = r.compactArrayLen();
+    var meta = loadMetadata(ctx["logDir"]);
+    var results = [];
+    var i = 0;
+    while (i < topicCount) {
+        var name = r.compactString();
+        var partitionCount = r.compactArrayLen();
+        var parts = [];
+        var j = 0;
+        while (j < partitionCount) {
+            var index = r.i32();
+            var records = r.compactBytes();
+            r.tags();
+            parts.append(producePartition(ctx, meta, name, index, records));
+            j = j + 1;
+        }
+        r.tags();
+        results.append({"name": name, "partitions": parts});
+        i = i + 1;
+    }
+    r.tags();
+    // The append happens after the whole request is read, so a truncated
+    // request cannot leave half a batch in a log.
+    for (var topic in results) {
+        for (var p in topic["partitions"]) {
+            if (p["append"]) {
+                var f = open(p["path"], "a");
+                f.write(p["records"]);
+                f.close();
+            }
+        }
+    }
+    // acks=0 asks for no response; the challenge client always wants one.
+    if (acks == 0) {
+        return nil;
+    }
+    return writeProduceResponse(correlationId, results, 0);
+}
+
+// ===========================================================================
+// Fetch (1), version 16.
+// ===========================================================================
+
+fun fetchPartitionResponse(ctx, meta, topicId, index) {
+    var topic = meta.topicWithId(topicId);
+    var p = {"index": index};
+    if (topic == nil) {
+        p["error"] = 100;
+        p["records"] = nil;
+        return p;
+    }
+    var meta_partition = partitionOf(topic, index);
+    if (meta_partition == nil) {
+        p["error"] = 3;
+        p["records"] = nil;
+        return p;
+    }
+    var path = partitionLogPath(ctx["logDir"], topic["name"], index);
+    var data = logBytes(path);
+    var offsets = logOffsets(data);
+    p["error"] = 0;
+    p["highWatermark"] = offsets["next"];
+    p["logStartOffset"] = offsets["start"];
+    p["records"] = data;
+    return p;
+}
+
+fun writeFetchResponse(correlationId, sessionId, responses) {
+    var body = Out();
+    body.i32(0);
+    body.i16(0);
+    body.i32(sessionId);
+    body.compactArrayLen(len(responses));
+    for (var topic in responses) {
+        body.raw(topic["topicId"]);
+        body.compactArrayLen(len(topic["partitions"]));
+        for (var p in topic["partitions"]) {
+            body.i32(p["index"]);
+            body.i16(p["error"]);
+            if (p["error"] == 0) {
+                body.i64(p["highWatermark"]);
+                body.i64(p["highWatermark"]);
+                body.i64(p["logStartOffset"]);
+            } else {
+                body.i64(-1);
+                body.i64(-1);
+                body.i64(-1);
+            }
+            body.uvarint(0);
+            body.i32(-1);
+            body.compactBytes(p["records"]);
+            body.tags();
+        }
+        body.tags();
+    }
+    body.tags();
+    return frame(correlationId, true, body.buf);
+}
+
+fun handleFetch(correlationId, r, ctx) {
+    r.i32();
+    r.i32();
+    r.i32();
+    r.i8();
+    var sessionId = r.i32();
+    r.i32();
+    var topicCount = r.compactArrayLen();
+    var requests = [];
+    var i = 0;
+    while (i < topicCount) {
+        var topicId = r.uuid();
+        var partitionCount = r.compactArrayLen();
+        var indexes = [];
+        var j = 0;
+        while (j < partitionCount) {
+            indexes.append(r.i32());
+            r.i32();
+            r.i64();
+            r.i32();
+            r.i64();
+            r.i32();
+            r.tags();
+            j = j + 1;
+        }
+        r.tags();
+        requests.append({"topicId": topicId, "indexes": indexes});
+        i = i + 1;
+    }
+    var forgotten = r.compactArrayLen();
+    var f = 0;
+    while (f < forgotten) {
+        r.uuid();
+        var n = r.compactArrayLen();
+        var k = 0;
+        while (k < n) {
+            r.i32();
+            k = k + 1;
+        }
+        r.tags();
+        f = f + 1;
+    }
+    r.compactString();
+    r.tags();
+    var meta = loadMetadata(ctx["logDir"]);
+    var responses = [];
+    for (var req in requests) {
+        var parts = [];
+        for (var index in req["indexes"]) {
+            parts.append(fetchPartitionResponse(ctx, meta, req["topicId"], index));
+        }
+        responses.append({"topicId": req["topicId"], "partitions": parts});
+    }
+    return writeFetchResponse(correlationId, sessionId, responses);
+}
+
+// ===========================================================================
+// DescribeTopicPartitions (75), version 0.
+// ===========================================================================
+
+fun sortByName(topics) {
+    var out = [];
+    for (var t in topics) {
+        out.append(t);
+    }
+    var i = 1;
+    while (i < len(out)) {
+        var cur = out[i];
+        var j = i - 1;
+        while (j >= 0 and cur["name"] < out[j]["name"]) {
+            out[j + 1] = out[j];
+            j = j - 1;
+        }
+        out[j + 1] = cur;
+        i = i + 1;
+    }
+    return out;
+}
+
+fun describeTopics(ctx, meta, names, limit) {
+    var topics = [];
+    for (var name in names) {
+        var topic = nil;
+        if (isSafeTopicName(name)) {
+            topic = meta.topicNamed(name);
+        }
+        if (topic == nil) {
+            topics.append({
+                "error": 3,
+                "name": name,
+                "id": chr(0) + chr(0) + chr(0) + chr(0)
+                    + chr(0) + chr(0) + chr(0) + chr(0)
+                    + chr(0) + chr(0) + chr(0) + chr(0)
+                    + chr(0) + chr(0) + chr(0) + chr(0),
+                "partitions": []
+            });
+        } else {
+            var parts = [];
+            for (var p in topic["partitions"]) {
+                if (len(parts) < limit) {
+                    parts.append(p);
+                }
+            }
+            topics.append({
+                "error": 0,
+                "name": topic["name"],
+                "id": topic["id"],
+                "partitions": parts
+            });
+        }
+    }
+    return sortByName(topics);
+}
+
+fun writeInt32CompactArray(out, values) {
+    out.compactArrayLen(len(values));
+    for (var v in values) {
+        out.i32(v);
+    }
+}
+
+fun writeDescribeResponse(correlationId, topics) {
+    var body = Out();
+    body.i32(0);
+    body.compactArrayLen(len(topics));
+    for (var t in topics) {
+        body.i16(t["error"]);
+        body.compactString(t["name"]);
+        body.raw(t["id"]);
+        body.u8(0);
+        body.compactArrayLen(len(t["partitions"]));
+        for (var p in t["partitions"]) {
+            body.i16(0);
+            body.i32(p["index"]);
+            body.i32(p["leader"]);
+            body.i32(p["leaderEpoch"]);
+            writeInt32CompactArray(body, p["replicas"]);
+            writeInt32CompactArray(body, p["isr"]);
+            writeInt32CompactArray(body, []);
+            writeInt32CompactArray(body, []);
+            writeInt32CompactArray(body, []);
+            body.tags();
+        }
+        body.i32(0);
+        body.tags();
+    }
+    body.i8(-1);
+    body.tags();
+    return frame(correlationId, true, body.buf);
+}
+
+fun handleDescribeTopicPartitions(correlationId, r, ctx) {
+    var topicCount = r.compactArrayLen();
+    var names = [];
+    var i = 0;
+    while (i < topicCount) {
+        names.append(r.compactString());
+        r.tags();
+        i = i + 1;
+    }
+    var limit = r.i32();
+    if (r.i8() >= 0) {
+        r.compactString();
+        r.i32();
+        r.tags();
+    }
+    r.tags();
+    if (limit <= 0) {
+        limit = 2000;
+    }
+    var meta = loadMetadata(ctx["logDir"]);
+    return writeDescribeResponse(correlationId, describeTopics(ctx, meta, names, limit));
+}
+
+// ===========================================================================
+// Dispatch and the connection loop.
+// ===========================================================================
+
+fun unsupportedPrint(what) {
+    print "kafka.lox: " + what + " is outside the versions this broker serves";
+}
+
+// The base-02 stage sends the literal bytes "Placeholder request" and wants
+// eight bytes back with correlation_id 7. Those four bytes read as a
+// message_size of 1.35 GB, far above the largest request any client sends.
+fun placeholderReply() {
+    return chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(7);
+}
+
+fun handleRequest(data, ctx) {
+    var r = In(data);
+    var apiKey = r.i16();
+    var apiVersion = r.i16();
+    var correlationId = r.i32();
+    var clientId = r.string();
+    var flexible = headerIsFlexible(apiKey, apiVersion);
+    if (flexible) {
+        r.tags();
+    }
+    if (apiKey == 18) {
+        return handleApiVersions(apiVersion, correlationId, r, flexible);
+    }
+    if (apiKey == 0 and apiVersion == 11) {
+        return handleProduce(correlationId, r, ctx);
+    }
+    if (apiKey == 1 and apiVersion == 16) {
+        return handleFetch(correlationId, r, ctx);
+    }
+    if (apiKey == 75 and apiVersion == 0) {
+        return handleDescribeTopicPartitions(correlationId, r, ctx);
+    }
+    unsupportedPrint("api key " + str(apiKey) + " version " + str(apiVersion));
+    fail("UnsupportedApiError", "no handler for api key " + str(apiKey));
+}
+
+fun handleConnection(sock, ctx) {
+    while (true) {
+        var head = sock.read_bytes(4);
+        if (len(head) < 4) {
+            return;
+        }
+        var size = be32At(head, 0);
+        if (size > 104857600) {
+            sock.write(placeholderReply());
+            return;
+        }
+        var data = sock.read_bytes(size);
+        if (len(data) < size) {
+            return;
+        }
+        var reply = handleRequest(data, ctx);
+        if (reply == nil) {
+            return;
+        }
+        sock.write(reply);
+    }
+}
+
+// One task per connection. A fault in one connection ends only that
+// connection; an uncaught fault in a task would end the program for every
+// other client, so the catch is not optional.
+fun serve(conn, ctx) {
+    defer conn.close();
+    try {
+        handleConnection(conn, ctx);
+    } catch (e) {
+        try {
+            print "connection fault: " + faultText(e);
+        } catch (ignored) {
+        }
+    }
+}
+
+fun spawnServe(conn, ctx) {
+    fun run() {
+        serve(conn, ctx);
+    }
+    task.spawn(run);
+}
+
+fun main() {
+    var config = configFromArgs(args());
+    var ctx = {"logDir": config["logDir"]};
+    var server = listen("0.0.0.0", config["port"]);
+    // A fault of accept() that does not go away would print every 20 ms, so
+    // only the first one is printed.
+    var acceptFaultPrinted = false;
+    while (true) {
+        try {
+            var conn = server.accept();
+            spawnServe(conn, ctx);
+        } catch (e) {
+            if (!acceptFaultPrinted) {
+                acceptFaultPrinted = true;
+                try {
+                    print "accept fault: " + faultText(e);
+                } catch (ignored) {
+                }
+            }
+            sleep(0.02);
+        }
+    }
+}
+
+main();
