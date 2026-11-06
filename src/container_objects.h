@@ -545,6 +545,14 @@ struct TaskOwned {
     int selectDepth{0};
     // Number of natives running now (callNative), innermost included.
     int nativeDepth{0};
+    // nativeDepth at which the frames of the current coroutine run, while the
+    // chain from the running task's base to that coroutine is clean: each
+    // link is a `resume` native that its parent's loop called (one native
+    // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run
+    // (Runtime::m_reentrantRunDepth) in between. -1 when the chain is not clean
+    // or no task runs. resumeCoroutine() sets it for its own run and restores
+    // it.
+    int cleanNativeDepth{-1};
 };
 
 // The object lives in the heap of its worker. A handle on another worker is

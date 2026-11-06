@@ -657,9 +657,9 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     // deeper) or from ITER_HAS_NEXT, the scheduler, or resumeWaitingInner (no
     // native deeper). Any other native in between would hold a C++
     // continuation that a task switch cannot keep.
-    const int savedCleanDepth = m_cleanNativeDepth;
+    const int savedCleanDepth = m_owned->cleanNativeDepth;
     const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
-    m_cleanNativeDepth =
+    m_owned->cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
          m_reentrantRunDepth == m_cleanReentrantDepth)
             ? m_owned->nativeDepth
@@ -694,7 +694,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         // task.receive reached below it must raise YieldAcrossNativeError,
         // not suspend a coroutine that has no frame to resume.
         if (nativeEntry) {
-            m_cleanNativeDepth = -1;
+            m_owned->cleanNativeDepth = -1;
         }
         // A compiled entry (QBE coroutine mode) must be pushed, not run:
         // opCall's own invokeClosure branches on m_resumableMode, and
@@ -875,7 +875,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
 #ifdef LOXPP_PROFILE
     m_activeProfiler = savedProfiler;
 #endif
-    m_cleanNativeDepth = savedCleanDepth;
+    m_owned->cleanNativeDepth = savedCleanDepth;
     m_currentCoroutine = parent;
     if (parent != nullptr) {
         parent->state = CoroutineState::RUNNING;
@@ -1299,8 +1299,8 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
 
 bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
-    return m_currentTask != nullptr && m_cleanNativeDepth >= 0 &&
-           m_owned->nativeDepth == m_cleanNativeDepth + 1 &&
+    return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
+           m_owned->nativeDepth == m_owned->cleanNativeDepth + 1 &&
            m_reentrantRunDepth == m_cleanReentrantDepth;
 }
 
@@ -1599,12 +1599,12 @@ bool Runtime::runTask(ObjTask* task) {
     m_reentrantOutcome = OpResult::OK;
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
-    m_cleanNativeDepth = m_owned->nativeDepth;
+    m_owned->cleanNativeDepth = m_owned->nativeDepth;
     m_cleanReentrantDepth = m_reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
     OpResult outcome = m_reentrantOutcome;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     m_nativeStopAtFrameCount = savedBoundary;
     m_reentrantOutcome = savedOutcome;
     enterTask(nullptr);
@@ -1703,7 +1703,7 @@ void Runtime::abandonTasks() {
     enterTask(nullptr);
     m_taskSwitchPending = false;
     m_taskSwitchInner = nullptr;
-    m_cleanNativeDepth = -1;
+    m_owned->cleanNativeDepth = -1;
     ++m_taskEpoch;
 }
 

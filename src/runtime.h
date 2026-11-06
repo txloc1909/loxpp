@@ -1084,7 +1084,7 @@ class Runtime {
     // True when a receive on an empty mailbox can suspend the current task:
     // every C++ frame between the task's base and the receive native is the
     // resume of a coroutine the task resumed, so a suspension loses no C++
-    // continuation (see m_cleanNativeDepth).
+    // continuation (see TaskOwned::cleanNativeDepth).
     [[nodiscard]] bool taskCanSuspend() const;
 
     // One level of a task switch: suspends m_currentCoroutine, which waits at
@@ -1436,13 +1436,6 @@ class Runtime {
     std::vector<std::shared_ptr<const std::string>> m_sources;
     // See setSessionMode().
     bool m_sessionMode{false};
-    // nativeDepth at which the frames of m_currentCoroutine run, while the
-    // chain from the running task's base to that coroutine is clean: each
-    // link is a `resume` native that its parent's loop called (one native
-    // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run
-    // (m_reentrantRunDepth) in between. -1 when the chain is not clean or no
-    // task runs. resumeCoroutine() sets it for its own run and restores it.
-    int m_cleanNativeDepth{-1};
     // m_reentrantRunDepth when the scheduler resumed the running task.
     int m_cleanReentrantDepth{0};
 
