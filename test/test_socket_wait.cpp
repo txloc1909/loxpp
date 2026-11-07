@@ -1,4 +1,4 @@
-// test_socket_park.cpp — the read side of a socket on a task that parks.
+// test_socket_wait.cpp — the read side of a socket on a task that parks.
 //
 // The spec probes 261 to 265, 278, 280, 281, 284 and 285 pin what a program
 // sees. These tests look at what a probe cannot see well: a call that waits
@@ -53,7 +53,7 @@ const char* const kPair = R"(
 
 } // namespace
 
-class SocketParkTest : public ::testing::Test {
+class SocketWaitTest : public ::testing::Test {
   protected:
     // Runs the pair prologue and `body`; the test reads the globals.
     static InterpretResult run(VM& vm, const std::string& body) {
@@ -65,7 +65,7 @@ class SocketParkTest : public ::testing::Test {
 // holder whose wait ended but that has not run yet is `ready`, and its call
 // never returns. An ended task holds no side, so the next line can read the
 // same Socket (spec/04-semantics.md, The Task Machine, Sides rule 1).
-TEST_F(SocketParkTest, AnAbandonedReadyHolderLeavesItsSideFree) {
+TEST_F(SocketWaitTest, AnAbandonedReadyHolderLeavesItsSideFree) {
     VM vm;
     vm.setSessionMode(true);
     ASSERT_EQ(run(vm, R"(
@@ -103,7 +103,7 @@ TEST_F(SocketParkTest, AnAbandonedReadyHolderLeavesItsSideFree) {
 // In a session the end of a line abandons a task that waits in a call of
 // class suspends, and the runtime closes the Socket that it waits on
 // (spec/04-semantics.md, Ending). The next line sees a closed Socket.
-TEST_F(SocketParkTest, TheEndOfALineClosesTheSocketOfAnAbandonedWaitingHolder) {
+TEST_F(SocketWaitTest, TheEndOfALineClosesTheSocketOfAnAbandonedWaitingHolder) {
     VM vm;
     vm.setSessionMode(true);
     ASSERT_EQ(run(vm, R"(
@@ -125,7 +125,7 @@ TEST_F(SocketParkTest, TheEndOfALineClosesTheSocketOfAnAbandonedWaitingHolder) {
 
 // A line that comes in three chunks: the reader parks at each chunk, and the
 // bytes of the three joined, in order, are the line.
-TEST_F(SocketParkTest, ALineInThreeChunks) {
+TEST_F(SocketWaitTest, ALineInThreeChunks) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none";
@@ -149,7 +149,7 @@ TEST_F(SocketParkTest, ALineInThreeChunks) {
 
 // A line split between "\r" and "\n" keeps its "\r": readline cuts at "\n"
 // only.
-TEST_F(SocketParkTest, AReturnStaysInTheLine) {
+TEST_F(SocketWaitTest, AReturnStaysInTheLine) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none";
@@ -170,7 +170,7 @@ TEST_F(SocketParkTest, AReturnStaysInTheLine) {
 
 // read_bytes(n) waits for n bytes across chunks and returns exactly n; the
 // bytes past n stay for the next read.
-TEST_F(SocketParkTest, ReadBytesAcrossChunks) {
+TEST_F(SocketWaitTest, ReadBytesAcrossChunks) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none";
@@ -193,7 +193,7 @@ TEST_F(SocketParkTest, ReadBytesAcrossChunks) {
 // read_some(n) returns the bytes that arrived, without waiting for n. The
 // feeder keeps the connection open until the reader answers, so only a call
 // that returns early can pass.
-TEST_F(SocketParkTest, ReadSomeReturnsWhatArrivedBeforeN) {
+TEST_F(SocketWaitTest, ReadSomeReturnsWhatArrivedBeforeN) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none";
@@ -218,7 +218,7 @@ TEST_F(SocketParkTest, ReadSomeReturnsWhatArrivedBeforeN) {
 // A line longer than one chunk leaves bytes in the input buffer. read_some
 // returns them first, in order, and a stream of 10000 bytes comes back whole
 // across calls.
-TEST_F(SocketParkTest, ReadSomeTakesBufferedBytesFirstAndLosesNone) {
+TEST_F(SocketWaitTest, ReadSomeTakesBufferedBytesFirstAndLosesNone) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         fun rep(t, n) {
@@ -244,7 +244,7 @@ TEST_F(SocketParkTest, ReadSomeTakesBufferedBytesFirstAndLosesNone) {
 // The end of the stream: readline gives nil, read gives "", read_bytes gives
 // the bytes that came, and readlines gives the lines. Each call waits for the
 // close of the peer.
-TEST_F(SocketParkTest, EndOfStream) {
+TEST_F(SocketWaitTest, EndOfStream) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var a = "unset"; var b = "unset"; var c = "unset"; var d = "unset";
@@ -264,7 +264,7 @@ TEST_F(SocketParkTest, EndOfStream) {
     EXPECT_EQ(globalString(vm, "d"), "[]");
 }
 
-TEST_F(SocketParkTest, ReadBytesAndReadlinesAtEndAfterPartialData) {
+TEST_F(SocketWaitTest, ReadBytesAndReadlinesAtEndAfterPartialData) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none"; var lines = "none";
@@ -288,7 +288,7 @@ TEST_F(SocketParkTest, ReadBytesAndReadlinesAtEndAfterPartialData) {
 
 // A read of zero bytes, and a read that the input buffer already satisfies,
 // return at once and park nothing: no poller exists afterwards.
-TEST_F(SocketParkTest, ACallWithNoWaitDoesNotPark) {
+TEST_F(SocketWaitTest, ACallWithNoWaitDoesNotPark) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.write("x\ny\nz");
@@ -305,7 +305,7 @@ TEST_F(SocketParkTest, ACallWithNoWaitDoesNotPark) {
 
 // A close while tasks wait on the sockets fails each call with
 // SocketClosedError, and the message names each call.
-TEST_F(SocketParkTest, ACloseFailsEveryParkedCallWithItsOwnName) {
+TEST_F(SocketWaitTest, ACloseFailsEveryParkedCallWithItsOwnName) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var peer2 = connect("127.0.0.1", srv.port());
@@ -344,7 +344,7 @@ TEST_F(SocketParkTest, ACloseFailsEveryParkedCallWithItsOwnName) {
 // gets the same number must not meet the wait of the closed one: the new
 // reader gets its own bytes, and the old reader got its fault and nothing
 // else.
-TEST_F(SocketParkTest, ADescriptorNumberThatComesBackMeetsNoStaleWait) {
+TEST_F(SocketWaitTest, ADescriptorNumberThatComesBackMeetsNoStaleWait) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var old = "none"; var fresh = "none";
@@ -381,7 +381,7 @@ TEST_F(SocketParkTest, ADescriptorNumberThatComesBackMeetsNoStaleWait) {
 // The collector runs while the call waits. The socket has no other holder
 // than the parked task, and the line is built from chunks that arrive during
 // collections.
-TEST_F(SocketParkTest, TheSocketOfAParkedCallStaysAliveAcrossCollections) {
+TEST_F(SocketWaitTest, TheSocketOfAParkedCallStaysAliveAcrossCollections) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var srv = listen("127.0.0.1", 0);
@@ -409,7 +409,7 @@ TEST_F(SocketParkTest, TheSocketOfAParkedCallStaysAliveAcrossCollections) {
 
 // A very long line: the socket keeps only the unread tail afterwards, also
 // when the call waited.
-TEST_F(SocketParkTest, ALongLineThatWaitedLeavesNoCapacityBehind) {
+TEST_F(SocketWaitTest, ALongLineThatWaitedLeavesNoCapacityBehind) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         fun rep(t, n) { var r = ""; var i = 0; while (i < n) { r = r + t; i = i + 1; } return r; }
@@ -435,7 +435,7 @@ TEST_F(SocketParkTest, ALongLineThatWaitedLeavesNoCapacityBehind) {
 // A line that arrives in many pieces is searched for a newline once per byte,
 // not once per piece. The text is right even when each wake-up scans the whole
 // buffer, so only the count of scanned bytes shows the cost.
-TEST_F(SocketParkTest, AReadlineScansEachByteOnce) {
+TEST_F(SocketWaitTest, AReadlineScansEachByteOnce) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var got = "none";
@@ -466,7 +466,7 @@ TEST_F(SocketParkTest, AReadlineScansEachByteOnce) {
 // next newline in the bytes that are in the buffer now, and not wait for more
 // data or return a line with a newline inside it because an offset from
 // before the park points past the first line.
-TEST_F(SocketParkTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
+TEST_F(SocketWaitTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var l1 = "none"; var l2 = "none"; var l3 = "none";
@@ -490,7 +490,7 @@ TEST_F(SocketParkTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
 // wait. When its Socket and the Socket of a later call become ready in one
 // poll, the earlier call continues first. A new place at each wait would put
 // it behind the later call.
-TEST_F(SocketParkTest, ARearmedCallContinuesBeforeALaterCall) {
+TEST_F(SocketWaitTest, ARearmedCallContinuesBeforeALaterCall) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var other_out = connect("127.0.0.1", srv.port());
@@ -564,7 +564,7 @@ class HostListener {
 // raise, also when a signal interrupts the wait. The handler has no
 // SA_RESTART, so poll(2) and read(2) return EINTR. The shooter sends the
 // signal to every thread of the process but its own.
-TEST_F(SocketParkTest, ABlockingWaitSurvivesSignals) {
+TEST_F(SocketWaitTest, ABlockingWaitSurvivesSignals) {
     struct sigaction act;
     memset(&act, 0, sizeof(act));
     act.sa_handler = [](int) {};
@@ -629,7 +629,7 @@ TEST_F(SocketParkTest, ABlockingWaitSurvivesSignals) {
 
 // The end of the program closes the descriptor of a parked call: the host
 // peer sees the end of the stream, and the program has not waited for it.
-TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedCall) {
+TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedCall) {
     HostListener host;
     std::atomic<ssize_t> seen{-2};
     std::thread peer([&] {
@@ -696,14 +696,14 @@ static void expectReadBlocks(const std::string& context) {
     EXPECT_EQ(globalString(vm, "log"), "RT");
 }
 
-TEST_F(SocketParkTest, AReadInStrBlocksTheWorker) {
+TEST_F(SocketWaitTest, AReadInStrBlocksTheWorker) {
     expectReadBlocks(R"(
         class A { __str__() { got = c.readline(); log = log + "R"; return "a"; } }
         var s = str(A());
     )");
 }
 
-TEST_F(SocketParkTest, AReadInAMapKeyHashBlocksTheWorker) {
+TEST_F(SocketWaitTest, AReadInAMapKeyHashBlocksTheWorker) {
     expectReadBlocks(R"(
         class K {
             __hash__() { got = c.readline(); log = log + "R"; return 1; }
@@ -714,14 +714,14 @@ TEST_F(SocketParkTest, AReadInAMapKeyHashBlocksTheWorker) {
     )");
 }
 
-TEST_F(SocketParkTest, AReadInCallMethodBlocksTheWorker) {
+TEST_F(SocketWaitTest, AReadInCallMethodBlocksTheWorker) {
     expectReadBlocks(R"(
         class M { run() { got = c.read_bytes(3); log = log + "R"; return 1; } }
         var r = callMethod(M(), "run");
     )");
 }
 
-TEST_F(SocketParkTest, AReadInADeferredCallBlocksTheWorker) {
+TEST_F(SocketWaitTest, AReadInADeferredCallBlocksTheWorker) {
     expectReadBlocks(R"(
         fun rd() { got = c.readline(); log = log + "R"; }
         fun f() { defer rd(); }
@@ -729,7 +729,7 @@ TEST_F(SocketParkTest, AReadInADeferredCallBlocksTheWorker) {
     )");
 }
 
-TEST_F(SocketParkTest, AReadInANestedCoroutineBlocksTheWorker) {
+TEST_F(SocketWaitTest, AReadInANestedCoroutineBlocksTheWorker) {
     expectReadBlocks(R"(
         fun inner() { got = c.readline(); log = log + "R"; return 1; }
         var co = coroutine.create(inner);
@@ -740,7 +740,7 @@ TEST_F(SocketParkTest, AReadInANestedCoroutineBlocksTheWorker) {
 
 // accept in a nested coroutine blocks the worker until a host client
 // connects, and does not raise.
-TEST_F(SocketParkTest, AnAcceptInANestedCoroutineBlocksTheWorker) {
+TEST_F(SocketWaitTest, AnAcceptInANestedCoroutineBlocksTheWorker) {
     const int port = freePort();
     std::thread client([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -783,7 +783,7 @@ TEST_F(SocketParkTest, AnAcceptInANestedCoroutineBlocksTheWorker) {
 // A write of 16 MiB to a reader that starts late fills the connection. The
 // write waits for room in the kernel and ends when the reader has drained
 // everything.
-TEST_F(SocketParkTest, ALargeWriteWaitsForRoomAndSendsEveryByte) {
+TEST_F(SocketWaitTest, ALargeWriteWaitsForRoomAndSendsEveryByte) {
     HostListener host;
     std::atomic<size_t> total{0};
     std::thread peer([&] {
@@ -882,7 +882,7 @@ long millisSince(std::chrono::steady_clock::time_point start) {
 // A write that waits many times sends every byte once and in order: the
 // offset of the parked call is the only record of the progress. The text is a
 // counter pattern, so a byte sent twice or skipped shows at its position.
-TEST_F(SocketParkTest, AWriteThatWaitsManyTimesSendsEveryByteInOrder) {
+TEST_F(SocketWaitTest, AWriteThatWaitsManyTimesSendsEveryByteInOrder) {
     HostListener host;
     std::atomic<size_t> total{0};
     std::atomic<size_t> wrong{0};
@@ -923,7 +923,7 @@ TEST_F(SocketParkTest, AWriteThatWaitsManyTimesSendsEveryByteInOrder) {
 
 // The newline of writeline is part of the offset: after many large lines that
 // each wait, every line ends in exactly one newline at the right position.
-TEST_F(SocketParkTest, ALargeWritelineKeepsItsNewlineAtTheEnd) {
+TEST_F(SocketWaitTest, ALargeWritelineKeepsItsNewlineAtTheEnd) {
     constexpr size_t kLine = size_t{1} << 17;
     constexpr size_t kLines = 120;
     HostListener host;
@@ -962,7 +962,7 @@ TEST_F(SocketParkTest, ALargeWritelineKeepsItsNewlineAtTheEnd) {
 // (spec/04-semantics.md, The Task Machine, Sides, rules 2 and 5). Without the
 // check it would block the worker, and its bytes would follow or split the
 // bytes of the parked call.
-TEST_F(SocketParkTest, ABlockingWriterOnAHeldWriteSideRaisesBusyError) {
+TEST_F(SocketWaitTest, ABlockingWriterOnAHeldWriteSideRaisesBusyError) {
     constexpr size_t kHalf = size_t{1} << 22;
     HostListener host;
     std::string seen;
@@ -1034,14 +1034,14 @@ static void expectWriteBlocks(const std::string& context) {
     EXPECT_EQ(total.load(), kBytes);
 }
 
-TEST_F(SocketParkTest, AWriteInStrBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWriteInStrBlocksTheWorker) {
     expectWriteBlocks(R"(
         class A { __str__() { c.write(big); log = log + "W"; return "a"; } }
         var s = str(A());
     )");
 }
 
-TEST_F(SocketParkTest, AWritelineInStrBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWritelineInStrBlocksTheWorker) {
     constexpr size_t kBytes = size_t{1} << 24;
     HostListener host;
     std::atomic<size_t> total{0};
@@ -1074,7 +1074,7 @@ TEST_F(SocketParkTest, AWritelineInStrBlocksTheWorker) {
     EXPECT_EQ(last.load(), '\n');
 }
 
-TEST_F(SocketParkTest, AWriteInAMapKeyHashBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWriteInAMapKeyHashBlocksTheWorker) {
     expectWriteBlocks(R"(
         class K {
             __hash__() { c.write(big); log = log + "W"; return 1; }
@@ -1085,14 +1085,14 @@ TEST_F(SocketParkTest, AWriteInAMapKeyHashBlocksTheWorker) {
     )");
 }
 
-TEST_F(SocketParkTest, AWriteInCallMethodBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWriteInCallMethodBlocksTheWorker) {
     expectWriteBlocks(R"(
         class M { run() { c.write(big); log = log + "W"; return 1; } }
         var r = callMethod(M(), "run");
     )");
 }
 
-TEST_F(SocketParkTest, AWriteInADeferredCallBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWriteInADeferredCallBlocksTheWorker) {
     expectWriteBlocks(R"(
         fun wr() { c.write(big); log = log + "W"; }
         fun f() { defer wr(); }
@@ -1100,7 +1100,7 @@ TEST_F(SocketParkTest, AWriteInADeferredCallBlocksTheWorker) {
     )");
 }
 
-TEST_F(SocketParkTest, AWriteInANestedCoroutineBlocksTheWorker) {
+TEST_F(SocketWaitTest, AWriteInANestedCoroutineBlocksTheWorker) {
     expectWriteBlocks(R"(
         fun inner() { c.write(big); log = log + "W"; return 1; }
         var co = coroutine.create(inner);
@@ -1112,7 +1112,7 @@ TEST_F(SocketParkTest, AWriteInANestedCoroutineBlocksTheWorker) {
 // A peer that never reads: the writer waits, the other tasks run, and a close
 // by another task ends the call with SocketClosedError. The memory of the
 // call does not grow with the wait.
-TEST_F(SocketParkTest, ACloseEndsAWriteToAPeerThatNeverReads) {
+TEST_F(SocketWaitTest, ACloseEndsAWriteToAPeerThatNeverReads) {
     HostListener host;
     std::atomic<bool> release{false};
     std::thread peer([&] {
@@ -1190,7 +1190,7 @@ static std::string closeReaderAndWriter(bool writerFirst) {
     return globalString(vm, "log");
 }
 
-TEST_F(SocketParkTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
+TEST_F(SocketWaitTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
     EXPECT_EQ(closeReaderAndWriter(true),
               "bBusyErrorbBusyError"
               "wCannot call 'writeline' on a closed socket."
@@ -1204,7 +1204,7 @@ TEST_F(SocketParkTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
 // close_write while a writer waits: the call fails with SocketClosedError,
 // like a write after close_write(). The peer sees the bytes sent so far and
 // then the end of the stream.
-TEST_F(SocketParkTest, CloseWriteFailsAParkedWriter) {
+TEST_F(SocketWaitTest, CloseWriteFailsAParkedWriter) {
     HostListener host;
     std::atomic<size_t> total{0};
     std::atomic<bool> sawEof{false};
@@ -1253,7 +1253,7 @@ TEST_F(SocketParkTest, CloseWriteFailsAParkedWriter) {
 // A peer that resets the connection while a writer waits: the call raises
 // NetworkError (EPIPE or ECONNRESET), and the other tasks ran meanwhile. A
 // second writer meanwhile finds the write side held and raises BusyError.
-TEST_F(SocketParkTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
+TEST_F(SocketWaitTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1290,7 +1290,7 @@ TEST_F(SocketParkTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
 
 // EPIPE, with no task parked: a write to a peer that closed raises
 // NetworkError, can be caught, and does not end the process by SIGPIPE.
-TEST_F(SocketParkTest, EpipeIsANetworkErrorThatACatchSees) {
+TEST_F(SocketWaitTest, EpipeIsANetworkErrorThatACatchSees) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.close();
@@ -1311,7 +1311,7 @@ TEST_F(SocketParkTest, EpipeIsANetworkErrorThatACatchSees) {
 // A failed write does not change what a later read returns: the host sends
 // "bye" and then closes while the program still writes, and the program reads
 // "bye" after its write fails.
-TEST_F(SocketParkTest, AFailedParkedWriteLeavesTheNextReadAlone) {
+TEST_F(SocketWaitTest, AFailedParkedWriteLeavesTheNextReadAlone) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1337,7 +1337,7 @@ TEST_F(SocketParkTest, AFailedParkedWriteLeavesTheNextReadAlone) {
 
 // Zero-length writes: write("") sends nothing, parks nothing and raises
 // nothing, also when the connection is full; writeline("") sends one newline.
-TEST_F(SocketParkTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
+TEST_F(SocketWaitTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.write("");
@@ -1357,7 +1357,7 @@ TEST_F(SocketParkTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
 // A zero-length write on a write side that a parked writer holds raises
 // BusyError, although it could return at once (spec/04-semantics.md, The Task
 // Machine, Sides, rule 2).
-TEST_F(SocketParkTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
+TEST_F(SocketWaitTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1384,7 +1384,7 @@ TEST_F(SocketParkTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
 }
 
 // A write that is not full does not park and builds no poller.
-TEST_F(SocketParkTest, AWriteThatFitsDoesNotPark) {
+TEST_F(SocketWaitTest, AWriteThatFitsDoesNotPark) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.write("hello"); peer.writeline(" world");
@@ -1401,7 +1401,7 @@ TEST_F(SocketParkTest, AWriteThatFitsDoesNotPark) {
 // sees the end only if the program closed the descriptor; the bytes it got
 // are fewer than the text, so the write did not finish first. No wall-clock
 // bound is used: building the text takes seconds in a debug build under load.
-TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
+TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
     constexpr size_t kBytes = size_t{1} << 27;
     HostListener host;
     std::atomic<bool> sawEnd{false};
@@ -1431,7 +1431,7 @@ TEST_F(SocketParkTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
 // The collector runs while the call waits. The only holder of the text is the
 // parked call: the writer builds it in the argument, and the ticker allocates
 // meanwhile.
-TEST_F(SocketParkTest, TheTextOfAParkedWriteStaysAliveAcrossCollections) {
+TEST_F(SocketWaitTest, TheTextOfAParkedWriteStaysAliveAcrossCollections) {
     constexpr size_t kBytes = size_t{1} << 22;
     HostListener host;
     std::atomic<size_t> total{0};
@@ -1488,7 +1488,7 @@ static size_t residentBytes() {
     return static_cast<size_t>(resident) * 4096;
 }
 
-TEST_F(SocketParkTest, AWriteToASlowReaderDoesNotCopyTheText) {
+TEST_F(SocketWaitTest, AWriteToASlowReaderDoesNotCopyTheText) {
     constexpr size_t kBytes = size_t{1} << 26;
     HostListener host;
     std::atomic<size_t> total{0};
@@ -1615,7 +1615,7 @@ int writeWithFailedRegistration() {
 
 // A park that fails to register leaves no holder of the write side. The next
 // write on the socket finishes, and the stream ends with its bytes.
-TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoHolder) {
+TEST_F(SocketWaitTest, AFailedParkRegistrationLeavesNoHolder) {
     fflush(nullptr);
     const pid_t pid = fork();
     ASSERT_GE(pid, 0);
@@ -1637,7 +1637,7 @@ TEST_F(SocketParkTest, AFailedParkRegistrationLeavesNoHolder) {
 // A side reads its holder's task record to see whether the call still holds
 // it, so the collector must reach the task through the Socket or the Server,
 // or the read dangles once nothing else holds the task.
-TEST_F(SocketParkTest, ATaskFoundOnlyThroughASideSurvivesACollection) {
+TEST_F(SocketWaitTest, ATaskFoundOnlyThroughASideSurvivesACollection) {
     MemoryManager mm;
     auto* sock = mm.create<ObjSocket>(nullptr);
     mm.pushTempRoot(sock);
