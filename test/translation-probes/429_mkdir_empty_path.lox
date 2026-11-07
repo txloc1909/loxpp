@@ -1,0 +1,10 @@
+// An empty path names no directory, in both forms of mkdir
+// (spec/05-stdlib.md, mkdir): the call raises the catchable DirectoryError,
+// so a program can report it and go on.
+// A consumer that resolves the empty path to the working directory, as the
+// JDK does, creates something and raises nothing.
+// STATUS: ok
+// CHECK: DirectoryError
+// CHECK: DirectoryError
+try { mkdir(""); } catch (e) { print e.kind; }
+try { mkdir("", "p"); } catch (e) { print e.kind; }

@@ -7,6 +7,7 @@
 //   4. time()  — reports wall-clock seconds since the Unix epoch.
 //   5. sleep() — suspends for roughly the requested duration.
 //   6. exists()/is_dir()/is_file()/stat() — file-system metadata.
+//   7. mkdir() — one directory, or a whole missing path in parents mode.
 
 #include "test_harness.h"
 #include "container_objects.h"
@@ -331,4 +332,121 @@ TEST_F(OsApiTest, Stat_Directory_Metadata) {
 TEST_F(OsApiTest, Stat_NonString_RuntimeError) {
     VMTestHarness h;
     EXPECT_EQ(h.run("stat(1);"), InterpretResult::RUNTIME_ERROR);
+}
+
+// ---------------------------------------------------------------------------
+// mkdir()
+// ---------------------------------------------------------------------------
+
+TEST_F(OsApiTest, Mkdir_CreatesOneDirectory) {
+    VMTestHarness h;
+    std::filesystem::path made = m_dir / "one";
+    ASSERT_EQ(h.run("mkdir(\"" + made.string() + "\");"), InterpretResult::OK);
+    EXPECT_TRUE(is<Nil>(h.lastResult()));
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::is_directory(made, ec));
+}
+
+TEST_F(OsApiTest, Mkdir_MissingParent_IsADirectoryError) {
+    VMTestHarness h;
+    std::filesystem::path made = m_dir / "missing" / "child";
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"" +
+                    made.string() +
+                    "\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+    std::error_code ec;
+    // The fault is a fault, not a quiet partial success.
+    EXPECT_FALSE(std::filesystem::exists(made, ec));
+    EXPECT_FALSE(std::filesystem::exists(made.parent_path(), ec));
+}
+
+TEST_F(OsApiTest, Mkdir_ExistingPath_IsADirectoryError) {
+    VMTestHarness h;
+    std::filesystem::path made = m_dir / "twice";
+    ASSERT_EQ(h.run("mkdir(\"" + made.string() + "\");"), InterpretResult::OK);
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"" +
+                    made.string() +
+                    "\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+}
+
+TEST_F(OsApiTest, Mkdir_Parents_CreatesEveryMissingParent) {
+    VMTestHarness h;
+    std::filesystem::path made = m_dir / "a" / "b" / "c";
+    ASSERT_EQ(h.run("mkdir(\"" + made.string() + "\", \"p\");"),
+              InterpretResult::OK);
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::is_directory(made, ec));
+}
+
+TEST_F(OsApiTest, Mkdir_Parents_ExistingDirectoryIsNoOp) {
+    VMTestHarness h;
+    std::filesystem::path made = m_dir / "kept";
+    ASSERT_EQ(h.run("mkdir(\"" + made.string() + "\", \"p\");"),
+              InterpretResult::OK);
+    ASSERT_EQ(h.run("mkdir(\"" + made.string() + "\", \"p\");"),
+              InterpretResult::OK);
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::is_directory(made, ec));
+}
+
+TEST_F(OsApiTest, Mkdir_Parents_FileInTheWay_IsADirectoryError) {
+    VMTestHarness h;
+    std::filesystem::path made = m_file / "below";
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"" +
+                    made.string() +
+                    "\", \"p\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+}
+
+TEST_F(OsApiTest, Mkdir_BadMode_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("mkdir(\"" + (m_dir / "bad").string() + "\", \"q\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, Mkdir_NonString_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("mkdir(1);"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, Mkdir_WrongArgumentCount_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("mkdir();"), InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("mkdir(\"a\", \"p\", \"x\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, Mkdir_EmptyPath_IsADirectoryError) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"\", \"p\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+}
+
+TEST_F(OsApiTest, Mkdir_PathWithNul_RuntimeError) {
+    VMTestHarness h;
+    // A NUL would end the path at the C library call, so the call would make a
+    // shorter directory than the program named, or none it can name back.
+    EXPECT_EQ(h.run("mkdir(\"" + (m_dir / "nul").string() +
+                    "\" + chr(0) + \"tail\");"),
+              InterpretResult::RUNTIME_ERROR);
+    std::error_code ec;
+    EXPECT_FALSE(std::filesystem::exists(m_dir / "nul", ec));
 }

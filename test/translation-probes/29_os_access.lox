@@ -12,3 +12,16 @@ print is_file("/tmp");
 print env("PATH") != nil;
 print stat("/tmp/loxpp_missing_probe_xyz_never_created") == nil;
 print sleep(0.01);
+// mkdir succeeds only once in the one-directory form, so the tree is made in
+// parents mode, which is a no-op when a previous run left it in place.
+mkdir("/tmp/loxpp_probe_mkdir_29/sub/deeper", "p");
+print is_dir("/tmp/loxpp_probe_mkdir_29");
+print is_dir("/tmp/loxpp_probe_mkdir_29/sub/deeper");
+// An existing path in the one-directory form, and a missing parent, both
+// raise the same catchable kind.
+try { mkdir("/tmp/loxpp_probe_mkdir_29"); } catch (e) { print e.kind; }
+try { mkdir("/tmp/loxpp_probe_mkdir_29/absent/child"); } catch (e) { print e.kind; }
+print is_dir("/tmp/loxpp_probe_mkdir_29/absent");
+// An empty path names no directory, in both forms.
+try { mkdir(""); } catch (e) { print e.kind; }
+try { mkdir("", "p"); } catch (e) { print e.kind; }

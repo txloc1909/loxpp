@@ -408,9 +408,9 @@ public final class LoxRuntime {
     }
 
     // Mirrors src/stdlib/os_api.cpp: args, env, exit, time, sleep, and the
-    // file-system predicates exists()/is_dir()/is_file()/stat(). Kept in the
-    // JVM runtime so a program using them does not DIVERGE in the differential
-    // suite (tools/diff_runtimes.py) against the native VM.
+    // file-system calls exists()/is_dir()/is_file()/stat()/mkdir(). Kept in
+    // the JVM runtime so a program using them does not DIVERGE in the
+    // differential suite (tools/diff_runtimes.py) against the native VM.
     private static void registerOsAccess(LoxGlobals globals) {
         globals.define("args", new LoxNative("args", 0, unused -> {
                            LoxList list = new LoxList();
@@ -512,6 +512,51 @@ public final class LoxRuntime {
                 }
                 return map;
             }));
+        // Variadic so one native serves both spec forms; the count check is
+        // the native's own, so a wrong count is a halting fault as the
+        // callNative arity guard's would be on native.
+        globals.define("mkdir", new LoxNative("mkdir", -1, args -> {
+                           if (args.length != 1 && args.length != 2) {
+                               throw new LoxError("Expected 1 or 2 arguments.");
+                           }
+                           String path = requireString(args[0]);
+                           // Paths.get() rejects a NUL itself, and a raw
+                           // InvalidPathException would escape every Lox
+                           // try, so both checks use the String.
+                           if (path.indexOf('\0') >= 0) {
+                               throw new LoxError(
+                                   "mkdir() path must not contain a NUL byte.");
+                           }
+                           Path p = Paths.get(path);
+                           boolean parents = false;
+                           if (args.length == 2) {
+                               if (!"p".equals(requireString(args[1]))) {
+                                   throw new LoxError(
+                                       "mkdir() mode must be \"p\".");
+                               }
+                               parents = true;
+                           }
+                           try {
+                               // An empty path names no directory. The JDK
+                               // resolves it to the working directory and
+                               // creates that, which no other consumer does.
+                               if (path.isEmpty()) {
+                                   throw new java.nio.file.NoSuchFileException(
+                                       "", null, "the path is empty");
+                               }
+                               if (parents) {
+                                   Files.createDirectories(p);
+                               } else {
+                                   Files.createDirectory(p);
+                               }
+                           } catch (IOException e) {
+                               throw LoxOps.makeError(
+                                   "DirectoryError",
+                                   "mkdir(): cannot create '" + p + "': " +
+                                       e.getMessage());
+                           }
+                           return null;
+                       }));
 
         // Sockets and subprocess (expressiveness roadmap item 2). Mirrors
         // src/stdlib/net_api.cpp and process_api.cpp.
