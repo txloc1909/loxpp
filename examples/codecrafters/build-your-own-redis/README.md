@@ -283,7 +283,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
 | S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.010 s / 0.04–0.09 s |
 | S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.2 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
-| S8: `XREAD` of 131072 streams that have entries | every stream; PING within 0.5 s (when the command copies the entries of each stream: 0.72 s) | 0.19–0.30 s |
+| S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | Not in the suite: `XREAD` of 524286 streams that have entries | PING within 1.0 s (redis-server 7.0: 0.76 s) | 0.72–0.78 s |
 | Not in the suite: `XREAD BLOCK 0` with `$` on 524286 streams, by a first and a second client | PING within 1.0 s in Lox++ code; a GC pause is native (#1165) | first 0.58–0.63 s; second 1.70–1.76 s, of which one GC pause of 0.76–0.79 s (redis-server 7.0: 0.56 s and 0.49 s) |

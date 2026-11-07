@@ -1470,8 +1470,15 @@ def stages_streams_large(prog):
         field = None
         c.close()
 
-        # S8: XREAD of 131072 streams that have entries. The command keeps
-        # only the bounds of each stream's entries; the session writes them.
+        # S8, on a new server, so that the heap of S1-S9 does not add GC
+        # pauses: XREAD of 131072 streams that have entries. The command
+        # keeps only the bounds of each stream's entries; the session writes
+        # them.
+        srv.stop()
+        srv = Server(prog, [])
+        check("streams (S8): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
         c = srv.client()
         keys = ["s8-%d" % i for i in range(131072)]
         make_streams(c, keys)
@@ -1484,8 +1491,8 @@ def stages_streams_large(prog):
         check("local: S8 XREAD of 131072 streams with entries gives each one",
               isinstance(got[0], list) and len(got[0]) == len(keys)
               and got[0][-1] == [keys[-1], [["1-1", ["f", "v"]]]])
-        check("local: S8 XREAD of 131072 streams with entries stalls PING at most 0.5 s",
-              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+        check("local: S8 XREAD of 131072 streams with entries stalls PING at most 0.45 s",
+              worst <= 0.45 and not wrong, "worst %.3f s" % worst)
         c.close()
     finally:
         srv.stop()

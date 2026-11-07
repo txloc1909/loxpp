@@ -212,7 +212,7 @@
   "old": "    reply.add(key, stream, from, to);\n    return true;",
   "new": "    reply.add(key, stream, from, to);\n    var copy = [stream.ms[from:to], stream.seq[from:to], stream.fields[from:to], \"*2\\r\\n\" + bulk(key) + \"*\" + str(to - from) + \"\\r\\n\"];\n    return true;",
   "cases": [
-   "local: S8 XREAD of 131072 streams with entries stalls PING at most 0.5 s"
+   "local: S8 XREAD of 131072 streams with entries stalls PING at most 0.45 s"
   ]
  },
  {
