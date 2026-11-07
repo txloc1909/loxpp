@@ -727,15 +727,13 @@ fun partitionLogPath(logDir, topic, index) {
     return joinPath(partitionDir(logDir, topic, index), "00000000000000000000.log");
 }
 
-// The stdlib has no mkdir. run() is the process API the spec already binds,
-// and it runs once per partition, not once per request.
+// The directory is made in parents mode, which is a no-op when it is already
+// there. It runs once per partition, not once per request.
 fun ensureDir(path) {
-    if (is_dir(path)) {
-        return;
-    }
-    var res = run("mkdir", ["-p", path]);
-    if (res["status"] != 0) {
-        fail("DirectoryError", "cannot create " + path);
+    try {
+        mkdir(path, "p");
+    } catch (e) {
+        fail(e.kind, "cannot create " + path);
     }
 }
 

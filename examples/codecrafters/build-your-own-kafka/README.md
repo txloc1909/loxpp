@@ -147,9 +147,9 @@ the assigned offset in the Produce response; the stored bytes stay the
 client's. `tests/check_format.py` pins both halves of that trade.
 
 The partition directory is created on the first Produce for it, with
-`run("mkdir", ["-p", path])`. The stdlib has no `mkdir` (#1147), and `run` is
-the process interface the spec already binds. `ensureDir` calls `is_dir`
-first, so `mkdir` runs only when the directory is absent.
+`mkdir(path, "p")`, which also makes a missing parent and does nothing when
+the directory is already there. A path it cannot create raises a catchable
+`DirectoryError`, which the broker turns into its own fault.
 
 Fetch returns the whole log file as the `records` field, which is a sequence of
 RecordBatches, and the topic is matched by the `topic_id` in the request.
@@ -227,8 +227,8 @@ compatibility path, and the Produce request header's tag buffer.
 `check_format.py` guards each group, so a mutation that makes a decode raise
 fails the group by name instead of ending the battery.
 
-## One gap this example found
+## A stdlib gap this example found
 
-`mkdir`. See #1147. The broker uses `run("mkdir", ["-p", ...])` once per
-partition directory, and the README of the issue explains why the gap belongs
-in the stdlib and not in a library.
+`mkdir` (#1147). The broker first used `run("mkdir", ["-p", ...])` once per
+partition directory, and that gap is now closed: the call is bound by
+`spec/05-stdlib.md` and every backend implements it.
