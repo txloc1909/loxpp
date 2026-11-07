@@ -45,9 +45,10 @@ constexpr std::array<StdlibEntry, 33> kGlobals = {{
      "True when `path` exists and is a regular file."},
     {"stat", "stat(path) -> Map | Nil", 1,
      "A map of file metadata (is_dir, is_file, size, mtime), or nil."},
-    {"mkdir", "mkdir(path[, \"p\"]) -> Nil", kArityVariadic,
-     "Creates the directory at `path`; the argument \"p\" also makes missing "
-     "parents, as mkdir -p does. Raises DirectoryError when it cannot."},
+    {"mkdir", "mkdir(path, mode) -> Nil", kArityVariadic,
+     "Creates the directory at `path`. A `mode` of \"p\" creates every missing "
+     "parent and does nothing when the directory is there. Raises "
+     "DirectoryError."},
     {"connect", "connect(host, port) -> Socket", 2,
      "Opens a TCP connection and returns a connected Socket."},
     {"connect_within", "connect_within(host, port, seconds) -> Socket", 3,
