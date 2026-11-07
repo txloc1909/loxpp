@@ -1146,12 +1146,13 @@ class Runtime {
     class SynchronousRun {
       public:
         explicit SynchronousRun(Runtime& rt)
-            : m_rt(rt), m_savedResumable(rt.m_resumableMode) {
+            : m_rt(rt), m_owned(*rt.m_owned),
+              m_savedResumable(rt.m_resumableMode) {
             m_rt.m_resumableMode = false;
-            ++m_rt.m_reentrantRunDepth;
+            ++m_owned.reentrantRunDepth;
         }
         ~SynchronousRun() {
-            --m_rt.m_reentrantRunDepth;
+            --m_owned.reentrantRunDepth;
             m_rt.m_resumableMode = m_savedResumable;
         }
         SynchronousRun(const SynchronousRun&) = delete;
@@ -1159,6 +1160,7 @@ class Runtime {
 
       private:
         Runtime& m_rt;
+        TaskOwned& m_owned;
         bool m_savedResumable;
     };
 
@@ -1513,7 +1515,7 @@ class Runtime {
     // driver owns the call. callNative() clears it (and restores it) around a
     // native's own body, so Lox re-entered from a native runs non-resumably:
     // a YIELD there is a native-callback error, exactly as native's own
-    // m_reentrantRunDepth check makes it.
+    // reentrantRunDepth check makes it.
     bool m_resumableMode{false};
 
     // Set by invokeCallableFromNative() when a native's re-entrant call did
@@ -1531,13 +1533,6 @@ class Runtime {
     // currently executing. Saved/restored around each callNative() so a native
     // re-entering the VM judges a caught throw against the right boundary.
     int m_nativeStopAtFrameCount{0};
-
-    // Number of C++ re-entrant runs currently on the native stack — every
-    // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
-    // every SynchronousRun. A Lox frame inside one of these cannot
-    // be captured by a coroutine snapshot: its C++ continuation would be
-    // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
-    int m_reentrantRunDepth{0};
 
     // The enclosing run()'s boundary for the canonical stringify in progress,
     // and the outcome of a __str__ dispatch inside it. stringifyObj

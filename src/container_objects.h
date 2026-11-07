@@ -396,10 +396,10 @@ struct ObjCoroutine : public Obj {
     // window after the native returns, so the slice is truncated here, not to
     // activeStackBase (which is the slice's own base).
     Value* activeWindowTop{nullptr};
-    // m_reentrantRunDepth at the moment this coroutine was resumed. A yield
-    // is legal while the depth is unchanged (the C++ frames below the resume
-    // point keep running); it is illegal when a deeper re-entrant run was
-    // entered inside the coroutine (a native callback or a defer drain).
+    // TaskOwned::reentrantRunDepth at the moment this coroutine was resumed. A
+    // yield is legal while the depth is unchanged (the C++ frames below the
+    // resume point keep running); it is illegal when a deeper re-entrant run
+    // was entered inside the coroutine (a native callback or a defer drain).
     int resumeReentrantDepth{0};
 
     // A task switch at a receive suspends every coroutine that the task
@@ -545,15 +545,22 @@ struct TaskOwned {
     int selectDepth{0};
     // Number of natives running now (callNative), innermost included.
     int nativeDepth{0};
+    // Number of C++ re-entrant runs on the native stack now: every
+    // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
+    // every SynchronousRun. A Lox frame inside one of these cannot be
+    // captured by a coroutine snapshot: its C++ continuation would be lost.
+    // Op::YIELD raises YieldAcrossNativeError while this is above the depth
+    // at which the coroutine was resumed.
+    int reentrantRunDepth{0};
     // nativeDepth at which the frames of the current coroutine run, while the
     // chain from the running task's base to that coroutine is clean: each
     // link is a `resume` native that its parent's loop called (one native
     // deeper) or an ITER_HAS_NEXT (no native deeper), with no re-entrant run
-    // (Runtime::m_reentrantRunDepth) in between. -1 when the chain is not clean
+    // (reentrantRunDepth) in between. -1 when the chain is not clean
     // or no task runs. resumeCoroutine() sets it for its own run and restores
     // it.
     int cleanNativeDepth{-1};
-    // Runtime::m_reentrantRunDepth when the scheduler resumed the task.
+    // reentrantRunDepth when the scheduler resumed the task.
     int cleanReentrantDepth{0};
 };
 
