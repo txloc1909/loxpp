@@ -84,10 +84,12 @@ command is atomic, as in Redis.
 ### Lists and BLPOP
 
 A list key holds a deque over two Lox++ Lists (`class Deque`). `LPUSH`
-appends to the first List, which holds the left part from right to left;
-`RPUSH` appends to the second. A pop takes from the end of the first List,
-or moves a head index in the second. So no push copies the list, and each
-push and pop costs a constant time on average. An empty list is never
+adds to the first List, which holds the left part from right to left;
+`RPUSH` appends to the second. A pop moves a count of live elements in the
+first List, or a head index in the second, so a pop of k elements costs one
+slice of k. When the free slots outnumber the elements of a List, one slice
+drops them. So no push copies the list, and each push and pop costs a
+constant time on average. An empty list is never
 stored: the key goes away with its last element, as in Redis.
 
 `BLPOP` puts a `Waiter` for the session in a first-in first-out queue for
@@ -225,10 +227,12 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | P8: the first `LPUSH` on a list of 4194292 elements that `RPUSH` built | PING within 0.1 s (when the push copies the list: 0.32 s) | 0.001 s |
 | P9: `BLPOP` on 1048574 keys, the most that one command can name | PING within 1.0 s while it joins the queue of each key in one step (before the change: 1.51 s; redis-server 7.0: 0.62 s) | 0.55–0.63 s |
 | P9: an `RPUSH` serves it, and it leaves the other 1048573 queues | PING within 0.2 s (without the yield of `leaveQueues`: 0.48 s) | 0.002 s |
-| Group `lists`: 300 waiters that reset the connection just before a push | each element stays in its list | as required (before the change: 249–283 lost) |
-| Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.13 s / 0.11–0.13 s |
-| Not in the suite: `LPOP k 2000000` of a list of 2097146 elements, from the right part / `LPOP k 1048000` from the left part | PING within 1.0 s | 0.08–0.09 s / 0.08 s |
-| Not in the suite: `LRANGE 0 -1` of a list of 1049146 elements that `LPUSH` built | PING within 0.2 s | 0.07–0.08 s |
+| Group `lists`: 150 waiters that reset the connection just before a push | each element stays in its list | as required (before the change: 249–283 of 300 lost) |
+| Group `lists`: the same, with a second waiter behind each one | each element goes to the second waiter | as required |
+| P10 (group `lists`): `LPOP k 4194291` of a list of 8388584 elements that `LPUSH` built | PING within 0.14 s (when the pop removes the elements one by one: 0.19–0.23 s) | 0.07–0.08 s |
+| Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.13 s / 0.17–0.19 s |
+| Not in the suite: `LPOP k 2000000` of a list of 2097146 elements, from the right part / `LPOP k 1048000` from the left part | PING within 1.0 s | 0.08–0.09 s / 0.06–0.07 s |
+| Not in the suite: `LRANGE 0 -1` of a list of 1049146 elements that `LPUSH` built | PING within 0.2 s | 0.06–0.08 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
@@ -236,11 +240,15 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json` or
-`tests/mutations/lists.json` that removes its guard. One guard has no
-probe: the give-back after a failed write of a `BLPOP` reply. The write
-fails only when the reset arrives after the session gets its element and
-before it writes, inside one step of the worker, and no client timing
-forces that order.
+`tests/mutations/lists.json` that removes its guard. Two guards have no
+probe, because no client timing forces the order of events that they
+handle:
+- the give-back after a failed write of a `BLPOP` reply: the write fails
+  only when the reset arrives after the session gets its element and
+  before it writes, inside one step of the worker;
+- the element that a pusher hands to a waiter after its time limit ended
+  but before its session ran: the session must reply with it, not with a
+  null array.
 
 Known residuals, each with its own issue:
 

@@ -455,35 +455,38 @@ fun unknownCommand(argv) {
 // Lists
 // ===========================================================================
 
-// A double-ended queue over two Lists. front holds the elements pushed to
-// the left, last pushed at its end, so the first element is the last of
-// front. back[head:len(back)] holds the others in order. Each push is one
-// append, so no push copies the queue. A pop takes from the end of front, or
-// moves head; when head passes the middle of back, one slice drops the free
-// slots. So a long LPUSH, RPUSH or LPOP series stays linear.
+// A double-ended queue over two Lists. front[0:live] holds the elements
+// pushed to the left, last pushed at the end, so the first element is
+// front[live - 1]; the slots after live are free. back[head:len(back)] holds
+// the others in order. A push fills a free slot or appends, so no push copies
+// the queue. A pop moves live or head, so a pop of k elements costs one slice
+// of k. When the free slots outnumber the elements of a List, one slice drops
+// them; it copies fewer elements than the pops that freed the slots. So each
+// push and pop costs a constant time on average, and a long LPUSH, RPUSH or
+// LPOP series stays linear.
 class Deque {
     init() {
         this.front = [];
+        this.live = 0;
         this.back = [];
         this.head = 0;
     }
 
     size() {
-        return len(this.front) + len(this.back) - this.head;
+        return this.live + len(this.back) - this.head;
     }
 
     at(i) {
-        var f = len(this.front);
-        if (i < f) {
-            return this.front[f - 1 - i];
+        if (i < this.live) {
+            return this.front[this.live - 1 - i];
         }
-        return this.back[this.head + i - f];
+        return this.back[this.head + i - this.live];
     }
 
     // The elements start..stop-1 (0 <= start <= stop <= size()), as a Bulks
     // reply, with one slice of each List.
     range(start, stop) {
-        var f = len(this.front);
+        var f = this.live;
         var rev = [];
         if (start < f) {
             var end = stop;
@@ -508,41 +511,43 @@ class Deque {
     }
 
     pushLeft(v) {
-        this.front.append(v);
+        if (this.live < len(this.front)) {
+            this.front[this.live] = v;
+        } else {
+            this.front.append(v);
+        }
+        this.live = this.live + 1;
     }
 
     // Removes the first k elements (k <= size()) and returns them as a
     // Bulks reply. The cost grows with k, not with the size of the queue.
     takeLeft(k) {
         var reply = this.range(0, k);
-        var f = len(this.front);
-        var m = len(reply.rev);
-        if (m * 2 >= f) {
-            this.front = this.front[0:f - m];
-        } else {
-            var i = 0;
-            while (i < m) {
-                this.front.pop();
-                i = i + 1;
-            }
-        }
+        this.live = this.live - len(reply.rev);
         this.head = this.head + len(reply.fwd);
         this.compact();
         return reply;
     }
 
     popLeft() {
-        if (len(this.front) > 0) {
-            return this.front.pop();
+        var v = nil;
+        if (this.live > 0) {
+            this.live = this.live - 1;
+            v = this.front[this.live];
+            this.front[this.live] = nil;
+        } else {
+            v = this.back[this.head];
+            this.back[this.head] = nil;
+            this.head = this.head + 1;
         }
-        var v = this.back[this.head];
-        this.back[this.head] = nil;
-        this.head = this.head + 1;
         this.compact();
         return v;
     }
 
     compact() {
+        if (len(this.front) > 32 and this.live * 2 < len(this.front)) {
+            this.front = this.front[0:this.live];
+        }
         if (this.head > 32 and this.head * 2 > len(this.back)) {
             this.back = this.back[this.head:len(this.back)];
             this.head = 0;

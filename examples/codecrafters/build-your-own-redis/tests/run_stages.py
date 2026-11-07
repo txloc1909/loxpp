@@ -1012,24 +1012,61 @@ def stages_lists(prog):
               got == [key, "v"] and pongs == 900, "%r, %d PONG" % (got, pongs))
         waiting.close()
 
-        # A waiter that resets its connection just before a push. The
-        # pusher can serve it after its reader saw the reset; the element
-        # then goes back to the list.
-        rounds, kept = 300, 0
+        # A waiter that resets its connection just before a push, and a
+        # second waiter behind it. The pusher can serve the first after its
+        # reader saw the reset; the element then goes back to the list, and
+        # to the second waiter.
+        rounds, kept, passed_on = 300, 0, 0
         keys = ["gone-%s-%d" % (rand_word(), i) for i in range(rounds)]
-        for key in keys:
+        for n_round, key in enumerate(keys):
             w = socket.create_connection(("127.0.0.1", srv.port))
             w.sendall(encode("BLPOP", key, "0"))
+            nxt = None
+            if n_round % 2 == 1:
+                nxt = srv.client()
+                nxt.send_raw(encode("BLPOP", key, "0"))
             time.sleep(0.005)
             w.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
             w.close()
             pusher.call("RPUSH", key, "v")
+            if nxt is not None:
+                if nxt.try_read(1) == [key, "v"]:
+                    passed_on += 1
+                nxt.close()
         time.sleep(0.3)
-        for key in keys:
-            if pusher.call("LLEN", key) == 1:
+        for n_round, key in enumerate(keys):
+            if n_round % 2 == 0 and pusher.call("LLEN", key) == 1:
                 kept += 1
-        check("local: an element pushed as its waiter resets stays in the list (300 rounds)",
-              kept == rounds, "%d of %d kept" % (kept, rounds))
+        check("local: an element pushed as its waiter resets stays in the list (150 rounds)",
+              kept == rounds // 2, "%d of %d kept" % (kept, rounds // 2))
+        check("local: an element pushed as its waiter resets goes to the next waiter (150 rounds)",
+              passed_on == rounds // 2, "%d of %d passed on" % (passed_on, rounds // 2))
+
+        # P10: LPOP of a little less than half of a list of 8388584
+        # elements that LPUSH built. A pop that removes the elements one by
+        # one stalls about 0.2 s here.
+        big = srv.client()
+        n = 1048573
+        raw = encode("LPUSH", "p10", *(["abcd"] * n))
+        for _ in range(8):
+            big.send_raw(raw)
+            big.try_read(60)
+        half = 4 * n - 1
+        popped = [None]
+
+        def lpop_half():
+            big.send_raw(encode("LPOP", "p10", str(half)))
+            popped[0] = big.try_read(60)
+            time.sleep(0.2)
+        worst, wrong, _ = measure_while(srv, lpop_half)
+        big.send_raw(encode("LLEN", "p10"))
+        left = big.try_read(30)
+        check("local: P10 LPOP of 4194291 of 8388584 elements gives them",
+              isinstance(popped[0], list) and len(popped[0]) == half
+              and left == 8 * n - half, "%r" % (left,))
+        check("local: P10 LPOP of 4194291 of 8388584 elements stalls PING at most 0.14 s",
+              worst <= 0.14 and not wrong, "worst %.3f s" % worst)
+        big.close()
 
         for cl in (c, blocked, pusher, first, second):
             cl.close()

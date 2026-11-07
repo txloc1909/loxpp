@@ -154,8 +154,8 @@
  },
  {
   "name": "L21 LPUSH copies the list",
-  "old": "    pushLeft(v) {\n        this.front.append(v);",
-  "new": "    pushLeft(v) {\n        if (len(this.front) == 0) {\n            var copy = [];\n            for (var x in this.back) {\n                copy.append(x);\n            }\n            this.back = copy;\n        }\n        this.front.append(v);",
+  "old": "    pushLeft(v) {\n        if (this.live < len(this.front)) {",
+  "new": "    pushLeft(v) {\n        if (this.live == 0) {\n            var copy = [];\n            for (var x in this.back) {\n                copy.append(x);\n            }\n            this.back = copy;\n        }\n        if (this.live < len(this.front)) {",
   "cases": [
    "local: P8 LPUSH on a list of 4194292 elements stalls PING at most 0.1 s"
   ]
@@ -181,7 +181,7 @@
   "old": "    if (closed) {\n        giveBack(key, value);\n        return nil;",
   "new": "    if (closed) {\n        return nil;",
   "cases": [
-   "local: an element pushed as its waiter resets stays in the list (300 rounds)"
+   "local: an element pushed as its waiter resets stays in the list (150 rounds)"
   ]
  },
  {
@@ -189,7 +189,23 @@
   "old": "        served = task.receive_where(isServed);",
   "new": "        served = msg;",
   "cases": [
-   "local: an element pushed as its waiter resets stays in the list (300 rounds)"
+   "local: an element pushed as its waiter resets stays in the list (150 rounds)"
+  ]
+ },
+ {
+  "name": "L26 a given-back element does not go to the next waiter",
+  "old": "    entry.value.pushLeft(value);\n    serveWaiters(key);",
+  "new": "    entry.value.pushLeft(value);",
+  "cases": [
+   "local: an element pushed as its waiter resets goes to the next waiter (150 rounds)"
+  ]
+ },
+ {
+  "name": "L27 LPOP with a count removes the left part one by one",
+  "old": "        this.live = this.live - len(reply.rev);",
+  "new": "        var i = 0;\n        while (i < len(reply.rev)) {\n            this.front[this.live - 1] = nil;\n            this.live = this.live - 1;\n            i = i + 1;\n        }",
+  "cases": [
+   "local: P10 LPOP of 4194291 of 8388584 elements stalls PING at most 0.14 s"
   ]
  }
 ]

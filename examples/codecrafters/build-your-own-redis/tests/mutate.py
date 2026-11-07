@@ -31,7 +31,7 @@ for m in json.load(open(spec)):
     os.chmod(wrap, 0o755)
     try:
         out = subprocess.run([sys.executable, suite, wrap], capture_output=True,
-                             text=True, timeout=120).stdout
+                             text=True, timeout=240).stdout
     except subprocess.TimeoutExpired as e:
         out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
         out += "\n(timeout)"
