@@ -34,9 +34,10 @@ program. A value of any other kind is the same kind of runtime error.
 | `p.err_read_bytes(n)` | `process-err-read-bytes` | 0 to 2147483647 |
 
 An Int and an integer-valued Number name the same count, so `chr(65)` and
-`chr(65i)` return the same String. A parameter that this section does not list
-is a Number, and an Int argument to it is a runtime error: `math.floor(1i)` is
-a runtime error ([§03-types, Int](03-types.md#int)). The `integer` module is
+`chr(65i)` return the same String. A numeric parameter that this section does
+not list is a Number, and an Int argument to it is a runtime error:
+`math.floor(1i)` is a runtime error ([§03-types, Int](03-types.md#int)). The
+`integer` module is
 the other way around: its arguments are Ints, and an integer-valued Number
 argument is a runtime error.
 
