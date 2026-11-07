@@ -1,8 +1,8 @@
 // Invariant I1, the overflow unwind (spec/04-semantics.md, The Task Machine, the
 // table of task-owned state; the rule that a second StackOverflowError during an
 // unwind is a halting fault): whether a StackOverflowError of a task is unwinding is
-// a state of that task. A task cannot park while its unwind runs, so this probe
-// checks the part that a program can see: each task catches its own overflow, parks,
+// a state of that task. A task cannot suspend while its unwind runs, so this probe
+// checks the part that a program can see: each task catches its own overflow, suspends,
 // and when it runs again it catches a second one, and the unwind of one task
 // leaves no mark on the other. A task that kept the mark of the unwind into
 // its next overflow, or into the overflow of the other task, would halt the

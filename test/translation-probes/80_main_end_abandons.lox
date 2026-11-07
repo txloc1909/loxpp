@@ -11,7 +11,7 @@ fun print_deferred() {
     print "deferred call ran";
 }
 
-fun parked() {
+fun receiver() {
     defer print_deferred();
     task.receive();
 }
@@ -20,7 +20,7 @@ fun waker() {
     task.send(main, "go");
 }
 
-task.spawn(parked);
+task.spawn(receiver);
 task.spawn(waker);
 print task.receive();
 task.spawn(never);

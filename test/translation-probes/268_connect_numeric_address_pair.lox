@@ -6,8 +6,8 @@
 // finish, whichever way they are scheduled (spec/05-stdlib.md, connect).
 // This probe does not show that connect() suspends its task: it passes the same
 // when connect() blocks the worker. Only native holds that property, in the unit
-// test ConnectParkTest.ASlowConnectSuspendsOnlyTheCallingTask
-// (test/test_connect_park.cpp), where a listener with a full accept queue keeps
+// test ConnectWaitTest.ASlowConnectSuspendsOnlyTheCallingTask
+// (test/test_connect_wait.cpp), where a listener with a full accept queue keeps
 // the connection in progress. The JVM, QBE and bootstrap backends have no test
 // of it.
 // STATUS: ok
