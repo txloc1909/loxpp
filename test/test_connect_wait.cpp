@@ -1,11 +1,11 @@
-// test_connect_wait.cpp — connect() on a task that parks.
+// test_connect_wait.cpp — connect() on a task that waits.
 //
 // No shared probe can show that connect suspends: a connection to the local
 // host finishes at once. These tests give connect a peer that is slow to
 // accept. The listener has a backlog of zero and its queue is full, so the
 // kernel drops the SYN of the new connection, and the connection stays in
 // progress until the host takes a connection from the queue. They check that
-// the task parks and the worker goes on, that every context where a task
+// the task waits and the worker goes on, that every context where a task
 // cannot suspend blocks, that the address list is tried in order, and that the
 // descriptor of an attempt is closed on each path. The `_gc` twin runs the
 // suite under LOXPP_STRESS_GC.
@@ -232,7 +232,7 @@ class ConnectWaitTest : public ::testing::Test {};
 
 // The connect is in progress for about a second. The ticker, a task of the same
 // worker, runs while the main task waits for the connection: "T" comes before
-// "C". The poller exists, so the wait was a park and not a block.
+// "C". The poller exists, so the task waited and did not block its worker.
 TEST_F(ConnectWaitTest, ASlowConnectSuspendsOnlyTheCallingTask) {
     SlowListener host;
     REQUIRE_SLOW(host);
@@ -270,7 +270,7 @@ static void expectSocketFlags(int port) {
     EXPECT_NE(fcntl(fd, F_GETFL) & O_NONBLOCK, 0);
 }
 
-TEST_F(ConnectWaitTest, AParkedConnectGivesANonblockingCloseOnExecSocket) {
+TEST_F(ConnectWaitTest, AWaitingConnectGivesANonblockingCloseOnExecSocket) {
     SlowListener host;
     REQUIRE_SLOW(host);
     ConnectTestHooks armHooks;
@@ -298,9 +298,9 @@ TEST_F(ConnectWaitTest, AnImmediateConnectGivesANonblockingCloseOnExecSocket) {
 }
 
 // A connect that finishes before connect(2) returns, as it does on loopback,
-// does not park: no poller exists afterwards, and the ticker runs after the
+// does not wait: no poller exists afterwards, and the ticker runs after the
 // call.
-TEST_F(ConnectWaitTest, AConnectThatFinishesAtOnceDoesNotPark) {
+TEST_F(ConnectWaitTest, AConnectThatFinishesAtOnceDoesNotWait) {
     int port = 0;
     int fd = hostListen(AF_INET, port);
     ASSERT_GE(fd, 0);
@@ -320,7 +320,7 @@ TEST_F(ConnectWaitTest, AConnectThatFinishesAtOnceDoesNotPark) {
     close(fd);
 }
 
-// Two tasks connect to the slow listener. Both park, both get a socket, and
+// Two tasks connect to the slow listener. Both wait, both get a socket, and
 // the ticker runs before either.
 TEST_F(ConnectWaitTest, ManyTasksConnectAtOnce) {
     SlowListener host;
@@ -557,7 +557,7 @@ TEST_F(ConnectWaitTest, EveryAddressFailingLeavesNoDescriptor) {
 
 // The program ends while a task waits in connect. The descriptor of the
 // attempt is closed with the task: no Socket holds it, so nothing else will.
-TEST_F(ConnectWaitTest, TheEndOfTheProgramClosesTheAttemptOfAParkedConnect) {
+TEST_F(ConnectWaitTest, TheEndOfTheProgramClosesTheAttemptOfAWaitingConnect) {
     SlowListener host;
     REQUIRE_SLOW(host);
     VM vm;
@@ -774,8 +774,8 @@ TEST_F(ConnectWaitTest, ABlockingConnectSurvivesSignals) {
     EXPECT_EQ(globalString(vm, "got"), "Socket");
 }
 
-// The same storm while the task is parked in the poller.
-TEST_F(ConnectWaitTest, AParkedConnectSurvivesSignals) {
+// The same storm while the task is waiting in the poller.
+TEST_F(ConnectWaitTest, AWaitingConnectSurvivesSignals) {
     SlowListener host;
     REQUIRE_SLOW(host);
     ConnectTestHooks armHooks;
@@ -962,8 +962,8 @@ TEST_F(ConnectWaitTest, AFailingPollIsAFaultAndAnInterruptedPollIsRetried) {
 }
 
 // A poll(2) failure ends the attempt, and the descriptor of the attempt is
-// closed: at once when connect(2) returns, and after a park when the wait
-// ends. No descriptor is open afterwards that was not open before.
+// closed: at once when connect(2) returns, and when the wait ends if the task
+// waited. No descriptor is open afterwards that was not open before.
 TEST_F(ConnectWaitTest, AFailingPollClosesTheDescriptorOfTheAttempt) {
     int port = 0;
     int fd = hostListen(AF_INET, port);
@@ -998,7 +998,7 @@ TEST_F(ConnectWaitTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
         int polls = 0;
         ConnectTestHooks hooks;
         host.armOnConnect(hooks, 200, false);
-        // The first poll finds the connect in progress and the task parks.
+        // The first poll finds the connect in progress and the task waits.
         // The poll after the wake fails.
         hooks.pollCall = [&](int s) {
             if (polls++ == 0) {
@@ -1030,7 +1030,7 @@ TEST_F(ConnectWaitTest, AFailingPollAfterTheWaitClosesTheDescriptor) {
 // limit ends the wait. The ticker, a task of the same worker, runs while the
 // main task waits, the call raises a NetworkError that a catch receives, and
 // the descriptor of the attempt is closed.
-TEST_F(ConnectWaitTest, ALimitEndsAParkedConnect) {
+TEST_F(ConnectWaitTest, ALimitEndsAWaitingConnect) {
     SlowListener host;
     REQUIRE_SLOW(host);
     const auto before = openDescriptors();
