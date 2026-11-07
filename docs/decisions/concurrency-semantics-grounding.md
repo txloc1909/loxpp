@@ -357,3 +357,39 @@ written here during the mission (rule 4 of "Plans for a language change").
 | #1087 | `diff_runtimes.py` cannot tell a rejection from a halt for a program that is not a spec probe | This change |
 
 #1080 closes with this change.
+
+## Where the task-owned state lives
+
+Decided in #1142, after #1068 moved the counters of a task into one record
+of the task (`TaskOwned` in native, `LoxTask.Owned` in the JVM).
+
+**The rule.** A task's state lives in two places of the task, never in a
+place that another task can write:
+
+- The **record** of the task (`TaskOwned`, `LoxTask.Owned`) holds the
+  counters and flags: the native and re-entrant depths, the select depth,
+  the stack-overflow unwind, and the others in the spec's table of
+  task-owned state.
+- The **snapshot** of the task's coroutine (`ObjCoroutine`) holds the call
+  frames, the handlers, the deferred calls, the result checks and the open
+  upvalues while the task is not running. Every task runs in its own
+  coroutine, so the snapshot belongs to the task, and the coroutines that
+  the task resumed hold the rest of its frames.
+
+The frame arrays, `m_frameCount` and `m_handlerStack` in `Runtime` are the
+**working set of the running task**, as a register file is. The suspend at
+a task switch moves the whole working set into the snapshot, and the resume
+moves it back. It is the coroutine's own suspend, not a copy of one field by
+hand, so it agrees with the first constraint above. When no task runs, the
+working set holds nothing of any task, and the scheduler checks this after
+each task runs.
+
+**Why the working set does not move into the record.** The frame array has
+1024 frames and a reserve, the stack has 16384 values (128 KB), and six more
+arrays are parallel to the frames. One copy of each for every task costs that
+memory per task. A pointer to the arrays of the running task, swapped at each
+switch, puts one more read on every call, return and handler access. The JVM
+measured that cost: with `frameCount` in the task record, fib(37) three times
+took 1.81 s, against 1.62 s with it in `LoxWorker` (8% slower). So the JVM
+`frameCount` also stays in its worker, as the working set of the running
+task.
