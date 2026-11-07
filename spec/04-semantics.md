@@ -2235,7 +2235,7 @@ whose text is implementation-defined.
 | A shift count outside `0i` to `63i` | `1i << 64i` | `"ShiftCountError"` |
 | Int `/` or `%` with a zero divisor | `1i / 0i`, `1i % 0i` | `"DivisionByZeroError"` |
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
-| Wrong argument count of a call to a Lox function, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)) | `fun f(a) {} f(1, 2)` | `"ArityError"` |
+| Wrong argument count of a call of a Function, a BoundMethod, or an Instance with `__call__`, of a class whose `init` gets another count, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)) | `fun f(a) {} f(1, 2)`, `class C { m() {} } C().m(1)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
@@ -2247,7 +2247,7 @@ whose text is implementation-defined.
 | Object without `__hash__`/`__eq__` used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
-| Constructor called with wrong arity | `Result.Ok(1, 2)` when `Ok` takes one field | `"ConstructorArityError"` |
+| An enum constructor called with the wrong arity, or a class with no `init` called with any argument | `Result.Ok(1, 2)` when `Ok` takes one field, `class C {} C(1)` | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
 | Operator method returned a non-Number, an Int included | `class C { __len__() { return "x"; } } len(C())`, `class C { __len__() { return 1i; } } len(C())`, or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
