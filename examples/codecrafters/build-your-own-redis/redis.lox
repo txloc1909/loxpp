@@ -1706,9 +1706,11 @@ fun cmdIncr(ctx, argv) {
 // The commands that a client queued after MULTI. dirty is true when one of
 // them was rejected, so that EXEC runs none of them. args counts the
 // arguments of the queued commands, for the bound of README rule 4.
+// ctxs[i] is the parse of queued[i] (PARSERS), or nil.
 class Transaction {
     init() {
         this.queued = [];
+        this.ctxs = [];
         this.dirty = false;
         this.args = 0;
     }
@@ -1737,9 +1739,15 @@ fun arityOk(name, count) {
     return count == a;
 }
 
+// Redis 7.0 gives this text for EXEC with arguments, also with no MULTI.
+var EXEC_ARITY = "-EXECABORT Transaction discarded because of: wrong number of arguments for 'exec' command\r\n";
+
 // MULTI, EXEC and DISCARD outside a transaction. Returns the reply.
 fun beginOrRefuse(conn, name, argv) {
     if (!arityOk(name, len(argv))) {
+        if (name == "EXEC") {
+            return EXEC_ARITY;
+        }
         return wrongArgs(lower(name));
     }
     if (name == "MULTI") {
@@ -1761,7 +1769,7 @@ fun inTransaction(conn, name, argv) {
     if (!arityOk(name, len(argv))) {
         if (name == "EXEC") {
             conn.tx = nil;
-            return errorReply("EXECABORT Transaction discarded because of: wrong number of arguments for 'exec' command");
+            return EXEC_ARITY;
         }
         tx.dirty = true;
         return wrongArgs(lower(name));
@@ -1784,19 +1792,29 @@ fun inTransaction(conn, name, argv) {
         tx.dirty = true;
         return errorReply("ERR the transaction holds too many commands or arguments");
     }
+    // The parse reads no key, so it runs now, with yields, and EXEC passes
+    // it to the command. A parse error is a reply of EXEC, as in Redis.
+    var ctx = nil;
+    var parse = PARSERS[name];
+    if (parse != nil) {
+        ctx = parse(argv, true);
+    }
     tx.queued.append(argv);
+    tx.ctxs.append(ctx);
     tx.args = tx.args + len(argv);
     return simple("QUEUED");
 }
 
-// Runs the queued commands in one step, with no suspend point: execute with
-// no ctx parses in the command, with no yield. A command that would wait
-// (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis. Returns the
-// List of the replies; the session writes them after the step.
+// Runs the queued commands in one step, with no suspend point: each command
+// gets the parse that was made when it was queued. A command that would
+// wait (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis.
+// Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
     var replies = [];
+    var i = 0;
     for (var argv in tx.queued) {
-        var reply = execute(nil, argv);
+        var reply = execute(tx.ctxs[i], argv);
+        i = i + 1;
         if (type(reply) == "Instance" and hasField(reply, "timeout")) {
             reply = NULL_ARRAY;
         }

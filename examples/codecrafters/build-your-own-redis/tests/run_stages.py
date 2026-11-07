@@ -1516,10 +1516,235 @@ def stages_streams_large(prog):
     finally:
         srv.stop()
 
+def stages_transactions(prog):
+    srv = Server(prog, [])
+    try:
+        check("transactions: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = Asker(srv)
+
+        key = rand_word()
+        c.call("SET", key, "41")
+        check("transactions-01 INCR of a number", c.call("INCR", key) == 42)
+        check("transactions-01 INCR again", c.call("INCR", key) == 43)
+        check("transactions-02 INCR of a missing key", c.call("INCR", rand_word()) == 1)
+        key = rand_word()
+        c.call("SET", key, "xyz")
+        check("transactions-03 INCR of a word",
+              c.call("INCR", key) == "ERR value is not an integer or out of range")
+        lkey = rand_word()
+        c.call("RPUSH", lkey, "a")
+        got = c.call("INCR", lkey)
+        check("local: INCR of a list is WRONGTYPE",
+              isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        key = rand_word()
+        c.call("SET", key, "999999999999999")
+        check("local: INCR above 15 digits is an overflow error",
+              c.call("INCR", key) == "ERR increment or decrement would overflow")
+        key = rand_word()
+        c.call("SET", key, "5", "PX", "300")
+        c.call("INCR", key)
+        time.sleep(0.5)
+        check("local: INCR keeps the expiry", c.call("GET", key) is None)
+
+        check("transactions-04 MULTI", c.call("MULTI") == "OK")
+        check("transactions-06 empty EXEC", c.call("EXEC") == [])
+        check("transactions-05 EXEC without MULTI",
+              c.call("EXEC") == "ERR EXEC without MULTI")
+        check("local: DISCARD without MULTI",
+              c.call("DISCARD") == "ERR DISCARD without MULTI")
+
+        key = rand_word()
+        other = Asker(srv)
+        c.call("MULTI")
+        check("transactions-07 SET is queued", c.call("SET", key, "41") == "QUEUED")
+        check("transactions-07 INCR is queued", c.call("INCR", key) == "QUEUED")
+        check("transactions-07 another client sees nothing yet",
+              other.call("GET", key) is None)
+        check("transactions-08 EXEC gives each reply", c.call("EXEC") == ["OK", 42])
+        check("transactions-08 the commands ran", other.call("GET", key) == "42")
+
+        key = rand_word()
+        c.call("MULTI")
+        c.call("SET", key, "41")
+        check("transactions-09 DISCARD", c.call("DISCARD") == "OK")
+        check("transactions-09 the commands did not run", c.call("GET", key) is None)
+        check("transactions-09 DISCARD again",
+              c.call("DISCARD") == "ERR DISCARD without MULTI")
+
+        a, b = rand_word(), rand_word()
+        c.call("SET", a, "abc")
+        c.call("MULTI")
+        c.call("INCR", a)
+        c.call("SET", b, "7")
+        got = c.call("EXEC")
+        check("transactions-10 a failed command does not stop the others",
+              got == ["ERR value is not an integer or out of range", "OK"], repr(got))
+        check("transactions-10 the next command ran", c.call("GET", b) == "7")
+
+        key = rand_word()
+        c.call("MULTI")
+        other.call("MULTI")
+        c.call("INCR", key)
+        other.call("INCR", key)
+        c.call("INCR", key)
+        got1 = other.call("EXEC")
+        got2 = c.call("EXEC")
+        check("transactions-11 two transactions at once",
+              got1 == [1] and got2 == [2, 3], "%r %r" % (got1, got2))
+
+        c.call("MULTI")
+        check("local: MULTI in MULTI is an error",
+              c.call("MULTI") == "ERR MULTI calls can not be nested")
+        check("local: the transaction goes on after it", c.call("EXEC") == [])
+        c.call("MULTI")
+        got = c.call("NOSUCH", "a")
+        check("local: an unknown command in MULTI is an error",
+              isinstance(got, Error) and got.startswith("ERR unknown command"), repr(got))
+        check("local: EXEC after an unknown command is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        check("local: a wrong argument count in MULTI is an error",
+              c.call("GET") == "ERR wrong number of arguments for 'get' command")
+        check("local: EXEC after a wrong argument count is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        check("local: EXEC with an argument ends the transaction",
+              c.call("EXEC", "x") == "EXECABORT Transaction discarded because of: "
+              "wrong number of arguments for 'exec' command")
+        check("local: no transaction after it", c.call("EXEC") == "ERR EXEC without MULTI")
+        check("local: EXEC with an argument and no MULTI is EXECABORT too",
+              c.call("EXEC", "x") == "EXECABORT Transaction discarded because of: "
+              "wrong number of arguments for 'exec' command")
+
+        # A command that would wait does not wait in EXEC.
+        key, skey = rand_word(), rand_word()
+        c.call("MULTI")
+        c.call("BLPOP", key, "0")
+        c.call("XREAD", "BLOCK", "0", "STREAMS", skey, "$")
+        start = time.time()
+        got = c.call("EXEC")
+        check("local: BLPOP and XREAD BLOCK in EXEC give null arrays at once",
+              got == [None, None] and time.time() - start < 1.0, repr(got))
+
+        # Replies that the session writes in steps.
+        lkey, skey = rand_word(), rand_word()
+        c.call("MULTI")
+        c.call("RPUSH", lkey, "a", "b")
+        c.call("LRANGE", lkey, "0", "-1")
+        c.call("XADD", skey, "1-1", "f", "v")
+        c.call("XRANGE", skey, "-", "+")
+        c.call("XREAD", "STREAMS", skey, "0")
+        got = c.call("EXEC")
+        check("local: EXEC with list and stream replies",
+              got == [2, ["a", "b"], "1-1", [["1-1", ["f", "v"]]],
+                      [[skey, [["1-1", ["f", "v"]]]]]], repr(got))
+
+        # EXEC is atomic: a client that reads the key during a long EXEC
+        # sees it before or after, never in between.
+        key = rand_word()
+        c.call("SET", key, "0")
+        c.call("MULTI")
+        for _ in range(5):
+            c.c.send_raw(encode("INCR", key) * 4000)
+            for _ in range(4000):
+                c.c.try_read(3)
+        seen = set()
+        stop = threading.Event()
+
+        def poll():
+            p = srv.client()
+            while not stop.is_set():
+                seen.add(p.call("GET", key))
+            p.close()
+        th = threading.Thread(target=poll)
+        th.start()
+        time.sleep(0.1)
+        got = c.call("EXEC")
+        time.sleep(0.1)
+        stop.set()
+        th.join(10)
+        check("local: EXEC of 20000 INCR gives each reply",
+              isinstance(got, list) and len(got) == 20000 and got[-1] == 20000)
+        check("local: another client sees the key before or after EXEC, never in between",
+              seen <= {"0", "20000"} and "20000" in seen, repr(sorted(seen)[:5]))
+
+        # The bound of a transaction (README rule 4).
+        c.call("MULTI")
+        for _ in range(16):
+            c.c.send_raw(encode("PING") * 4096)
+            for _ in range(4096):
+                c.c.try_read(3)
+        got = c.call("PING")
+        check("local: the 65537th command of a transaction is refused",
+              isinstance(got, Error) and "too many" in got, repr(got))
+        check("local: EXEC after it is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        c.c.send_raw(encode("RPUSH", "big", *(["a"] * 1048574)))
+        c.c.try_read(10)
+        got = c.call("PING", "x")
+        check("local: a transaction over 1048576 arguments is refused",
+              isinstance(got, Error) and "too many" in got, repr(got))
+        c.call("DISCARD")
+
+        def clients_now():
+            info = c.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        base = clients_now()
+        gone = srv.client()
+        gone.send_raw(encode("MULTI") + encode("SET", "g", "1") * 100)
+        time.sleep(0.2)
+        gone.close()
+        deadline = time.time() + 5
+        now = clients_now()
+        while time.time() < deadline and now != base:
+            time.sleep(0.05)
+            now = clients_now()
+        check("local: a client that goes during MULTI ends its tasks",
+              now == base, "connected_clients %d, before %d" % (now, base))
+        check("local: its queued commands did not run", c.call("GET", "g") is None)
+
+        # T1, T2: EXEC of the largest transactions.
+        def exec_stall(cmds):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.c.send_raw(b"".join(part))
+                for _ in part:
+                    c.c.try_read(10)
+            out = [None]
+
+            def run():
+                c.c.send_raw(encode("EXEC"))
+                out[0] = c.c.try_read(30)
+                time.sleep(0.2)
+            worst, wrong, _ = measure_while(srv, run)
+            return worst, wrong, out[0]
+        worst, wrong, got = exec_stall([encode("RPUSH", "t1", *(["a"] * 14))] * 65535)
+        check("local: T1 EXEC of 65535 RPUSH of 14 elements stalls PING at most 0.6 s",
+              worst <= 0.6 and not wrong and isinstance(got, list) and len(got) == 65535,
+              "worst %.3f s" % worst)
+        keys = ["t2-%d" % i for i in range(524286)]
+        worst, wrong, got = exec_stall([encode("XREAD", "STREAMS", *keys, *(["0"] * len(keys)))])
+        check("local: T2 EXEC of an XREAD of 524286 streams stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and got == [None], "worst %.3f s, %r" % (worst, got))
+        c.close()
+        other.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
     ("streams", stages_streams),
+    ("transactions", stages_transactions),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
