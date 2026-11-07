@@ -1074,9 +1074,203 @@ def stages_lists(prog):
         srv.stop()
 
 
+def stages_streams(prog):
+    srv = Server(prog, [])
+    try:
+        check("streams: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+
+        key = rand_word()
+        c.call("SET", key, "value")
+        check("streams-01 TYPE of a string", c.call("TYPE", key) == "string")
+        check("streams-01 TYPE of a missing key", c.call("TYPE", rand_word()) == "none")
+        lkey = rand_word()
+        c.call("RPUSH", lkey, "x")
+        check("local: TYPE of a list", c.call("TYPE", lkey) == "list")
+
+        key = rand_word()
+        check("streams-02 XADD gives the ID", c.call("XADD", key, "0-1", "foo", "bar") == "0-1")
+        check("streams-02 TYPE of a stream", c.call("TYPE", key) == "stream")
+
+        key = rand_word()
+        smaller = "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+        check("streams-03 XADD 1-1", c.call("XADD", key, "1-1", "foo", "bar") == "1-1")
+        check("streams-03 XADD 1-2", c.call("XADD", key, "1-2", "bar", "baz") == "1-2")
+        got = c.call("XADD", key, "1-2", "baz", "foo")
+        check("streams-03 XADD of the top ID is an error",
+              isinstance(got, Error) and got == smaller, repr(got))
+        got = c.call("XADD", key, "0-3", "baz", "foo")
+        check("streams-03 XADD below the top is an error",
+              isinstance(got, Error) and got == smaller, repr(got))
+        got = c.call("XADD", key, "0-0", "baz", "foo")
+        check("streams-03 XADD 0-0 is an error",
+              got == "ERR The ID specified in XADD must be greater than 0-0", repr(got))
+        got = c.call("XADD", rand_word(), "0-0", "baz", "foo")
+        check("local: XADD 0-0 on a missing key is an error",
+              got == "ERR The ID specified in XADD must be greater than 0-0", repr(got))
+
+        key = rand_word()
+        check("streams-04 XADD 0-* on a new stream", c.call("XADD", key, "0-*", "a", "b") == "0-1")
+        check("streams-04 XADD 1-*", c.call("XADD", key, "1-*", "a", "b") == "1-0")
+        check("streams-04 XADD 1-* again", c.call("XADD", key, "1-*", "a", "b") == "1-1")
+        got = c.call("XADD", key, "0-*", "a", "b")
+        check("local: XADD 0-* below the top is an error", got == smaller, repr(got))
+
+        key = rand_word()
+        before = int(time.time() * 1000)
+        got = c.call("XADD", key, "*", "foo", "bar")
+        after = int(time.time() * 1000)
+        ms, _, seq = got.partition("-")
+        check("streams-05 XADD * gives <ms>-0 with the time now",
+              ms.isdigit() and seq == "0" and before - 1000 <= int(ms) <= after + 1000, repr(got))
+        got = c.call("XADD", key, ms + "-*", "foo", "bar")
+        check("local: XADD <ms>-* after * gives the next sequence", got == ms + "-1", repr(got))
+
+        key = rand_word()
+        c.call("XADD", key, "0-1", "foo", "bar")
+        c.call("XADD", key, "0-2", "bar", "baz")
+        c.call("XADD", key, "0-3", "baz", "foo")
+        e1, e2, e3 = ["0-1", ["foo", "bar"]], ["0-2", ["bar", "baz"]], ["0-3", ["baz", "foo"]]
+        check("streams-06 XRANGE 0-2 0-3", c.call("XRANGE", key, "0-2", "0-3") == [e2, e3])
+        check("streams-06 XRANGE 0 0 (no sequence part)",
+              c.call("XRANGE", key, "0", "0") == [e1, e2, e3])
+        check("streams-07 XRANGE - 0-2", c.call("XRANGE", key, "-", "0-2") == [e1, e2])
+        check("streams-08 XRANGE 0-2 +", c.call("XRANGE", key, "0-2", "+") == [e2, e3])
+        check("local: XRANGE COUNT 2", c.call("XRANGE", key, "-", "+", "COUNT", "2") == [e1, e2])
+        check("local: XRANGE of a missing key", c.call("XRANGE", rand_word(), "-", "+") == [])
+
+        key = rand_word()
+        c.call("XADD", key, "0-1", "temperature", "96")
+        check("streams-09 XREAD of one stream",
+              c.call("XREAD", "streams", key, "0-0") == [[key, [["0-1", ["temperature", "96"]]]]])
+        check("local: XREAD with nothing to read is a null array",
+              c.call("XREAD", "streams", key, "0-1") is None)
+
+        a, b = rand_word(), rand_word()
+        c.call("XADD", a, "0-1", "temperature", "95")
+        c.call("XADD", b, "0-2", "humidity", "97")
+        check("streams-10 XREAD of two streams",
+              c.call("XREAD", "streams", a, b, "0-0", "0-1")
+              == [[a, [["0-1", ["temperature", "95"]]]], [b, [["0-2", ["humidity", "97"]]]]])
+
+        key = rand_word()
+        c.call("XADD", key, "0-1", "temperature", "96")
+        r = srv.client()
+        r.send_raw(encode("XREAD", "block", "1000", "streams", key, "0-1"))
+        time.sleep(0.3)
+        c.call("XADD", key, "0-2", "temperature", "95")
+        check("streams-11 XREAD BLOCK gets the new entry",
+              r.try_read(3) == [[key, [["0-2", ["temperature", "95"]]]]])
+        start = time.time()
+        r.send_raw(encode("XREAD", "block", "1000", "streams", key, "0-2"))
+        got = r.try_read(3)
+        waited = time.time() - start
+        check("streams-11 XREAD BLOCK 1000 ends with a null array after about 1 s",
+              got is None and 0.9 <= waited <= 2.0, "%r after %.2f s" % (got, waited))
+
+        key = rand_word()
+        c.call("XADD", key, "0-1", "temperature", "96")
+        r.send_raw(encode("XREAD", "block", "0", "streams", key, "0-1"))
+        check("streams-12 XREAD BLOCK 0 waits", r.try_read(1) is TIMEOUT)
+        c.call("XADD", key, "0-2", "temperature", "95")
+        check("streams-12 XREAD BLOCK 0 gets the new entry",
+              r.try_read(3) == [[key, [["0-2", ["temperature", "95"]]]]])
+
+        key = rand_word()
+        c.call("XADD", key, "0-1", "temperature", "96")
+        r.send_raw(encode("XREAD", "block", "0", "streams", key, "$"))
+        time.sleep(0.3)
+        c.call("XADD", key, "0-2", "temperature", "95")
+        check("streams-13 XREAD BLOCK with $ gets only the new entry",
+              r.try_read(3) == [[key, [["0-2", ["temperature", "95"]]]]])
+        r.send_raw(encode("XREAD", "block", "300", "streams", key, "$"))
+        check("streams-13 XREAD BLOCK with $ and no new entry times out",
+              r.try_read(3) is None)
+
+        # Every reader of the key gets the entry, and a reader of two
+        # streams gets only the stream that changed.
+        key, other = rand_word(), rand_word()
+        r2 = srv.client()
+        r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
+        r2.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", other, key, "$", "$"))
+        time.sleep(0.3)
+        c.call("XADD", key, "5-1", "f", "v")
+        entry = [key, [["5-1", ["f", "v"]]]]
+        got1, got2 = r.try_read(3), r2.try_read(3)
+        check("local: XADD wakes every reader of the key",
+              got1 == [entry] and got2 == [entry], "%r %r" % (got1, got2))
+
+        # A reader whose ID is above the top waits until an entry above it
+        # comes.
+        key = rand_word()
+        c.call("XADD", key, "1-0", "f", "v")
+        r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "9-0"))
+        time.sleep(0.2)
+        c.call("XADD", key, "2-0", "f", "v")
+        check("local: XREAD BLOCK above the top waits after a lower XADD",
+              r.try_read(0.5) is TIMEOUT)
+        c.call("XADD", key, "10-0", "f", "v")
+        check("local: XREAD BLOCK above the top gets the entry above it",
+              r.try_read(3) == [[key, [["10-0", ["f", "v"]]]]])
+
+        # The commands that the client sends during the wait run after it,
+        # in order.
+        key = rand_word()
+        r.send_raw(encode("XREAD", "BLOCK", "5000", "STREAMS", key, "$") + encode("PING") * 50)
+        time.sleep(0.2)
+        c.call("XADD", key, "1-1", "f", "v")
+        got = r.try_read(3)
+        pongs = 0
+        while pongs < 50 and r.try_read(3) == "PONG":
+            pongs += 1
+        check("local: 50 commands sent during XREAD BLOCK run after it, in order",
+              got == [[key, [["1-1", ["f", "v"]]]]] and pongs == 50, "%r, %d PONG" % (got, pongs))
+
+        def clients_now():
+            info = c.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        def clients_back_to(count):
+            deadline = time.time() + 5
+            now = clients_now()
+            while time.time() < deadline and now != count:
+                time.sleep(0.05)
+                now = clients_now()
+            return now
+
+        r.close()
+        r2.close()
+        base = clients_now()
+        gone = srv.client()
+        gone.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", rand_word(), "$")
+                      + encode("PING") * 100)
+        time.sleep(0.2)
+        gone.close()
+        now = clients_back_to(base)
+        check("local: XREAD BLOCK with no limit ends when its client goes",
+              now == base, "connected_clients %d, before %d" % (now, base))
+
+        key = rand_word()
+        c.call("SET", key, "v")
+        for args in (("XADD", key, "1-1", "f", "v"), ("XRANGE", key, "-", "+"),
+                     ("XREAD", "STREAMS", key, "0")):
+            got = c.call(*args)
+            check("local: %s on a string key is WRONGTYPE" % args[0],
+                  isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
+    ("streams", stages_streams),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]

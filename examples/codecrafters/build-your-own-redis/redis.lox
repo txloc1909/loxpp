@@ -1396,7 +1396,10 @@ fun cmdXrange(ctx, argv) {
     if (stream == false) {
         return WRONGTYPE;
     }
-    if (stream == nil or (count != nil and count <= 0)) {
+    if (count != nil and count <= 0) {
+        return NULL_ARRAY;
+    }
+    if (stream == nil) {
         return "*0\r\n";
     }
     var from = stream.find(start.ms, start.seq, true);
@@ -1412,8 +1415,9 @@ fun cmdXrange(ctx, argv) {
     return reply;
 }
 
-// What one XREAD reads: for each key, the ID after which it reads, and the
-// most entries for each stream (0 for no limit).
+// What one XREAD BLOCK waits for: for each key, the ID after which it
+// reads (for a key named twice, the last ID), and the most entries for each
+// stream (0 for no limit).
 class StreamRead {
     init(count) {
         this.after = {};
@@ -1421,10 +1425,9 @@ class StreamRead {
     }
 }
 
-// Adds to reply the entries of stream above the ID that read gives for
-// key. Returns true when there are some.
-fun addEntriesAfter(reply, read, key, stream) {
-    var id = read.after[key];
+// Adds to reply the entries of stream above id, at most read.count of them
+// when it is above 0. Returns true when there are some.
+fun addEntriesAfter(reply, read, key, stream, id) {
     var from = stream.find(id.ms, id.seq, false);
     var to = stream.size();
     if (to <= from) {
@@ -1472,13 +1475,14 @@ fun cmdXread(ctx, argv) {
     }
     var rest = len(argv) - i - 1;
     if (rest == 0 or rest % 2 == 1) {
-        return errorReply("ERR Unbalanced 'xread' list of streams: for each stream key an ID or '$' must be specified.");
+        return errorReply("ERR Unbalanced XREAD list of streams: for each stream key an ID or '$' must be specified.");
     }
     var n = rest / 2;
     var keys = argv[i + 1:i + 1 + n];
     var ids = argv[i + 1 + n:len(argv)];
     var read = StreamRead(count);
     var streams = [];
+    var after = [];
     var j = 0;
     while (j < n) {
         var stream = streamEntry(keys[j]);
@@ -1502,13 +1506,14 @@ fun cmdXread(ctx, argv) {
         }
         read.after[keys[j]] = id;
         streams.append(stream);
+        after.append(id);
         j = j + 1;
     }
     var reply = Segments("");
     j = 0;
     while (j < n) {
         if (streams[j] != nil) {
-            addEntriesAfter(reply, read, keys[j], streams[j]);
+            addEntriesAfter(reply, read, keys[j], streams[j], after[j]);
         }
         j = j + 1;
     }
@@ -1534,7 +1539,7 @@ fun wakeReaders(key, stream) {
             break;
         }
         var reply = Segments("*1\r\n");
-        if (!addEntriesAfter(reply, w.read, key, stream)) {
+        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key])) {
             later.append(w);
         } else {
             w.active = false;
