@@ -98,7 +98,7 @@ public final class SideTest {
         LoxTask holder = spawn("holder", () -> got[0] = conn.readline());
         LoxOps.yield(null);
         checkEquals(LoxTask.State.WAITING, holder.state,
-                    "the holder parks in readline");
+                    "the holder waits in readline");
         pair[0].write("ab");
         checkEquals("BusyError", kindRaisedBy(() -> conn.read()), "read");
         checkEquals("BusyError", kindRaisedBy(() -> conn.readBytes(1)),
@@ -166,7 +166,7 @@ public final class SideTest {
             spawn("acceptor", () -> kind[0] = kindRaisedBy(server::accept));
         LoxOps.yield(null);
         checkEquals(LoxTask.State.WAITING, acceptor.state,
-                    "the acceptor parks");
+                    "the acceptor waits");
         checkEquals("BusyError", kindRaisedBy(server::accept),
                     "a second accept raises");
         server.close();
