@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_stages import DEFAULT_PROG, Client, Error, Server, free_port  # noqa: E402
 
 import subprocess  # noqa: E402
+import random  # noqa: E402
 import socket  # noqa: E402
 import time  # noqa: E402
 
@@ -26,6 +27,37 @@ FAIL = 0
 
 # One entry per group: (script name, [command, ...]). A command is a list of
 # arguments.
+
+def both_ends_script():
+    """LPUSH, RPUSH, LPOP and LRANGE in a fixed random order, so that the
+    elements cross between the two parts of the queue and the free slots
+    are dropped many times."""
+    rng = random.Random(1151)
+    script = [["RPUSH", "q"] + [f"r{i}" for i in range(100)],
+              ["LPOP", "q", "40"], ["LRANGE", "q", "0", "-1"]]
+    n = 0
+    for _ in range(400):
+        op = rng.randrange(6)
+        k = rng.randrange(1, 12)
+        if op == 0:
+            script.append(["LPUSH", "q"] + [f"l{n + i}" for i in range(k)])
+            n += k
+        elif op == 1:
+            script.append(["RPUSH", "q"] + [f"r{n + i}" for i in range(k)])
+            n += k
+        elif op == 2:
+            script.append(["LPOP", "q"])
+        elif op == 3:
+            script.append(["LPOP", "q", str(k)])
+        elif op == 4:
+            a, b = rng.randrange(-20, 20), rng.randrange(-20, 20)
+            script.append(["LRANGE", "q", str(a), str(b)])
+        else:
+            script.append(["LLEN", "q"])
+    script.append(["LRANGE", "q", "0", "-1"])
+    return script
+
+
 SCRIPTS = {
     "base": [
         ("ping", [["PING"], ["ping"], ["PING", "hello"]]),
@@ -72,6 +104,33 @@ SCRIPTS = {
                    ["PING", "a", "b"]]),
         ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
                      ["NOSUCH", "x" * 200, "y"], ["PING"]]),
+    ],
+    "lists": [
+        ("push-and-range", [
+            ["RPUSH", "l", "a", "b", "c"], ["LPUSH", "l", "z", "y"],
+            ["LRANGE", "l", "0", "-1"], ["LRANGE", "l", "1", "2"],
+            ["LRANGE", "l", "-3", "-2"], ["LRANGE", "l", "-100", "100"],
+            ["LRANGE", "l", "4", "2"], ["LRANGE", "l", "10", "20"],
+            ["LRANGE", "missing", "0", "-1"], ["LLEN", "l"], ["LLEN", "missing"],
+        ]),
+        ("pop", [
+            ["RPUSH", "l", "1", "2", "3", "4"], ["LPOP", "l"], ["LPOP", "l", "2"],
+            ["LPOP", "l", "0"], ["LPOP", "l", "5"], ["LPOP", "l"], ["LLEN", "l"],
+            ["LPOP", "missing"], ["LPOP", "missing", "2"],
+        ]),
+        ("both-ends", both_ends_script()),
+        ("blpop-no-wait", [
+            ["RPUSH", "b", "x", "y"], ["BLPOP", "missing", "b", "0"],
+            ["BLPOP", "b", "0.01"], ["BLPOP", "b", "0.01"],
+        ]),
+        ("errors", [
+            ["SET", "s", "v"], ["RPUSH", "s", "x"], ["LPUSH", "s", "x"],
+            ["LLEN", "s"], ["LRANGE", "s", "0", "1"], ["LPOP", "s"],
+            ["BLPOP", "s", "0"], ["RPUSH", "l", "x"], ["GET", "l"],
+            ["LRANGE", "l", "a", "1"], ["LPOP", "l", "-1"], ["LPOP", "l", "x"],
+            ["BLPOP", "l", "-1"], ["BLPOP", "l", "abc"], ["RPUSH", "l"],
+            ["LLEN"], ["LRANGE", "l", "0"],
+        ]),
     ],
 }
 

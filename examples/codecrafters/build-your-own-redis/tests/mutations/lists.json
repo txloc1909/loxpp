@@ -1,0 +1,211 @@
+[
+ {
+  "name": "BLPOP serves the newest waiter",
+  "old": "            var w = this.next();",
+  "new": "            var w = this.items.pop();",
+  "cases": [
+   "lists-10 the first waiter is served"
+  ]
+ },
+ {
+  "name": "push does not serve waiters",
+  "old": "    serveWaiters(argv[1]);\n",
+  "new": "",
+  "cases": [
+   "lists-10 BLPOP gets the element"
+  ]
+ },
+ {
+  "name": "BLPOP limit ignored",
+  "old": "            msg = task.receive_where_within(isWake, block.timeout);",
+  "new": "            msg = task.receive_where(isWake);",
+  "cases": [
+   "lists-11 BLPOP times out with a null array"
+  ]
+ },
+ {
+  "name": "timed-out waiter stays active",
+  "old": "    w.active = false;\n    var i = 0;",
+  "new": "    var i = 0;",
+  "cases": [
+   "local: the push skips the timed-out waiter"
+  ]
+ },
+ {
+  "name": "client close does not end a wait",
+  "old": "        case Msg.Closed => true\n",
+  "new": "",
+  "cases": [
+   "local: a closed waiter takes no element"
+  ]
+ },
+ {
+  "name": "served key counted out twice",
+  "old": "        w.servedBy = key;\n",
+  "new": "",
+  "cases": [
+   "local: the second waiter gets the next push"
+  ]
+ },
+ {
+  "name": "LRANGE negative start not mapped",
+  "old": "    if (start < 0) {\n        start = n + start;\n    }\n",
+  "new": "",
+  "cases": [
+   "lists-05 LRANGE -2 -1"
+  ]
+ },
+ {
+  "name": "LPUSH keeps argument order",
+  "old": "            entry.value.pushLeft(argv[i]);",
+  "new": "            entry.value.pushRight(argv[i]);",
+  "cases": [
+   "lists-06 LPUSH order"
+  ]
+ },
+ {
+  "name": "LLEN of a missing list not 0",
+  "old": "        return integerReply(0);",
+  "new": "        return NULL_BULK;",
+  "cases": [
+   "lists-07 LLEN missing list"
+  ]
+ },
+ {
+  "name": "LPOP count pops one less",
+  "old": "    var reply = entry.value.takeLeft(count);",
+  "new": "    var reply = entry.value.takeLeft(count - 1);",
+  "cases": [
+   "lists-09 LPOP 2"
+  ]
+ },
+ {
+  "name": "empty list kept",
+  "old": "    if (entry.value.size() == 0) {\n        store.del(key);\n    }\n",
+  "new": "",
+  "cases": [
+   "local: LPOP on the emptied list is a null bulk string"
+  ]
+ },
+ {
+  "name": "push on a string key",
+  "old": "    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (entry == nil) {\n        entry = newList(argv[1]);",
+  "new": "    if (entry == nil) {\n        entry = newList(argv[1]);",
+  "cases": [
+   "local: LPUSH on a string key is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "GET of a list key",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
+  "new": "    return bulk(entry.value);",
+  "cases": [
+   "local: GET on a list key is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "array reply joined left to right",
+  "old": "        var parts = [];\n        while (i < stop) {\n            if (i < r) {\n                parts.append(bulk(reply.rev[r - 1 - i]));\n            } else {\n                parts.append(bulk(reply.fwd[i - r]));\n            }\n            i = i + 1;\n        }\n        conn.sock.write(joinRange(parts, 0, len(parts)));",
+  "new": "        var out = \"\";\n        while (i < n) {\n            if (i < r) {\n                out = out + bulk(reply.rev[r - 1 - i]);\n            } else {\n                out = out + bulk(reply.fwd[i - r]);\n            }\n            i = i + 1;\n        }\n        conn.sock.write(out);",
+  "cases": [
+   "local: LRANGE of RPUSH of 100000 elements is fast"
+  ]
+ },
+ {
+  "name": "L16 no yield while a long array reply is written",
+  "old": "        conn.sock.write(joinRange(parts, 0, len(parts)));\n        if (i < n) {\n            yield nil;\n        }",
+  "new": "        conn.sock.write(joinRange(parts, 0, len(parts)));",
+  "cases": [
+   "local: P7 LRANGE of 2097146 elements stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "L17 array reply in steps drops the last step",
+  "old": "        if (stop > n) {\n            stop = n;\n        }",
+  "new": "        if (stop > n) {\n            return;\n        }",
+  "cases": [
+   "local: P7 LRANGE of 2097146 elements gives every element"
+  ]
+ },
+ {
+  "name": "L18 session does not wake a reader that waits for credit",
+  "old": "        task.send(conn.reader, Msg.Blocked());\n",
+  "new": "",
+  "cases": [
+   "local: BLPOP on 1100 keys with no limit ends when its client goes after 100 more commands"
+  ]
+ },
+ {
+  "name": "L19 no limit on commands during BLPOP",
+  "old": "            if (credits <= -HOLD) {\n                return false;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: a client that sends 2000 commands during one BLPOP is closed"
+  ]
+ },
+ {
+  "name": "L20 reader does not read on during BLPOP",
+  "old": "        if (conn.blocked) {\n            if (credits <= -HOLD) {",
+  "new": "        if (false) {\n            if (credits <= -HOLD) {",
+  "cases": [
+   "local: BLPOP with no limit ends when its client goes after 100 more commands",
+   "local: a client that sends 2000 commands during one BLPOP is closed"
+  ]
+ },
+ {
+  "name": "L21 LPUSH copies the list",
+  "old": "    pushLeft(v) {\n        if (this.live < len(this.front)) {",
+  "new": "    pushLeft(v) {\n        if (this.live == 0) {\n            var copy = [];\n            for (var x in this.back) {\n                copy.append(x);\n            }\n            this.back = copy;\n        }\n        if (this.live < len(this.front)) {",
+  "cases": [
+   "local: P8 LPUSH on a list of 4194292 elements stalls PING at most 0.1 s"
+  ]
+ },
+ {
+  "name": "L22 the left part of a range in push order",
+  "old": "                parts.append(bulk(reply.rev[r - 1 - i]));",
+  "new": "                parts.append(bulk(reply.rev[i]));",
+  "cases": [
+   "lists-06 LPUSH order"
+  ]
+ },
+ {
+  "name": "L23 no yield in leaveQueues",
+  "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n",
+  "new": "",
+  "cases": [
+   "local: P9 it leaves the other 1048573 queues and PING waits at most 0.2 s"
+  ]
+ },
+ {
+  "name": "L24 a closed waiter drops its element",
+  "old": "    if (closed) {\n        giveBack(key, value);\n        return nil;",
+  "new": "    if (closed) {\n        return nil;",
+  "cases": [
+   "local: an element pushed as its waiter resets stays in the list (150 rounds)"
+  ]
+ },
+ {
+  "name": "L25 an element served after Closed stays in the mailbox",
+  "old": "        served = task.receive_where(isServed);",
+  "new": "        served = msg;",
+  "cases": [
+   "local: an element pushed as its waiter resets stays in the list (150 rounds)"
+  ]
+ },
+ {
+  "name": "L26 a given-back element does not go to the next waiter",
+  "old": "    entry.value.pushLeft(value);\n    serveWaiters(key);",
+  "new": "    entry.value.pushLeft(value);",
+  "cases": [
+   "local: an element pushed as its waiter resets goes to the next waiter (150 rounds)"
+  ]
+ },
+ {
+  "name": "L27 LPOP with a count removes the left part one by one",
+  "old": "        this.live = this.live - len(reply.rev);",
+  "new": "        var i = 0;\n        while (i < len(reply.rev)) {\n            this.front[this.live - 1] = nil;\n            this.live = this.live - 1;\n            i = i + 1;\n        }",
+  "cases": [
+   "local: P10 LPOP of 4194291 of 8388584 elements stalls PING at most 0.14 s"
+  ]
+ }
+]

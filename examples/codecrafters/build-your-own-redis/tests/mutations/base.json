@@ -18,15 +18,15 @@
  },
  {
   "name": "ECHO case-sensitive",
-  "old": "var name = upper(argv[0]);",
-  "new": "var name = argv[0];",
+  "old": "    var run = COMMANDS[upper(argv[0])];",
+  "new": "    var run = COMMANDS[argv[0]];",
   "cases": [
    "base-05 ECHO is case-insensitive"
   ]
  },
  {
   "name": "SET does not store",
-  "old": "    store[key] = Entry(argv[2], expiresAt);\n",
+  "old": "    store[key] = Entry(\"string\", argv[2], expiresAt);\n",
   "new": "",
   "cases": [
    "base-06 GET"
@@ -66,8 +66,8 @@
  },
  {
   "name": "missing key not null",
-  "old": "        return NULL_BULK;\n    }\n    return bulk(entry.value);",
-  "new": "        return bulk(\"\");\n    }\n    return bulk(entry.value);",
+  "old": "        return NULL_BULK;\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
+  "new": "        return bulk(\"\");\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
   "cases": [
    "local: GET of a missing key is a null bulk string",
    "base-07 GET after expiry"
