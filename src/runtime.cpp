@@ -1909,12 +1909,14 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     // group or session line, clear the run queue and move the task epoch, and
     // its last runTask would leave the outer task with no current task, so
     // that task's counters would go to m_noTaskOwned. Nothing can make that
-    // safe, so a nested run ends the process. Only the top level calls
-    // runTasks now (VM::interpret from main, rt_run_tasks from a QBE
-    // program); a native that runs Lox code inside a task would reach this.
+    // safe, so a nested run ends the process. It must end it and not return
+    // an error: VM::interpret has already loaded the new source into this
+    // runtime when it gets here. The legal callers run at the top level
+    // (VM::interpret from main, rt_run_tasks from a QBE program); a native
+    // that runs Lox code inside a task would reach this.
     if (m_currentTask != nullptr) {
         std::fprintf(stderr,
-                     "loxpp: the scheduler cannot run inside a running task\n");
+                     "The scheduler cannot run inside a running task.\n");
         endProcess(70);
     }
     Inbox& inbox = m_mm.inbox();

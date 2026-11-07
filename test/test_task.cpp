@@ -521,5 +521,5 @@ TEST(TaskDeathTest, ASchedulerRunInsideATaskEndsTheProcess) {
             std::exit(0);
         },
         ::testing::ExitedWithCode(70),
-        "loxpp: the scheduler cannot run inside a running task");
+        "The scheduler cannot run inside a running task\\.");
 }
