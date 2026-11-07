@@ -217,20 +217,21 @@ class Bulks {
     }
 }
 
-// A reply of arrays of entries that are encoded already: head, then for each
-// i, prefixes[i] and the entries lists[i]. The session writes the entries in
-// steps and yields between the steps (writeSegments). Each List of entries
-// is a slice that the command took from a Stream in one step.
+// A reply of arrays of stream entries: head, then for each i, prefixes[i]
+// and the entries ranges[i]. Each range holds slices that the command took
+// from a Stream in one step, so the command stays atomic. The session
+// encodes and writes the entries in steps and yields between the steps
+// (writeSegments).
 class Segments {
     init(head) {
         this.head = head;
         this.prefixes = [];
-        this.lists = [];
+        this.ranges = [];
     }
 
-    add(prefix, items) {
+    add(prefix, range) {
         this.prefixes.append(prefix);
-        this.lists.append(items);
+        this.ranges.append(range);
     }
 }
 
@@ -1202,15 +1203,25 @@ fun idPart(digits, seq) {
     return StreamId(ms, seq);
 }
 
-// The entries of a stream, oldest first, in three Lists of the same length:
-// the two parts of each ID, and the reply text of each entry, which XADD
-// encodes once. A read takes a slice of the texts, so its cost does not
-// grow with the fields of the entries.
+// Entries of a stream: three Lists of the same length, the two parts of
+// each ID and the fields of each entry.
+class EntryRange {
+    init(ms, seq, fields) {
+        this.ms = ms;
+        this.seq = seq;
+        this.fields = fields;
+    }
+}
+
+// The entries of a stream, oldest first. XADD keeps the fields of an entry
+// as one slice of its arguments, and a read takes one slice of each List,
+// so neither costs more for an entry with more fields; the session encodes
+// the reply in steps.
 class Stream {
     init() {
         this.ms = [];
         this.seq = [];
-        this.encoded = [];
+        this.fields = [];
     }
 
     size() {
@@ -1255,13 +1266,13 @@ class Stream {
     }
 
     add(ms, seq, fields) {
-        var parts = ["*2\r\n" + bulk(idText(ms, seq)) + "*" + str(len(fields)) + "\r\n"];
-        for (var f in fields) {
-            parts.append(bulk(f));
-        }
         this.ms.append(ms);
         this.seq.append(seq);
-        this.encoded.append(joinRange(parts, 0, len(parts)));
+        this.fields.append(fields);
+    }
+
+    slice(from, to) {
+        return EntryRange(this.ms[from:to], this.seq[from:to], this.fields[from:to]);
     }
 }
 
@@ -1411,7 +1422,7 @@ fun cmdXrange(ctx, argv) {
         to = from + count;
     }
     var reply = Segments("");
-    reply.add("*" + str(to - from) + "\r\n", stream.encoded[from:to]);
+    reply.add("*" + str(to - from) + "\r\n", stream.slice(from, to));
     return reply;
 }
 
@@ -1436,11 +1447,25 @@ fun addEntriesAfter(reply, read, key, stream, id) {
     if (read.count > 0 and to - from > read.count) {
         to = from + read.count;
     }
-    reply.add("*2\r\n" + bulk(key) + "*" + str(to - from) + "\r\n", stream.encoded[from:to]);
+    reply.add("*2\r\n" + bulk(key) + "*" + str(to - from) + "\r\n", stream.slice(from, to));
     return true;
 }
 
-fun cmdXread(ctx, argv) {
+// The arguments of one XREAD, parsed: ids[j] is a StreamId, or "$".
+class XreadArgs {
+    init(count, block, keys, ids) {
+        this.count = count;
+        this.block = block;
+        this.keys = keys;
+        this.ids = ids;
+    }
+}
+
+// Parses the arguments of XREAD. Returns an XreadArgs, or an error reply.
+// It reads no key, so the session runs it before the command and may yield
+// (mayYield) every ELEMENTS_PER_YIELD IDs: an XREAD can name up to 524287
+// streams.
+fun parseXread(argv, mayYield) {
     if (len(argv) < 4) {
         return wrongArgs("xread");
     }
@@ -1478,25 +1503,12 @@ fun cmdXread(ctx, argv) {
         return errorReply("ERR Unbalanced XREAD list of streams: for each stream key an ID or '$' must be specified.");
     }
     var n = rest / 2;
-    var keys = argv[i + 1:i + 1 + n];
-    var ids = argv[i + 1 + n:len(argv)];
-    var read = StreamRead(count);
-    var streams = [];
-    var after = [];
+    var ids = [];
     var j = 0;
-    while (j < n) {
-        var stream = streamEntry(keys[j]);
-        if (stream == false) {
-            return WRONGTYPE;
-        }
-        var id = nil;
-        if (ids[j] == "$") {
-            id = StreamId(0, 0);
-            if (stream != nil) {
-                id = StreamId(stream.topMs(), stream.topSeq());
-            }
-        } else {
-            id = parseStreamId(ids[j], false);
+    for (var text in argv[i + 1 + n:len(argv)]) {
+        var id = "$";
+        if (text != "$") {
+            id = parseStreamId(text, false);
             if (id == nil) {
                 return INVALID_ID;
             }
@@ -1504,27 +1516,55 @@ fun cmdXread(ctx, argv) {
                 id.seq = 0;
             }
         }
-        read.after[keys[j]] = id;
-        streams.append(stream);
-        after.append(id);
+        ids.append(id);
         j = j + 1;
+        if (mayYield and j % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
     }
+    return XreadArgs(count, block, argv[i + 1:i + 1 + n], ids);
+}
+
+// ctx is the XreadArgs that the session parsed before the command, or nil.
+// The rest has no suspend point: it reads the streams and joins the queues
+// in one step.
+fun cmdXread(ctx, argv) {
+    var args = ctx;
+    if (args == nil) {
+        args = parseXread(argv, false);
+    }
+    if (type(args) == "String") {
+        return args;
+    }
+    var read = StreamRead(args.count);
     var reply = Segments("");
-    j = 0;
-    while (j < n) {
-        if (streams[j] != nil) {
-            addEntriesAfter(reply, read, keys[j], streams[j], after[j]);
+    var j = 0;
+    for (var key in args.keys) {
+        var stream = streamEntry(key);
+        if (stream == false) {
+            return WRONGTYPE;
+        }
+        var id = args.ids[j];
+        if (id == "$") {
+            id = StreamId(0, 0);
+            if (stream != nil) {
+                id = StreamId(stream.topMs(), stream.topSeq());
+            }
+        }
+        read.after[key] = id;
+        if (stream != nil) {
+            addEntriesAfter(reply, read, key, stream, id);
         }
         j = j + 1;
     }
-    if (len(reply.lists) > 0) {
-        reply.head = "*" + str(len(reply.lists)) + "\r\n";
+    if (len(reply.ranges) > 0) {
+        reply.head = "*" + str(len(reply.ranges)) + "\r\n";
         return reply;
     }
-    if (block == nil) {
+    if (args.block == nil) {
         return NULL_ARRAY;
     }
-    return Block(readers, keys, block / 1000, read);
+    return Block(readers, args.keys, args.block / 1000, read);
 }
 
 // Hands each session that waits in XREAD BLOCK on key, and has entries to
@@ -1872,7 +1912,11 @@ fun readLoop(conn) {
 // Returns true while the session goes on. A Block reply waits in the
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv) {
-    var reply = execute(nil, argv);
+    var ctx = nil;
+    if (len(argv) > 0 and upper(argv[0]) == "XREAD") {
+        ctx = parseXread(argv, true);
+    }
+    var reply = execute(ctx, argv);
     if (type(reply) == "Instance" and hasField(reply, "timeout")) {
         reply = waitForElement(conn, reply);
         if (reply == nil) {
@@ -1916,37 +1960,58 @@ fun writeBulks(conn, reply) {
     }
 }
 
-// A step of writeEncoded writes at most this many bytes, unless one entry
-// is longer, so the step does not copy a long reply into one String.
+// Collects reply parts and writes them in steps of at most
+// ELEMENTS_PER_YIELD parts and about STEP_BYTES bytes, and yields after each
+// step. A part longer than a step is written alone, so no step copies a long
+// reply into one String.
 var STEP_BYTES = 1048576;
 
-fun writeSegments(conn, reply) {
-    if (reply.head != "") {
-        conn.sock.write(reply.head);
+class Output {
+    init(conn) {
+        this.conn = conn;
+        this.parts = [];
+        this.bytes = 0;
     }
-    var i = 0;
-    while (i < len(reply.lists)) {
-        conn.sock.write(reply.prefixes[i]);
-        writeEncoded(conn, reply.lists[i]);
-        i = i + 1;
+
+    add(part) {
+        this.parts.append(part);
+        this.bytes = this.bytes + len(part);
+        if (len(this.parts) >= ELEMENTS_PER_YIELD or this.bytes >= STEP_BYTES) {
+            this.flush();
+            yield nil;
+        }
+    }
+
+    flush() {
+        if (len(this.parts) > 0) {
+            this.conn.sock.write(joinRange(this.parts, 0, len(this.parts)));
+        }
+        this.parts = [];
+        this.bytes = 0;
     }
 }
 
-// Writes items, which are encoded already, in steps of at most
-// ELEMENTS_PER_YIELD items and about STEP_BYTES bytes, and yields after each
-// step.
-fun writeEncoded(conn, items) {
-    var i = 0;
-    while (i < len(items)) {
-        var start = i;
-        var bytes = 0;
-        while (i < len(items) and i - start < ELEMENTS_PER_YIELD and bytes < STEP_BYTES) {
-            bytes = bytes + len(items[i]);
-            i = i + 1;
-        }
-        conn.sock.write(joinRange(items, start, i));
-        yield nil;
+fun writeSegments(conn, reply) {
+    var out = Output(conn);
+    if (reply.head != "") {
+        out.add(reply.head);
     }
+    var i = 0;
+    while (i < len(reply.ranges)) {
+        out.add(reply.prefixes[i]);
+        var r = reply.ranges[i];
+        var j = 0;
+        while (j < len(r.ms)) {
+            var fields = r.fields[j];
+            out.add("*2\r\n" + bulk(idText(r.ms[j], r.seq[j])) + "*" + str(len(fields)) + "\r\n");
+            for (var f in fields) {
+                out.add(bulk(f));
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out.flush();
 }
 
 fun giveCredit(conn) {

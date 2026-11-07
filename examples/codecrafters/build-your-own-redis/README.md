@@ -25,7 +25,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 |---|---|---|
 | base | 7 | pass |
 | lists | 11 | pass |
-| streams | 13 | not started |
+| streams | 13 | pass |
 | transactions | 11 | not started |
 | optimistic-locking | 8 | not started |
 | persistence-rdb | 6 | not started |
@@ -81,6 +81,11 @@ takes the arguments of the command out of its message first (this step
 yields, see rule 2), and the socket write comes after the command. So each
 command is atomic, as in Redis.
 
+One command has a step before it: the session parses the IDs of `XREAD`
+(`parseXread`) before the command runs, and yields every 1024 IDs, because
+one `XREAD` can name 524287 streams. The parse reads no key, so the command
+stays atomic.
+
 ### Lists and BLPOP
 
 A list key holds a deque over two Lox++ Lists (`class Deque`). `LPUSH`
@@ -113,6 +118,22 @@ mailbox of the session. The session finds it there (`w.servedBy` is set),
 and puts it back at the head of its key for the next waiter. It does the
 same when the write of the reply fails.
 
+### Streams
+
+A stream key holds a `Stream`: three Lists of the same length, the two
+parts of each entry ID and the fields of each entry. `XADD` keeps the fields
+as one slice of its arguments, so it costs no more for an entry with more
+fields. The IDs only grow, so `XRANGE` and `XREAD` find their first entry
+with a binary search and take one slice of each List.
+
+`XREAD BLOCK` waits as `BLPOP` does (`waitForElement`), in a second map of
+queues, `readers`. At the end of `XADD`, `wakeReaders` takes each reader of
+the key that now has entries to read, puts its reply in its `Waiter` and
+sends `Msg.Ready`. So the reply holds the entries up to this `XADD` and only
+this stream, as in Redis. A reader whose ID is still above the top joins the
+queue again. `XREAD` takes nothing from the stream, so a reply that the
+client cannot get is dropped.
+
 ### Large replies
 
 `LRANGE` and `LPOP` with a count take their elements from the keyspace with
@@ -120,6 +141,10 @@ at most one slice of each List of the deque. The session then encodes and writes
 in steps of 1024 elements and yields between the steps (`class Bulks`,
 `writeBulks`). The command stays atomic, because its keyspace work is the
 one slice; the other clients go on while a long reply is written.
+
+A stream reply (`class Segments`) is written the same way: `class Output`
+writes at most 1024 parts and about 1 MB in each step, and yields between
+the steps. A part longer than a step is written alone.
 
 ### Expiry
 
@@ -141,8 +166,14 @@ printed.
 
 ### Known differences from Redis
 
-- An integer argument has at most 15 digits, so that it is exact in a
-  Number. Redis accepts the full 64-bit range.
+- An integer argument, and each part of a stream ID, has at most 15
+  digits, so that it is exact in a Number. Redis accepts the full 64-bit
+  range.
+- `XADD` takes no options (`NOMKSTREAM`, `MAXLEN`, `MINID`, `LIMIT`): the
+  word in the ID place must be an ID. `XRANGE` takes no exclusive bounds
+  (`(1-1`).
+- An `XREAD BLOCK` that names one key twice waits for entries above the
+  second ID of that key.
 - An inline command (a line with no `*` header) is split on spaces and tabs.
   Redis also reads quotes and escapes in it.
 - A last inline command with no newline before the end of the stream gets a
@@ -152,10 +183,11 @@ printed.
   - two bytes other than CRLF after a bulk string (Redis 7.0 does not check
     them);
   - an array header above 1048576 (Redis waits for the arguments).
-- A client that sends more than 960 commands during one `BLPOP` is closed.
+- A client that sends more than 960 commands during one `BLPOP` or
+  `XREAD BLOCK` is closed.
   Redis keeps them in its query buffer, up to `client-query-buffer-limit`.
-- A malformed request during `BLPOP` closes the client at once, with no
-  reply, and the `BLPOP` takes no element. Redis keeps the client blocked,
+- A malformed request during `BLPOP` or `XREAD BLOCK` closes the client at
+  once, with no reply, and the `BLPOP` takes no element. Redis keeps the client blocked,
   serves it, then sends the error and closes it.
 - The `BLPOP` time-out is a decimal number. Redis also accepts exponents
   (`1e3`) and hexadecimal (`0x10`), gives other error text for `inf`, gives
@@ -233,14 +265,21 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.13 s / 0.17–0.19 s |
 | Not in the suite: `LPOP k 2000000` of a list of 2097146 elements, from the right part / `LPOP k 1048000` from the left part | PING within 1.0 s | 0.08–0.09 s / 0.06–0.07 s |
 | Not in the suite: `LRANGE 0 -1` of a list of 1049146 elements that `LPUSH` built | PING within 0.2 s | 0.06–0.08 s |
+| S1 (group `streams`): `XADD` with 524286 field pairs | PING within 0.2 s (when `XADD` encodes the entry: 0.71 s) | 0.006–0.046 s |
+| S2: `XRANGE` of that entry | every field; PING within 0.15 s (without the yield of `Output.add`: 0.27 s) | as required; 0.056–0.067 s |
+| S3: `XREAD` of 524286 missing streams | PING within 0.5 s (when the IDs are parsed in the step of the command: 0.93 s) | 0.23–0.27 s |
+| S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
+| Group `streams`: `XREAD BLOCK 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
+| Not in the suite: `XRANGE` / `XREAD` of 200000 entries | PING within 1.0 s | 0.07–0.13 s / 0.07–0.21 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
 
 Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
-probe has a mutation in `tests/mutations/base.json` or
-`tests/mutations/lists.json` that removes its guard. Two guards have no
+probe has a mutation in `tests/mutations/base.json`,
+`tests/mutations/lists.json` or `tests/mutations/streams.json` that removes
+its guard (S4 holds rule 6 only: the S3 mutation also removes its guard). Two guards have no
 probe, because no client timing forces the order of events that they
 handle:
 - the give-back after a failed write of a `BLPOP` reply: the write fails
@@ -284,7 +323,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/redis.lox \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
-# the same with tests/mutations/lists.json for the lists group
+# the same with tests/mutations/lists.json and streams.json
 ```
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the

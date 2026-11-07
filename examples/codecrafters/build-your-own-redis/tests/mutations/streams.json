@@ -1,0 +1,210 @@
+[
+ {
+  "name": "TYPE gives string for every kind",
+  "old": "    return simple(entry.kind);",
+  "new": "    return simple(\"string\");",
+  "cases": [
+   "streams-02 TYPE of a stream"
+  ]
+ },
+ {
+  "name": "TYPE of a missing key is string",
+  "old": "        return simple(\"none\");",
+  "new": "        return simple(\"string\");",
+  "cases": [
+   "streams-01 TYPE of a missing key"
+  ]
+ },
+ {
+  "name": "XADD 0-0 accepted",
+  "old": "    if (id.ms == 0 and seq == 0) {\n        return ID_ZERO;",
+  "new": "    if (false) {\n        return ID_ZERO;",
+  "cases": [
+   "streams-03 XADD 0-0 is an error"
+  ]
+ },
+ {
+  "name": "XADD of the top ID accepted",
+  "old": "(id.ms == topMs and seq <= topSeq)",
+  "new": "(id.ms == topMs and seq < topSeq)",
+  "cases": [
+   "streams-03 XADD of the top ID is an error"
+  ]
+ },
+ {
+  "name": "XADD <ms>-* always gives sequence 0",
+  "old": "        if (id.ms == topMs) {\n            return StreamId(id.ms, topSeq + 1);",
+  "new": "        if (false) {\n            return StreamId(id.ms, topSeq + 1);",
+  "cases": [
+   "streams-04 XADD 1-* again"
+  ]
+ },
+ {
+  "name": "XADD * keeps the fraction of the milliseconds",
+  "old": "        now = now - now % 1;\n",
+  "new": "",
+  "cases": [
+   "streams-05 XADD * gives <ms>-0 with the time now"
+  ]
+ },
+ {
+  "name": "XADD does not check the key kind",
+  "old": "    var stream = streamEntry(key);\n    if (stream == false) {\n        return WRONGTYPE;\n    }\n    var topMs = 0;",
+  "new": "    var stream = streamEntry(key);\n    if (stream == false) {\n        stream = nil;\n    }\n    var topMs = 0;",
+  "cases": [
+   "local: XADD on a string key is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "XRANGE end excludes its ID",
+  "old": "    var to = stream.find(end.ms, end.seq, false);",
+  "new": "    var to = stream.find(end.ms, end.seq, true);",
+  "cases": [
+   "streams-06 XRANGE 0-2 0-3"
+  ]
+ },
+ {
+  "name": "XRANGE end with no sequence means sequence 0",
+  "old": "    var end = rangeBound(argv[3], MAX_ID_PART);",
+  "new": "    var end = rangeBound(argv[3], 0);",
+  "cases": [
+   "streams-06 XRANGE 0 0 (no sequence part)"
+  ]
+ },
+ {
+  "name": "XRANGE - is not the least ID",
+  "old": "    if (text == \"-\") {\n        return StreamId(0, 0);",
+  "new": "    if (text == \"-\") {\n        return StreamId(0, 2);",
+  "cases": [
+   "streams-07 XRANGE - 0-2"
+  ]
+ },
+ {
+  "name": "XRANGE + is not the greatest ID",
+  "old": "        return StreamId(MAX_ID_PART, MAX_ID_PART);",
+  "new": "        return StreamId(0, 2);",
+  "cases": [
+   "streams-08 XRANGE 0-2 +"
+  ]
+ },
+ {
+  "name": "XRANGE COUNT ignored",
+  "old": "    if (count != nil and to - from > count) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: XRANGE COUNT 2"
+  ]
+ },
+ {
+  "name": "XREAD reads the given ID too",
+  "old": "    var from = stream.find(id.ms, id.seq, false);\n    var to = stream.size();",
+  "new": "    var from = stream.find(id.ms, id.seq, true);\n    var to = stream.size();",
+  "cases": [
+   "local: XREAD with nothing to read is a null array"
+  ]
+ },
+ {
+  "name": "XREAD reads only the first stream",
+  "old": "        j = j + 1;\n    }\n    if (len(reply.ranges) > 0) {",
+  "new": "        j = j + 1;\n        break;\n    }\n    if (len(reply.ranges) > 0) {",
+  "cases": [
+   "streams-10 XREAD of two streams"
+  ]
+ },
+ {
+  "name": "XREAD BLOCK reads its limit as seconds",
+  "old": "    return Block(readers, args.keys, args.block / 1000, read);",
+  "new": "    return Block(readers, args.keys, args.block, read);",
+  "cases": [
+   "streams-11 XREAD BLOCK 1000 ends with a null array after about 1 s"
+  ]
+ },
+ {
+  "name": "XADD does not wake the readers",
+  "old": "    wakeReaders(key, stream);\n",
+  "new": "",
+  "cases": [
+   "streams-11 XREAD BLOCK gets the new entry"
+  ]
+ },
+ {
+  "name": "XREAD $ reads from 0-0",
+  "old": "                id = StreamId(stream.topMs(), stream.topSeq());",
+  "new": "                id = StreamId(0, 0);",
+  "cases": [
+   "streams-13 XREAD BLOCK with $ gets only the new entry"
+  ]
+ },
+ {
+  "name": "XADD wakes one reader only",
+  "old": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n",
+  "new": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n            break;\n",
+  "cases": [
+   "local: XADD wakes every reader of the key"
+  ]
+ },
+ {
+  "name": "a reader above the top is dropped",
+  "old": "    for (var w in later) {\n        joinQueues(readers, w, [key]);\n    }",
+  "new": "",
+  "cases": [
+   "local: XREAD BLOCK above the top gets the entry above it"
+  ]
+ },
+ {
+  "name": "a reader above the top is served empty",
+  "old": "        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key])) {",
+  "new": "        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key]) and false) {",
+  "cases": [
+   "local: XREAD BLOCK above the top waits after a lower XADD (no byte comes)"
+  ]
+ },
+ {
+  "name": "a served reader counted out twice",
+  "old": "            w.servedBy = key;\n            w.ready = reply;",
+  "new": "            w.ready = reply;",
+  "cases": [
+   "local: XREAD BLOCK above the top gets the entry above it"
+  ]
+ },
+ {
+  "name": "Ready does not end the wait",
+  "old": "        case Msg.Ready => true\n        case Msg.Closed => true",
+  "new": "        case Msg.Closed => true",
+  "cases": [
+   "streams-12 XREAD BLOCK 0 gets the new entry"
+  ]
+ },
+ {
+  "name": "S1 XADD encodes the entry",
+  "old": "    add(ms, seq, fields) {\n        this.ms.append(ms);",
+  "new": "    add(ms, seq, fields) {\n        var parts = [];\n        for (var f in fields) {\n            parts.append(bulk(f));\n        }\n        joinRange(parts, 0, len(parts));\n        this.ms.append(ms);",
+  "cases": [
+   "local: S1 XADD with 524286 field pairs stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "S2 no yield while a stream reply is written",
+  "old": "            this.flush();\n            yield nil;",
+  "new": "            this.flush();",
+  "cases": [
+   "local: S2 XRANGE of that entry stalls PING at most 0.15 s"
+  ]
+ },
+ {
+  "name": "S2 a stream reply drops its last step",
+  "old": "    out.flush();\n}",
+  "new": "}",
+  "cases": [
+   "local: S2 XRANGE of that entry gives every field"
+  ]
+ },
+ {
+  "name": "S3 XREAD parses its IDs in its one step",
+  "old": "        ctx = parseXread(argv, true);",
+  "new": "        ctx = parseXread(argv, false);",
+  "cases": [
+   "local: S3 XREAD of 524286 streams stalls PING at most 0.5 s"
+  ]
+ }
+]

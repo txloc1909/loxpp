@@ -1203,17 +1203,34 @@ def stages_streams(prog):
               got1 == [entry] and got2 == [entry], "%r %r" % (got1, got2))
 
         # A reader whose ID is above the top waits until an entry above it
-        # comes.
+        # comes. A second reader, which the lower XADD serves, leaves the
+        # queue without taking the other two out of it.
         key = rand_word()
         c.call("XADD", key, "1-0", "f", "v")
         r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "9-0"))
+        r3 = srv.client()
+        r3.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "9-0"))
+        time.sleep(0.1)
+        r2.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
         time.sleep(0.2)
         c.call("XADD", key, "2-0", "f", "v")
-        check("local: XREAD BLOCK above the top waits after a lower XADD",
-              r.try_read(0.5) is TIMEOUT)
+        check("local: XREAD BLOCK with $ gets the lower XADD",
+              r2.try_read(3) == [[key, [["2-0", ["f", "v"]]]]])
+        r.sock.settimeout(0.5)
+        try:
+            early = r.sock.recv(65536)
+        except socket.timeout:
+            early = b""
+        r.sock.settimeout(5)
+        r.buf += early
+        check("local: XREAD BLOCK above the top waits after a lower XADD (no byte comes)",
+              early == b"", repr(early))
         c.call("XADD", key, "10-0", "f", "v")
+        above = [[key, [["10-0", ["f", "v"]]]]]
+        got1, got3 = r.try_read(3), r3.try_read(3)
         check("local: XREAD BLOCK above the top gets the entry above it",
-              r.try_read(3) == [[key, [["10-0", ["f", "v"]]]]])
+              got1 == above and got3 == above, "%r %r" % (got1, got3))
+        r3.close()
 
         # The commands that the client sends during the wait run after it,
         # in order.
@@ -1254,6 +1271,52 @@ def stages_streams(prog):
         now = clients_back_to(base)
         check("local: XREAD BLOCK with no limit ends when its client goes",
               now == base, "connected_clients %d, before %d" % (now, base))
+
+        # S1-S4: the largest commands of the group. XADD keeps the fields as
+        # one slice, the session writes a reply in steps and yields between
+        # them, and XREAD parses its IDs before its one step, with yields.
+        n = 524286
+        big = srv.client()
+
+        def xadd_big():
+            big.send_raw(encode("XADD", "s1", "1-1", *(["abcd"] * (2 * n))))
+            big.try_read(60)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xadd_big)
+        check("local: S1 XADD with 524286 field pairs stalls PING at most 0.2 s",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        got = [None]
+
+        def xrange_big():
+            big.send_raw(encode("XRANGE", "s1", "-", "+"))
+            got[0] = big.try_read(60)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xrange_big)
+        check("local: S2 XRANGE of that entry gives every field",
+              got[0] == [["1-1", ["abcd"] * (2 * n)]])
+        check("local: S2 XRANGE of that entry stalls PING at most 0.15 s",
+              worst <= 0.15 and not wrong, "worst %.3f s" % worst)
+        keys = ["s3-%d" % i for i in range(n)]
+
+        def xread_many():
+            big.send_raw(encode("XREAD", "STREAMS", *keys, *(["0"] * n)))
+            got[0] = big.try_read(60)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xread_many)
+        check("local: S3 XREAD of 524286 missing streams gives a null array", got[0] is None)
+        check("local: S3 XREAD of 524286 streams stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+
+        def xread_block_many():
+            big.send_raw(encode("XREAD", "BLOCK", "1000", "STREAMS", *keys, *(["0"] * (n - 1)), "0"))
+            got[0] = big.try_read(60)
+            time.sleep(0.3)
+        worst, wrong, _ = measure_while(srv, xread_block_many)
+        check("local: S4 XREAD BLOCK on 524286 streams times out with a null array",
+              got[0] is None, repr(got[0])[:80])
+        check("local: S4 XREAD BLOCK on 524286 streams stalls PING at most 1 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+        big.close()
 
         key = rand_word()
         c.call("SET", key, "v")
