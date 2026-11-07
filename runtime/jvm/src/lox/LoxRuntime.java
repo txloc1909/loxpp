@@ -251,15 +251,14 @@ public final class LoxRuntime {
             }));
         globals.define(
             "chr", new LoxNative("chr", 1, args -> {
-                if (!(args[0] instanceof Double)) {
-                    throw new LoxError("chr() argument must be a number.");
-                }
-                double n = (Double)args[0];
-                if (n != Math.floor(n) || n < 0 || n > 255) {
+                long n = integerArg(
+                    args[0], "chr() argument must be a number.",
+                    "chr() argument must be an integer from 0 to 255.");
+                if (n < 0 || n > 255) {
                     throw new LoxError(
                         "chr() argument must be an integer from 0 to 255.");
                 }
-                return String.valueOf((char)(int)n);
+                return String.valueOf((char)n);
             }));
         // spec/05-stdlib.md's int() and float(). A fault of either is a
         // halting fault on native (tools/check_fault_table.py, FATAL_ROWS),
@@ -429,20 +428,28 @@ public final class LoxRuntime {
             }));
         globals.define(
             "exit", new LoxNative("exit", 1, args -> {
-                if (!(args[0] instanceof Double)) {
+                // An Int (a Long here) is already an integer; a Number is
+                // truncated toward zero, the C-style integral conversion
+                // (os_api.cpp). Both must fit the signed 32-bit code.
+                long code;
+                if (args[0] instanceof Long) {
+                    code = (Long)args[0];
+                } else if (args[0] instanceof Double) {
+                    double raw = (Double)args[0];
+                    if (Double.isNaN(raw) || Double.isInfinite(raw) ||
+                        raw >= TWO_TO_THE_63 || raw < -TWO_TO_THE_63) {
+                        throw new LoxError("exit() code must be a finite " +
+                                           "number in the integer range.");
+                    }
+                    code = (long)raw; // truncates toward zero, matching C
+                } else {
                     throw new LoxError("exit() code must be a number.");
                 }
-                double raw = (Double)args[0];
-                // Truncate toward zero, the C-style integral conversion
-                // (os_api.cpp). Reject a value Java's cast cannot represent,
-                // mirroring the native VM's finite/int-range guard.
-                if (Double.isNaN(raw) || Double.isInfinite(raw) ||
-                    raw > Integer.MAX_VALUE || raw < Integer.MIN_VALUE) {
-                    throw new LoxError("exit() code must be a finite number " +
-                                       "in the integer range.");
+                if (code > Integer.MAX_VALUE || code < Integer.MIN_VALUE) {
+                    throw new LoxError("exit() code must be a finite " +
+                                       "number in the integer range.");
                 }
-                System.exit((int)raw); // range-guarded above, so the cast
-                                       // truncates toward zero, matching C
+                System.exit((int)code);
                 throw new AssertionError("System.exit must not return");
             }));
         globals.define(
@@ -551,15 +558,35 @@ public final class LoxRuntime {
     }
 
     private static int requirePort(Object v, int minPort) {
-        if (!(v instanceof Double)) {
-            throw new LoxError("Port must be a number.");
-        }
-        double raw = (Double)v;
-        if (Double.isNaN(raw) || Double.isInfinite(raw) ||
-            raw != Math.floor(raw) || raw < minPort || raw > 65535) {
+        long n = integerArg(v, "Port must be a number.",
+                            "Port must be an integer in range.");
+        if (n < minPort || n > 65535) {
             throw new LoxError("Port must be an integer in range.");
         }
-        return (int)raw;
+        return (int)n;
+    }
+
+    /**
+     * Mirrors src/stdlib/integer_arg.cpp's readIntegerArg. A parameter that
+     * spec/05-stdlib.md, "Integer arguments", calls an integer accepts an Int
+     * (a Long here) or an integer-valued Number (a Double here). The two
+     * kinds do not mix. `exit`'s code is not such a parameter — a Number code
+     * is truncated toward zero — so it reads its own Int case.
+     */
+    static long integerArg(Object v, String notNumber, String notInteger) {
+        if (v instanceof Long) {
+            return (Long)v;
+        }
+        if (v instanceof Double) {
+            double raw = (Double)v;
+            if (!Double.isNaN(raw) && !Double.isInfinite(raw) &&
+                raw == Math.floor(raw) && raw >= -TWO_TO_THE_63 &&
+                raw < TWO_TO_THE_63) {
+                return (long)raw;
+            }
+            throw new LoxError(notInteger);
+        }
+        throw new LoxError(notNumber);
     }
 
     // The limit of connect in nanoseconds, never below 1. A limit that is

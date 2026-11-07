@@ -489,25 +489,22 @@ public final class LoxSocket {
 
     /**
      * A non-negative integer byte count, mirroring native net_api.cpp's
-     * asByteCount. Java has no separate integer type, so an integral Double in
-     * the int range is the accepted shape.
+     * asByteCount. The count is an Int (a Long here) or an integer-valued
+     * Number (a Double here), per spec/05-stdlib.md, "Integer arguments".
      */
     static int checkByteCountArg(Object v, String method) {
         return checkByteCountArg(v, method, 0);
     }
 
     static int checkByteCountArg(Object v, String method, int minimum) {
-        if (!(v instanceof Double)) {
-            throw new LoxError(method + "() byte count must be a number.");
+        String notInteger = method +
+            "() byte count must be an integer in range " + minimum +
+            " to 2147483647.";
+        long n = LoxRuntime.integerArg(
+            v, method + "() byte count must be a number.", notInteger);
+        if (n < minimum || n > Integer.MAX_VALUE) {
+            throw new LoxError(notInteger);
         }
-        double raw = (Double)v;
-        if (Double.isNaN(raw) || Double.isInfinite(raw) ||
-            raw != Math.floor(raw) || raw < minimum ||
-            raw > Integer.MAX_VALUE) {
-            throw new LoxError(method +
-                "() byte count must be an integer in range " + minimum +
-                " to 2147483647.");
-        }
-        return (int)raw;
+        return (int)n;
     }
 }

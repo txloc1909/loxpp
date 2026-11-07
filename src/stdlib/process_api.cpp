@@ -1,4 +1,5 @@
 #include "process_api.h"
+#include "integer_arg.h"
 #include "stdlib_context.h"
 #include "stream_io.h"
 #include "../container_objects.h"
@@ -52,24 +53,26 @@ static bool asStringList(const Value& v, std::vector<std::string>& out) {
     return true;
 }
 
-// Validate a byte-count argument. `n` must be a non-negative integer Number.
+// Validate a byte-count argument. `n` must be an integer from 0 through
+// INT_MAX, as an Int or an integer-valued Number (spec/05-stdlib.md, Integer
+// arguments).
 static bool asByteCount(const Value& v, const char* method, size_t& out) {
-    if (!is<Number>(v)) {
+    Int n = 0;
+    const IntegerArgRead read = readIntegerArg(v, n);
+    if (read == IntegerArgRead::NotNumber) {
         std::string msg =
             std::string(method) + "() byte count must be a number.";
         nativeRuntimeError(msg.c_str());
         return false;
     }
-    double raw = as<Number>(v);
-    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < 0 ||
-        raw > static_cast<double>(INT_MAX)) {
+    if (read != IntegerArgRead::Ok || n < 0 || n > INT_MAX) {
         std::string msg =
             std::string(method) +
             "() byte count must be an integer in range 0 to 2147483647.";
         nativeRuntimeError(msg.c_str());
         return false;
     }
-    out = static_cast<size_t>(raw);
+    out = static_cast<size_t>(n);
     return true;
 }
 

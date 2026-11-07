@@ -1,0 +1,15 @@
+// The count of Process.read_bytes() must be an integer, and an integer is an
+// Int or an integer-valued Number (spec/05-stdlib.md, Integer arguments). The
+// child is /bin/cat, which echoes the bytes, so the Int count reads the same
+// two bytes as the Number count. A fractional count is a runtime error that
+// halts the program.
+// COVERS: integer-arg process-read-bytes
+// STATUS: error
+// TIMEOUT: 30
+// CHECK: ab
+var p = spawn("/bin/cat", []);
+p.write("abcdef");
+p.close_stdin();
+print p.read_bytes(2i);
+p.read_bytes(2.5);
+print "unreachable";
