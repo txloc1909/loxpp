@@ -141,11 +141,11 @@ PROBES = [
     ("accept on a closed server",
      'var l = listen("127.0.0.1", 0); l.close(); try { l.accept(); } catch (e) { print e.kind; }',
      CATCHABLE, "SocketClosedError", "e.message"),
-    # mkdir below a regular file. A file as the parent is a fault for every
-    # user, root included, and the attempt leaves nothing behind.
-    ("mkdir below a regular file",
-     'var f = open("/tmp/loxpp-mkdir-cause-probe", "w"); f.close(); '
-     'try { mkdir("/tmp/loxpp-mkdir-cause-probe/child"); } catch (e) { print e.kind; }',
+    # mkdir below /dev/null, which can never be a directory: the call faults
+    # for every user, root included, and nothing can be left behind for a
+    # later run to find in place.
+    ("mkdir below a device that is not a directory",
+     'try { mkdir("/dev/null/loxpp-child"); } catch (e) { print e.kind; }',
      CATCHABLE, "DirectoryError", "e.message"),
     ("accept on a server whose accept side another task holds",
      'var l = listen("127.0.0.1", 0); fun a() { try { l.accept(); } catch (e) {} } task.spawn(a); yield; '
