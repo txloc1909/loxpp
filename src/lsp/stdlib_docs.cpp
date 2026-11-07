@@ -11,7 +11,7 @@ namespace {
 // Globals: src/stdlib/globals.cpp, file_api.cpp, os_api.cpp, reflect_api.cpp,
 // math_module.cpp, integer_module.cpp. Descriptions condensed from
 // spec/05-stdlib.md.
-constexpr std::array<StdlibEntry, 32> kGlobals = {{
+constexpr std::array<StdlibEntry, 33> kGlobals = {{
     {"clock", "clock() -> Number", 0,
      "Elapsed processor time in seconds. Use for measuring durations."},
     {"input", "input() -> String | Nil", 0,
@@ -45,6 +45,9 @@ constexpr std::array<StdlibEntry, 32> kGlobals = {{
      "True when `path` exists and is a regular file."},
     {"stat", "stat(path) -> Map | Nil", 1,
      "A map of file metadata (is_dir, is_file, size, mtime), or nil."},
+    {"mkdir", "mkdir(path, \"p\") -> Nil", kArityVariadic,
+     "Creates the directory at `path`; the argument \"p\" also makes missing "
+     "parents, as mkdir -p does. Raises DirectoryError when it cannot."},
     {"connect", "connect(host, port) -> Socket", 2,
      "Opens a TCP connection and returns a connected Socket."},
     {"connect_within", "connect_within(host, port, seconds) -> Socket", 3,

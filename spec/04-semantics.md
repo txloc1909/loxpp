@@ -2258,6 +2258,7 @@ whose text is implementation-defined.
 | `yield` in a deferred call | `fun note() { var v = yield 1; } fun g() { defer note(); } g();` | `"YieldAcrossNativeError"` |
 | A Socket call on a closed Socket, a write after `close_write()`, or `accept()` on a closed Server | `var l = listen("127.0.0.1", 0); l.close(); l.accept();` | `"SocketClosedError"` |
 | A failure of the network in `connect`, `listen`, `accept`, or a Socket read or write | `var l = listen("127.0.0.1", 0); var p = l.port(); l.close(); connect("127.0.0.1", p);` | `"NetworkError"` |
+| `mkdir` cannot create the directory | `mkdir("/no/such/parent/dir");` | `"DirectoryError"` |
 
 **The two map-key rows above cover an index read or write, a map literal,
 and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native

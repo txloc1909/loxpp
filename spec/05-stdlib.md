@@ -438,6 +438,38 @@ report whole seconds, milliseconds, or finer.
 
 ---
 
+## `mkdir(path) → Nil`, `mkdir(path, "p") → Nil`
+
+Creates the directory at `path`. Both arguments must be Strings; any other
+type is a runtime error.
+
+With one argument, `mkdir` creates one directory. It does not create a
+missing parent, and it does not succeed when `path` already exists.
+
+With the second argument `"p"`, `mkdir` creates `path` and every missing
+parent of it, as `mkdir -p` does. It does nothing when `path` is already a
+directory. Any other second argument is a runtime error.
+
+When the directory cannot be created — because a parent is missing in the
+one-argument form, because `path` exists and is not a directory, because
+the program has no permission, or for any other reason — the call raises a
+catchable fault of kind `DirectoryError` ([§04-semantics, Runtime
+Errors](04-semantics.md#runtime-errors)).
+
+```lox
+mkdir("/tmp/loxpp-cache/objects", "p");   // makes /tmp/loxpp-cache too
+try {
+    mkdir("/no/such/parent/dir");
+} catch (e) {
+    print e.kind;                          // DirectoryError
+}
+```
+
+**Arity:** 1 or 2  
+**Returns:** Nil
+
+---
+
 ## `open(path, mode) → File`
 
 Opens the file at `path` and returns a File value. Both arguments must be
