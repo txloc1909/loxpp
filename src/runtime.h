@@ -1023,6 +1023,22 @@ class Runtime {
     // runs until the main task ends; another worker until its last task
     // ends or the program ends.
     InterpretResult schedule();
+    // The frames, handlers, stack and open upvalues in this Runtime are the
+    // working set of the running task; the task's own copy lives in the
+    // snapshot of its coroutine (docs/decisions/
+    // concurrency-semantics-grounding.md, "Where the task-owned state
+    // lives"). WorkingSetMark is the working set with no task in it, as the
+    // scheduler finds it, and checkWorkingSetEmpty() ends the process if a
+    // task that ran left anything above that mark.
+    struct WorkingSetMark {
+        int frameCount;
+        std::size_t handlerCount;
+        Value* stackTop;
+    };
+    [[nodiscard]] WorkingSetMark workingSetMark() const {
+        return {m_frameCount, m_handlerStack.size(), stackTop};
+    }
+    void checkWorkingSetEmpty(const WorkingSetMark& mark) const;
     // Delivers every envelope in the inbound queue to its task's mailbox.
     void drainInbox();
     enum class WaitResult : std::uint8_t { Work, Deadlock, Ended };
@@ -1130,12 +1146,13 @@ class Runtime {
     class SynchronousRun {
       public:
         explicit SynchronousRun(Runtime& rt)
-            : m_rt(rt), m_savedResumable(rt.m_resumableMode) {
+            : m_rt(rt), m_owned(*rt.m_owned),
+              m_savedResumable(rt.m_resumableMode) {
             m_rt.m_resumableMode = false;
-            ++m_rt.m_reentrantRunDepth;
+            ++m_owned.reentrantRunDepth;
         }
         ~SynchronousRun() {
-            --m_rt.m_reentrantRunDepth;
+            --m_owned.reentrantRunDepth;
             m_rt.m_resumableMode = m_savedResumable;
         }
         SynchronousRun(const SynchronousRun&) = delete;
@@ -1143,6 +1160,7 @@ class Runtime {
 
       private:
         Runtime& m_rt;
+        TaskOwned& m_owned;
         bool m_savedResumable;
     };
 
@@ -1497,7 +1515,7 @@ class Runtime {
     // driver owns the call. callNative() clears it (and restores it) around a
     // native's own body, so Lox re-entered from a native runs non-resumably:
     // a YIELD there is a native-callback error, exactly as native's own
-    // m_reentrantRunDepth check makes it.
+    // reentrantRunDepth check makes it.
     bool m_resumableMode{false};
 
     // Set by invokeCallableFromNative() when a native's re-entrant call did
@@ -1515,13 +1533,6 @@ class Runtime {
     // currently executing. Saved/restored around each callNative() so a native
     // re-entering the VM judges a caught throw against the right boundary.
     int m_nativeStopAtFrameCount{0};
-
-    // Number of C++ re-entrant runs currently on the native stack — every
-    // runReentrantFrame() and runPushedFrameToCompletion() invocation, and
-    // every SynchronousRun. A Lox frame inside one of these cannot
-    // be captured by a coroutine snapshot: its C++ continuation would be
-    // lost. Op::YIELD raises YieldAcrossNativeError while this is nonzero.
-    int m_reentrantRunDepth{0};
 
     // The enclosing run()'s boundary for the canonical stringify in progress,
     // and the outcome of a __str__ dispatch inside it. stringifyObj

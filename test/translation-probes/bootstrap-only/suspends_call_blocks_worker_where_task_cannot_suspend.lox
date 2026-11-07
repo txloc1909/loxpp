@@ -1,6 +1,6 @@
 // A call of class suspends blocks the worker where the task cannot suspend
 // (spec/05-stdlib.md, "Blocking calls"). The bootstrap interpreter runs every
-// worker on one host thread, so a task that is parked there lets the other
+// worker on one host thread, so a task that waits there lets the other
 // tasks of its worker run, and a worker that is blocked does not. A process
 // outside the program ends each wait. So the output tells the two apart: the
 // "checker ran" line comes after the line of the blocked call, never before.

@@ -5,7 +5,7 @@
 // an empty mailbox, so the call raises YieldAcrossNativeError, and `t1` catches it.
 // `t1` then calls task.receive() outside the context, and it waits: the call does
 // not raise. Main wakes `t2` and then `t1`, and each task has its own message. A
-// task that leaves the context marked, or that parks in it, prints another line.
+// task that leaves the context marked, or that suspends in it, prints another line.
 // STATUS: ok
 // TIMEOUT: 30
 // CHECK: t1 str: YieldAcrossNativeError

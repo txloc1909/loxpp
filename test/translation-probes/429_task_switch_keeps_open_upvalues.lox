@@ -1,0 +1,32 @@
+// A task switch keeps the open upvalues of each task (spec/04-semantics.md,
+// The Task Machine, the table of task-owned state: the call frames, with
+// their locals). Each task makes a closure over a local of its own frame, and
+// waits in task.receive() while that local is still open. After the switch
+// it changes the local through the closure and reads it through the frame.
+// Main wakes `t2` first.
+// STATUS: ok
+// TIMEOUT: 30
+// CHECK: t2: 21
+// CHECK: t1: 11
+var me = task.self();
+fun work(tag, start) {
+    var n = start;
+    fun bump() { n = n + 1; }
+    task.receive();
+    bump();
+    return tag + ": " + str(n);
+}
+fun t1() { task.send(me, work("t1", 10)); }
+fun t2() { task.send(me, work("t2", 20)); }
+var h1 = task.spawn(t1);
+var h2 = task.spawn(t2);
+yield;
+task.send(h2, "go");
+task.send(h1, "go");
+for (var i = 0; i < 2; i = i + 1) {
+    try {
+        print task.receive_within(5);
+    } catch (e) {
+        print "missing: " + e.kind;
+    }
+}

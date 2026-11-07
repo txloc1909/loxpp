@@ -7,8 +7,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * A Socket that parked and that the program never closes must not keep a
- * selector key after its last parked call ends, and it must park again.
+ * A Socket that waited and that the program never closes must not keep a
+ * selector key after its last waiting call ends, and it must wait again.
  */
 public final class SelectorKeyTest {
     private static final Object[][] NO_UPVALUES = new Object[0][];
@@ -35,8 +35,8 @@ public final class SelectorKeyTest {
         dog.start();
 
         checkDroppedSocketsKeepNoKey();
-        checkSocketParksAgainAfterItsKeyWentAway();
-        checkSocketParksAgainWhileAnotherSocketWaits();
+        checkSocketWaitsAgainAfterItsKeyWentAway();
+        checkSocketWaitsAgainWhileAnotherSocketWaits();
         checkAcceptLoopWhileAnotherSocketWaits();
         checkReadWakeKeepsTheWriteWait();
         checkCloseWriteDropsTheKeyOfTheOnlyWait();
@@ -71,7 +71,7 @@ public final class SelectorKeyTest {
         }
     }
 
-    // Each reader parks until its line arrives. Neither end is closed.
+    // Each reader waits until its line arrives. Neither end is closed.
     private static void checkDroppedSocketsKeepNoKey() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         int maxDuring = 0;
@@ -82,7 +82,7 @@ public final class SelectorKeyTest {
                 pair[1].readline();
                 done[0] = true;
             }));
-            LoxOps.yield(null); // the reader parks
+            LoxOps.yield(null); // the reader waits
             pair[0].writeline("x");
             yieldUntil(done);
             maxDuring = Math.max(maxDuring,
@@ -94,8 +94,8 @@ public final class SelectorKeyTest {
         server.close();
     }
 
-    // The same socket parks, wakes, and parks again; each park registers anew.
-    private static void checkSocketParksAgainAfterItsKeyWentAway() {
+    // The same socket waits, wakes, and waits again; each wait registers anew.
+    private static void checkSocketWaitsAgainAfterItsKeyWentAway() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         LoxSocket[] pair = connectedPair(server);
         String[] got = new String[3];
@@ -107,26 +107,26 @@ public final class SelectorKeyTest {
             done[0] = true;
         }));
         for (int i = 0; i < got.length; i++) {
-            LoxOps.yield(null); // the reader parks
+            LoxOps.yield(null); // the reader waits
             pair[0].writeline("line" + i);
             while (got[i] == null) {
                 LoxOps.yield(null);
             }
         }
         yieldUntil(done);
-        checkEquals("line0", got[0], "the first park reads its line");
-        checkEquals("line1", got[1], "the second park reads its line");
-        checkEquals("line2", got[2], "the third park reads its line");
+        checkEquals("line0", got[0], "the first wait reads its line");
+        checkEquals("line1", got[1], "the second wait reads its line");
+        checkEquals("line2", got[2], "the third wait reads its line");
         checkEquals(0, LoxWorker.current().selectorKeyCount(),
-                    "no key stays after the last park");
+                    "no key stays after the last wait");
         pair[0].close();
         pair[1].close();
         server.close();
     }
 
-    // Parks a reader on a second Socket that gets no data until the caller
-    // closes it, so the poller always holds one wait.
-    private static LoxSocket[] parkBystander(LoxServer server) {
+    // Makes a reader wait on a second Socket that gets no data until the
+    // caller closes it, so the poller always holds one wait.
+    private static LoxSocket[] waitingBystander(LoxServer server) {
         LoxSocket[] pair = connectedPair(server);
         task("spawn", fn("bystander", () -> {
             try {
@@ -140,11 +140,11 @@ public final class SelectorKeyTest {
     }
 
     // The main task waits for a message, so no task runs between the wake of
-    // the reader and its next park. The key of the first Socket is cancelled
+    // the reader and its next wait. The key of the first Socket is cancelled
     // while the bystander still waits, so no select flushes it before then.
-    private static void checkSocketParksAgainWhileAnotherSocketWaits() {
+    private static void checkSocketWaitsAgainWhileAnotherSocketWaits() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] bystander = parkBystander(server);
+        LoxSocket[] bystander = waitingBystander(server);
         LoxSocket[] pair = connectedPair(server);
         Object me = task("self");
         String[] got = new String[3];
@@ -155,11 +155,11 @@ public final class SelectorKeyTest {
             }
         }));
         for (int i = 0; i < got.length; i++) {
-            LoxOps.yield(null); // the reader parks
+            LoxOps.yield(null); // the reader waits
             pair[0].writeline("line" + i);
             task("receive");
             checkEquals("line" + i, got[i],
-                        "park " + i + " reads its line while a bystander waits");
+                        "wait " + i + " reads its line while a bystander waits");
         }
         checkEquals(1, LoxWorker.current().selectorKeyCount(),
                     "only the bystander keeps a key");
@@ -171,10 +171,10 @@ public final class SelectorKeyTest {
         server.close();
     }
 
-    // The accept loop parks on the same Server again and again.
+    // The accept loop waits on the same Server again and again.
     private static void checkAcceptLoopWhileAnotherSocketWaits() {
         LoxServer bystanderServer = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] bystander = parkBystander(bystanderServer);
+        LoxSocket[] bystander = waitingBystander(bystanderServer);
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         Object me = task("self");
         int[] accepted = {0};
@@ -186,7 +186,7 @@ public final class SelectorKeyTest {
             }
         }));
         for (int i = 0; i < SOCKETS; i++) {
-            LoxOps.yield(null); // the acceptor parks
+            LoxOps.yield(null); // the acceptor waits
             LoxSocket.connect("127.0.0.1", (int)server.port()).close();
             task("receive");
         }
@@ -201,7 +201,7 @@ public final class SelectorKeyTest {
     }
 
     // close_write() ends the only wait of the poller. No select follows while
-    // nothing waits, and the program may never park again, so the key of the
+    // nothing waits, and the program may never wait again, so the key of the
     // wait it ended must go at the close itself.
     private static void checkCloseWriteDropsTheKeyOfTheOnlyWait() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
@@ -221,9 +221,9 @@ public final class SelectorKeyTest {
             }
             done[0] = true;
         }));
-        LoxOps.yield(null); // the writer fills the send buffer and parks
+        LoxOps.yield(null); // the writer fills the send buffer and waits
         checkEquals(1, LoxWorker.current().selectorKeyCount(),
-                    "the parked write holds its selector key");
+                    "the waiting write holds its selector key");
         pair[1].closeWrite();
         checkEquals(0, LoxWorker.current().selectorKeyCount(),
                     "close_write() drops the key of the wait it ended");
@@ -251,14 +251,14 @@ public final class SelectorKeyTest {
             pair[1].write(big);
             task("send", me, "wrote");
         }));
-        LoxOps.yield(null); // the reader parks
-        LoxOps.yield(null); // the writer fills the send buffer and parks
+        LoxOps.yield(null); // the reader waits
+        LoxOps.yield(null); // the writer fills the send buffer and waits
         pair[0].writeline("go");
         task("receive");
         Object bytes = pair[0].readBytes(size);
         task("receive");
         checkEquals(size, ((String)bytes).length(),
-                    "the parked write finishes once the peer reads");
+                    "the waiting write finishes once the peer reads");
         pair[0].close();
         pair[1].close();
         server.close();

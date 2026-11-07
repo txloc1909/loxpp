@@ -921,7 +921,7 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 RAISE_ERROR("BUG: yield with no task running.");
                 return InterpretResult::RUNTIME_ERROR;
             }
-            if (m_rt.m_reentrantRunDepth >
+            if (m_rt.m_owned->reentrantRunDepth >
                 m_rt.m_currentCoroutine->resumeReentrantDepth) {
                 // A native (or a __str__/__hash__/__eq__ method invoked by
                 // one, or a defer drain) was entered inside this coroutine

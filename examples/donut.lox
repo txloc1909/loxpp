@@ -1,0 +1,182 @@
+// donut.lox — the spinning donut of donut.c, ported to Lox++.
+//
+// The original is 19 lines of golfed C: https://github.com/limiteci/donut.c
+// This port keeps its geometry, its z-buffer, its twelve-step luminance ramp,
+// and its 79-column frame, and spells out what the original leaves implicit.
+//
+// The frame is 90 x 314 samples of a torus. Each sample is projected to a
+// pixel; the sample nearest to the viewer wins the pixel, and the surface
+// normal at that sample picks the character through the ramp.
+//
+// No sin or cos is evaluated. donut.c turns the two angles of a sample with a
+// small step along the unit circle and one Newton step that pulls the pair
+// back to unit length (see `rotate`), so every backend computes the same
+// doubles and a frame is identical on all of them.
+//
+// The original spins forever. This port renders one frame by default, because
+// a program in examples/ runs in the gates that walk the corpus, and a traced
+// debug build prints an instruction trace for every one of the 28,260 samples.
+// The file carries no CHECK lines for the same reason: a CHECK line makes
+// tools/check_examples.py run the file in that traced build.
+// The spin is one argument away:
+//
+//   loxpp examples/donut.lox               render one frame
+//   loxpp examples/donut.lox --frames 200  render 200 frames, in place
+//   loxpp examples/donut.lox --forever     spin until interrupted
+//
+// A frame is 22 lines of 79 characters, and the last line ends with the
+// cursor-up command that redraws the same 22 lines on the next frame.
+
+var WIDTH = 80;
+var HEIGHT = 22;
+var PIXELS = WIDTH * HEIGHT;
+var RAMP = ".,-~:;=!*#$@";
+var ROW_STEP = 0.07;
+var COLUMN_STEP = 0.02;
+var SPIN_STEP = 0.04;
+var TILT_STEP = 0.02;
+var FRAME_DELAY = 0.015;
+var CURSOR_UP = chr(27) + "[22A";
+
+// Truncates toward zero, as C's (int) cast does, and stays a Number: an
+// integer-valued Number is a valid index, and an Int mixed with a Number is a
+// fault. math.floor alone would round the wrong way for the coordinates that
+// fall off the left and top edges.
+fun trunc(v) {
+    if (v < 0) {
+        return math.ceil(v);
+    }
+    return math.floor(v);
+}
+
+// donut.c's R macro. The step is accurate only for the small angles the
+// program uses, and the Newton step is what keeps the drift from growing.
+fun rotate(t, p) {
+    var f = p[0];
+    p[0] = f - t * p[1];
+    p[1] = p[1] + t * f;
+    f = (3 - p[0] * p[0] - p[1] * p[1]) / 2;
+    p[0] = p[0] * f;
+    p[1] = p[1] * f;
+}
+
+// Renders one frame as a list of 22 lines. (cosA, sinA) is the rotation of the
+// donut about the vertical axis and (cosB, sinB) its tilt; the sample angles
+// (cosI, sinI) and (cosJ, sinJ) walk the two circles of the torus.
+fun renderFrame(cosA, sinA, cosB, sinB) {
+    var depth = [];
+    var pixels = [];
+    for (var k = 0; k < PIXELS; k = k + 1) {
+        depth.append(0);
+        pixels.append(" ");
+    }
+
+    var cosJ = 1;
+    var sinJ = 0;
+    for (var j = 0; j < 90; j = j + 1) {
+        var angle = [1, 0];
+        for (var i = 0; i < 314; i = i + 1) {
+            var cosI = angle[0];
+            var sinI = angle[1];
+            var ring = cosJ + 2;
+            var d = 1 / (sinI * ring * sinA + sinJ * cosA + 5);
+            var t = sinI * ring * cosA - sinJ * sinA;
+            var x = trunc(40 + 30 * d * (cosI * ring * sinB - t * cosB));
+            var y = trunc(12 + 15 * d * (cosI * ring * cosB + t * sinB));
+            var o = x + WIDTH * y;
+            var n = trunc(8 * ((sinJ * sinA - sinI * cosJ * cosA) * sinB
+                               - sinI * cosJ * sinA - sinJ * cosA - cosI * cosJ * cosB));
+            // The frame bounds come first: a sample outside the frame has an
+            // index outside the buffers, so the depth read must not happen.
+            if (y < HEIGHT and y > 0 and x > 0 and x < WIDTH and d > depth[o]) {
+                depth[o] = d;
+                // A luminance of zero or less is the ramp's darkest step. The
+                // luminance of these angles stays inside the ramp's twelve
+                // steps, and one past the end would be a loud fault here.
+                var step = n;
+                if (step < 0) {
+                    step = 0;
+                }
+                pixels[o] = RAMP[step];
+            }
+            rotate(COLUMN_STEP, angle);
+        }
+        var tilt = [cosJ, sinJ];
+        rotate(ROW_STEP, tilt);
+        cosJ = tilt[0];
+        sinJ = tilt[1];
+    }
+
+    var lines = [];
+    for (var r = 0; r < HEIGHT; r = r + 1) {
+        var line = "";
+        // Column 0 of each row is not printed: donut.c writes a newline in its
+        // place, which keeps every line 79 characters wide so that a frame does
+        // not wrap on an 80-column terminal.
+        for (var c = 1; c < WIDTH; c = c + 1) {
+            line = line + pixels[r * WIDTH + c];
+        }
+        lines.append(line);
+    }
+    return lines;
+}
+
+// donut.c moves the cursor up 23 lines after a frame that starts with a
+// newline. This port writes 22 lines with print, each of which print ends with
+// a newline, so the cursor-up goes at the end of the last line and print's own
+// newline brings the cursor back to the first line of the frame.
+fun draw(lines) {
+    for (var r = 0; r < HEIGHT; r = r + 1) {
+        var line = lines[r];
+        if (r == HEIGHT - 1) {
+            line = line + CURSOR_UP;
+        }
+        print line;
+    }
+}
+
+fun usage() {
+    print "usage: donut.lox [--frames N | --forever]";
+    exit(64);
+}
+
+fun main() {
+    var frames = 1i;
+    var forever = false;
+    var a = args();
+    var k = 0;
+    while (k < len(a)) {
+        if (a[k] == "--forever") {
+            forever = true;
+        } else if (a[k] == "--frames" and k + 1 < len(a)) {
+            frames = int(a[k + 1]);
+            k = k + 1;
+        } else {
+            usage();
+        }
+        k = k + 1;
+    }
+
+    var cosA = 1;
+    var sinA = 0;
+    var cosB = 1;
+    var sinB = 0;
+    var drawn = 0i;
+    while (forever or drawn < frames) {
+        draw(renderFrame(cosA, sinA, cosB, sinB));
+        var spin = [cosA, sinA];
+        rotate(SPIN_STEP, spin);
+        cosA = spin[0];
+        sinA = spin[1];
+        var tilt = [cosB, sinB];
+        rotate(TILT_STEP, tilt);
+        cosB = tilt[0];
+        sinB = tilt[1];
+        drawn = drawn + 1i;
+        if (forever or drawn < frames) {
+            sleep(FRAME_DELAY);
+        }
+    }
+}
+
+main();

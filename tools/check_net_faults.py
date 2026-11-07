@@ -15,8 +15,8 @@ Native (src/stdlib/net_api.cpp):
   - `setFault(out, KIND, ...)` records a catchable fault in the outcome of a
     read-side step. The caller raises it with `raiseNet(out.faultKind, ...)`
     where the task runs, or `failWait(task, out.faultKind, ...)` where the task
-    was parked. Those two pass a kind through and are not sites.
-  - `failWait(task, KIND, ...)` with a constant kind ends a parked call with a
+    was waiting. Those two pass a kind through and are not sites.
+  - `failWait(task, KIND, ...)` with a constant kind ends a waiting call with a
     catchable fault of that kind.
   - `writeStreamOrError(` must not appear: it is a halting fault, and the
     Socket write path uses `stepWrite` and `raiseNet`.

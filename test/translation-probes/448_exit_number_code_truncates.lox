@@ -1,6 +1,6 @@
 // A Number exit code is truncated toward zero (spec/05-stdlib.md, exit), so
 // 3.7 ends the program with code 3. The Int form of the same code is a
-// separate probe, 436.
+// separate probe, 447.
 // STATUS: error
 // EXIT: 3
 // CHECK: before

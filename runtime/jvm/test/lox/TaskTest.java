@@ -39,9 +39,9 @@ public final class TaskTest {
         checkReceiveInNativeCoroutineEntryRaises();
         checkReceiveInNativeCoroutineEntryWithMessage();
         checkReceiveUnderANativeResumeEntryRaises();
-        checkSleepParksOnlyTheTask();
+        checkSleepMakesOnlyTheTaskWait();
         checkSleepUnderACallbackBlocksTheWorker();
-        checkCloseWakesAParkedAccept();
+        checkCloseWakesAWaitingAccept();
         checkSendWakesAPollingWorker();
         checkReadyChannelNobodyWaitsOnDoesNotSpin();
         checkWritableChannelNobodyWaitsOnDoesNotSpin();
@@ -278,7 +278,7 @@ public final class TaskTest {
         ((LoxCallable)globals.get("sleep")).call(new Object[] {seconds});
     }
 
-    private static void checkSleepParksOnlyTheTask() {
+    private static void checkSleepMakesOnlyTheTaskWait() {
         boolean[] ticked = {false};
         task("spawn", fn("ticker", () -> ticked[0] = true));
         long start = System.nanoTime();
@@ -302,7 +302,7 @@ public final class TaskTest {
         check(ticked[0], "the task runs once the sleep may suspend");
     }
 
-    private static void checkCloseWakesAParkedAccept() {
+    private static void checkCloseWakesAWaitingAccept() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         String[] kind = {null};
         task("spawn", fn("acceptor", () -> {
@@ -310,11 +310,11 @@ public final class TaskTest {
             kind[0] = err == null ? "none" : kindOf(err);
         }));
         sleepSeconds(0.05);
-        check(kind[0] == null, "accept parks while no connection arrives");
+        check(kind[0] == null, "accept waits while no connection arrives");
         server.close();
         sleepSeconds(0.05);
         checkEquals("SocketClosedError", kind[0],
-                    "a close raises the closed fault in the parked accept");
+                    "a close raises the closed fault in the waiting accept");
     }
 
     // The state of the worker that a probe task watches, set before it starts.
@@ -418,9 +418,9 @@ public final class TaskTest {
         return new LoxSocket[] {client, (LoxSocket)server.accept()};
     }
 
-    // Parks a task of the main worker in readline on a socket that gets no
-    // data, so the worker's poller has a wait and no timer.
-    private static LoxSocket[] parkReader(LoxServer server) {
+    // Makes a task of the main worker wait in readline on a socket that gets
+    // no data, so the worker's poller has a wait and no timer.
+    private static LoxSocket[] waitingReader(LoxServer server) {
         LoxSocket[] pair = connectedPair(server);
         task("spawn", fn("reader", () -> {
             raised(() -> pair[1].readline());
@@ -433,7 +433,7 @@ public final class TaskTest {
     // poller must end that sleep (spec/04-semantics.md, task.send).
     private static void checkSendWakesAPollingWorker() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] idle = parkReader(server);
+        LoxSocket[] idle = waitingReader(server);
         watched = LoxWorker.current();
         spinCheck = false;
         sawPollingWorker = false;
@@ -471,8 +471,8 @@ public final class TaskTest {
     // poller from sleeping: the interest of a drained key is reset.
     private static void checkReadyChannelNobodyWaitsOnDoesNotSpin() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] idle = parkReader(server);
-        LoxSocket[] ended = parkReader(server);
+        LoxSocket[] idle = waitingReader(server);
+        LoxSocket[] ended = waitingReader(server);
         // The peer of the second pair reads end of stream, which stays ready
         // after its reader returned.
         ended[0].closeWrite();
@@ -487,17 +487,17 @@ public final class TaskTest {
     // interest of a drained key must be reset or the poller spins.
     private static void checkWritableChannelNobodyWaitsOnDoesNotSpin() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] idle = parkReader(server);
+        LoxSocket[] idle = waitingReader(server);
         LoxSocket[] pair = connectedPair(server);
         // Larger than the send and receive buffers of the pair together, so
-        // the writer parks in OP_WRITE until the main task reads.
+        // the writer waits in OP_WRITE until the main task reads.
         final int size = 1 << 25;
         task("spawn", fn("writer", () -> {
             pair[0].write("x".repeat(size));
         }));
         LoxOps.yield(null);
         checkEquals(size, ((String)pair[1].readBytes(size)).length(),
-                    "the reader gets every byte of the parked write");
+                    "the reader gets every byte of the waiting write");
         LoxOps.yield(null); // the writer returns
         watchForSpin("a writable channel that no task waits on lets the poller sleep",
                      "a writable channel that no task waits on does not wake the poller");
