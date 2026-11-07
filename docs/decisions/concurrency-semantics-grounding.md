@@ -385,11 +385,11 @@ working set holds nothing of any task, and the scheduler checks this after
 each task runs.
 
 **Why the working set does not move into the record.** The frame array has
-1024 frames and a reserve, the stack has 16384 values (128 KB), and six more
-arrays are parallel to the frames. One copy of each for every task costs that
-memory per task. A pointer to the arrays of the running task, swapped at each
-switch, puts one more read on every call, return and handler access. The JVM
-measured that cost: with `frameCount` in the task record, fib(37) three times
-took 1.81 s, against 1.62 s with it in `LoxWorker` (8% slower). So the JVM
-`frameCount` also stays in its worker, as the working set of the running
-task.
+1024 frames and a reserve, the stack has 16384 values (128 KB), and four more
+arrays are parallel to the frames (five with `LOXPP_PROFILE`). One copy of
+each for every task costs that memory per task. A pointer to the arrays of
+the running task, swapped at each switch, puts one more read on every call,
+return and handler access. The JVM measured that cost: with `frameCount` in
+the task record, fib(37) three times took 1.81 s, against 1.62 s with it in
+`LoxWorker` (8% slower). So the JVM `frameCount` also stays in its worker, as
+the working set of the running task.
