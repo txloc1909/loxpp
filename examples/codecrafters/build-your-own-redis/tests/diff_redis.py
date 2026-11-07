@@ -58,6 +58,39 @@ def both_ends_script():
     return script
 
 
+
+def random_stream_script():
+    """XADD with IDs that are good, too low or partly given, and XRANGE and
+    XREAD with random bounds and counts, in a fixed random order."""
+    rng = random.Random(1112)
+    script = []
+    for _ in range(400):
+        key = "st%d" % rng.randrange(3)
+        op = rng.randrange(5)
+        ms, seq = rng.randrange(0, 40), rng.randrange(0, 4)
+        if op == 0:
+            fields = []
+            for i in range(rng.randrange(1, 4)):
+                fields += ["f%d" % i, "v%d" % rng.randrange(100)]
+            idarg = rng.choice(["%d-%d" % (ms, seq), "%d" % ms, "%d-*" % ms])
+            script.append(["XADD", key, idarg] + fields)
+        elif op in (1, 2):
+            lo = rng.choice(["-", "+", "%d" % ms, "%d-%d" % (ms, seq)])
+            hi = rng.choice(["-", "+", "%d" % (ms + 5), "%d-%d" % (ms + 5, seq)])
+            cmd = ["XRANGE", key, lo, hi]
+            if rng.randrange(3) == 0:
+                cmd += ["COUNT", str(rng.randrange(-1, 4))]
+            script.append(cmd)
+        else:
+            keys = ["st%d" % rng.randrange(3) for _ in range(rng.randrange(1, 3))]
+            ids = [rng.choice(["0", "$", "%d-%d" % (ms, seq), "%d" % ms]) for _ in keys]
+            cmd = ["XREAD"]
+            if rng.randrange(3) == 0:
+                cmd += ["COUNT", str(rng.randrange(-1, 4))]
+            script.append(cmd + ["STREAMS"] + keys + ids)
+    return script
+
+
 SCRIPTS = {
     "base": [
         ("ping", [["PING"], ["ping"], ["PING", "hello"]]),
@@ -104,6 +137,63 @@ SCRIPTS = {
                    ["PING", "a", "b"]]),
         ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
                      ["NOSUCH", "x" * 200, "y"], ["PING"]]),
+    ],
+    "streams": [
+        ("xadd-ids", [
+            ["XADD", "s", "1-1", "a", "b"], ["XADD", "s", "1-2", "c", "d"],
+            ["XADD", "s", "2", "e", "f"], ["XADD", "s", "0-0", "x", "y"],
+            ["XADD", "n", "0-0", "x", "y"], ["TYPE", "n"],
+            ["XADD", "s", "1-1", "x", "y"], ["XADD", "s", "abc", "x", "y"],
+            ["XADD", "s", "3-x", "x", "y"], ["XADD", "s", "-1", "x", "y"],
+            ["XADD", "s", "3-", "x", "y"], ["XADD", "s", "3-4-5", "x", "y"],
+            ["XADD", "s", "5-*", "x", "y"], ["XADD", "s", "5-*", "x", "y"],
+            ["XADD", "s", "4-*", "x", "y"], ["XADD", "z", "0-*", "a", "b"],
+            ["XADD", "s", "x" * 100, "a", "b"], ["XADD", "s", "3", "x"],
+            ["XADD", "s"], ["XADD", "s", "9"], ["TYPE", "s"], ["TYPE", "z"],
+        ]),
+        ("xrange", [
+            ["XADD", "s", "1-1", "a", "b"], ["XADD", "s", "1-2", "c", "d"],
+            ["XADD", "s", "2-0", "e", "f", "g", "h"], ["XADD", "s", "5-1", "x", "y"],
+            ["XRANGE", "s", "-", "+"], ["XRANGE", "s", "1", "1"],
+            ["XRANGE", "s", "1-2", "5"], ["XRANGE", "s", "2", "1"],
+            ["XRANGE", "s", "+", "-"], ["XRANGE", "s", "-", "-"],
+            ["XRANGE", "s", "+", "+"], ["XRANGE", "s", "5-1", "5-1"],
+            ["XRANGE", "s", "-", "+", "COUNT", "2"], ["XRANGE", "s", "-", "+", "count", "0"],
+            ["XRANGE", "s", "-", "+", "COUNT", "-1"], ["XRANGE", "s", "-", "+", "COUNT", "x"],
+            ["XRANGE", "s", "-", "+", "FOO", "1"], ["XRANGE", "s", "-", "+", "COUNT"],
+            ["XRANGE", "s", "-"], ["XRANGE", "s", "x", "+"], ["XRANGE", "s", "1-1-1", "+"],
+            ["XRANGE", "missing", "-", "+"],
+        ]),
+        ("xread", [
+            ["XADD", "s", "1-1", "a", "b"], ["XADD", "s", "1-2", "c", "d"],
+            ["XADD", "t", "3-0", "e", "f"],
+            ["XREAD", "STREAMS", "s", "0"], ["XREAD", "streams", "s", "1-1"],
+            ["XREAD", "STREAMS", "s", "1-2"], ["XREAD", "STREAMS", "s", "$"],
+            ["XREAD", "COUNT", "1", "STREAMS", "s", "t", "0", "0"],
+            ["XREAD", "COUNT", "0", "STREAMS", "s", "0"],
+            ["XREAD", "COUNT", "-1", "STREAMS", "s", "0"],
+            ["XREAD", "COUNT", "1", "COUNT", "2", "STREAMS", "s", "0"],
+            ["XREAD", "STREAMS", "s", "missing", "0", "0"],
+            ["XREAD", "STREAMS", "missing", "0"],
+            ["XREAD", "STREAMS", "s", "s", "0", "1-1"],
+            ["XREAD", "BLOCK", "10", "STREAMS", "s", "0"],
+            ["XREAD", "BLOCK", "10", "STREAMS", "s", "$"],
+            ["XREAD", "BLOCK", "-1", "STREAMS", "s", "0"],
+            ["XREAD", "BLOCK", "x", "STREAMS", "s", "0"],
+            ["XREAD", "BLOCK", "1.5", "STREAMS", "s", "0"],
+            ["XREAD", "COUNT", "x", "STREAMS", "s", "0"],
+            ["XREAD", "FOO", "STREAMS", "s", "0"], ["XREAD", "COUNT", "1", "s", "0"],
+            ["XREAD", "STREAMS", "s", "t", "0"], ["XREAD", "STREAMS", "s", "x"],
+            ["XREAD", "STREAMS", "s"], ["XREAD", "s", "0"], ["XREAD"],
+        ]),
+        ("random-streams", random_stream_script()),
+        ("stream-errors", [
+            ["SET", "str", "v"], ["XADD", "str", "1", "a", "b"],
+            ["XRANGE", "str", "-", "+"], ["XREAD", "STREAMS", "str", "0"],
+            ["XADD", "st", "1", "a", "b"], ["GET", "st"], ["RPUSH", "st", "x"],
+            ["LLEN", "st"], ["TYPE", "str"], ["TYPE", "nope"], ["type", "st"],
+            ["TYPE"], ["TYPE", "a", "b"],
+        ]),
     ],
     "lists": [
         ("push-and-range", [

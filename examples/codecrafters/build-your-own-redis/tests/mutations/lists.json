@@ -41,8 +41,8 @@
  },
  {
   "name": "served key counted out twice",
-  "old": "        w.servedBy = key;\n",
-  "new": "",
+  "old": "        w.servedBy = key;\n        try {\n            task.send(w.handle, Msg.Served(key, value));",
+  "new": "        try {\n            task.send(w.handle, Msg.Served(key, value));",
   "cases": [
    "local: the second waiter gets the next push"
   ]
