@@ -281,15 +281,14 @@ CASES = [
     # callMethod on a variadic native (issue #1147): the bootstrap's own
     # arity gate for a forwarded native must skip arity -1, as the ordinary
     # call path does, or a native that accepts 1 or 2 arguments is refused.
-    # The parent is a regular file, so both calls fault for every user, root
-    # included, and they leave nothing behind.
+    # The parent is /dev/null, which can never be a directory, so both calls
+    # fault for every user, root included, and nothing is left behind for a
+    # later run to find in place.
     Case(
         "callmethod_variadic_native",
-        "var f = open(\"/tmp/loxpp-callmethod-mkdir-probe\", \"w\");\n"
-        "f.close();\n"
         "class C { init() { this.f = mkdir; } }\n"
-        "try { callMethod(C(), \"f\", \"/tmp/loxpp-callmethod-mkdir-probe/child\", \"p\"); } catch (e) { print e.kind; }\n"
-        "try { callMethod(C(), \"f\", \"/tmp/loxpp-callmethod-mkdir-probe/child\"); } catch (e) { print e.kind; }\n",
+        "try { callMethod(C(), \"f\", \"/dev/null/loxpp-child\", \"p\"); } catch (e) { print e.kind; }\n"
+        "try { callMethod(C(), \"f\", \"/dev/null/loxpp-child\"); } catch (e) { print e.kind; }\n",
     ),
     # Reflected methods (issue #508): a built-in left operand defers to the
     # right operand's __r*__ method, and to the right operand's __eq__ for
