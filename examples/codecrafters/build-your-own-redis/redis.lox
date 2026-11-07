@@ -217,6 +217,29 @@ class Bulks {
     }
 }
 
+// A reply of arrays of stream entries: head, then for each i the entries
+// froms[i] to tos[i] - 1 of streams[i], under the name keys[i] (XREAD) or
+// with no name (XRANGE, keys[i] is nil). A Stream only grows at its end, so
+// these entries do not change after the command: the command stays atomic
+// with no copy, and the session encodes and writes the entries in steps and
+// yields between the steps (writeSegments).
+class Segments {
+    init(head) {
+        this.head = head;
+        this.keys = [];
+        this.streams = [];
+        this.froms = [];
+        this.tos = [];
+    }
+
+    add(key, stream, from, to) {
+        this.keys.append(key);
+        this.streams.append(stream);
+        this.froms.append(from);
+        this.tos.append(to);
+    }
+}
+
 fun bulkArray(strings) {
     var items = [];
     for (var s in strings) {
@@ -244,8 +267,9 @@ enum Args { Cons(head, tail) Empty }
 // Session to reader: Credit after each command it has done, Blocked when it
 // starts to wait in BLPOP, and Stop when it ends.
 // Served(key, value), from a pusher to a session that waits in BLPOP,
-// hands it a popped element.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) }
+// hands it a popped element. Ready, from XADD to a session that waits in
+// XREAD BLOCK, says that its reply is in its Waiter.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready }
 
 // Both run over up to ARRAY_MAX arguments, so they yield as the reader does
 // (rule 2 of the README). toArgs runs in the reader and fromArgs in the
@@ -293,9 +317,9 @@ fun fromArgs(args) {
 // Keyspace
 // ===========================================================================
 
-// kind is "string" or "list". A list key holds a Lox++ List, and an empty
-// list is never stored: the key goes away with its last element, as in
-// Redis.
+// kind is "string", "list" or "stream", which is also the TYPE reply. A
+// list key holds a Deque, and an empty list is never stored: the key goes
+// away with its last element, as in Redis. A stream key holds a Stream.
 class Entry {
     init(kind, value, expiresAt) {
         this.kind = kind;
@@ -558,11 +582,15 @@ class Deque {
 // A session that waits in BLPOP. active turns false when the waiter is
 // served, times out, or its client goes away. servedBy is the key whose
 // pusher served it: that queue already counted it out.
+// For XREAD BLOCK, read is its StreamRead, and XADD puts the reply in
+// ready before it sends Msg.Ready.
 class Waiter {
-    init(handle) {
+    init(handle, read) {
         this.handle = handle;
         this.active = true;
         this.servedBy = nil;
+        this.read = read;
+        this.ready = nil;
     }
 }
 
@@ -634,8 +662,11 @@ class WaitQueue {
     }
 }
 
-// key -> Waiter or WaitQueue.
+// key -> Waiter or WaitQueue: the sessions in BLPOP.
 var waiters = {};
+
+// key -> Waiter or WaitQueue: the sessions in XREAD BLOCK.
+var readers = {};
 
 // Returns the list entry of key, nil when the key is missing, or false when
 // the key holds another kind.
@@ -673,7 +704,7 @@ fun serveWaiters(key) {
         if (entry == nil or entry == false) {
             break;
         }
-        var w = takeWaiter(key);
+        var w = takeWaiter(waiters, key);
         if (w == nil) {
             break;
         }
@@ -698,9 +729,10 @@ fun isWaiter(x) {
     return hasField(x, "handle");
 }
 
-// Removes the oldest active waiter of key and returns it, or nil.
-fun takeWaiter(key) {
-    var queue = waiters[key];
+// Removes the oldest active waiter of key in queues (waiters or readers)
+// and returns it, or nil.
+fun takeWaiter(queues, key) {
+    var queue = queues[key];
     if (queue == nil) {
         return nil;
     }
@@ -709,12 +741,12 @@ fun takeWaiter(key) {
             // It is leaving, and removes the key itself.
             return nil;
         }
-        waiters.del(key);
+        queues.del(key);
         return queue;
     }
     var w = queue.takeOldest();
     if (queue.live == 0) {
-        waiters.del(key);
+        queues.del(key);
     }
     return w;
 }
@@ -906,11 +938,15 @@ fun parseTimeout(s) {
     return t;
 }
 
-// The result of a command that must wait: the session waits, then replies.
+// The result of a command that must wait: the session waits in queues
+// (waiters or readers) on each key, then replies. timeout is in seconds, 0
+// for no limit. read is the StreamRead of XREAD BLOCK, or nil.
 class Block {
-    init(keys, timeout) {
+    init(queues, keys, timeout, read) {
+        this.queues = queues;
         this.keys = keys;
         this.timeout = timeout;
+        this.read = read;
     }
 }
 
@@ -932,12 +968,13 @@ fun cmdBlpop(ctx, argv) {
             return bulkArray([key, popLeft(key, entry)]);
         }
     }
-    return Block(keys, timeout);
+    return Block(waiters, keys, timeout, nil);
 }
 
 fun isWake(msg) {
     return match msg {
         case Msg.Served(key, value) => true
+        case Msg.Ready => true
         case Msg.Closed => true
         case _ => false
     };
@@ -946,18 +983,18 @@ fun isWake(msg) {
 // Counts the waiter out of the queue of each of its keys, except the queue
 // whose pusher served it. The waiter is no longer active, so no pusher
 // takes it while this yields between steps.
-fun leaveQueues(w, keys) {
+fun leaveQueues(queues, w, keys) {
     w.active = false;
     var i = 0;
     for (var key in keys) {
-        var queue = waiters[key];
+        var queue = queues[key];
         if (key != w.servedBy and queue != nil) {
             if (queue == w) {
-                waiters.del(key);
+                queues.del(key);
             } else if (!isWaiter(queue)) {
                 queue.left();
                 if (queue.live == 0) {
-                    waiters.del(key);
+                    queues.del(key);
                 }
             }
         }
@@ -971,17 +1008,17 @@ fun leaveQueues(w, keys) {
 // Puts w in the queue of each key, and returns the keys without repeats.
 // It has no suspend point: a push between two keys would not see w in the
 // queues that come after.
-fun joinQueues(w, keys) {
+fun joinQueues(queues, w, keys) {
     var joined = [];
     for (var key in keys) {
-        var queue = waiters[key];
+        var queue = queues[key];
         if (queue == nil) {
-            waiters[key] = w;
+            queues[key] = w;
             joined.append(key);
         } else if (queue == w) {
             // A repeated key: w already waits on it.
         } else if (isWaiter(queue)) {
-            waiters[key] = WaitQueue(queue, w);
+            queues[key] = WaitQueue(queue, w);
             joined.append(key);
         } else if (queue.add(w)) {
             joined.append(key);
@@ -990,11 +1027,13 @@ fun joinQueues(w, keys) {
     return joined;
 }
 
-// Waits for a pusher or for the limit. Returns the reply, or nil when the
-// client went away while the session waited.
+// Waits for a pusher (BLPOP) or a writer (XREAD BLOCK), or for the limit.
+// Returns the reply, or nil when the client went away while the session
+// waited.
 fun waitForElement(conn, block) {
-    var w = Waiter(task.self());
-    var keys = joinQueues(w, block.keys);
+    var w = Waiter(task.self(), block.read);
+    var queues = block.queues;
+    var keys = joinQueues(queues, w, block.keys);
     var msg = nil;
     conn.blocked = true;
     try {
@@ -1013,7 +1052,7 @@ fun waitForElement(conn, block) {
     } catch (e) {
         if (faultKind(e) != "TimeoutError") {
             conn.blocked = false;
-            leaveQueues(w, keys);
+            leaveQueues(queues, w, keys);
             throw e;
         }
         timedOut = true;
@@ -1022,10 +1061,10 @@ fun waitForElement(conn, block) {
     var served = msg;
     if (!isServed(msg) and w.servedBy != nil) {
         // A pusher served w after Closed came or after the limit, but
-        // before this task ran: the element is in the mailbox.
+        // before this task ran: its message is in the mailbox.
         served = task.receive_where(isServed);
     }
-    leaveQueues(w, keys);
+    leaveQueues(queues, w, keys);
     if (!isServed(served)) {
         if (timedOut) {
             return NULL_ARRAY;
@@ -1035,6 +1074,7 @@ fun waitForElement(conn, block) {
     var closed = !timedOut and !isServed(msg);
     return match served {
         case Msg.Served(key, value) => replyServed(conn, key, value, closed)
+        case Msg.Ready => readyReply(w, closed)
         case _ => nil
     };
 }
@@ -1045,8 +1085,18 @@ fun isServed(msg) {
     }
     return match msg {
         case Msg.Served(key, value) => true
+        case Msg.Ready => true
         case _ => false
     };
+}
+
+// XREAD takes nothing from the stream, so a reply that the client cannot
+// get is dropped.
+fun readyReply(w, closed) {
+    if (closed) {
+        return nil;
+    }
+    return w.ready;
 }
 
 // Writes the element that a pusher handed to this client. When the client
@@ -1080,6 +1130,544 @@ fun giveBack(key, value) {
     }
     entry.value.pushLeft(value);
     serveWaiters(key);
+}
+
+// ===========================================================================
+// Streams
+// ===========================================================================
+
+// An entry ID. seq is nil when the text had no "-<seq>" part, and "*" for
+// "<ms>-*".
+class StreamId {
+    init(ms, seq) {
+        this.ms = ms;
+        this.seq = seq;
+    }
+}
+
+// Above any ID part that parseStreamId accepts (15 digits).
+var MAX_ID_PART = 10000000000000000;
+
+var INVALID_ID = "-ERR Invalid stream ID specified as stream command argument\r\n";
+var ID_NOT_ABOVE_TOP = "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
+var ID_ZERO = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
+var SYNTAX_ERROR = "-ERR syntax error\r\n";
+var ZERO_ID = StreamId(0, 0);
+
+fun idText(ms, seq) {
+    return str(ms) + "-" + str(seq);
+}
+
+// Parses "<ms>-<seq>" or "<ms>", and "<ms>-*" when star is true. Returns a
+// StreamId, or nil when s is not an ID. Each part has at most 15 digits, so
+// that it is exact in a Number; Redis allows the full 64-bit range. The
+// length check comes first, so a long argument costs no loop.
+fun parseStreamId(s, star) {
+    if (len(s) == 0 or len(s) > 31) {
+        return nil;
+    }
+    var dash = -1;
+    var i = 0;
+    while (i < len(s)) {
+        if (s[i] == "-") {
+            if (dash != -1) {
+                return nil;
+            }
+            dash = i;
+        }
+        i = i + 1;
+    }
+    if (dash == -1) {
+        if (!isDigits(s)) {
+            return nil;
+        }
+        return idPart(s, nil);
+    }
+    var head = s[0:dash];
+    var tail = s[dash + 1:len(s)];
+    if (!isDigits(head)) {
+        return nil;
+    }
+    if (star and tail == "*") {
+        return idPart(head, "*");
+    }
+    if (!isDigits(tail)) {
+        return nil;
+    }
+    var seq = parseInteger(tail);
+    if (seq == nil) {
+        return nil;
+    }
+    return idPart(head, seq);
+}
+
+fun idPart(digits, seq) {
+    var ms = parseInteger(digits);
+    if (ms == nil) {
+        return nil;
+    }
+    return StreamId(ms, seq);
+}
+
+// The entries of a stream, oldest first, in three Lists of the same length:
+// the two parts of each ID and the fields of each entry. XADD keeps the
+// fields as one slice of its arguments, and a read keeps only the bounds of
+// its entries, so neither costs more for an entry with more fields; the
+// session encodes the reply in steps.
+class Stream {
+    init() {
+        this.ms = [];
+        this.seq = [];
+        this.fields = [];
+    }
+
+    size() {
+        return len(this.ms);
+    }
+
+    // The top ID; 0-0 for a stream with no entry.
+    topMs() {
+        if (this.size() == 0) {
+            return 0;
+        }
+        return this.ms[this.size() - 1];
+    }
+
+    topSeq() {
+        if (this.size() == 0) {
+            return 0;
+        }
+        return this.seq[this.size() - 1];
+    }
+
+    // The index of the first entry whose ID is above ms-seq, or equal to it
+    // when inclusive is true. A binary search: the IDs only grow.
+    find(ms, seq, inclusive) {
+        var lo = 0;
+        var hi = this.size();
+        while (lo < hi) {
+            var mid = lo + (hi - lo - (hi - lo) % 2) / 2;
+            var m = this.ms[mid];
+            var q = this.seq[mid];
+            var below = m < ms or (m == ms and q < seq);
+            if (!inclusive and m == ms and q == seq) {
+                below = true;
+            }
+            if (below) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    add(ms, seq, fields) {
+        this.ms.append(ms);
+        this.seq.append(seq);
+        this.fields.append(fields);
+    }
+
+    // True when the stream has an entry above ms-seq.
+    hasAbove(ms, seq) {
+        var n = this.size();
+        if (n == 0) {
+            return false;
+        }
+        var top = this.ms[n - 1];
+        return ms < top or (ms == top and seq < this.seq[n - 1]);
+    }
+}
+
+// Returns the Stream of key, nil when the key is missing, or false when the
+// key holds another kind.
+fun streamEntry(key) {
+    var entry = lookup(key);
+    if (entry == nil) {
+        return nil;
+    }
+    if (entry.kind != "stream") {
+        return false;
+    }
+    return entry.value;
+}
+
+fun cmdType(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("type");
+    }
+    var entry = lookup(argv[1]);
+    if (entry == nil) {
+        return simple("none");
+    }
+    return simple(entry.kind);
+}
+
+// The ID of a new entry, from the ID argument of XADD and the top ID of the
+// stream. Returns a StreamId, or an error reply.
+fun nextStreamId(text, topMs, topSeq) {
+    if (text == "*") {
+        var now = nowMs();
+        now = now - now % 1;
+        if (now > topMs) {
+            return StreamId(now, 0);
+        }
+        return StreamId(topMs, topSeq + 1);
+    }
+    var id = parseStreamId(text, true);
+    if (id == nil) {
+        return INVALID_ID;
+    }
+    if (id.seq == "*") {
+        if (id.ms < topMs) {
+            return ID_NOT_ABOVE_TOP;
+        }
+        if (id.ms == topMs) {
+            return StreamId(id.ms, topSeq + 1);
+        }
+        return StreamId(id.ms, 0);
+    }
+    var seq = id.seq;
+    if (seq == nil) {
+        seq = 0;
+    }
+    if (id.ms == 0 and seq == 0) {
+        return ID_ZERO;
+    }
+    if (id.ms < topMs or (id.ms == topMs and seq <= topSeq)) {
+        return ID_NOT_ABOVE_TOP;
+    }
+    return StreamId(id.ms, seq);
+}
+
+fun cmdXadd(ctx, argv) {
+    if (len(argv) < 5 or len(argv) % 2 == 0) {
+        return wrongArgs("xadd");
+    }
+    var key = argv[1];
+    var stream = streamEntry(key);
+    if (stream == false) {
+        return WRONGTYPE;
+    }
+    var topMs = 0;
+    var topSeq = 0;
+    if (stream != nil) {
+        topMs = stream.topMs();
+        topSeq = stream.topSeq();
+    }
+    var id = nextStreamId(argv[2], topMs, topSeq);
+    if (type(id) == "String") {
+        return id;
+    }
+    if (stream == nil) {
+        stream = Stream();
+        store[key] = Entry("stream", stream, nil);
+    }
+    stream.add(id.ms, id.seq, argv[3:len(argv)]);
+    wakeReaders(key, stream);
+    return bulk(idText(id.ms, id.seq));
+}
+
+// The bounds of an XRANGE argument: "-" is the least ID and "+" the
+// greatest. A missing sequence part is 0 at the start and the greatest at
+// the end, so "5" covers every entry of millisecond 5.
+fun rangeBound(text, missingSeq) {
+    if (text == "-") {
+        return StreamId(0, 0);
+    }
+    if (text == "+") {
+        return StreamId(MAX_ID_PART, MAX_ID_PART);
+    }
+    var id = parseStreamId(text, false);
+    if (id == nil) {
+        return nil;
+    }
+    if (id.seq == nil) {
+        id.seq = missingSeq;
+    }
+    return id;
+}
+
+// The arguments of one XRANGE, parsed.
+class XrangeArgs {
+    init(start, end, count) {
+        this.start = start;
+        this.end = end;
+        this.count = count;
+    }
+}
+
+// Parses the arguments of XRANGE. Returns an XrangeArgs, or an error reply.
+// It reads no key, so the session runs it before the command and may yield
+// (mayYield) every ELEMENTS_PER_YIELD options.
+fun parseXrange(argv, mayYield) {
+    if (len(argv) < 4) {
+        return wrongArgs("xrange");
+    }
+    var count = nil;
+    var i = 4;
+    while (i < len(argv)) {
+        if (upper(argv[i]) != "COUNT" or i + 1 >= len(argv)) {
+            return SYNTAX_ERROR;
+        }
+        count = parseInteger(argv[i + 1]);
+        if (count == nil) {
+            return NOT_INTEGER;
+        }
+        i = i + 2;
+        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 0) {
+            yield nil;
+        }
+    }
+    var start = rangeBound(argv[2], 0);
+    var end = rangeBound(argv[3], MAX_ID_PART);
+    if (start == nil or end == nil) {
+        return INVALID_ID;
+    }
+    return XrangeArgs(start, end, count);
+}
+
+// ctx is the XrangeArgs that the session parsed before the command, or nil.
+fun cmdXrange(ctx, argv) {
+    var args = ctx;
+    if (args == nil) {
+        args = parseXrange(argv, false);
+    }
+    if (type(args) == "String") {
+        return args;
+    }
+    var stream = streamEntry(argv[1]);
+    if (stream == false) {
+        return WRONGTYPE;
+    }
+    if (stream == nil) {
+        return "*0\r\n";
+    }
+    if (args.count != nil and args.count <= 0) {
+        return NULL_ARRAY;
+    }
+    var from = stream.find(args.start.ms, args.start.seq, true);
+    var to = stream.find(args.end.ms, args.end.seq, false);
+    if (to <= from) {
+        return "*0\r\n";
+    }
+    if (args.count != nil and to - from > args.count) {
+        to = from + args.count;
+    }
+    var reply = Segments("");
+    reply.add(nil, stream, from, to);
+    return reply;
+}
+
+// What one XREAD BLOCK waits for: for each key (for a key named twice, the
+// last one), the ID after which it reads, or for "$" the Stream that the key
+// held, and the most entries for each stream (0 for no limit).
+class StreamRead {
+    init(count) {
+        this.after = {};
+        this.count = count;
+    }
+}
+
+// Adds to reply the entries of stream above id, at most count of them when
+// count is above 0. Returns true when there are some. An ID at or above the
+// top costs one comparison, with no search.
+fun addEntriesAfter(reply, count, key, stream, id) {
+    if (!stream.hasAbove(id.ms, id.seq)) {
+        return false;
+    }
+    var from = stream.find(id.ms, id.seq, false);
+    var to = stream.size();
+    if (count > 0 and to - from > count) {
+        to = from + count;
+    }
+    reply.add(key, stream, from, to);
+    return true;
+}
+
+// The arguments of one XREAD, parsed: ids[j] is a StreamId, or "$".
+class XreadArgs {
+    init(count, block, keys, ids) {
+        this.count = count;
+        this.block = block;
+        this.keys = keys;
+        this.ids = ids;
+    }
+}
+
+// Parses the arguments of XREAD. Returns an XreadArgs, or an error reply.
+// It reads no key, so the session runs it before the command and may yield
+// (mayYield) every ELEMENTS_PER_YIELD IDs: an XREAD can name up to 524287
+// streams.
+fun parseXread(argv, mayYield) {
+    if (len(argv) < 4) {
+        return wrongArgs("xread");
+    }
+    var count = 0;
+    var block = nil;
+    var i = 1;
+    while (i < len(argv) and upper(argv[i]) != "STREAMS") {
+        var word = upper(argv[i]);
+        if (i + 1 >= len(argv)) {
+            return SYNTAX_ERROR;
+        }
+        if (word == "COUNT") {
+            count = parseInteger(argv[i + 1]);
+            if (count == nil) {
+                return NOT_INTEGER;
+            }
+        } else if (word == "BLOCK") {
+            block = parseInteger(argv[i + 1]);
+            if (block == nil) {
+                return errorReply("ERR timeout is not an integer or out of range");
+            }
+            if (block < 0) {
+                return errorReply("ERR timeout is negative");
+            }
+        } else {
+            return SYNTAX_ERROR;
+        }
+        i = i + 2;
+        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 1) {
+            yield nil;
+        }
+    }
+    if (i >= len(argv)) {
+        return SYNTAX_ERROR;
+    }
+    var rest = len(argv) - i - 1;
+    if (rest == 0 or rest % 2 == 1) {
+        return errorReply("ERR Unbalanced XREAD list of streams: for each stream key an ID or '$' must be specified.");
+    }
+    var n = rest / 2;
+    var ids = [];
+    var j = 0;
+    for (var text in argv[i + 1 + n:len(argv)]) {
+        var id = "$";
+        if (text != "$") {
+            id = parseStreamId(text, false);
+            if (id == nil) {
+                return INVALID_ID;
+            }
+            if (id.seq == nil) {
+                id.seq = 0;
+            }
+        }
+        ids.append(id);
+        j = j + 1;
+        if (mayYield and j % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    return XreadArgs(count, block, argv[i + 1:i + 1 + n], ids);
+}
+
+// ctx is the XreadArgs that the session parsed before the command, or nil.
+// The rest has no suspend point: it reads the streams and joins the queues
+// in one step.
+fun cmdXread(ctx, argv) {
+    var args = ctx;
+    if (args == nil) {
+        args = parseXread(argv, false);
+    }
+    if (type(args) == "String") {
+        return args;
+    }
+    var blocking = args.block != nil;
+    var read = StreamRead(args.count);
+    var reply = Segments("");
+    var j = 0;
+    // This loop can run over 524287 keys in one step, so it reads each key
+    // with one Map access and no call where it can.
+    for (var key in args.keys) {
+        var entry = store[key];
+        if (entry != nil and entry.expiresAt != nil) {
+            entry = lookup(key);
+        }
+        var stream = nil;
+        if (entry != nil) {
+            if (entry.kind != "stream") {
+                return WRONGTYPE;
+            }
+            stream = entry.value;
+        }
+        var id = args.ids[j];
+        if (id == "$") {
+            // No entry is above the top, so only a wait needs it. A wait
+            // stores the Stream itself, with no new object; see
+            // wakeReaders.
+            if (blocking) {
+                if (stream == nil) {
+                    read.after[key] = ZERO_ID;
+                } else {
+                    read.after[key] = stream;
+                }
+            }
+        } else {
+            if (blocking) {
+                read.after[key] = id;
+            }
+            if (stream != nil) {
+                addEntriesAfter(reply, args.count, key, stream, id);
+            }
+        }
+        j = j + 1;
+    }
+    if (len(reply.keys) > 0) {
+        reply.head = "*" + str(len(reply.keys)) + "\r\n";
+        return reply;
+    }
+    if (args.block == nil) {
+        return NULL_ARRAY;
+    }
+    return Block(readers, args.keys, args.block / 1000, read);
+}
+
+// Hands each session that waits in XREAD BLOCK on key, and has entries to
+// read in stream now, its reply: the entries of this one stream, as Redis
+// replies. A waiter whose ID is still above the top waits on. It runs at the
+// end of XADD, so the reply holds the entries up to this one.
+fun wakeReaders(key, stream) {
+    var later = [];
+    while (true) {
+        var w = takeWaiter(readers, key);
+        if (w == nil) {
+            break;
+        }
+        var reply = Segments("*1\r\n");
+        var after = w.read.after[key];
+        var has = true;
+        if (after == stream) {
+            // "$" on this same Stream: each XADD on it wakes the reader at
+            // once, so the entries above the top that "$" named are the one
+            // entry of this XADD.
+            var n = stream.size();
+            reply.add(key, stream, n - 1, n);
+        } else {
+            if (hasField(after, "fields")) {
+                // "$" on a Stream that the key no longer holds: nothing
+                // appends to it now, so its top is the top at the wait.
+                after = StreamId(after.topMs(), after.topSeq());
+            }
+            has = addEntriesAfter(reply, w.read.count, key, stream, after);
+        }
+        if (!has) {
+            later.append(w);
+        } else {
+            w.active = false;
+            w.servedBy = key;
+            w.ready = reply;
+            try {
+                task.send(w.handle, Msg.Ready());
+            } catch (ignored) {
+                // The waiter's task has ended. XREAD takes nothing, so
+                // nothing goes back.
+            }
+        }
+    }
+    for (var w in later) {
+        joinQueues(readers, w, [key]);
+    }
 }
 
 // ===========================================================================
@@ -1126,7 +1714,18 @@ var COMMANDS = {
     "LLEN": cmdLlen,
     "LRANGE": cmdLrange,
     "LPOP": cmdLpop,
-    "BLPOP": cmdBlpop
+    "BLPOP": cmdBlpop,
+    "TYPE": cmdType,
+    "XADD": cmdXadd,
+    "XRANGE": cmdXrange,
+    "XREAD": cmdXread
+};
+
+// Commands whose arguments the session parses before the command runs
+// (rule 5 of the README): the parse reads no key and may yield.
+var PARSERS = {
+    "XRANGE": parseXrange,
+    "XREAD": parseXread
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.
@@ -1310,7 +1909,7 @@ fun awaitCredit() {
             case Msg.Stop => -1
             // Only the session sends to the reader, and it sends only these
             // three.
-            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) => -1
+            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) or Msg.Ready => -1
         };
         if (got < 0) {
             return nil;
@@ -1392,19 +1991,25 @@ fun readLoop(conn) {
 // Returns true while the session goes on. A Block reply waits in the
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv) {
-    var reply = execute(nil, argv);
-    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
-        writeBulks(conn, reply);
-        giveCredit(conn);
-        return true;
+    var ctx = nil;
+    if (len(argv) > 0) {
+        var parse = PARSERS[upper(argv[0])];
+        if (parse != nil) {
+            ctx = parse(argv, true);
+        }
     }
-    if (type(reply) != "String") {
+    var reply = execute(ctx, argv);
+    if (type(reply) == "Instance" and hasField(reply, "timeout")) {
         reply = waitForElement(conn, reply);
         if (reply == nil) {
             return false;
         }
     }
-    if (reply != "") {
+    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
+        writeBulks(conn, reply);
+    } else if (type(reply) == "Instance") {
+        writeSegments(conn, reply);
+    } else if (reply != "") {
         conn.sock.write(reply);
     }
     giveCredit(conn);
@@ -1435,6 +2040,82 @@ fun writeBulks(conn, reply) {
             yield nil;
         }
     }
+}
+
+// Collects reply parts and writes them in steps of at most
+// ELEMENTS_PER_YIELD parts and about STEP_BYTES bytes, and yields after each
+// step. A part of STEP_BYTES or more goes to the socket alone, so no step
+// copies a long part.
+var STEP_BYTES = 1048576;
+
+class Output {
+    init(conn) {
+        this.conn = conn;
+        this.parts = [];
+        this.bytes = 0;
+    }
+
+    add(part) {
+        if (len(part) >= STEP_BYTES) {
+            this.flush();
+            this.conn.sock.write(part);
+            yield nil;
+            return;
+        }
+        this.parts.append(part);
+        this.bytes = this.bytes + len(part);
+        if (len(this.parts) >= ELEMENTS_PER_YIELD or this.bytes >= STEP_BYTES) {
+            this.flush();
+            yield nil;
+        }
+    }
+
+    // A bulk string, with no copy of a long value.
+    addBulk(s) {
+        if (len(s) >= STEP_BYTES) {
+            this.add("$" + str(len(s)) + "\r\n");
+            this.add(s);
+            this.add("\r\n");
+        } else {
+            this.add(bulk(s));
+        }
+    }
+
+    flush() {
+        if (len(this.parts) > 0) {
+            this.conn.sock.write(joinRange(this.parts, 0, len(this.parts)));
+        }
+        this.parts = [];
+        this.bytes = 0;
+    }
+}
+
+fun writeSegments(conn, reply) {
+    var out = Output(conn);
+    if (reply.head != "") {
+        out.add(reply.head);
+    }
+    var i = 0;
+    while (i < len(reply.keys)) {
+        var stream = reply.streams[i];
+        var j = reply.froms[i];
+        var to = reply.tos[i];
+        if (reply.keys[i] != nil) {
+            out.add("*2\r\n");
+            out.addBulk(reply.keys[i]);
+        }
+        out.add("*" + str(to - j) + "\r\n");
+        while (j < to) {
+            var fields = stream.fields[j];
+            out.add("*2\r\n" + bulk(idText(stream.ms[j], stream.seq[j])) + "*" + str(len(fields)) + "\r\n");
+            for (var f in fields) {
+                out.addBulk(f);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out.flush();
 }
 
 fun giveCredit(conn) {
@@ -1476,9 +2157,9 @@ fun sessionLoop(conn) {
                 // Only the reader sends to the session, and it never sends
                 // these.
                 case Msg.Credit or Msg.Blocked or Msg.Stop => true
-                // A pusher sends Served only to a session that waits in
-                // waitForElement, which takes it there.
-                case Msg.Served(_, _) => true
+                // A pusher sends Served, and XADD sends Ready, only to a
+                // session that waits in waitForElement, which takes it there.
+                case Msg.Served(_, _) or Msg.Ready => true
             };
         }
     } catch (e) {
