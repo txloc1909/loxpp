@@ -2281,7 +2281,7 @@ run before the program ends is implementation-defined, as for every halt.
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
 | A native function is called with an argument count other than its arity | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
-| A stdlib native function reports its own error while running, except the faults of the two Socket rows of the [Runtime Errors](#runtime-errors) table | `open("/no/such/path", "r");` |
+| A stdlib native function reports its own error while running, except a fault of a [Runtime Errors](#runtime-errors) row that names a stdlib call: `mkdir`, a Socket, or a Server | `open("/no/such/path", "r");` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) |
 | Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` |
