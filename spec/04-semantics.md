@@ -520,7 +520,9 @@ callee(arg1, arg2, ...)
 
 1. Evaluate `callee`.
 2. Evaluate arguments left-to-right.
-3. If `callee` is not a Function, Class, or BoundMethod, this is a **runtime error**.
+3. If `callee` is not a Function, a Class, an enum constructor, a
+   BoundMethod, or an Instance whose class defines `__call__`, this is a
+   **runtime error**.
 4. If the number of arguments does not match the function's arity, this is a
    **runtime error**.
 5. A new local scope is created; each parameter is bound to the corresponding
@@ -2235,7 +2237,7 @@ whose text is implementation-defined.
 | A shift count outside `0i` to `63i` | `1i << 64i` | `"ShiftCountError"` |
 | Int `/` or `%` with a zero divisor | `1i / 0i`, `1i % 0i` | `"DivisionByZeroError"` |
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
-| Wrong argument count of a call of a Function, a BoundMethod, or an Instance with `__call__`, of a class whose `init` gets another count, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)) | `fun f(a) {} f(1, 2)`, `class C { m() {} } C().m(1)` | `"ArityError"` |
+| Wrong argument count of a call of a user-defined Function, a user-defined BoundMethod, or an Instance with `__call__`, of a class whose `init` gets another count, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)). A native-backed Function or BoundMethod is a stdlib call, and its wrong count is a [halting fault](#halting-faults) | `fun f(a) {} f(1, 2)`, `class C { m() {} } C().m(1)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
