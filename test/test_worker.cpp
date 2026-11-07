@@ -429,15 +429,15 @@ long msSince(PClock::time_point start) {
 // passed since the last poll, and that poll can report a timer before the
 // program has run its first statement: under a sanitizer on a loaded host the
 // start of interpret() can take longer than a short timer. The two tests below
-// are about the blocking wait a parked task makes, so they pin the clock that
+// are about the blocking wait a waiting task makes, so they pin the clock that
 // paces that poll: the only poll left is the one the worker makes after its
-// task parked, whatever start-up took.
+// task waited, whatever start-up took.
 PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
 
 } // namespace
 
-// A program that never parks makes no poller, and opens no descriptor.
-TEST_F(WorkerTest, AWorkerThatNeverParksMakesNoPoller) {
+// A program that never waits makes no poller, and opens no descriptor.
+TEST_F(WorkerTest, AWorkerThatNeverWaitsMakesNoPoller) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         fun far(main) { sleep(0.01); task.send(main, "x"); }

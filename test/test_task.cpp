@@ -347,7 +347,7 @@ TEST_F(TaskTest, ACoroutineRunsInTheTaskThatResumesIt) {
     expect_string(h, "log", "truetrue");
 }
 
-// A spawned task whose entry is a native function cannot park in receive.
+// A spawned task whose entry is a native function cannot suspend in receive.
 // Nothing can rebuild the native frame, so the task ends with an uncaught
 // YieldAcrossNativeError (spec/04-semantics.md, task.receive step 3).
 TEST_F(TaskTest, NativeEntryReceiveOnEmptyMailboxIsUncaught) {
