@@ -93,7 +93,7 @@ is installed and is only reached on the interpreter.
 
 **2. OS / world access — basics. DONE** (#516, all three backends). `args`,
 `env`, `exit`, `time`/`sleep`, FS metadata (`exists`, `is_dir`, `is_file`,
-`stat`) live in `src/stdlib/os_api.cpp`; `clock` is in
+`stat`) and `mkdir` live in `src/stdlib/os_api.cpp`; `clock` is in
 `src/stdlib/globals.cpp`. The medium-cost tail is closed: `connect`/`listen`
 (TCP client and server, `Socket`/`Server` values) in `src/stdlib/net_api.cpp`,
 and `spawn`/`run` (child processes with pipes, a `Process` value) in
@@ -108,6 +108,12 @@ The CodeCrafters HTTP server example
 (`examples/codecrafters/build-your-own-http-server`) showed one residual gap:
 simultaneous keep-alive connections. The example now serves each connection on
 its own task (#519), so item 2 has no open gap.
+
+A later gap in the same item was a call that creates a directory: the surface
+could read metadata but not write a directory, so a program reached for
+`run("mkdir", ...)`. The CodeCrafters Kafka example found it. `mkdir(path)` and
+`mkdir(path, "p")` close it, and a directory that cannot be created raises a
+catchable `DirectoryError` (#1147).
 
 The former bounded-read gap was closed by `read_bytes(n)` (#518), which blocks
 until `n` bytes arrive or the peer closes and is exposed on `Socket` and
