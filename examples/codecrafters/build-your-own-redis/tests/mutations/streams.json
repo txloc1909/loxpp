@@ -270,5 +270,13 @@
   "cases": [
    "local: S3 XREAD of 524286 streams stalls PING at most 0.5 s"
   ]
+ },
+ {
+  "name": "$ on a replaced key reads from its last entry",
+  "old": "            if (hasField(after, \"fields\")) {\n                // \"$\" on a Stream that the key no longer holds: nothing\n                // appends to it now, so its top is the top at the wait.\n                after = StreamId(after.topMs(), after.topSeq());\n            }",
+  "new": "            if (hasField(after, \"fields\")) {\n                after = StreamId(stream.ms[stream.size() - 1], stream.seq[stream.size() - 1] - 1);\n            }",
+  "cases": [
+   "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
+  ]
  }
 ]

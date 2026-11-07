@@ -134,8 +134,11 @@ queues, `readers`. At the end of `XADD`, `wakeReaders` takes each reader of
 the key that now has entries to read, puts its reply in its `Waiter` and
 sends `Msg.Ready`. So the reply holds the entries up to this `XADD` and only
 this stream, as in Redis. For a key that the reader named with `$`, the
-first `XADD` on the key after the wait started wakes the reader at once, so
-its reply is the entry of that `XADD`, and the wait stores no ID for it. A reader whose ID is still above the top joins the
+wait stores the `Stream` that the key held, with no new object. Each `XADD`
+on that same `Stream` wakes the reader at once, so its reply is the entry of
+that `XADD`. When the key holds another `Stream` (the first one expired or
+was replaced), the reader compares with the top of the first one, which
+nothing appends to any more. A reader whose ID is still above the top joins the
 queue again. `XREAD` takes nothing from the stream, so a reply that the
 client cannot get is dropped.
 
@@ -286,7 +289,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | Not in the suite: `XREAD` of 524286 streams that have entries | PING within 1.0 s (redis-server 7.0: 0.76 s) | 0.72–0.78 s |
-| Not in the suite: `XREAD BLOCK 0` with `$` on 524286 streams, by a first and a second client | PING within 1.0 s in Lox++ code; a GC pause is native (#1165) | first 0.58–0.63 s; second 1.70–1.76 s, of which one GC pause of 0.76–0.79 s (redis-server 7.0: 0.56 s and 0.49 s) |
+| Not in the suite: `XREAD BLOCK 0` with `$` on 524286 streams, by a first and a second client | PING within 1.0 s in Lox++ code; a GC pause is native (#1165). No probe holds the 1.0 s of the Lox++ part, and its margin is small. | first 0.58–0.63 s; second 1.70–1.76 s: one GC pause of 0.76–0.79 s, and 0.92–0.95 s of Lox++ code (redis-server 7.0: 0.56 s and 0.49 s) |
 | Not in the suite: `XRANGE` of one field of 200 MB | PING within 1.0 s | 0.009–0.023 s |
 | Group `streams`: `XREAD BLOCK 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | Not in the suite: `XRANGE` / `XREAD` of 200000 entries | PING within 1.0 s | 0.07–0.13 s / 0.07–0.21 s |
@@ -302,8 +305,8 @@ its guard (S4 holds rule 6 only: the S3 mutation also removes its guard).
 
 A large heap brings a second kind of stall: the native VM stops the worker
 for each full collection, and the pause grows with the live heap. With
-524286 streams (about 4 million objects), one pause was 0.76–0.79 s
-(#1165). It can come in any command, so a probe on such a heap measures it
+524286 streams, one pause was 0.76–0.79 s: 9.6 million objects at the
+start of the pause, 5.8 million live after it (#1165). It can come in any command, so a probe on such a heap measures it
 too; S8 uses 131072 streams so that it measures the command. Two guards have no
 probe, because no client timing forces the order of events that they
 handle:

@@ -110,6 +110,7 @@ def encode(*args):
 
 TIMEOUT = "<no reply within the limit>"
 CLOSED = "<connection closed>"
+BAD_REPLY = "<bytes that are not RESP>"
 
 
 class Error(str):
@@ -181,8 +182,10 @@ class Client:
             return self.read()
         except socket.timeout:
             return TIMEOUT
-        except (EOFError, OSError, ValueError):
+        except (EOFError, OSError):
             return CLOSED
+        except ValueError:
+            return BAD_REPLY
         finally:
             self.sock.settimeout(5)
 
@@ -1259,6 +1262,22 @@ def stages_streams(prog):
               got1 == above and got3 == above, "%r %r" % (got1, got3))
         r3.close()
 
+        # "$" names the top of the stream at the wait. When the key is
+        # replaced while the reader waits, an entry below that top does not
+        # wake it, and an entry above it does.
+        key = rand_word()
+        c.call("XADD", key, "5-1", "f", "v")
+        r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
+        time.sleep(0.1)
+        c.call("SET", key, "x", "PX", "30")
+        time.sleep(0.1)
+        c.call("XADD", key, "1-1", "f", "low")
+        check("local: XREAD BLOCK $ ignores an entry below the old top of a replaced key",
+              r.try_read(0.5) is TIMEOUT)
+        c.call("XADD", key, "9-1", "f", "high")
+        check("local: XREAD BLOCK $ gets an entry above the old top of a replaced key",
+              r.try_read(3) == [[key, [["9-1", ["f", "high"]]]]])
+
         # The commands that the client sends during the wait run after it,
         # in order.
         key = rand_word()
@@ -1328,7 +1347,7 @@ class Asker:
             got = self.c.try_read(3)
         except (OSError, ValueError, EOFError):
             got = CLOSED
-        if got is TIMEOUT or got is CLOSED:
+        if got is TIMEOUT or got is CLOSED or got is BAD_REPLY:
             self.c.close()
             self.c = self.srv.client()
         return got

@@ -1152,6 +1152,7 @@ var INVALID_ID = "-ERR Invalid stream ID specified as stream command argument\r\
 var ID_NOT_ABOVE_TOP = "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
 var ID_ZERO = "-ERR The ID specified in XADD must be greater than 0-0\r\n";
 var SYNTAX_ERROR = "-ERR syntax error\r\n";
+var ZERO_ID = StreamId(0, 0);
 
 fun idText(ms, seq) {
     return str(ms) + "-" + str(seq);
@@ -1458,9 +1459,9 @@ fun cmdXrange(ctx, argv) {
     return reply;
 }
 
-// What one XREAD BLOCK waits for: for each key, the ID after which it
-// reads, or "$" (for a key named twice, the last one), and the most entries
-// for each stream (0 for no limit).
+// What one XREAD BLOCK waits for: for each key (for a key named twice, the
+// last one), the ID after which it reads, or for "$" the Stream that the key
+// held, and the most entries for each stream (0 for no limit).
 class StreamRead {
     init(count) {
         this.after = {};
@@ -1592,10 +1593,15 @@ fun cmdXread(ctx, argv) {
         }
         var id = args.ids[j];
         if (id == "$") {
-            // No entry is above the top, so only a wait needs it; see
+            // No entry is above the top, so only a wait needs it. A wait
+            // stores the Stream itself, with no new object; see
             // wakeReaders.
             if (blocking) {
-                read.after[key] = "$";
+                if (stream == nil) {
+                    read.after[key] = ZERO_ID;
+                } else {
+                    read.after[key] = stream;
+                }
             }
         } else {
             if (blocking) {
@@ -1631,13 +1637,18 @@ fun wakeReaders(key, stream) {
         var reply = Segments("*1\r\n");
         var after = w.read.after[key];
         var has = true;
-        if (after == "$") {
-            // The first XADD on the key after the wait started wakes the
-            // reader at once, so the entries above the top that "$" named
-            // are the one entry of this XADD.
+        if (after == stream) {
+            // "$" on this same Stream: each XADD on it wakes the reader at
+            // once, so the entries above the top that "$" named are the one
+            // entry of this XADD.
             var n = stream.size();
             reply.add(key, stream, n - 1, n);
         } else {
+            if (hasField(after, "fields")) {
+                // "$" on a Stream that the key no longer holds: nothing
+                // appends to it now, so its top is the top at the wait.
+                after = StreamId(after.topMs(), after.topSeq());
+            }
             has = addEntriesAfter(reply, w.read.count, key, stream, after);
         }
         if (!has) {
