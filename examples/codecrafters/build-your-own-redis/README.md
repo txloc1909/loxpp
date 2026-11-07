@@ -153,13 +153,21 @@ command is queued, with yields, because it reads no key.
 `EXEC` runs the queue in one step (`execQueued`): each command gets its
 parse, so no command yields, and no other client runs between two commands
 of a transaction. A command that would wait (`BLPOP`, `XREAD BLOCK`) gives a
-null array at once, as in Redis. The session writes the replies after the
-step, in steps of its own (`writeReplies`).
+null array at once, as in Redis. In the step, a push or an `XADD` only notes
+that its key is ready (`listReady`, `streamReady`), and `serveReady` serves
+the waiting clients one time after the last command, from the state at that
+time, as Redis does. So a waiter acts before or after a transaction, never
+in it, and an `EXEC` of many `XADD` passes over the readers of a key once.
 
-A transaction holds at most 65536 commands and 1048576 arguments in all,
-the size of one command. So the step of `EXEC` costs about as much as the
-largest single command (README rules 4 and 6). A command over the bound
-gets an error and makes `EXEC` give `EXECABORT`.
+`GET`, `ECHO`, `PING` with a message, `LPOP` of one element and `SET ... GET`
+give their value as a `Bulk`, with no copy, so `EXEC` holds only references.
+The session writes the replies after the step, in steps of its own
+(`writeReplies`), and writes a long value alone (`Output.addBulk`).
+
+A transaction holds at most 65536 commands, 1048576 arguments and the query
+limit of bytes (`--client-query-buffer-limit`, 1 GB by default). A command
+over a bound gets an error and makes `EXEC` give `EXECABORT`. The probes
+T1-T5 measure the largest steps of `EXEC` that the bounds allow.
 
 ### Large replies
 
@@ -199,8 +207,8 @@ printed.
   range.
 - `INCR` stops at 999999999999999 (15 digits) with "increment or decrement
   would overflow". Redis goes on to 9223372036854775807.
-- A transaction holds at most 65536 commands and 1048576 arguments. Redis
-  has no such bound.
+- A transaction holds at most 65536 commands, 1048576 arguments and the
+  query limit of bytes. Redis has no such bound.
 - `XADD` takes no options (`NOMKSTREAM`, `MAXLEN`, `MINID`, `LIMIT`): the
   word in the ID place must be an ID. `XRANGE` takes no exclusive bounds
   (`(1-1`).
@@ -312,6 +320,9 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
+| T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 200 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 4.28 s) | 0.07 s |
+| T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
+| T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |
@@ -329,7 +340,8 @@ range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
 `tests/mutations/transactions.json` that removes
-its guard (S4 holds rule 6 only: the S3 mutation also removes its guard).
+its guard (S4 and T1 hold rule 6 only: no single change removes their
+guard).
 
 A large heap brings a second kind of stall: the native VM stops the worker
 for each full collection, and the pause grows with the live heap. With

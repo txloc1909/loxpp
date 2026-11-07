@@ -97,8 +97,8 @@
  },
  {
   "name": "EXEC stops at the first error",
-  "old": "        replies.append(reply);\n    }\n    return replies;",
-  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    return replies;",
+  "old": "        replies.append(reply);\n    }\n    serveReady();\n    return replies;",
+  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    serveReady();\n    return replies;",
   "cases": [
    "transactions-10 a failed command does not stop the others"
   ]
@@ -185,16 +185,16 @@
  },
  {
   "name": "no command bound",
-  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
-  "new": "    if (tx.args + len(argv) > TX_ARGS) {",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS\n",
+  "new": "    if (tx.args + len(argv) > TX_ARGS\n",
   "cases": [
    "local: the 65537th command of a transaction is refused"
   ]
  },
  {
   "name": "no argument bound",
-  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
-  "new": "    if (len(tx.queued) >= TX_COMMANDS) {",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS\n",
+  "new": "    if (len(tx.queued) >= TX_COMMANDS\n",
   "cases": [
    "local: a transaction over 1048576 arguments is refused"
   ]
@@ -205,6 +205,54 @@
   "new": "    tx.queued.append(argv);",
   "cases": [
    "local: T2 EXEC of an XREAD of 524286 streams stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "no byte bound",
+  "old": "        or tx.bytes + nbytes > QUERY_MAX) {",
+  "new": "        or false) {",
+  "cases": [
+   "local: a transaction over the query limit of bytes is refused"
+  ]
+ },
+ {
+  "name": "a push in EXEC serves the waiters at once",
+  "old": "    if (readyLists == nil) {\n        serveWaiters(key);\n        return;\n    }",
+  "new": "    if (true) {\n        serveWaiters(key);\n        return;\n    }",
+  "cases": [
+   "local: a push and a pop in EXEC are not seen by a BLPOP waiter"
+  ]
+ },
+ {
+  "name": "EXEC serves no waiter after it",
+  "old": "        replies.append(reply);\n    }\n    serveReady();",
+  "new": "        replies.append(reply);\n    }\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "cases": [
+   "local: the waiter gets the first element after EXEC"
+  ]
+ },
+ {
+  "name": "a $ reader gets only the last entry of an EXEC",
+  "old": "    if (mark == nil or mark.stream != stream) {\n        readyStreams[key] = StreamMark(stream, stream.size() - 1);\n    }",
+  "new": "    readyStreams[key] = StreamMark(stream, stream.size() - 1);",
+  "cases": [
+   "local: an XREAD BLOCK $ reader gets every entry of an EXEC"
+  ]
+ },
+ {
+  "name": "T4 GET copies its value",
+  "old": "    return Bulk(entry.value);\n}",
+  "new": "    return bulk(entry.value);\n}",
+  "cases": [
+   "local: T4 EXEC of 8 GET of a 64 MB value stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "T5 the replies of EXEC are written in one step",
+  "old": "        } else if (hasField(reply, \"bulkValue\")) {\n            out.addBulk(reply.bulkValue);",
+  "new": "        } else if (hasField(reply, \"bulkValue\")) {\n            out.parts.append(bulk(reply.bulkValue));",
+  "cases": [
+   "local: T5 EXEC of 65535 GET of a 1 KB value stalls PING at most 0.5 s"
   ]
  }
 ]

@@ -240,6 +240,15 @@ class Segments {
     }
 }
 
+// A reply of one bulk string, kept as its value: the session encodes it
+// when it writes it (Output.addBulk), so a command does not copy a long
+// value, and EXEC holds only a reference to it.
+class Bulk {
+    init(bulkValue) {
+        this.bulkValue = bulkValue;
+    }
+}
+
 fun bulkArray(strings) {
     var items = [];
     for (var s in strings) {
@@ -411,7 +420,7 @@ fun cmdSet(argv) {
     if (returnOld) {
         reply = NULL_BULK;
         if (old != nil) {
-            reply = bulk(old.value);
+            reply = Bulk(old.value);
         }
     }
     if ((condition == "NX" and old != nil) or (condition == "XX" and old == nil)) {
@@ -458,7 +467,7 @@ fun cmdGet(argv) {
     if (entry.kind != "string") {
         return WRONGTYPE;
     }
-    return bulk(entry.value);
+    return Bulk(entry.value);
 }
 
 // The text of Redis 7.0: the name and the start of the arguments, each cut
@@ -776,7 +785,7 @@ fun cmdPush(argv, left) {
         i = i + 1;
     }
     var n = entry.value.size();
-    serveWaiters(argv[1]);
+    listReady(argv[1]);
     return integerReply(n);
 }
 
@@ -859,7 +868,7 @@ fun cmdLpop(ctx, argv) {
         return NULL_ARRAY;
     }
     if (count == nil) {
-        return bulk(popLeft(argv[1], entry));
+        return Bulk(popLeft(argv[1], entry));
     }
     if (count > entry.value.size()) {
         count = entry.value.size();
@@ -1364,7 +1373,7 @@ fun cmdXadd(ctx, argv) {
         store[key] = Entry("stream", stream, nil);
     }
     stream.add(id.ms, id.seq, argv[3:len(argv)]);
-    wakeReaders(key, stream);
+    streamReady(key, stream);
     return bulk(idText(id.ms, id.seq));
 }
 
@@ -1627,7 +1636,7 @@ fun cmdXread(ctx, argv) {
 // read in stream now, its reply: the entries of this one stream, as Redis
 // replies. A waiter whose ID is still above the top waits on. It runs at the
 // end of XADD, so the reply holds the entries up to this one.
-fun wakeReaders(key, stream) {
+fun wakeReaders(key, stream, firstNew) {
     var later = [];
     while (true) {
         var w = takeWaiter(readers, key);
@@ -1638,11 +1647,15 @@ fun wakeReaders(key, stream) {
         var after = w.read.after[key];
         var has = true;
         if (after == stream) {
-            // "$" on this same Stream: each XADD on it wakes the reader at
-            // once, so the entries above the top that "$" named are the one
-            // entry of this XADD.
+            // "$" on this same Stream: each XADD on it, or the end of each
+            // EXEC that added to it, wakes the reader at once, so the
+            // entries above the top that "$" named are the new ones, from
+            // firstNew.
             var n = stream.size();
-            reply.add(key, stream, n - 1, n);
+            if (w.read.count > 0 and n - firstNew > w.read.count) {
+                n = firstNew + w.read.count;
+            }
+            reply.add(key, stream, firstNew, n);
         } else {
             if (hasField(after, "fields")) {
                 // "$" on a Stream that the key no longer holds: nothing
@@ -1673,6 +1686,72 @@ fun wakeReaders(key, stream) {
 // ===========================================================================
 // Transactions
 // ===========================================================================
+
+// During EXEC, a push or an XADD only notes that its key is ready, and the
+// waiting clients are served one time after the last command, as Redis
+// does: a waiter acts before or after a transaction, never in it, and an
+// EXEC of many XADDs passes over the readers of a key once. Outside EXEC
+// these are nil, and a push serves at once.
+var readyLists = nil;
+var readyListSeen = nil;
+var readyStreamKeys = nil;
+// key -> StreamMark: the Stream that the key held at the first XADD of this
+// EXEC on it, and the index of that first new entry.
+var readyStreams = nil;
+
+class StreamMark {
+    init(stream, first) {
+        this.stream = stream;
+        this.first = first;
+    }
+}
+
+fun listReady(key) {
+    if (readyLists == nil) {
+        serveWaiters(key);
+        return;
+    }
+    if (!readyListSeen.has(key)) {
+        readyListSeen[key] = true;
+        readyLists.append(key);
+    }
+}
+
+fun streamReady(key, stream) {
+    if (readyStreams == nil) {
+        wakeReaders(key, stream, stream.size() - 1);
+        return;
+    }
+    var mark = readyStreams[key];
+    if (mark == nil) {
+        readyStreamKeys.append(key);
+    }
+    if (mark == nil or mark.stream != stream) {
+        readyStreams[key] = StreamMark(stream, stream.size() - 1);
+    }
+}
+
+// Serves the keys that EXEC made ready, from the state after its last
+// command. A stream key that no longer holds the marked Stream (a command
+// replaced it after the XADD) wakes nobody.
+fun serveReady() {
+    var lists = readyLists;
+    var streamKeys = readyStreamKeys;
+    var marks = readyStreams;
+    readyLists = nil;
+    readyListSeen = nil;
+    readyStreamKeys = nil;
+    readyStreams = nil;
+    for (var key in lists) {
+        serveWaiters(key);
+    }
+    for (var key in streamKeys) {
+        var mark = marks[key];
+        if (streamEntry(key) == mark.stream) {
+            wakeReaders(key, mark.stream, mark.first);
+        }
+    }
+}
 
 // The largest value that INCR gives: a value has at most 15 digits, so that
 // it is exact in a Number. Redis allows the full 64-bit range.
@@ -1713,12 +1792,14 @@ class Transaction {
         this.ctxs = [];
         this.dirty = false;
         this.args = 0;
+        this.bytes = 0;
     }
 }
 
-// The bounds of one transaction: at most TX_COMMANDS commands and TX_ARGS
-// arguments in all. EXEC runs the whole queue in one step, so these bound
-// that step (README rules 4 and 6). Redis has no such bound.
+// The bounds of one transaction: at most TX_COMMANDS commands, TX_ARGS
+// arguments and the query limit (QUERY_MAX) of bytes in all. EXEC runs the
+// whole queue in one step, so these bound that step and the queue (README
+// rules 4 and 6). Redis has no such bound.
 var TX_COMMANDS = 65536;
 var TX_ARGS = 1048576;
 
@@ -1760,7 +1841,7 @@ fun beginOrRefuse(conn, name, argv) {
 // A command of a client in a transaction: queue it, or end the
 // transaction. Returns the reply: a String, or the List of the replies of
 // EXEC.
-fun inTransaction(conn, name, argv) {
+fun inTransaction(conn, name, argv, nbytes) {
     var tx = conn.tx;
     if (COMMANDS[name] == nil and ARITY[name] == nil) {
         tx.dirty = true;
@@ -1788,7 +1869,8 @@ fun inTransaction(conn, name, argv) {
         }
         return execQueued(tx);
     }
-    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {
+    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS
+        or tx.bytes + nbytes > QUERY_MAX) {
         tx.dirty = true;
         return errorReply("ERR the transaction holds too many commands or arguments");
     }
@@ -1802,6 +1884,7 @@ fun inTransaction(conn, name, argv) {
     tx.queued.append(argv);
     tx.ctxs.append(ctx);
     tx.args = tx.args + len(argv);
+    tx.bytes = tx.bytes + nbytes;
     return simple("QUEUED");
 }
 
@@ -1810,6 +1893,10 @@ fun inTransaction(conn, name, argv) {
 // wait (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis.
 // Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
+    readyLists = [];
+    readyListSeen = {};
+    readyStreamKeys = [];
+    readyStreams = {};
     var replies = [];
     var i = 0;
     for (var argv in tx.queued) {
@@ -1820,6 +1907,7 @@ fun execQueued(tx) {
         }
         replies.append(reply);
     }
+    serveReady();
     return replies;
 }
 
@@ -1830,6 +1918,8 @@ fun writeReplies(conn, replies) {
     for (var reply in replies) {
         if (type(reply) == "String") {
             out.add(reply);
+        } else if (hasField(reply, "bulkValue")) {
+            out.addBulk(reply.bulkValue);
         } else {
             out.flush();
             writeReply(conn, reply);
@@ -1838,9 +1928,13 @@ fun writeReplies(conn, replies) {
     out.flush();
 }
 
-// Writes one reply of a command: a String, Bulks or Segments.
+// Writes one reply of a command: a String, Bulk, Bulks or Segments.
 fun writeReply(conn, reply) {
-    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
+    if (type(reply) == "Instance" and hasField(reply, "bulkValue")) {
+        var out = Output(conn);
+        out.addBulk(reply.bulkValue);
+        out.flush();
+    } else if (type(reply) == "Instance" and hasField(reply, "fwd")) {
         writeBulks(conn, reply);
     } else if (type(reply) == "Instance") {
         writeSegments(conn, reply);
@@ -1858,7 +1952,7 @@ fun cmdPing(ctx, argv) {
         return simple("PONG");
     }
     if (len(argv) == 2) {
-        return bulk(argv[1]);
+        return Bulk(argv[1]);
     }
     return wrongArgs("ping");
 }
@@ -1867,7 +1961,7 @@ fun cmdEcho(ctx, argv) {
     if (len(argv) != 2) {
         return wrongArgs("echo");
     }
-    return bulk(argv[1]);
+    return Bulk(argv[1]);
 }
 
 fun cmdSetEntry(ctx, argv) {
@@ -2172,14 +2266,14 @@ fun readLoop(conn) {
 
 // Returns true while the session goes on. A Block reply waits in the
 // session; the client's next commands stay in the mailbox until it ends.
-fun runCommand(conn, argv) {
+fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
     if (len(argv) > 0) {
         var name = upper(argv[0]);
         if (conn.tx != nil or name == "MULTI" or name == "EXEC" or name == "DISCARD") {
             var reply = nil;
             if (conn.tx != nil) {
-                reply = inTransaction(conn, name, argv);
+                reply = inTransaction(conn, name, argv, nbytes);
             } else {
                 reply = beginOrRefuse(conn, name, argv);
             }
@@ -2343,7 +2437,7 @@ fun sessionLoop(conn) {
         while (running) {
             var msg = task.receive();
             running = match msg {
-                case Msg.Cmd(args, nbytes) => runCommand(conn, fromArgs(args))
+                case Msg.Cmd(args, nbytes) => runCommand(conn, fromArgs(args), nbytes)
                 case Msg.Fail(text) => failConnection(conn, text)
                 case Msg.Closed => false
                 // Only the reader sends to the session, and it never sends

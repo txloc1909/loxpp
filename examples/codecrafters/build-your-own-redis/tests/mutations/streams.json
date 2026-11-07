@@ -97,7 +97,7 @@
  },
  {
   "name": "XADD does not wake the readers",
-  "old": "    wakeReaders(key, stream);\n",
+  "old": "    streamReady(key, stream);\n",
   "new": "",
   "cases": [
    "streams-11 XREAD BLOCK gets the new entry"
@@ -153,8 +153,8 @@
  },
  {
   "name": "S2 a stream reply drops its last step",
-  "old": "    out.flush();\n}",
-  "new": "}",
+  "old": "        i = i + 1;\n    }\n    out.flush();\n}\n\n",
+  "new": "        i = i + 1;\n    }\n}\n\n",
   "cases": [
    "local: S2 XRANGE of that entry gives every field"
   ]
@@ -249,7 +249,7 @@
  },
  {
   "name": "XREAD $ reads from the first entry",
-  "old": "            reply.add(key, stream, n - 1, n);",
+  "old": "            reply.add(key, stream, firstNew, n);",
   "new": "            reply.add(key, stream, 0, n);",
   "cases": [
    "streams-13 XREAD BLOCK with $ gets only the new entry"
@@ -277,6 +277,14 @@
   "new": "            if (hasField(after, \"fields\")) {\n                after = StreamId(stream.ms[stream.size() - 1], stream.seq[stream.size() - 1] - 1);\n            }",
   "cases": [
    "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
+  ]
+ },
+ {
+  "name": "XADD in EXEC wakes the readers at once",
+  "old": "    if (readyStreams == nil) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
+  "new": "    if (true) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
+  "cases": [
+   "local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s"
   ]
  }
 ]

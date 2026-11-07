@@ -1653,6 +1653,42 @@ def stages_transactions(prog):
               got == [2, ["a", "b"], "1-1", [["1-1", ["f", "v"]]],
                       [[skey, [["1-1", ["f", "v"]]]]]], repr(got))
 
+        # A client that waits acts before or after a transaction, never in
+        # it: EXEC serves the waiters one time, after its last command.
+        key = rand_word()
+        waiter = srv.client()
+        waiter.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("RPUSH", key, "a")
+        c.call("LPOP", key)
+        got = c.call("EXEC")
+        check("local: a push and a pop in EXEC are not seen by a BLPOP waiter",
+              got == [1, "a"], repr(got))
+        check("local: the waiter still waits after that EXEC", waiter.try_read(0.3) is TIMEOUT)
+        c.call("MULTI")
+        c.call("RPUSH", key, "a", "b")
+        c.call("LRANGE", key, "0", "-1")
+        got = c.call("EXEC")
+        check("local: EXEC sees its own push whole while a client waits",
+              got == [2, ["a", "b"]], repr(got))
+        check("local: the waiter gets the first element after EXEC",
+              waiter.try_read(3) == [key, "a"])
+        waiter.close()
+        skey = rand_word()
+        c.call("XADD", skey, "1-1", "f", "v")
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "2-1", "f", "a")
+        c.call("XADD", skey, "3-1", "f", "b")
+        c.call("EXEC")
+        got = reader.try_read(3)
+        check("local: an XREAD BLOCK $ reader gets every entry of an EXEC",
+              got == [[skey, [["2-1", ["f", "a"]], ["3-1", ["f", "b"]]]]], repr(got))
+        reader.close()
+
         # EXEC is atomic: a client that reads the key during a long EXEC
         # sees it before or after, never in between.
         key = rand_word()
@@ -1748,6 +1784,101 @@ def stages_transactions(prog):
               worst <= 0.5 and not wrong and got == [None], "worst %.3f s, %r" % (worst, got))
         c.close()
         other.close()
+    finally:
+        srv.stop()
+    stages_transactions_large(prog)
+
+
+def stages_transactions_large(prog):
+    """The byte bound of a transaction, and T3-T5, on servers of their
+    own."""
+    srv = Server(prog, ["--client-query-buffer-limit", "100000"])
+    try:
+        check("transactions (bytes): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        c.call("MULTI")
+        first = c.call("SET", "k", "x" * 60000)
+        got = c.call("SET", "k", "x" * 60000)
+        check("local: a transaction over the query limit of bytes is refused",
+              first == "QUEUED" and isinstance(got, Error) and "too many" in got, repr(got))
+        check("local: EXEC after it is EXECABORT (bytes)",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.close()
+    finally:
+        srv.stop()
+
+    srv = Server(prog, [])
+    try:
+        check("transactions (large): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+
+        def exec_stall(cmds, drain=None):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.send_raw(b"".join(part))
+                for _ in part:
+                    c.try_read(10)
+            got = [None]
+
+            def run():
+                c.send_raw(encode("EXEC"))
+                if drain is None:
+                    got[0] = c.try_read(30)
+                else:
+                    c.sock.settimeout(30)
+                    n = 0
+                    try:
+                        while n < drain:
+                            chunk = c.sock.recv(1 << 22)
+                            if not chunk:
+                                break
+                            n += len(chunk)
+                    except OSError:
+                        pass
+                    c.sock.settimeout(5)
+                    got[0] = n
+                time.sleep(0.2)
+            worst, wrong, _ = measure_while(srv, run)
+            return worst, wrong, got[0]
+
+        # T3: 200 readers wait above the top, and EXEC adds 10000 entries.
+        # EXEC passes over the readers once, not once for each XADD.
+        c.call("XADD", "t3", "1-1", "f", "v")
+        readers = []
+        for _ in range(200):
+            r = srv.client()
+            r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", "t3", "999999999-0"))
+            readers.append(r)
+        time.sleep(0.5)
+        worst, wrong, got = exec_stall(
+            [encode("XADD", "t3", "%d-1" % (i + 2), "f", "v") for i in range(10000)])
+        check("local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and isinstance(got, list) and len(got) == 10000,
+              "worst %.3f s" % worst)
+        for r in readers:
+            r.close()
+
+        # T4: GET gives its value with no copy, and the session writes a
+        # long value alone.
+        size = 64 << 20
+        c.call("SET", "t4", "x" * size)
+        want = 8 * (len("$%d\r\n" % size) + size + 2) + len("*8\r\n")
+        worst, wrong, got = exec_stall([encode("GET", "t4")] * 8, drain=want)
+        check("local: T4 EXEC of 8 GET of a 64 MB value stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong and got == want, "worst %.3f s, %r bytes" % (worst, got))
+
+        # T5: the session writes the replies of EXEC in steps.
+        c.call("SET", "t5", "y" * 1024)
+        want = 65535 * (len("$1024\r\n") + 1024 + 2) + len("*65535\r\n")
+        worst, wrong, got = exec_stall([encode("GET", "t5")] * 65535, drain=want)
+        check("local: T5 EXEC of 65535 GET of a 1 KB value stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and got == want, "worst %.3f s, %r bytes" % (worst, got))
+        c.close()
     finally:
         srv.stop()
 
