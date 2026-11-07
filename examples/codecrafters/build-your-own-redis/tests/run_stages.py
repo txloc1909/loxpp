@@ -1223,9 +1223,9 @@ def stages_streams(prog):
             ka, kb = rand_word(), rand_word()
             r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", ka, kb, "$", "$"))
             time.sleep(0.05)
-            c.c.send_raw(encode("XADD", ka, "1-1", "f", "a") + encode("XADD", kb, "1-1", "f", "b"))
-            c.c.try_read(3)
-            c.c.try_read(3)
+            c.raw().send_raw(encode("XADD", ka, "1-1", "f", "a") + encode("XADD", kb, "1-1", "f", "b"))
+            c.raw().try_read(3)
+            c.raw().try_read(3)
             if r.try_read(3) != [[ka, [["1-1", ["f", "a"]]]]]:
                 break
             served_a += 1
@@ -1343,17 +1343,28 @@ class Asker:
 
     def call(self, *args):
         try:
+            if self.c is None:
+                self.c = self.srv.client()
             self.c.send_raw(encode(*args))
             got = self.c.try_read(3)
         except (OSError, ValueError, EOFError):
             got = CLOSED
         if got is TIMEOUT or got is CLOSED or got is BAD_REPLY:
-            self.c.close()
-            self.c = self.srv.client()
+            if self.c is not None:
+                self.c.close()
+            self.c = None
         return got
 
+    def raw(self):
+        """The connection, for a case that sends raw bytes. It opens a new
+        one when a failed call closed the last one."""
+        if self.c is None:
+            self.c = self.srv.client()
+        return self.c
+
     def close(self):
-        self.c.close()
+        if self.c is not None:
+            self.c.close()
 
 
 def make_streams(c, keys):
@@ -1595,9 +1606,10 @@ def stages_transactions(prog):
               got1 == [1] and got2 == [2, 3], "%r %r" % (got1, got2))
 
         c.call("MULTI")
+        c.call("PING")
         check("local: MULTI in MULTI is an error",
               c.call("MULTI") == "ERR MULTI calls can not be nested")
-        check("local: the transaction goes on after it", c.call("EXEC") == [])
+        check("local: the transaction goes on after it", c.call("EXEC") == ["PONG"])
         c.call("MULTI")
         got = c.call("NOSUCH", "a")
         check("local: an unknown command in MULTI is an error",
@@ -1647,9 +1659,9 @@ def stages_transactions(prog):
         c.call("SET", key, "0")
         c.call("MULTI")
         for _ in range(5):
-            c.c.send_raw(encode("INCR", key) * 4000)
+            c.raw().send_raw(encode("INCR", key) * 4000)
             for _ in range(4000):
-                c.c.try_read(3)
+                c.raw().try_read(3)
         seen = set()
         stop = threading.Event()
 
@@ -1673,17 +1685,17 @@ def stages_transactions(prog):
         # The bound of a transaction (README rule 4).
         c.call("MULTI")
         for _ in range(16):
-            c.c.send_raw(encode("PING") * 4096)
+            c.raw().send_raw(encode("PING") * 4096)
             for _ in range(4096):
-                c.c.try_read(3)
+                c.raw().try_read(3)
         got = c.call("PING")
         check("local: the 65537th command of a transaction is refused",
               isinstance(got, Error) and "too many" in got, repr(got))
         check("local: EXEC after it is EXECABORT",
               c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
         c.call("MULTI")
-        c.c.send_raw(encode("RPUSH", "big", *(["a"] * 1048574)))
-        c.c.try_read(10)
+        c.raw().send_raw(encode("RPUSH", "big", *(["a"] * 1048574)))
+        c.raw().try_read(10)
         got = c.call("PING", "x")
         check("local: a transaction over 1048576 arguments is refused",
               isinstance(got, Error) and "too many" in got, repr(got))
@@ -1715,14 +1727,14 @@ def stages_transactions(prog):
             c.call("MULTI")
             for i in range(0, len(cmds), 4096):
                 part = cmds[i:i + 4096]
-                c.c.send_raw(b"".join(part))
+                c.raw().send_raw(b"".join(part))
                 for _ in part:
-                    c.c.try_read(10)
+                    c.raw().try_read(10)
             out = [None]
 
             def run():
-                c.c.send_raw(encode("EXEC"))
-                out[0] = c.c.try_read(30)
+                c.raw().send_raw(encode("EXEC"))
+                out[0] = c.raw().try_read(30)
                 time.sleep(0.2)
             worst, wrong, _ = measure_while(srv, run)
             return worst, wrong, out[0]

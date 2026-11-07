@@ -84,7 +84,7 @@
   "old": "        conn.tx = nil;\n        if (tx.dirty) {",
   "new": "        if (tx.dirty) {",
   "cases": [
-   "transactions-06 empty EXEC"
+   "transactions-05 EXEC without MULTI"
   ]
  },
  {
