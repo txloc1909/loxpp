@@ -1671,6 +1671,167 @@ fun wakeReaders(key, stream) {
 }
 
 // ===========================================================================
+// Transactions
+// ===========================================================================
+
+// The largest value that INCR gives: a value has at most 15 digits, so that
+// it is exact in a Number. Redis allows the full 64-bit range.
+var INCR_MAX = 999999999999999;
+
+fun cmdIncr(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("incr");
+    }
+    var entry = lookup(argv[1]);
+    if (entry == nil) {
+        store[argv[1]] = Entry("string", "1", nil);
+        return integerReply(1);
+    }
+    if (entry.kind != "string") {
+        return WRONGTYPE;
+    }
+    var n = parseInteger(entry.value);
+    if (n == nil) {
+        return NOT_INTEGER;
+    }
+    if (n >= INCR_MAX) {
+        return errorReply("ERR increment or decrement would overflow");
+    }
+    n = n + 1;
+    // The key keeps its expiry, as in Redis.
+    entry.value = str(n);
+    return integerReply(n);
+}
+
+// The commands that a client queued after MULTI. dirty is true when one of
+// them was rejected, so that EXEC runs none of them. args counts the
+// arguments of the queued commands, for the bound of README rule 4.
+class Transaction {
+    init() {
+        this.queued = [];
+        this.dirty = false;
+        this.args = 0;
+    }
+}
+
+// The bounds of one transaction: at most TX_COMMANDS commands and TX_ARGS
+// arguments in all. EXEC runs the whole queue in one step, so these bound
+// that step (README rules 4 and 6). Redis has no such bound.
+var TX_COMMANDS = 65536;
+var TX_ARGS = 1048576;
+
+// The number of arguments of each command, as Redis 7.0 checks it before it
+// runs or queues the command: n for exactly n, -n for at least n.
+var ARITY = {
+    "PING": -1, "ECHO": 2, "SET": -3, "GET": 2, "INFO": -1,
+    "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
+    "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
+    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1
+};
+
+fun arityOk(name, count) {
+    var a = ARITY[name];
+    if (a < 0) {
+        return count >= -a;
+    }
+    return count == a;
+}
+
+// MULTI, EXEC and DISCARD outside a transaction. Returns the reply.
+fun beginOrRefuse(conn, name, argv) {
+    if (!arityOk(name, len(argv))) {
+        return wrongArgs(lower(name));
+    }
+    if (name == "MULTI") {
+        conn.tx = Transaction();
+        return simple("OK");
+    }
+    return errorReply("ERR " + name + " without MULTI");
+}
+
+// A command of a client in a transaction: queue it, or end the
+// transaction. Returns the reply: a String, or the List of the replies of
+// EXEC.
+fun inTransaction(conn, name, argv) {
+    var tx = conn.tx;
+    if (COMMANDS[name] == nil and ARITY[name] == nil) {
+        tx.dirty = true;
+        return unknownCommand(argv);
+    }
+    if (!arityOk(name, len(argv))) {
+        if (name == "EXEC") {
+            conn.tx = nil;
+            return errorReply("EXECABORT Transaction discarded because of: wrong number of arguments for 'exec' command");
+        }
+        tx.dirty = true;
+        return wrongArgs(lower(name));
+    }
+    if (name == "MULTI") {
+        return errorReply("ERR MULTI calls can not be nested");
+    }
+    if (name == "DISCARD") {
+        conn.tx = nil;
+        return simple("OK");
+    }
+    if (name == "EXEC") {
+        conn.tx = nil;
+        if (tx.dirty) {
+            return errorReply("EXECABORT Transaction discarded because of previous errors.");
+        }
+        return execQueued(tx);
+    }
+    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {
+        tx.dirty = true;
+        return errorReply("ERR the transaction holds too many commands or arguments");
+    }
+    tx.queued.append(argv);
+    tx.args = tx.args + len(argv);
+    return simple("QUEUED");
+}
+
+// Runs the queued commands in one step, with no suspend point: execute with
+// no ctx parses in the command, with no yield. A command that would wait
+// (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis. Returns the
+// List of the replies; the session writes them after the step.
+fun execQueued(tx) {
+    var replies = [];
+    for (var argv in tx.queued) {
+        var reply = execute(nil, argv);
+        if (type(reply) == "Instance" and hasField(reply, "timeout")) {
+            reply = NULL_ARRAY;
+        }
+        replies.append(reply);
+    }
+    return replies;
+}
+
+// Writes the replies of EXEC as one array, in steps.
+fun writeReplies(conn, replies) {
+    var out = Output(conn);
+    out.add("*" + str(len(replies)) + "\r\n");
+    for (var reply in replies) {
+        if (type(reply) == "String") {
+            out.add(reply);
+        } else {
+            out.flush();
+            writeReply(conn, reply);
+        }
+    }
+    out.flush();
+}
+
+// Writes one reply of a command: a String, Bulks or Segments.
+fun writeReply(conn, reply) {
+    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
+        writeBulks(conn, reply);
+    } else if (type(reply) == "Instance") {
+        writeSegments(conn, reply);
+    } else if (reply != "") {
+        conn.sock.write(reply);
+    }
+}
+
+// ===========================================================================
 // Command table
 // ===========================================================================
 
@@ -1718,7 +1879,8 @@ var COMMANDS = {
     "TYPE": cmdType,
     "XADD": cmdXadd,
     "XRANGE": cmdXrange,
-    "XREAD": cmdXread
+    "XREAD": cmdXread,
+    "INCR": cmdIncr
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -1865,6 +2027,8 @@ class Conn {
         // True while the session waits in BLPOP. The reader reads on then,
         // past its credit, so that it sees the end of the stream.
         this.blocked = false;
+        // The Transaction after MULTI, or nil.
+        this.tx = nil;
     }
 }
 
@@ -1993,7 +2157,23 @@ fun readLoop(conn) {
 fun runCommand(conn, argv) {
     var ctx = nil;
     if (len(argv) > 0) {
-        var parse = PARSERS[upper(argv[0])];
+        var name = upper(argv[0]);
+        if (conn.tx != nil or name == "MULTI" or name == "EXEC" or name == "DISCARD") {
+            var reply = nil;
+            if (conn.tx != nil) {
+                reply = inTransaction(conn, name, argv);
+            } else {
+                reply = beginOrRefuse(conn, name, argv);
+            }
+            if (type(reply) == "List") {
+                writeReplies(conn, reply);
+            } else {
+                conn.sock.write(reply);
+            }
+            giveCredit(conn);
+            return true;
+        }
+        var parse = PARSERS[name];
         if (parse != nil) {
             ctx = parse(argv, true);
         }
@@ -2005,13 +2185,7 @@ fun runCommand(conn, argv) {
             return false;
         }
     }
-    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
-        writeBulks(conn, reply);
-    } else if (type(reply) == "Instance") {
-        writeSegments(conn, reply);
-    } else if (reply != "") {
-        conn.sock.write(reply);
-    }
+    writeReply(conn, reply);
     giveCredit(conn);
     return true;
 }
