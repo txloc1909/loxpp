@@ -124,13 +124,18 @@ A stream key holds a `Stream`: three Lists of the same length, the two
 parts of each entry ID and the fields of each entry. `XADD` keeps the fields
 as one slice of its arguments, so it costs no more for an entry with more
 fields. The IDs only grow, so `XRANGE` and `XREAD` find their first entry
-with a binary search and take one slice of each List.
+with a binary search, and an ID at or above the top costs one comparison. A
+stream only grows at its end, so the reply keeps only the stream and the
+bounds of its entries (`class Segments`); the session reads the entries
+when it writes them.
 
 `XREAD BLOCK` waits as `BLPOP` does (`waitForElement`), in a second map of
 queues, `readers`. At the end of `XADD`, `wakeReaders` takes each reader of
 the key that now has entries to read, puts its reply in its `Waiter` and
 sends `Msg.Ready`. So the reply holds the entries up to this `XADD` and only
-this stream, as in Redis. A reader whose ID is still above the top joins the
+this stream, as in Redis. For a key that the reader named with `$`, the
+first `XADD` on the key after the wait started wakes the reader at once, so
+its reply is the entry of that `XADD`, and the wait stores no ID for it. A reader whose ID is still above the top joins the
 queue again. `XREAD` takes nothing from the stream, so a reply that the
 client cannot get is dropped.
 
@@ -144,7 +149,8 @@ one slice; the other clients go on while a long reply is written.
 
 A stream reply (`class Segments`) is written the same way: `class Output`
 writes at most 1024 parts and about 1 MB in each step, and yields between
-the steps. A part longer than a step is written alone.
+the steps. A part of 1 MB or more goes to the socket alone, and a long field
+goes as its header, the field and CRLF, so no step copies it.
 
 ### Expiry
 
@@ -172,6 +178,12 @@ printed.
 - `XADD` takes no options (`NOMKSTREAM`, `MAXLEN`, `MINID`, `LIMIT`): the
   word in the ID place must be an ID. `XRANGE` takes no exclusive bounds
   (`(1-1`).
+- A stream ID part is digits with no leading zero and no sign. Redis also
+  accepts `007-1` and `+8-1`.
+- Some errors come in another order when a command has two of them: `XADD`
+  on a key of another kind with a bad ID, `XRANGE` with a bad `COUNT` and a
+  bad ID (here the `COUNT` error comes first), and `XREAD` with a key of
+  another kind before a bad ID (here the ID error comes first).
 - An `XREAD BLOCK` that names one key twice waits for entries above the
   second ID of that key.
 - An inline command (a line with no `*` header) is split on spaces and tabs.
@@ -269,6 +281,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S2: `XRANGE` of that entry | every field; PING within 0.15 s (without the yield of `Output.add`: 0.27 s) | as required; 0.056–0.067 s |
 | S3: `XREAD` of 524286 missing streams | PING within 0.5 s (when the IDs are parsed in the step of the command: 0.93 s) | 0.23–0.27 s |
 | S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
+| S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.010 s / 0.04–0.09 s |
+| S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.2 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
+| S8: `XREAD` of 131072 streams that have entries | every stream; PING within 0.5 s (when the command copies the entries of each stream: 0.72 s) | 0.19–0.30 s |
+| S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
+| Not in the suite: `XREAD` of 524286 streams that have entries | PING within 1.0 s (redis-server 7.0: 0.76 s) | 0.72–0.78 s |
+| Not in the suite: `XREAD BLOCK 0` with `$` on 524286 streams, by a first and a second client | PING within 1.0 s in Lox++ code; a GC pause is native (#1165) | first 0.58–0.63 s; second 1.70–1.76 s, of which one GC pause of 0.76–0.79 s (redis-server 7.0: 0.56 s and 0.49 s) |
+| Not in the suite: `XRANGE` of one field of 200 MB | PING within 1.0 s | 0.009–0.023 s |
 | Group `streams`: `XREAD BLOCK 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | Not in the suite: `XRANGE` / `XREAD` of 200000 entries | PING within 1.0 s | 0.07–0.13 s / 0.07–0.21 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
@@ -279,7 +298,13 @@ Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json` or `tests/mutations/streams.json` that removes
-its guard (S4 holds rule 6 only: the S3 mutation also removes its guard). Two guards have no
+its guard (S4 holds rule 6 only: the S3 mutation also removes its guard).
+
+A large heap brings a second kind of stall: the native VM stops the worker
+for each full collection, and the pause grows with the live heap. With
+524286 streams (about 4 million objects), one pause was 0.76–0.79 s
+(#1165). It can come in any command, so a probe on such a heap measures it
+too; S8 uses 131072 streams so that it measures the command. Two guards have no
 probe, because no client timing forces the order of events that they
 handle:
 - the give-back after a failed write of a `BLPOP` reply: the write fails

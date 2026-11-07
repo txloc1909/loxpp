@@ -84,7 +84,7 @@
   "old": "    var from = stream.find(id.ms, id.seq, false);\n    var to = stream.size();",
   "new": "    var from = stream.find(id.ms, id.seq, true);\n    var to = stream.size();",
   "cases": [
-   "local: XREAD with nothing to read is a null array"
+   "local: XREAD from a middle ID reads only the entries above it"
   ]
  },
  {

@@ -181,7 +181,7 @@ class Client:
             return self.read()
         except socket.timeout:
             return TIMEOUT
-        except (EOFError, OSError):
+        except (EOFError, OSError, ValueError):
             return CLOSED
         finally:
             self.sock.settimeout(5)
@@ -1155,6 +1155,9 @@ def stages_streams(prog):
               c.call("XREAD", "streams", key, "0-0") == [[key, [["0-1", ["temperature", "96"]]]]])
         check("local: XREAD with nothing to read is a null array",
               c.call("XREAD", "streams", key, "0-1") is None)
+        c.call("XADD", key, "0-2", "temperature", "97")
+        check("local: XREAD from a middle ID reads only the entries above it",
+              c.call("XREAD", "streams", key, "0-1") == [[key, [["0-2", ["temperature", "97"]]]]])
 
         a, b = rand_word(), rand_word()
         c.call("XADD", a, "0-1", "temperature", "95")
@@ -1220,8 +1223,9 @@ def stages_streams(prog):
             c.c.send_raw(encode("XADD", ka, "1-1", "f", "a") + encode("XADD", kb, "1-1", "f", "b"))
             c.c.try_read(3)
             c.c.try_read(3)
-            if r.try_read(3) == [[ka, [["1-1", ["f", "a"]]]]]:
-                served_a += 1
+            if r.try_read(3) != [[ka, [["1-1", ["f", "a"]]]]]:
+                break
+            served_a += 1
         check("local: a reader that XADD served is not served again by the next XADD (20 rounds)",
               served_a == 20, "%d of 20" % served_a)
 
@@ -1295,52 +1299,6 @@ def stages_streams(prog):
         check("local: XREAD BLOCK with no limit ends when its client goes",
               now == base, "connected_clients %d, before %d" % (now, base))
 
-        # S1-S4: the largest commands of the group. XADD keeps the fields as
-        # one slice, the session writes a reply in steps and yields between
-        # them, and XREAD parses its IDs before its one step, with yields.
-        n = 524286
-        big = srv.client()
-
-        def xadd_big():
-            big.send_raw(encode("XADD", "s1", "1-1", *(["abcd"] * (2 * n))))
-            big.try_read(20)
-            time.sleep(0.1)
-        worst, wrong, _ = measure_while(srv, xadd_big)
-        check("local: S1 XADD with 524286 field pairs stalls PING at most 0.2 s",
-              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
-        got = [None]
-
-        def xrange_big():
-            big.send_raw(encode("XRANGE", "s1", "-", "+"))
-            got[0] = big.try_read(20)
-            time.sleep(0.1)
-        worst, wrong, _ = measure_while(srv, xrange_big)
-        check("local: S2 XRANGE of that entry gives every field",
-              got[0] == [["1-1", ["abcd"] * (2 * n)]])
-        check("local: S2 XRANGE of that entry stalls PING at most 0.15 s",
-              worst <= 0.15 and not wrong, "worst %.3f s" % worst)
-        keys = ["s3-%d" % i for i in range(n)]
-
-        def xread_many():
-            big.send_raw(encode("XREAD", "STREAMS", *keys, *(["0"] * n)))
-            got[0] = big.try_read(20)
-            time.sleep(0.1)
-        worst, wrong, _ = measure_while(srv, xread_many)
-        check("local: S3 XREAD of 524286 missing streams gives a null array", got[0] is None)
-        check("local: S3 XREAD of 524286 streams stalls PING at most 0.5 s",
-              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
-
-        def xread_block_many():
-            big.send_raw(encode("XREAD", "BLOCK", "1000", "STREAMS", *keys, *(["0"] * (n - 1)), "0"))
-            got[0] = big.try_read(20)
-            time.sleep(0.3)
-        worst, wrong, _ = measure_while(srv, xread_block_many)
-        check("local: S4 XREAD BLOCK on 524286 streams times out with a null array",
-              got[0] is None, repr(got[0])[:80])
-        check("local: S4 XREAD BLOCK on 524286 streams stalls PING at most 1 s",
-              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
-        big.close()
-
         key = rand_word()
         c.call("SET", key, "v")
         for args in (("XADD", key, "1-1", "f", "v"), ("XRANGE", key, "-", "+"),
@@ -1388,7 +1346,7 @@ def make_streams(c, keys):
 
 
 def stages_streams_large(prog):
-    """S5-S8, on a server of their own: S8 fills the heap with streams."""
+    """S1-S9, on a server of their own: S8 fills the heap with streams."""
     srv = Server(prog, [])
     try:
         check("streams (large): server starts", srv.up, srv.log_text())
@@ -1398,6 +1356,53 @@ def stages_streams_large(prog):
         c.call("XADD", "one", "1-1", "f", "v")
         got = [None]
 
+        # S1-S4: the largest commands of the group. XADD keeps the fields as
+        # one slice, the session writes a reply in steps and yields between
+        # them, and XREAD parses its IDs before its one step, with yields.
+        n = 524286
+        big = srv.client()
+
+        def xadd_big():
+            big.send_raw(encode("XADD", "s1", "1-1", *(["abcd"] * (2 * n))))
+            big.try_read(15)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xadd_big)
+        check("local: S1 XADD with 524286 field pairs stalls PING at most 0.2 s",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        got = [None]
+
+        def xrange_big():
+            big.send_raw(encode("XRANGE", "s1", "-", "+"))
+            got[0] = big.try_read(15)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xrange_big)
+        check("local: S2 XRANGE of that entry gives every field",
+              got[0] == [["1-1", ["abcd"] * (2 * n)]])
+        check("local: S2 XRANGE of that entry stalls PING at most 0.15 s",
+              worst <= 0.15 and not wrong, "worst %.3f s" % worst)
+        keys = ["s3-%d" % i for i in range(n)]
+
+        def xread_many():
+            big.send_raw(encode("XREAD", "STREAMS", *keys, *(["0"] * n)))
+            got[0] = big.try_read(15)
+            time.sleep(0.1)
+        worst, wrong, _ = measure_while(srv, xread_many)
+        check("local: S3 XREAD of 524286 missing streams gives a null array", got[0] is None)
+        check("local: S3 XREAD of 524286 streams stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+
+        def xread_block_many():
+            big.send_raw(encode("XREAD", "BLOCK", "1000", "STREAMS", *keys, *(["0"] * (n - 1)), "0"))
+            got[0] = big.try_read(15)
+            time.sleep(0.3)
+        worst, wrong, _ = measure_while(srv, xread_block_many)
+        check("local: S4 XREAD BLOCK on 524286 streams times out with a null array",
+              got[0] is None, repr(got[0])[:80])
+        check("local: S4 XREAD BLOCK on 524286 streams stalls PING at most 1 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+        big.close()
+
+
         # S5, S6: the options of XREAD and XRANGE are parsed before the
         # command, with yields.
         m = 524000
@@ -1405,7 +1410,7 @@ def stages_streams_large(prog):
         def many_options(cmd):
             def run():
                 c.send_raw(cmd)
-                got[0] = c.try_read(20)
+                got[0] = c.try_read(10)
                 time.sleep(0.1)
             return run
         worst, wrong, _ = measure_while(srv, many_options(
@@ -1428,7 +1433,7 @@ def stages_streams_large(prog):
 
         def xrange_s7():
             c.send_raw(encode("XRANGE", "s7", "-", "+"))
-            c.sock.settimeout(20)
+            c.sock.settimeout(10)
             want = 64 * (len(field) + 40)
             n = 0
             try:
@@ -1454,7 +1459,7 @@ def stages_streams_large(prog):
 
         def xrange_s9():
             c.send_raw(encode("XRANGE", "s9", "-", "+"))
-            got[0] = c.try_read(30)
+            got[0] = c.try_read(15)
             time.sleep(0.2)
         worst, wrong, _ = measure_while(srv, xrange_s9)
         check("local: S9 XRANGE of a 64 MB field gives it",
@@ -1473,7 +1478,7 @@ def stages_streams_large(prog):
 
         def xread_s8():
             c.send_raw(encode("XREAD", "STREAMS", *keys, *(["0"] * len(keys))))
-            got[0] = c.try_read(30)
+            got[0] = c.try_read(15)
             time.sleep(0.2)
         worst, wrong, _ = measure_while(srv, xread_s8)
         check("local: S8 XREAD of 131072 streams with entries gives each one",
