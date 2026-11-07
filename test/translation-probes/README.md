@@ -432,6 +432,7 @@ each has an off-the-shelf solution.
 | `436_exit_int_code` | `exit` accepts an Int code, which ends the program with that code as a Number code does (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
 | `437_exit_number_code_truncates` | a Number exit code is truncated toward zero, so `exit(3.7)` ends with code 3 (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
 | `438_exit_int_code_too_large` | an Int exit code above the signed 32-bit range is a runtime error, not a code (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
+| `439_integer_arg_connect_within_port` | `connect_within` accepts an Int port while its limit stays a Number, and a fractional port still halts before the limit (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |
 | `322_receive_where_sees_the_mailbox` | `task.pending()` in `want` counts the whole mailbox, and a message that `want` sends to its own task is tested in the same call — a spec probe | none (spec probe) |

@@ -59,6 +59,7 @@ HELPER = "readIntegerArg"
 SITES = {
     "chr": ("globals.cpp", "chrNative"),
     "connect-port": ("net_api.cpp", "asPort"),
+    "connect-within-port": ("net_api.cpp", "asPort"),
     "listen-port": ("net_api.cpp", "asPort"),
     "socket-read-bytes": ("net_api.cpp", "asByteCount"),
     "socket-read-some": ("net_api.cpp", "asByteCount"),

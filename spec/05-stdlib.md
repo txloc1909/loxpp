@@ -26,6 +26,7 @@ program. A value of any other kind is the same kind of runtime error.
 |---|---|---|
 | `chr(value)` | `chr` | 0 to 255 |
 | `connect(host, port)` | `connect-port` | 1 to 65535 |
+| `connect_within(host, port, seconds)` | `connect-within-port` | 1 to 65535 |
 | `listen(host, port)` | `listen-port` | 0 to 65535 |
 | `s.read_bytes(n)` | `socket-read-bytes` | 0 to 2147483647 |
 | `s.read_some(n)` | `socket-read-some` | 1 to 2147483647 |
@@ -149,8 +150,8 @@ print chr(65i);     // A
 print len(chr(0));  // 1
 ```
 
-A non-Number argument, a fractional Number, or a value outside 0 through 255
-is a runtime error. `chr` is the inverse of `ord` on every valid value:
+A value of any other kind, a fractional Number, or a value outside 0 through
+255 is a runtime error. `chr` is the inverse of `ord` on every valid value:
 `ord(chr(n))` equals `n`, and `chr(ord(s))` equals `s` for every one-byte
 String `s`.
 

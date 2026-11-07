@@ -570,7 +570,8 @@ public final class LoxRuntime {
      * Mirrors src/stdlib/integer_arg.cpp's readIntegerArg. A parameter that
      * spec/05-stdlib.md, "Integer arguments", calls an integer accepts an Int
      * (a Long here) or an integer-valued Number (a Double here). The two
-     * kinds do not mix, so this is the only place that reads both.
+     * kinds do not mix. `exit`'s code is not such a parameter — a Number code
+     * is truncated toward zero — so it reads its own Int case.
      */
     static long integerArg(Object v, String notNumber, String notInteger) {
         if (v instanceof Long) {

@@ -69,8 +69,11 @@ with the suffix `i`, or as a hexadecimal or binary literal
   parameter that the spec calls a Number, and that does not say it is an
   integer, does not take an Int: `math.floor(1i)` is a runtime error. A
   function that gives a Number does not give an Int, unless §05-stdlib says
-  otherwise for `int`, `float`, `exit`, and the `integer` module. `len(x)`
-  gives a Number.
+  otherwise for `int`, `float`, and the `integer` module. `len(x)` gives a
+  Number. `exit` is the one function whose parameter is a Number and that
+  takes an Int too: its code is truncated toward zero, so it is not an
+  [integer parameter](05-stdlib.md#integer-arguments)
+  ([§05-stdlib, exit](05-stdlib.md#exitcode)).
 - **Width.** The spec binds 64 bits. How an implementation stores an Int is
   implementation-defined, and no program can observe it: an Int that an
   implementation keeps in a register, in a tagged word, or in a heap object
