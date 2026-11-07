@@ -166,6 +166,45 @@ CATCHABLE_ROWS = [
         setup='fun needsOne(a) {}\nfun g() { defer needsOne(); throw "boom"; }\n',
         expected_kind="ArityError",
     ),
+    # Every callable whose own arity check raises the catchable ArityError
+    # (spec/04-semantics.md, Runtime Errors; the review of #1147). A Lox
+    # function is row arity_error above; these four are the other sides of the
+    # row, and a native-backed Function or BoundMethod is the halting side.
+    Row(
+        "arity_error_method_call",
+        "caught",
+        "C().m(1);",
+        setup="class C { m() {} }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_super_call",
+        "caught",
+        "B().n();",
+        setup="class A { m() {} }\nclass B < A { n() { super.m(1); } }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_bound_method",
+        "caught",
+        "g(1);",
+        setup="class C { m() {} }\nvar g = C().m;\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_callable_instance",
+        "caught",
+        "K()(1, 2);",
+        setup="class K { __call__(a) {} }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_init",
+        "caught",
+        "C(1, 2);",
+        setup="class C { init(a) {} }\n",
+        expected_kind="ArityError",
+    ),
     Row("undefined_variable_error", "caught", "print undeclared;", expected_kind="UndefinedVariableError"),
     # `f` is declared OUTSIDE the try (setup), not inside it: a self-recursive
     # local function declared inside a try block fails JVM bytecode
@@ -968,6 +1007,15 @@ CATCHABLE_REGRESSION_ROWS = {
     # Issue #508: the right operand's reflected comparison method returned a
     # non-Boolean, sharing operator_result_type_error's spec row.
     "reflected_operator_result_type_error",
+    # The four other callables whose own arity check raises the catchable
+    # ArityError (the review of #1147): a method call, a super call, a bound
+    # method value, a callable instance, and a class whose init takes another
+    # count. Each shares arity_error's spec row.
+    "arity_error_method_call",
+    "arity_error_super_call",
+    "arity_error_bound_method",
+    "arity_error_callable_instance",
+    "arity_error_init",
     # The Int kind widens three operand rows to a Number together with an Int.
     "arithmetic_type_error_mixed_int",
     "comparison_type_error_mixed_int",
