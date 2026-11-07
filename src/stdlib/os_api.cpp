@@ -75,21 +75,35 @@ static Value envNative(int /*argc*/, Value* argv) {
 }
 
 static Value exitNative(int /*argc*/, Value* argv) {
-    if (!is<Number>(argv[0])) {
+    // An Int is already an integer. A Number is truncated toward zero, the
+    // C-style integral conversion. Both must fit the signed 32-bit code.
+    // 2^63 is exact, so it is the first Number above the Int range.
+    static constexpr double kTwoToThe63 = 9223372036854775808.0;
+    Int code = 0;
+    if (is<Int>(argv[0])) {
+        code = as<Int>(argv[0]);
+    } else if (is<Number>(argv[0])) {
+        const Number raw = as<Number>(argv[0]);
+        // Reject any value for which the truncation to an Int is undefined
+        // behaviour — a non-finite number or one outside the Int range —
+        // before it happens.
+        if (!std::isfinite(raw) || raw >= kTwoToThe63 || raw < -kTwoToThe63) {
+            nativeRuntimeError("exit() code must be a finite number in the "
+                               "integer range.");
+            return from<Nil>(Nil{});
+        }
+        code = static_cast<Int>(std::trunc(raw));
+    } else {
         nativeRuntimeError("exit() code must be a number.");
         return from<Nil>(Nil{});
     }
-    double raw = as<Number>(argv[0]);
-    // Truncate toward zero, the C-style integral conversion. Reject any value
-    // for which that conversion is undefined behaviour — a non-finite number
-    // or one outside the int range — before it happens.
-    if (!std::isfinite(raw) || raw > INT_MAX || raw < INT_MIN) {
+    if (code > INT_MAX || code < INT_MIN) {
         nativeRuntimeError("exit() code must be a finite number in the "
                            "integer range.");
         return from<Nil>(Nil{});
     }
     // Any worker can end the program (spec/04-semantics.md, Ending).
-    endProcess(static_cast<int>(std::trunc(raw)));
+    endProcess(static_cast<int>(code));
     return from<Nil>(Nil{});
 }
 

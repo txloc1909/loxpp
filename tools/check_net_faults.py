@@ -48,7 +48,11 @@ Native (src/stdlib/net_api.cpp):
 JVM (runtime/jvm/src/lox/LoxSocket.java, LoxServer.java, and LoxSide.java,
 which raises the BusyError of a held side for both):
   - `new LoxError(` is a halting fault. Only argument checks use it, and
-    `readBytesFrom`, which Process shares.
+    `readBytesFrom`, which Process shares. The type faults of a byte count and
+    of a port are raised by `LoxRuntime.integerArg`, the shared reader of an
+    integer argument (issue #1135), which is an argument check outside the
+    scanned files; the range fault that follows it stays in its own function
+    and the table counts it.
   - `makeError("KIND"` is a catchable fault of the given kind.
   - Any other `throw` fails, so a fault cannot use another exception.
   - `LoxRuntime.fatal`, `System.exit`, `Runtime.getRuntime().exit` and
@@ -118,7 +122,7 @@ NATIVE_SITES = {
 
 SOCKET_SITES = {
     ("checkStringArg", HALT): 1,
-    ("checkByteCountArg", HALT): 2,
+    ("checkByteCountArg", HALT): 1,
     ("readBytesFrom", HALT): 1,
     ("checkOpen", CLOSED): 1,
     ("checkWritable", CLOSED): 1,

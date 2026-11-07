@@ -13,6 +13,38 @@ specified in §03-types and §04-semantics.
 
 ---
 
+## Integer arguments
+
+Some parameters below must be an integer. Each one accepts an Int or an
+integer-valued Number, because the two kinds do not mix and a program that
+computes a count holds an Int ([§03-types, Int](03-types.md#int)). A Number
+that is not integer-valued (a fractional Number, a NaN, or an infinity), and a
+value outside the parameter's range, is a runtime error that halts the
+program. A value of any other kind is the same kind of runtime error.
+
+| Argument | Row | Range |
+|---|---|---|
+| `chr(value)` | `chr` | 0 to 255 |
+| `connect(host, port)` | `connect-port` | 1 to 65535 |
+| `listen(host, port)` | `listen-port` | 0 to 65535 |
+| `s.read_bytes(n)` | `socket-read-bytes` | 0 to 2147483647 |
+| `s.read_some(n)` | `socket-read-some` | 1 to 2147483647 |
+| `p.read_bytes(n)` | `process-read-bytes` | 0 to 2147483647 |
+| `p.err_read_bytes(n)` | `process-err-read-bytes` | 0 to 2147483647 |
+
+An Int and an integer-valued Number name the same count, so `chr(65)` and
+`chr(65i)` return the same String. A parameter that this section does not list
+is a Number, and an Int argument to it is a runtime error: `math.floor(1i)` is
+a runtime error ([§03-types, Int](03-types.md#int)). The `integer` module is
+the other way around: its arguments are Ints, and an integer-valued Number
+argument is a runtime error.
+
+`exit(code)` accepts an Int too, but its parameter is a Number that is
+truncated toward zero, not one that must be an integer, so it is not a row of
+this table ([`exit(code)`](#exitcode)).
+
+---
+
 ## `clock() → Number`
 
 Returns the elapsed processor time in seconds as a Number.
@@ -108,14 +140,16 @@ A non-String argument, or a String whose length is not 1, is a runtime error.
 ## `chr(value) → String`
 
 Returns the one-byte String whose byte value is `value`. `value` must be an
-integer Number from 0 through 255.
+integer from 0 through 255. It may be an Int or an integer-valued Number
+([Integer arguments](#integer-arguments)).
 
 ```lox
 print chr(65);      // A
+print chr(65i);     // A
 print len(chr(0));  // 1
 ```
 
-A non-Number argument, a fractional Number, or a Number outside 0 through 255
+A non-Number argument, a fractional Number, or a value outside 0 through 255
 is a runtime error. `chr` is the inverse of `ord` on every valid value:
 `ord(chr(n))` equals `n`, and `chr(ord(s))` equals `s` for every one-byte
 String `s`.
@@ -309,10 +343,10 @@ if the variable is not defined.
 
 Terminates the program immediately with exit code `code`.
 
-The numeric value of `code` is truncated toward zero to an integer, matching
-C's integral conversion. `code` must be a finite Number within the range of a
-signed 32-bit integer (`-2147483648` to `2147483647`); any other value is a
-runtime error.
+`code` may be an Int or a Number. The numeric value of a Number is truncated
+toward zero to an integer, matching C's integral conversion. `code` must be
+within the range of a signed 32-bit integer (`-2147483648` to `2147483647`);
+any other value is a runtime error.
 
 **Arity:** 1  
 **Returns:** never returns
@@ -494,8 +528,9 @@ was called.
 
 Opens a TCP connection to `host` at `port`, and returns a connected Socket.
 Both arguments are required. `host` must be a String — a host name or a
-numeric address. `port` must be an integer Number from 1 through 65535. Any
-other argument is a runtime error. A failure to resolve the name or to connect,
+numeric address. `port` must be an integer from 1 through 65535, an Int or an
+integer-valued Number ([Integer arguments](#integer-arguments)). Any other
+argument is a runtime error. A failure to resolve the name or to connect,
 which includes a refused connection, raises a catchable `NetworkError`.
 
 The call suspends its task while it waits for the connection. When `host` is a
@@ -534,7 +569,8 @@ implementation-defined.
 
 Binds a listening TCP socket to `host` at `port`, and returns a Server. Both
 arguments are required. `host` must be a String naming a local address.
-`port` must be an integer Number from 0 through 65535; `0` asks the operating
+`port` must be an integer from 0 through 65535, an Int or an integer-valued
+Number ([Integer arguments](#integer-arguments)); `0` asks the operating
 system to choose an unused port, which `Server.port()` then reports. Any other
 argument is a runtime error. A failure to resolve the name, to bind, or to
 listen raises a catchable `NetworkError`. The call resolves the name before it
@@ -630,7 +666,8 @@ everything read as one String.
 Reads up to `n` bytes from the Socket. The call blocks until `n` bytes have
 arrived or the peer closes its write direction, then returns everything read as
 one String. At end of stream it returns the bytes that remain, or `""` when none
-do. `n` must be an integer in the range 0 to 2147483647.
+do. `n` must be an integer from 0 to 2147483647, an Int or an integer-valued
+Number ([Integer arguments](#integer-arguments)).
 
 **Arity:** 1  
 **Returns:** String  
@@ -645,10 +682,11 @@ available, and the number of bytes in one result is not specified: a program
 that needs more bytes calls `read_some` again. The bytes of all results, in
 order, are the bytes of the stream. The call does not wait for more bytes than
 the first ones that arrive. At end of stream, when the peer has closed its write direction and
-no bytes remain, it returns `""`. `n` must be an integer in the range 1 to
-2147483647; any other value, including `0`, and any other type is a runtime
-error that halts the program. Zero is not allowed because `""` is the result
-at end of stream.
+no bytes remain, it returns `""`. `n` must be an integer from 1 to
+2147483647, an Int or an integer-valued Number
+([Integer arguments](#integer-arguments)); any other value, including `0`,
+and any other type is a runtime error that halts the program. Zero is not
+allowed because `""` is the result at end of stream.
 
 A byte that an earlier call took from the Socket is not returned again. A byte
 that an earlier call left unread, for example the bytes after a line that

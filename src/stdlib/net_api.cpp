@@ -1,4 +1,5 @@
 #include "net_api.h"
+#include "integer_arg.h"
 #include "stdlib_context.h"
 #include "stream_io.h"
 #include "../container_objects.h"
@@ -60,41 +61,44 @@ static bool asStringArg(const Value& v, std::string& out) {
 }
 
 // Validate a port argument. `minPort` is 1 for connect (0 is never a valid
-// remote port) and 0 for listen (0 asks the OS to choose).
+// remote port) and 0 for listen (0 asks the OS to choose). An Int is a port
+// as an integer-valued Number is (spec/05-stdlib.md, Integer arguments).
 static bool asPort(const Value& v, long minPort, int& out) {
-    if (!is<Number>(v)) {
+    Int n = 0;
+    const IntegerArgRead read = readIntegerArg(v, n);
+    if (read == IntegerArgRead::NotNumber) {
         nativeRuntimeError("Port must be a number.");
         return false;
     }
-    double raw = as<Number>(v);
-    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < minPort ||
-        raw > 65535) {
+    if (read != IntegerArgRead::Ok || n < static_cast<Int>(minPort) ||
+        n > 65535) {
         nativeRuntimeError("Port must be an integer in range.");
         return false;
     }
-    out = static_cast<int>(raw);
+    out = static_cast<int>(n);
     return true;
 }
 
-// Validate a byte-count argument. `n` must be a non-negative integer Number.
+// Validate a byte-count argument. `n` must be an integer in `minimum` through
+// INT_MAX, as an Int or an integer-valued Number.
 static bool asByteCount(const Value& v, const char* method, size_t& out,
-                        double minimum = 0) {
-    if (!is<Number>(v)) {
+                        Int minimum = 0) {
+    Int n = 0;
+    const IntegerArgRead read = readIntegerArg(v, n);
+    if (read == IntegerArgRead::NotNumber) {
         std::string msg =
             std::string(method) + "() byte count must be a number.";
         nativeRuntimeError(msg.c_str());
         return false;
     }
-    double raw = as<Number>(v);
-    if (!std::isfinite(raw) || raw != std::floor(raw) || raw < minimum ||
-        raw > static_cast<double>(INT_MAX)) {
+    if (read != IntegerArgRead::Ok || n < minimum || n > INT_MAX) {
         std::string msg = std::string(method) +
                           "() byte count must be an integer in range " +
                           (minimum > 0 ? "1" : "0") + " to 2147483647.";
         nativeRuntimeError(msg.c_str());
         return false;
     }
-    out = static_cast<size_t>(raw);
+    out = static_cast<size_t>(n);
     return true;
 }
 

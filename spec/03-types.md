@@ -63,11 +63,14 @@ with the suffix `i`, or as a hexadecimal or binary literal
   when it is negative, and never in an exponent form: `str(1i)` is `"1"` and
   `str(-1i)` is `"-1"`.
 - **Messages.** An Int is always a [message](#messages).
-- **The standard library.** A function of the standard library that takes a
-  Number does not take an Int, and a function that gives a Number does not give
-  an Int, unless [§05-stdlib](05-stdlib.md) says otherwise for `int`, `float`,
-  and the `integer` module. `len(x)` gives a Number. `chr(65i)` and
-  `math.floor(1i)` are runtime errors.
+- **The standard library.** A parameter that [§05-stdlib](05-stdlib.md)
+  calls an integer accepts an Int or an integer-valued Number
+  ([§05-stdlib, Integer arguments](05-stdlib.md#integer-arguments)). A
+  parameter that the spec calls a Number, and that does not say it is an
+  integer, does not take an Int: `math.floor(1i)` is a runtime error. A
+  function that gives a Number does not give an Int, unless §05-stdlib says
+  otherwise for `int`, `float`, `exit`, and the `integer` module. `len(x)`
+  gives a Number.
 - **Width.** The spec binds 64 bits. How an implementation stores an Int is
   implementation-defined, and no program can observe it: an Int that an
   implementation keeps in a register, in a tagged word, or in a heap object

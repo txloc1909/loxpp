@@ -254,6 +254,15 @@ later proposal can add them to the module.
 - `len`, `ord`, `chr`, `exit`, `sleep`, `read_bytes`, the port arguments and
   `math.floor`, `math.ceil`, `math.round` do not change. They take and give
   Numbers.
+- **Amended in #1135 (owner decision, 2026-11-07).** A standard-library
+  parameter that `spec/05-stdlib.md` calls an integer accepts an Int or an
+  integer-valued Number: `chr`, `Socket.read_bytes`, `Socket.read_some`,
+  `Process.read_bytes`, `Process.err_read_bytes`, and the port of `connect`,
+  `connect_within`, and `listen`. `exit` accepts an Int code too, though its
+  code stays a Number that is truncated toward zero. `len`, `ord`, `sleep`,
+  and the `math` functions still take and give Numbers only, because the spec
+  does not call their parameters integers. `spec/05-stdlib.md`, "Integer
+  arguments", is the table that binds this.
 - `type()` returns `"Int"` for an Int. The `type()` table in
   `spec/05-stdlib.md` gets the row, and the sendable table follows it.
 

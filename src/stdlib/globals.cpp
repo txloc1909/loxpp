@@ -1,4 +1,5 @@
 #include "globals.h"
+#include "integer_arg.h"
 #include "stdlib_context.h"
 #include "../container_objects.h"
 #include "../decimal_number.h"
@@ -36,16 +37,16 @@ static Value ordNative(int /*argCount*/, Value* args) {
         static_cast<double>(static_cast<unsigned char>(chars[0])));
 }
 
-// One-byte string for a byte value. Requires an integral Number in 0..255 so
-// it is the inverse of ord().
+// One-byte string for a byte value. Requires an integer in 0..255, an Int or
+// an integer-valued Number, so it is the inverse of ord().
 static Value chrNative(int /*argCount*/, Value* args) {
-    Value v = args[0];
-    if (!is<Number>(v)) {
+    Int n = 0;
+    const IntegerArgRead read = readIntegerArg(args[0], n);
+    if (read == IntegerArgRead::NotNumber) {
         nativeRuntimeError("chr() argument must be a number.");
         return from<Nil>(Nil{});
     }
-    Number n = as<Number>(v);
-    if (std::floor(n) != n || n < 0 || n > 255) {
+    if (read != IntegerArgRead::Ok || n < 0 || n > 255) {
         nativeRuntimeError("chr() argument must be an integer from 0 to 255.");
         return from<Nil>(Nil{});
     }
