@@ -425,3 +425,28 @@ TEST_F(OsApiTest, Mkdir_WrongArgumentCount_RuntimeError) {
     EXPECT_EQ(h.run("mkdir(\"a\", \"p\", \"x\");"),
               InterpretResult::RUNTIME_ERROR);
 }
+
+TEST_F(OsApiTest, Mkdir_EmptyPath_IsADirectoryError) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+    ASSERT_EQ(h.run("var k = \"\"; "
+                    "try { mkdir(\"\", \"p\"); } catch (e) { k = e.kind; } "
+                    "k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
+}
+
+TEST_F(OsApiTest, Mkdir_PathWithNul_RuntimeError) {
+    VMTestHarness h;
+    // A NUL would end the path at the C library call, so the call would make a
+    // shorter directory than the program named, or none it can name back.
+    EXPECT_EQ(h.run("mkdir(\"" + (m_dir / "nul").string() +
+                    "\" + chr(0) + \"tail\");"),
+              InterpretResult::RUNTIME_ERROR);
+    std::error_code ec;
+    EXPECT_FALSE(std::filesystem::exists(m_dir / "nul", ec));
+}

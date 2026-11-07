@@ -22,3 +22,6 @@ print is_dir("/tmp/loxpp_probe_mkdir_29/sub/deeper");
 try { mkdir("/tmp/loxpp_probe_mkdir_29"); } catch (e) { print e.kind; }
 try { mkdir("/tmp/loxpp_probe_mkdir_29/absent/child"); } catch (e) { print e.kind; }
 print is_dir("/tmp/loxpp_probe_mkdir_29/absent");
+// An empty path names no directory, in both forms.
+try { mkdir(""); } catch (e) { print e.kind; }
+try { mkdir("", "p"); } catch (e) { print e.kind; }

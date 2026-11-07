@@ -179,6 +179,12 @@ public final class RuntimeStdlibTest {
                     LoxError.class, "mkdir() rejects another mode");
             checkThrows(() -> call(globals, "mkdir", 1.0), LoxError.class,
                     "mkdir() rejects a non-string");
+            checkDirectoryError(() -> call(globals, "mkdir", ""), "mkdir() of an empty path");
+            checkDirectoryError(() -> call(globals, "mkdir", "", "p"), "mkdir(p) of an empty path");
+            checkHalting(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "\u0000tail"),
+                    "mkdir() rejects a NUL byte");
+            checkHalting(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "\u0000tail", "p"),
+                    "mkdir(p) rejects a NUL byte");
             checkThrows(() -> call(globals, "mkdir"), LoxError.class, "mkdir() rejects no arguments");
             checkThrows(() -> call(globals, "mkdir", "a", "p", "x"), LoxError.class,
                     "mkdir() rejects three arguments");
@@ -198,6 +204,23 @@ public final class RuntimeStdlibTest {
                 checkEquals("DirectoryError", ((LoxInstance) e.getValue()).fields.get("kind"),
                         label + ": the kind");
             }
+            return;
+        }
+        check(false, label + ": no fault was raised");
+    }
+
+    // A malformed argument is a halting fault: the LoxError wraps no Error
+    // value, so no interpreted try can catch it. A raw JDK exception would
+    // escape every try, so it fails too.
+    private static void checkHalting(Runnable body, String label) {
+        try {
+            body.run();
+        } catch (LoxError e) {
+            check(!e.isCatchable(), label + ": the fault halts");
+            return;
+        } catch (RuntimeException e) {
+            check(false, label + ": the fault is a LoxError, not " +
+                             e.getClass().getSimpleName());
             return;
         }
         check(false, label + ": no fault was raised");
