@@ -1905,6 +1905,18 @@ InterpretResult Runtime::schedule() {
 }
 
 InterpretResult Runtime::runTasks(ObjClosure* script) {
+    // The scheduler never runs inside a task. A nested run would make a new
+    // group or session line, clear the run queue and move the task epoch, and
+    // its last runTask would leave the outer task with no current task, so
+    // that task's counters would go to m_noTaskOwned. Nothing can make that
+    // safe, so a nested run ends the process. Only the top level calls
+    // runTasks now (VM::interpret from main, rt_run_tasks from a QBE
+    // program); a native that runs Lox code inside a task would reach this.
+    if (m_currentTask != nullptr) {
+        std::fprintf(stderr,
+                     "loxpp: the scheduler cannot run inside a running task\n");
+        endProcess(70);
+    }
     Inbox& inbox = m_mm.inbox();
     // A session keeps one group and one main task for all its lines: a worker
     // that an earlier line spawned is still in the group, and the main task is

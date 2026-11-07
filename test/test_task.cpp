@@ -6,13 +6,17 @@
 // do not reach: a receive inside a coroutine that a for-in or a second
 // coroutine resumed, a throw after the wake, the native-callback rule through
 // a defer and through a native, deadlock on one worker, the names in the
-// deadlock report of the credit channel probe, and the main task across REPL
-// lines. The `_gc` twin runs the suite under LOXPP_STRESS_GC.
+// deadlock report of the credit channel probe, the main task across REPL
+// lines, and a scheduler run inside a task. The `_gc` twin runs the suite
+// under LOXPP_STRESS_GC.
 
 #include "corpus.h"
 #include "test_harness.h"
+#include "vm.h"
 
 #include <gtest/gtest.h>
+
+#include <cstdlib>
 #include <string>
 
 static void expect_string(const VMTestHarness& h, const std::string& name,
@@ -493,4 +497,29 @@ TEST_F(TaskTest, AMessageEndsTheWaitOfTheLimit) {
     )"),
               InterpretResult::OK);
     expect_string(h, "log", "m");
+}
+
+// A native that runs a program through the VM from inside the task that
+// called it. No native of the language does this; the test makes one, to
+// reach the guard at the start of Runtime::runTasks.
+static VM* g_nestedVm = nullptr;
+static Value nestedRunNative(int, Value*) {
+    g_nestedVm->interpret("print \"inner\";");
+    return from<Nil>(Nil{});
+}
+
+// The scheduler refuses to run inside a running task: the process ends with
+// status 70 and a message, before the inner program prints anything.
+TEST(TaskDeathTest, ASchedulerRunInsideATaskEndsTheProcess) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_EXIT(
+        {
+            VM vm;
+            g_nestedVm = &vm;
+            vm.runtime().defineNative("nested_run", nestedRunNative, 0);
+            vm.interpret("nested_run();");
+            std::exit(0);
+        },
+        ::testing::ExitedWithCode(70),
+        "loxpp: the scheduler cannot run inside a running task");
 }
