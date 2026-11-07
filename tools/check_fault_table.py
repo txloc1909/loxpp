@@ -168,7 +168,7 @@ CATCHABLE_ROWS = [
     ),
     # Every callable whose own arity check raises the catchable ArityError
     # (spec/04-semantics.md, Runtime Errors; the review of #1147). A Lox
-    # function is row arity_error above; these four are the other sides of the
+    # function is row arity_error above; these five are the other sides of the
     # row, and a native-backed Function or BoundMethod is the halting side.
     Row(
         "arity_error_method_call",
@@ -516,6 +516,23 @@ FATAL_ROWS = [
         "stdlib_native_arity",
         "fatal",
         "clock(1);",
+    ),
+    # The row above has three dispatch sites, and a fix at one of them leaves
+    # the other two free to become catchable (the review of #1147). A File
+    # method call, and a call of the same method through a bound value, halt
+    # as a wrong count of any other stdlib native does.
+    Row(
+        "bound_native_arity",
+        "fatal",
+        'f.write("a", "b");',
+        setup='var f = open("__WORKDIR__/loxpp_bound_native.txt", "w");\n',
+    ),
+    Row(
+        "bound_native_value_arity",
+        "fatal",
+        'w("a", "b");',
+        setup='var f = open("__WORKDIR__/loxpp_bound_native2.txt", "w");\n'
+        "var w = f.write;\n",
     ),
     Row(
         "stdlib_open_failure",
@@ -1007,7 +1024,7 @@ CATCHABLE_REGRESSION_ROWS = {
     # Issue #508: the right operand's reflected comparison method returned a
     # non-Boolean, sharing operator_result_type_error's spec row.
     "reflected_operator_result_type_error",
-    # The four other callables whose own arity check raises the catchable
+    # The five other callables whose own arity check raises the catchable
     # ArityError (the review of #1147): a method call, a super call, a bound
     # method value, a callable instance, and a class whose init takes another
     # count. Each shares arity_error's spec row.
@@ -1055,6 +1072,11 @@ FATAL_REGRESSION_ROWS = {
     # row on a List method, once as a plain read and once as a defer callee.
     "list_method_read",
     "list_method_read_defer",
+    # The other two dispatch sites of the halting native-arity row (the review
+    # of #1147): a File method call and a call of that method through a bound
+    # value. Both share stdlib_native_arity's spec row.
+    "bound_native_arity",
+    "bound_native_value_arity",
     # Issue #748: a class pattern and an object destructuring both read a
     # property through GET_PROPERTY, so they share the spec rows of
     # undefined_property_on_instance and property_get_non_instance. The math
