@@ -22,7 +22,7 @@ The rules:
   - Each move has the From and To states that MOVES gives it, and a move whose
     To state is `ready` names a place in the run queue (not `—`).
   - The table of task-owned state has a row for each item in REQUIRED_OWNED.
-    These are the items that a park overwrote in a named bug class
+    These are the items that a suspension overwrote in a named bug class
     (docs/decisions/concurrency-semantics-grounding.md, "Constraints from
     named bug classes"), so a row removed from the spec fails here.
   - The calls of the sides table are exactly the calls of class `suspends`

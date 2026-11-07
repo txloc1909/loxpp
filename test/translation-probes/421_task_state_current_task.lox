@@ -1,8 +1,8 @@
 // Invariant I1, the current task (spec/04-semantics.md, The Task Machine, the
 // table of task-owned state): task.self() returns the handle of the task that
-// runs, after any park. Tasks `t1` and `t2` wait in task.receive(). Main wakes
+// runs, after any suspension. Tasks `t1` and `t2` wait in task.receive(). Main wakes
 // `t2` first, so the order in which the tasks run again is not the order in which
-// they parked. Each task compares its task.self() to both handles.
+// they suspended. Each task compares its task.self() to both handles.
 // STATUS: ok
 // TIMEOUT: 30
 // CHECK: t2: false true
