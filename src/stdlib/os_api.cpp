@@ -227,6 +227,13 @@ static Value mkdirNative(int argc, Value* argv) {
     if (!asPathString(argv[0], p)) {
         return from<Nil>(Nil{});
     }
+    // The C library reads a path up to its first NUL byte, so a NUL here would
+    // silently name a shorter, different path. It cannot name a directory at
+    // all, so it is a fault of the argument, like a non-String.
+    if (p.find('\0') != std::string::npos) {
+        nativeRuntimeError("mkdir() path must not contain a NUL byte.");
+        return from<Nil>(Nil{});
+    }
     bool parents = false;
     if (argc == 2) {
         std::string mode;
@@ -241,11 +248,16 @@ static Value mkdirNative(int argc, Value* argv) {
     }
 
     std::error_code ec;
-    bool created = parents ? std::filesystem::create_directories(p, ec)
-                           : std::filesystem::create_directory(p, ec);
+    bool created = false;
+    if (!p.empty()) {
+        created = parents ? std::filesystem::create_directories(p, ec)
+                          : std::filesystem::create_directory(p, ec);
+    }
     // An existing path in one-directory form is a fault, but the standard
     // library reports it as "not created, no error" rather than as an error.
-    if (ec || (!parents && !created)) {
+    // An empty path names no directory here, on every platform, so a platform
+    // that resolves it to something else cannot differ.
+    if (p.empty() || ec || (!parents && !created)) {
         std::string msg = "mkdir(): cannot create '" + p + "'";
         if (ec) {
             msg += ": " + ec.message();

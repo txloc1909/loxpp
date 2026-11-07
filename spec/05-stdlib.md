@@ -456,7 +456,9 @@ one-argument form, because `path` exists in the one-argument form, because a
 path component is not a directory, because the program has no permission, or
 for any other reason — the call raises a catchable fault of kind
 `DirectoryError` ([§04-semantics, Runtime
-Errors](04-semantics.md#runtime-errors)).
+Errors](04-semantics.md#runtime-errors)). An empty `path` names no
+directory, so it raises the same fault. A `path` that holds a NUL byte is a
+runtime error.
 
 ```lox
 mkdir("/tmp/loxpp-cache/objects", "p");   // makes /tmp/loxpp-cache too

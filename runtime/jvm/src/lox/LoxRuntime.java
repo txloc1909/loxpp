@@ -526,7 +526,15 @@ public final class LoxRuntime {
                            if (args.length != 1 && args.length != 2) {
                                throw new LoxError("Expected 1 or 2 arguments.");
                            }
-                           Path p = Paths.get(requireString(args[0]));
+                           String path = requireString(args[0]);
+                           // Paths.get() rejects a NUL itself, and a raw
+                           // InvalidPathException would escape every Lox
+                           // try, so both checks use the String.
+                           if (path.indexOf('\0') >= 0) {
+                               throw new LoxError(
+                                   "mkdir() path must not contain a NUL byte.");
+                           }
+                           Path p = Paths.get(path);
                            boolean parents = false;
                            if (args.length == 2) {
                                if (!"p".equals(requireString(args[1]))) {
@@ -536,6 +544,13 @@ public final class LoxRuntime {
                                parents = true;
                            }
                            try {
+                               // An empty path names no directory. The JDK
+                               // resolves it to the working directory and
+                               // creates that, which no other consumer does.
+                               if (path.isEmpty()) {
+                                   throw new java.nio.file.NoSuchFileException(
+                                       "", null, "the path is empty");
+                               }
                                if (parents) {
                                    Files.createDirectories(p);
                                } else {
