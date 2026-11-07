@@ -604,7 +604,7 @@ TEST_F(TaskWaitTest, TheDeadlockReportDoesNotNameAWaitingTask) {
 }
 
 // In a session the main task outlives a line that ended with a fault. If it
-// waited then, its wait ends with the line: the next line reports a real
+// was waiting then, its wait ends with the line: the next line reports a real
 // deadlock at once and does not wait for the old timer.
 TEST_F(TaskWaitTest, ASessionMainTaskThatWaitedLeavesNoWaitBehind) {
     VMTestHarness h;

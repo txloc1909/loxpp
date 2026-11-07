@@ -126,7 +126,7 @@ public final class SelectorKeyTest {
 
     // Makes a reader wait on a second Socket that gets no data until the
     // caller closes it, so the poller always holds one wait.
-    private static LoxSocket[] waitBystander(LoxServer server) {
+    private static LoxSocket[] waitingBystander(LoxServer server) {
         LoxSocket[] pair = connectedPair(server);
         task("spawn", fn("bystander", () -> {
             try {
@@ -144,7 +144,7 @@ public final class SelectorKeyTest {
     // while the bystander still waits, so no select flushes it before then.
     private static void checkSocketWaitsAgainWhileAnotherSocketWaits() {
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] bystander = waitBystander(server);
+        LoxSocket[] bystander = waitingBystander(server);
         LoxSocket[] pair = connectedPair(server);
         Object me = task("self");
         String[] got = new String[3];
@@ -174,7 +174,7 @@ public final class SelectorKeyTest {
     // The accept loop waits on the same Server again and again.
     private static void checkAcceptLoopWhileAnotherSocketWaits() {
         LoxServer bystanderServer = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket[] bystander = waitBystander(bystanderServer);
+        LoxSocket[] bystander = waitingBystander(bystanderServer);
         LoxServer server = LoxServer.listen("127.0.0.1", 0);
         Object me = task("self");
         int[] accepted = {0};

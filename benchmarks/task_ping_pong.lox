@@ -1,4 +1,5 @@
-// Pure message ping-pong between two tasks: 1,000,000 task switches, no wait.
+// Pure message ping-pong between two tasks: 1,000,000 task switches, and no
+// task is `waiting`.
 // It measures the cost of one task switch. benchmarks/task_switch_cost.sh runs
 // it: it alternates the runs of two release builds on one pinned core and
 // reads the user plus system CPU time. By hand:

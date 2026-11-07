@@ -436,8 +436,9 @@ PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
 
 } // namespace
 
-// A program that never waits makes no poller, and opens no descriptor.
-TEST_F(WorkerTest, AWorkerThatNeverWaitsMakesNoPoller) {
+// A program in which no task is `waiting` makes no poller, and opens no
+// descriptor.
+TEST_F(WorkerTest, AWorkerWithNoWaitingTaskMakesNoPoller) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         fun far(main) { sleep(0.01); task.send(main, "x"); }

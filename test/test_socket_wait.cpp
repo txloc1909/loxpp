@@ -464,8 +464,8 @@ TEST_F(SocketWaitTest, AReadlineScansEachByteOnce) {
 // A readline that waited on a partial line, and the readline after it. The
 // first takes its line when its end arrives; the second must then find the
 // next newline in the bytes that are in the buffer now, and not wait for more
-// data or return a line with a newline inside it because an offset from
-// before the wait points past the first line.
+// data or return a line with a newline inside it because an offset that
+// was taken before the wait points past the first line.
 TEST_F(SocketWaitTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
     VM vm;
     ASSERT_EQ(run(vm, R"(

@@ -2,10 +2,10 @@
 #
 # The cost of one task switch: benchmarks/task_ping_pong.lox sends a message
 # back and forth between two tasks, 1,000,000 task switches in all, with no
-# wait. Give two release binaries to compare them. The runs alternate (A B A B
-# ...), so a drift of the CPU speed hits both binaries alike, and each run is
-# pinned to one core. The figure is user plus system CPU time of the process,
-# not wall time. The first runs are warm-up and are not counted.
+# `waiting` task. Give two release binaries to compare them. The runs alternate
+# (A B A B ...), so a drift of the CPU speed hits both binaries alike, and each
+# run is pinned to one core. The figure is user plus system CPU time of the
+# process, not wall time. The first runs are warm-up and are not counted.
 #
 # Usage: benchmarks/task_switch_cost.sh BINARY_A [BINARY_B] [CORE] [RUNS] [WARM]
 set -euo pipefail

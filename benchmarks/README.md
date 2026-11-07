@@ -91,11 +91,11 @@ tools/build_lox_rt.sh
 ## Task switch cost
 
 `benchmarks/task_ping_pong.lox` sends messages between two tasks, 1,000,000
-task switches with no wait. `benchmarks/task_switch_cost.sh BINARY_A [BINARY_B]`
-runs it on one or two release builds in alternating runs on one pinned core,
-and prints the median user plus system CPU time and the ns per task switch.
-`benchmarks/coroutine_cost.sh` does the same for the cost of a coroutine yield
-and the size of a suspended coroutine.
+task switches with no `waiting` task. `benchmarks/task_switch_cost.sh BINARY_A
+[BINARY_B]` runs it on one or two release builds in alternating runs on one
+pinned core, and prints the median user plus system CPU time and the ns per
+task switch. `benchmarks/coroutine_cost.sh` does the same for the cost of a
+coroutine yield and the size of a suspended coroutine.
 
 CPU time is too noisy to show a change of a few instructions per switch.
 `tools/count_instructions.py --core N -- <command>` counts the instructions a
