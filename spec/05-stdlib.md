@@ -893,7 +893,9 @@ pending `yield` expression.
 Resuming a dead coroutine is a runtime error (`DeadCoroutineError`);
 resuming a running or normal coroutine is a runtime error
 (`RunningCoroutineError`). A throw from inside the coroutine propagates to
-the resumer, where it is catchable like any other throw.
+the resumer, where it is catchable like any other throw. A resume after the
+first that gives more than one argument raises a catchable `ArityError`
+([§04-semantics, Runtime Errors](04-semantics.md#runtime-errors)).
 
 **Arity:** variadic — the coroutine function's arity on the first call, 0 or
 1 afterward  
