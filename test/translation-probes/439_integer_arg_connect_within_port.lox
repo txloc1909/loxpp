@@ -10,5 +10,10 @@
 var l = listen("127.0.0.1", 0);
 var c = connect_within("127.0.0.1", int(l.port()), 5);
 print "connected";
-connect_within("127.0.0.1", 1.5, 5);
+// The fractional port is the listener's own port plus a half, so an
+// implementation that truncates the port connects to the listener and prints
+// the next line, and the probe fails. A fixed fractional port such as 1.5
+// would only be refused, and a refusal and a fault look the same here: both
+// halt with the output above.
+connect_within("127.0.0.1", l.port() + 0.5, 5);
 print "unreachable";
