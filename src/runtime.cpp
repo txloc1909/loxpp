@@ -1301,6 +1301,12 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
 }
 
 Runtime::WorkerState Runtime::workerState() const {
+    // A worker with a running task is `active` or `blocked`, never
+    // `finished`: `finished` means every task of the worker is `ended`
+    // (spec/04-semantics.md, The Task Machine, the worker states).
+    if (m_currentTask != nullptr) {
+        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
+    }
     // A session line is over when the main task's script ended, which leaves
     // the task itself alive for the next line.
     const bool mainTaskDone =
@@ -1308,9 +1314,6 @@ Runtime::WorkerState Runtime::workerState() const {
         (m_mainTask->state == TaskState::ENDED || m_mainLineDone);
     if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
         return WorkerState::FINISHED;
-    }
-    if (m_currentTask != nullptr) {
-        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
     }
     // Without a scheduler (runTasks never ran) the program runs on the thread
     // alone, outside every task, and a call that waits blocks the worker.
