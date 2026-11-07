@@ -1877,7 +1877,21 @@ void Runtime::reportDeadlock() {
     funlockfile(stderr);
 }
 
+void Runtime::checkWorkingSetEmpty(const WorkingSetMark& mark) const {
+    const bool left =
+        m_frameCount != mark.frameCount ||
+        m_handlerStack.size() != mark.handlerCount ||
+        stackTop != mark.stackTop || !m_deferLists[mark.frameCount].empty() ||
+        (m_openUpvalues != nullptr && m_openUpvalues->location >= stackTop);
+    if (left) {
+        std::fprintf(stderr, "A task left its frames, handlers or stack in "
+                             "the worker after it ran.\n");
+        endProcess(70);
+    }
+}
+
 InterpretResult Runtime::schedule() {
+    const WorkingSetMark empty = workingSetMark();
     for (;;) {
         if (workerState() == WorkerState::FINISHED) {
             return InterpretResult::OK;
@@ -1905,6 +1919,7 @@ InterpretResult Runtime::schedule() {
         if (!runTask(task)) {
             return InterpretResult::RUNTIME_ERROR;
         }
+        checkWorkingSetEmpty(empty);
     }
 }
 

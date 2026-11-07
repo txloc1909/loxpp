@@ -1023,6 +1023,22 @@ class Runtime {
     // runs until the main task ends; another worker until its last task
     // ends or the program ends.
     InterpretResult schedule();
+    // The frames, handlers, stack and open upvalues in this Runtime are the
+    // working set of the running task; the task's own copy lives in the
+    // snapshot of its coroutine (docs/decisions/
+    // concurrency-semantics-grounding.md, "Where the task-owned state
+    // lives"). WorkingSetMark is the working set with no task in it, as the
+    // scheduler finds it, and checkWorkingSetEmpty() ends the process if a
+    // task that ran left anything above that mark.
+    struct WorkingSetMark {
+        int frameCount;
+        std::size_t handlerCount;
+        Value* stackTop;
+    };
+    [[nodiscard]] WorkingSetMark workingSetMark() const {
+        return {m_frameCount, m_handlerStack.size(), stackTop};
+    }
+    void checkWorkingSetEmpty(const WorkingSetMark& mark) const;
     // Delivers every envelope in the inbound queue to its task's mailbox.
     void drainInbox();
     enum class WaitResult : std::uint8_t { Work, Deadlock, Ended };
