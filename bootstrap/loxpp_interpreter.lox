@@ -2815,7 +2815,9 @@ fun reflectCallMethod(interp, args) {
         interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
-    if (callee.arity() != len(forwarded)) {
+    // A native of arity -1 is variadic (LoxNative.arity), so any count is
+    // accepted, matching Runtime::callNative's `arity != -1` guard.
+    if (callee.arity() != -1 and callee.arity() != len(forwarded)) {
         interp.setError("ReflectionNativeArityError", "Expected " + str(callee.arity()) + " arguments but got " +
                          str(len(forwarded)) + ".", 0);
         return nil;
