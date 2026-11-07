@@ -444,16 +444,18 @@ Creates the directory at `path`. Both arguments must be Strings; any other
 type is a runtime error.
 
 With one argument, `mkdir` creates one directory. It does not create a
-missing parent, and it does not succeed when `path` already exists.
+missing parent, and it does not succeed when `path` already exists, whether
+as a directory or as any other value.
 
 With the second argument `"p"`, `mkdir` creates `path` and every missing
 parent of it, as `mkdir -p` does. It does nothing when `path` is already a
 directory. Any other second argument is a runtime error.
 
 When the directory cannot be created — because a parent is missing in the
-one-argument form, because `path` exists and is not a directory, because
-the program has no permission, or for any other reason — the call raises a
-catchable fault of kind `DirectoryError` ([§04-semantics, Runtime
+one-argument form, because `path` exists in the one-argument form, because a
+path component is not a directory, because the program has no permission, or
+for any other reason — the call raises a catchable fault of kind
+`DirectoryError` ([§04-semantics, Runtime
 Errors](04-semantics.md#runtime-errors)).
 
 ```lox
