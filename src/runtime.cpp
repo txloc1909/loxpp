@@ -383,9 +383,10 @@ Runtime::OpResult Runtime::runPushedFrameToCompletion(int entry) {
     // This nested run is driven by a C++ caller (a deferred call drain) that
     // resumes after it. A Lox frame here cannot be frozen into a snapshot, so
     // a yield inside it must be rejected like one inside a native callback.
-    ++m_reentrantRunDepth;
+    TaskOwned& owned = *m_owned;
+    ++owned.reentrantRunDepth;
     bool loopOk = runNestedLoop(entry);
-    --m_reentrantRunDepth;
+    --owned.reentrantRunDepth;
     if (!loopOk) {
         return OpResult::Fatal;
     }
@@ -402,7 +403,7 @@ Runtime::OpResult Runtime::reentrantCall(int argCount, int throwBoundary) {
     // A re-entrant call (a deferred-call drain, a native's synchronous call
     // back into Lox) must run to completion before its C++ caller resumes. It
     // cannot be suspended through: opCall runs the callee directly, and a
-    // YIELD inside is rejected by the m_reentrantRunDepth check.
+    // YIELD inside is rejected by the reentrantRunDepth check.
     SynchronousRun run(*this);
     // The nested run() must stop once the frame this call pushes (if any) has
     // returned — i.e. when m_frameCount falls back to this call's own entry
@@ -526,9 +527,10 @@ Runtime::OpResult Runtime::runReentrantFrame(int entry, Value* frameSlots,
     }
     // This whole nested run happens inside a C++ caller that expects a
     // result. A Lox frame here cannot be frozen into a coroutine snapshot.
-    ++m_reentrantRunDepth;
+    TaskOwned& owned = *m_owned;
+    ++owned.reentrantRunDepth;
     bool loopOk = runNestedLoop(entry);
-    --m_reentrantRunDepth;
+    --owned.reentrantRunDepth;
     if (!loopOk) {
         return OpResult::Fatal;
     }
@@ -651,7 +653,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     }
     co->state = CoroutineState::RUNNING;
     m_currentCoroutine = co;
-    co->resumeReentrantDepth = m_reentrantRunDepth;
+    co->resumeReentrantDepth = m_owned->reentrantRunDepth;
 
     // The resume is a clean link of the running task's chain when it comes
     // from the parent's own loop: through a `resume` native (one native
@@ -662,7 +664,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
     const int linkNatives = m_owned->nativeDepth - savedCleanDepth;
     m_owned->cleanNativeDepth =
         (savedCleanDepth >= 0 && (linkNatives == 0 || linkNatives == 1) &&
-         m_reentrantRunDepth == m_owned->cleanReentrantDepth)
+         m_owned->reentrantRunDepth == m_owned->cleanReentrantDepth)
             ? m_owned->nativeDepth
             : -1;
 
@@ -1299,6 +1301,12 @@ void Runtime::defineNative(const char* name, NativeFn fn, int arity) {
 }
 
 Runtime::WorkerState Runtime::workerState() const {
+    // A worker with a running task is `active` or `blocked`, never
+    // `finished`: `finished` means every task of the worker is `ended`
+    // (spec/04-semantics.md, The Task Machine, the worker states).
+    if (m_currentTask != nullptr) {
+        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
+    }
     // A session line is over when the main task's script ended, which leaves
     // the task itself alive for the next line.
     const bool mainTaskDone =
@@ -1306,9 +1314,6 @@ Runtime::WorkerState Runtime::workerState() const {
         (m_mainTask->state == TaskState::ENDED || m_mainLineDone);
     if (m_isMainWorker ? mainTaskDone : m_liveTasks == 0) {
         return WorkerState::FINISHED;
-    }
-    if (m_currentTask != nullptr) {
-        return taskCanSuspend() ? WorkerState::ACTIVE : WorkerState::BLOCKED;
     }
     // Without a scheduler (runTasks never ran) the program runs on the thread
     // alone, outside every task, and a call that waits blocks the worker.
@@ -1322,7 +1327,7 @@ bool Runtime::taskCanSuspend() const {
     // The receive native itself is the one native above the chain.
     return m_currentTask != nullptr && m_owned->cleanNativeDepth >= 0 &&
            m_owned->nativeDepth == m_owned->cleanNativeDepth + 1 &&
-           m_reentrantRunDepth == m_owned->cleanReentrantDepth;
+           m_owned->reentrantRunDepth == m_owned->cleanReentrantDepth;
 }
 
 void Runtime::raiseFromNative(const char* kind, const char* msg) {
@@ -1584,6 +1589,10 @@ bool Runtime::runTask(ObjTask* task) {
     // later, the one value the pending suspend point evaluates to. A task
     // that is receiving gets the head of its mailbox, which the send
     // that woke it put there; a `yield` gets nil.
+    // The first resume's window is the callee slot and the arguments; a later
+    // resume's window is the one received value. A suspend leaves the stack
+    // at the top of the window, so the whole window goes after the resume.
+    Value* const windowBase = stackTop;
     int argCount = 0;
     if (!co->started) {
         push(from<Nil>(Nil{}));
@@ -1621,7 +1630,7 @@ bool Runtime::runTask(ObjTask* task) {
     int savedBoundary = m_nativeStopAtFrameCount;
     m_nativeStopAtFrameCount = m_frameCount;
     m_owned->cleanNativeDepth = m_owned->nativeDepth;
-    m_owned->cleanReentrantDepth = m_reentrantRunDepth;
+    m_owned->cleanReentrantDepth = m_owned->reentrantRunDepth;
     Value out;
     bool ok = resumeCoroutine(co, argCount, &out);
     OpResult outcome = m_reentrantOutcome;
@@ -1641,7 +1650,7 @@ bool Runtime::runTask(ObjTask* task) {
         }
         return false;
     }
-    pop(); // the resume window
+    stackTop = windowBase;
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
@@ -1873,7 +1882,21 @@ void Runtime::reportDeadlock() {
     funlockfile(stderr);
 }
 
+void Runtime::checkWorkingSetEmpty(const WorkingSetMark& mark) const {
+    const bool left =
+        m_frameCount != mark.frameCount ||
+        m_handlerStack.size() != mark.handlerCount ||
+        stackTop != mark.stackTop || !m_deferLists[mark.frameCount].empty() ||
+        (m_openUpvalues != nullptr && m_openUpvalues->location >= stackTop);
+    if (left) {
+        std::fprintf(stderr, "A task left its frames, handlers or stack in "
+                             "the worker after it ran.\n");
+        endProcess(70);
+    }
+}
+
 InterpretResult Runtime::schedule() {
+    const WorkingSetMark empty = workingSetMark();
     for (;;) {
         if (workerState() == WorkerState::FINISHED) {
             return InterpretResult::OK;
@@ -1901,6 +1924,7 @@ InterpretResult Runtime::schedule() {
         if (!runTask(task)) {
             return InterpretResult::RUNTIME_ERROR;
         }
+        checkWorkingSetEmpty(empty);
     }
 }
 
@@ -2529,7 +2553,7 @@ Runtime::OpResult Runtime::callNative(ObjNative* native, int argCount,
     m_nativeStopAtFrameCount = stopAtFrameCount;
     // A native cannot be suspended through. Any Lox it re-enters runs
     // non-resumably (callCompiled), so a YIELD there raises the existing
-    // native-callback error (Op::YIELD's own m_reentrantRunDepth check)
+    // native-callback error (Op::YIELD's own reentrantRunDepth check)
     // instead of trying to drive a frame the native's C stack cannot expose.
     bool savedResumable = m_resumableMode;
     m_resumableMode = false;
@@ -3930,7 +3954,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
         // raises while a native runs or a C++ caller waits for the result of
         // Lox code (a SynchronousRun: a map key's __hash__ or __eq__, a
         // __str__, a deferred call).
-        if (m_owned->nativeDepth > 0 || m_reentrantRunDepth > 0) {
+        if (m_owned->nativeDepth > 0 || m_owned->reentrantRunDepth > 0) {
             return fromThrow(raiseThrowableError(
                 "YieldAcrossNativeError",
                 "Cannot yield across a native callback.", stopAtFrameCount));
@@ -3943,7 +3967,7 @@ Runtime::OpResult Runtime::yieldOp(int stopAtFrameCount) {
     // __eq__ dispatch, or a defer drain re-entered Lox — has m_resumableMode
     // clear: its C frame cannot be frozen, so a yield here must fail like any
     // native-callback yield. (The interpreted path keeps its own
-    // m_reentrantRunDepth check in vm.cpp; this flag is the compiled twin.)
+    // reentrantRunDepth check in vm.cpp; this flag is the compiled twin.)
     if (!m_resumableMode) {
         return fromThrow(raiseThrowableError(
             "YieldAcrossNativeError", "Cannot yield across a native callback.",
