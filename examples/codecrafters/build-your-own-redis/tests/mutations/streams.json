@@ -56,14 +56,6 @@
   ]
  },
  {
-  "name": "XRANGE end excludes its ID",
-  "old": "    var to = stream.find(end.ms, end.seq, false);",
-  "new": "    var to = stream.find(end.ms, end.seq, true);",
-  "cases": [
-   "streams-06 XRANGE 0-2 0-3"
-  ]
- },
- {
   "name": "XRANGE end with no sequence means sequence 0",
   "old": "    var end = rangeBound(argv[3], MAX_ID_PART);",
   "new": "    var end = rangeBound(argv[3], 0);",
@@ -88,27 +80,11 @@
   ]
  },
  {
-  "name": "XRANGE COUNT ignored",
-  "old": "    if (count != nil and to - from > count) {",
-  "new": "    if (false) {",
-  "cases": [
-   "local: XRANGE COUNT 2"
-  ]
- },
- {
   "name": "XREAD reads the given ID too",
   "old": "    var from = stream.find(id.ms, id.seq, false);\n    var to = stream.size();",
   "new": "    var from = stream.find(id.ms, id.seq, true);\n    var to = stream.size();",
   "cases": [
    "local: XREAD with nothing to read is a null array"
-  ]
- },
- {
-  "name": "XREAD reads only the first stream",
-  "old": "        j = j + 1;\n    }\n    if (len(reply.ranges) > 0) {",
-  "new": "        j = j + 1;\n        break;\n    }\n    if (len(reply.ranges) > 0) {",
-  "cases": [
-   "streams-10 XREAD of two streams"
   ]
  },
  {
@@ -128,14 +104,6 @@
   ]
  },
  {
-  "name": "XREAD $ reads from 0-0",
-  "old": "                id = StreamId(stream.topMs(), stream.topSeq());",
-  "new": "                id = StreamId(0, 0);",
-  "cases": [
-   "streams-13 XREAD BLOCK with $ gets only the new entry"
-  ]
- },
- {
   "name": "XADD wakes one reader only",
   "old": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n",
   "new": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n            break;\n",
@@ -149,14 +117,6 @@
   "new": "",
   "cases": [
    "local: XREAD BLOCK above the top gets the entry above it"
-  ]
- },
- {
-  "name": "a reader above the top is served empty",
-  "old": "        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key])) {",
-  "new": "        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key]) and false) {",
-  "cases": [
-   "local: XREAD BLOCK above the top waits after a lower XADD (no byte comes)"
   ]
  },
  {
@@ -200,9 +160,113 @@
   ]
  },
  {
+  "name": "XREAD COUNT ignored",
+  "old": "    if (count > 0 and to - from > count) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: XREAD COUNT 2"
+  ]
+ },
+ {
+  "name": "find compares the sequence part alone",
+  "old": "            var below = m < ms or (m == ms and q < seq);",
+  "new": "            var below = q < seq;",
+  "cases": [
+   "local: XRANGE across milliseconds"
+  ]
+ },
+ {
+  "name": "a served reader stays active",
+  "old": "            w.active = false;\n            w.servedBy = key;\n            w.ready = reply;",
+  "new": "            w.servedBy = key;\n            w.ready = reply;",
+  "cases": [
+   "local: a reader that XADD served is not served again by the next XADD (20 rounds)"
+  ]
+ },
+ {
+  "name": "S5 no yield in the XREAD options",
+  "old": "        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 1) {\n            yield nil;",
+  "new": "        if (false) {\n            yield nil;",
+  "cases": [
+   "local: S5 XREAD with 524000 COUNT options stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "S6 no yield in the XRANGE options",
+  "old": "        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 0) {\n            yield nil;",
+  "new": "        if (false) {\n            yield nil;",
+  "cases": [
+   "local: S6 XRANGE with 524000 COUNT options stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "S7 no byte bound on a reply step",
+  "old": "        if (len(this.parts) >= ELEMENTS_PER_YIELD or this.bytes >= STEP_BYTES) {",
+  "new": "        if (len(this.parts) >= ELEMENTS_PER_YIELD) {",
+  "cases": [
+   "local: S7 XRANGE of 64 entries of almost 1 MB stalls PING at most 0.2 s"
+  ]
+ },
+ {
+  "name": "S8 XREAD copies the entries of each stream",
+  "old": "    reply.add(key, stream, from, to);\n    return true;",
+  "new": "    reply.add(key, stream, from, to);\n    var copy = [stream.ms[from:to], stream.seq[from:to], stream.fields[from:to], \"*2\\r\\n\" + bulk(key) + \"*\" + str(to - from) + \"\\r\\n\"];\n    return true;",
+  "cases": [
+   "local: S8 XREAD of 131072 streams with entries stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "S9 a long field is copied into its bulk",
+  "old": "    addBulk(s) {\n        if (len(s) >= STEP_BYTES) {",
+  "new": "    addBulk(s) {\n        if (false) {",
+  "cases": [
+   "local: S9 XRANGE of a 64 MB field stalls PING at most 0.25 s"
+  ]
+ },
+ {
+  "name": "XRANGE end excludes its ID",
+  "old": "    var to = stream.find(args.end.ms, args.end.seq, false);",
+  "new": "    var to = stream.find(args.end.ms, args.end.seq, true);",
+  "cases": [
+   "streams-06 XRANGE 0-2 0-3"
+  ]
+ },
+ {
+  "name": "XRANGE COUNT ignored",
+  "old": "    if (args.count != nil and to - from > args.count) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: XRANGE COUNT 2"
+  ]
+ },
+ {
+  "name": "XREAD reads only the first stream",
+  "old": "        j = j + 1;\n    }\n    if (len(reply.keys) > 0) {",
+  "new": "        j = j + 1;\n        break;\n    }\n    if (len(reply.keys) > 0) {",
+  "cases": [
+   "streams-10 XREAD of two streams"
+  ]
+ },
+ {
+  "name": "XREAD $ reads from the first entry",
+  "old": "            reply.add(key, stream, n - 1, n);",
+  "new": "            reply.add(key, stream, 0, n);",
+  "cases": [
+   "streams-13 XREAD BLOCK with $ gets only the new entry"
+  ]
+ },
+ {
+  "name": "a reader above the top is served empty",
+  "old": "            has = addEntriesAfter(reply, w.read.count, key, stream, after);",
+  "new": "            addEntriesAfter(reply, w.read.count, key, stream, after);",
+  "cases": [
+   "local: XREAD BLOCK above the top waits after a lower XADD (no byte comes)"
+  ]
+ },
+ {
   "name": "S3 XREAD parses its IDs in its one step",
-  "old": "        ctx = parseXread(argv, true);",
-  "new": "        ctx = parseXread(argv, false);",
+  "old": "            ctx = parse(argv, true);",
+  "new": "            ctx = parse(argv, false);",
   "cases": [
    "local: S3 XREAD of 524286 streams stalls PING at most 0.5 s"
   ]

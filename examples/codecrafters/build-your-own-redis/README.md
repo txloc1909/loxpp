@@ -81,10 +81,10 @@ takes the arguments of the command out of its message first (this step
 yields, see rule 2), and the socket write comes after the command. So each
 command is atomic, as in Redis.
 
-One command has a step before it: the session parses the IDs of `XREAD`
-(`parseXread`) before the command runs, and yields every 1024 IDs, because
-one `XREAD` can name 524287 streams. The parse reads no key, so the command
-stays atomic.
+Two commands have a step before them: the session parses the arguments of
+`XRANGE` and `XREAD` (`PARSERS`) before the command runs, and yields every
+1024 options or IDs, because one command can hold about 524287 of them. The
+parse reads no key, so the command stays atomic.
 
 ### Lists and BLPOP
 

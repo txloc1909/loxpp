@@ -217,21 +217,26 @@ class Bulks {
     }
 }
 
-// A reply of arrays of stream entries: head, then for each i, prefixes[i]
-// and the entries ranges[i]. Each range holds slices that the command took
-// from a Stream in one step, so the command stays atomic. The session
-// encodes and writes the entries in steps and yields between the steps
-// (writeSegments).
+// A reply of arrays of stream entries: head, then for each i the entries
+// froms[i] to tos[i] - 1 of streams[i], under the name keys[i] (XREAD) or
+// with no name (XRANGE, keys[i] is nil). A Stream only grows at its end, so
+// these entries do not change after the command: the command stays atomic
+// with no copy, and the session encodes and writes the entries in steps and
+// yields between the steps (writeSegments).
 class Segments {
     init(head) {
         this.head = head;
-        this.prefixes = [];
-        this.ranges = [];
+        this.keys = [];
+        this.streams = [];
+        this.froms = [];
+        this.tos = [];
     }
 
-    add(prefix, range) {
-        this.prefixes.append(prefix);
-        this.ranges.append(range);
+    add(key, stream, from, to) {
+        this.keys.append(key);
+        this.streams.append(stream);
+        this.froms.append(from);
+        this.tos.append(to);
     }
 }
 
@@ -1203,20 +1208,11 @@ fun idPart(digits, seq) {
     return StreamId(ms, seq);
 }
 
-// Entries of a stream: three Lists of the same length, the two parts of
-// each ID and the fields of each entry.
-class EntryRange {
-    init(ms, seq, fields) {
-        this.ms = ms;
-        this.seq = seq;
-        this.fields = fields;
-    }
-}
-
-// The entries of a stream, oldest first. XADD keeps the fields of an entry
-// as one slice of its arguments, and a read takes one slice of each List,
-// so neither costs more for an entry with more fields; the session encodes
-// the reply in steps.
+// The entries of a stream, oldest first, in three Lists of the same length:
+// the two parts of each ID and the fields of each entry. XADD keeps the
+// fields as one slice of its arguments, and a read keeps only the bounds of
+// its entries, so neither costs more for an entry with more fields; the
+// session encodes the reply in steps.
 class Stream {
     init() {
         this.ms = [];
@@ -1271,8 +1267,14 @@ class Stream {
         this.fields.append(fields);
     }
 
-    slice(from, to) {
-        return EntryRange(this.ms[from:to], this.seq[from:to], this.fields[from:to]);
+    // True when the stream has an entry above ms-seq.
+    hasAbove(ms, seq) {
+        var n = this.size();
+        if (n == 0) {
+            return false;
+        }
+        var top = this.ms[n - 1];
+        return ms < top or (ms == top and seq < this.seq[n - 1]);
     }
 }
 
@@ -1385,50 +1387,80 @@ fun rangeBound(text, missingSeq) {
     return id;
 }
 
-fun cmdXrange(ctx, argv) {
+// The arguments of one XRANGE, parsed.
+class XrangeArgs {
+    init(start, end, count) {
+        this.start = start;
+        this.end = end;
+        this.count = count;
+    }
+}
+
+// Parses the arguments of XRANGE. Returns an XrangeArgs, or an error reply.
+// It reads no key, so the session runs it before the command and may yield
+// (mayYield) every ELEMENTS_PER_YIELD options.
+fun parseXrange(argv, mayYield) {
     if (len(argv) < 4) {
         return wrongArgs("xrange");
     }
     var count = nil;
-    if (len(argv) == 6 and upper(argv[4]) == "COUNT") {
-        count = parseInteger(argv[5]);
+    var i = 4;
+    while (i < len(argv)) {
+        if (upper(argv[i]) != "COUNT" or i + 1 >= len(argv)) {
+            return SYNTAX_ERROR;
+        }
+        count = parseInteger(argv[i + 1]);
         if (count == nil) {
             return NOT_INTEGER;
         }
-    } else if (len(argv) != 4) {
-        return SYNTAX_ERROR;
+        i = i + 2;
+        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 0) {
+            yield nil;
+        }
     }
     var start = rangeBound(argv[2], 0);
     var end = rangeBound(argv[3], MAX_ID_PART);
     if (start == nil or end == nil) {
         return INVALID_ID;
     }
+    return XrangeArgs(start, end, count);
+}
+
+// ctx is the XrangeArgs that the session parsed before the command, or nil.
+fun cmdXrange(ctx, argv) {
+    var args = ctx;
+    if (args == nil) {
+        args = parseXrange(argv, false);
+    }
+    if (type(args) == "String") {
+        return args;
+    }
     var stream = streamEntry(argv[1]);
     if (stream == false) {
         return WRONGTYPE;
     }
-    if (count != nil and count <= 0) {
-        return NULL_ARRAY;
-    }
     if (stream == nil) {
         return "*0\r\n";
     }
-    var from = stream.find(start.ms, start.seq, true);
-    var to = stream.find(end.ms, end.seq, false);
+    if (args.count != nil and args.count <= 0) {
+        return NULL_ARRAY;
+    }
+    var from = stream.find(args.start.ms, args.start.seq, true);
+    var to = stream.find(args.end.ms, args.end.seq, false);
     if (to <= from) {
         return "*0\r\n";
     }
-    if (count != nil and to - from > count) {
-        to = from + count;
+    if (args.count != nil and to - from > args.count) {
+        to = from + args.count;
     }
     var reply = Segments("");
-    reply.add("*" + str(to - from) + "\r\n", stream.slice(from, to));
+    reply.add(nil, stream, from, to);
     return reply;
 }
 
 // What one XREAD BLOCK waits for: for each key, the ID after which it
-// reads (for a key named twice, the last ID), and the most entries for each
-// stream (0 for no limit).
+// reads, or "$" (for a key named twice, the last one), and the most entries
+// for each stream (0 for no limit).
 class StreamRead {
     init(count) {
         this.after = {};
@@ -1436,18 +1468,19 @@ class StreamRead {
     }
 }
 
-// Adds to reply the entries of stream above id, at most read.count of them
-// when it is above 0. Returns true when there are some.
-fun addEntriesAfter(reply, read, key, stream, id) {
-    var from = stream.find(id.ms, id.seq, false);
-    var to = stream.size();
-    if (to <= from) {
+// Adds to reply the entries of stream above id, at most count of them when
+// count is above 0. Returns true when there are some. An ID at or above the
+// top costs one comparison, with no search.
+fun addEntriesAfter(reply, count, key, stream, id) {
+    if (!stream.hasAbove(id.ms, id.seq)) {
         return false;
     }
-    if (read.count > 0 and to - from > read.count) {
-        to = from + read.count;
+    var from = stream.find(id.ms, id.seq, false);
+    var to = stream.size();
+    if (count > 0 and to - from > count) {
+        to = from + count;
     }
-    reply.add("*2\r\n" + bulk(key) + "*" + str(to - from) + "\r\n", stream.slice(from, to));
+    reply.add(key, stream, from, to);
     return true;
 }
 
@@ -1494,6 +1527,9 @@ fun parseXread(argv, mayYield) {
             return SYNTAX_ERROR;
         }
         i = i + 2;
+        if (mayYield and i % (2 * ELEMENTS_PER_YIELD) == 1) {
+            yield nil;
+        }
     }
     if (i >= len(argv)) {
         return SYNTAX_ERROR;
@@ -1536,29 +1572,43 @@ fun cmdXread(ctx, argv) {
     if (type(args) == "String") {
         return args;
     }
+    var blocking = args.block != nil;
     var read = StreamRead(args.count);
     var reply = Segments("");
     var j = 0;
+    // This loop can run over 524287 keys in one step, so it reads each key
+    // with one Map access and no call where it can.
     for (var key in args.keys) {
-        var stream = streamEntry(key);
-        if (stream == false) {
-            return WRONGTYPE;
+        var entry = store[key];
+        if (entry != nil and entry.expiresAt != nil) {
+            entry = lookup(key);
+        }
+        var stream = nil;
+        if (entry != nil) {
+            if (entry.kind != "stream") {
+                return WRONGTYPE;
+            }
+            stream = entry.value;
         }
         var id = args.ids[j];
         if (id == "$") {
-            id = StreamId(0, 0);
-            if (stream != nil) {
-                id = StreamId(stream.topMs(), stream.topSeq());
+            // No entry is above the top, so only a wait needs it; see
+            // wakeReaders.
+            if (blocking) {
+                read.after[key] = "$";
             }
-        }
-        read.after[key] = id;
-        if (stream != nil) {
-            addEntriesAfter(reply, read, key, stream, id);
+        } else {
+            if (blocking) {
+                read.after[key] = id;
+            }
+            if (stream != nil) {
+                addEntriesAfter(reply, args.count, key, stream, id);
+            }
         }
         j = j + 1;
     }
-    if (len(reply.ranges) > 0) {
-        reply.head = "*" + str(len(reply.ranges)) + "\r\n";
+    if (len(reply.keys) > 0) {
+        reply.head = "*" + str(len(reply.keys)) + "\r\n";
         return reply;
     }
     if (args.block == nil) {
@@ -1579,7 +1629,18 @@ fun wakeReaders(key, stream) {
             break;
         }
         var reply = Segments("*1\r\n");
-        if (!addEntriesAfter(reply, w.read, key, stream, w.read.after[key])) {
+        var after = w.read.after[key];
+        var has = true;
+        if (after == "$") {
+            // The first XADD on the key after the wait started wakes the
+            // reader at once, so the entries above the top that "$" named
+            // are the one entry of this XADD.
+            var n = stream.size();
+            reply.add(key, stream, n - 1, n);
+        } else {
+            has = addEntriesAfter(reply, w.read.count, key, stream, after);
+        }
+        if (!has) {
             later.append(w);
         } else {
             w.active = false;
@@ -1647,6 +1708,13 @@ var COMMANDS = {
     "XADD": cmdXadd,
     "XRANGE": cmdXrange,
     "XREAD": cmdXread
+};
+
+// Commands whose arguments the session parses before the command runs
+// (rule 5 of the README): the parse reads no key and may yield.
+var PARSERS = {
+    "XRANGE": parseXrange,
+    "XREAD": parseXread
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.
@@ -1913,8 +1981,11 @@ fun readLoop(conn) {
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv) {
     var ctx = nil;
-    if (len(argv) > 0 and upper(argv[0]) == "XREAD") {
-        ctx = parseXread(argv, true);
+    if (len(argv) > 0) {
+        var parse = PARSERS[upper(argv[0])];
+        if (parse != nil) {
+            ctx = parse(argv, true);
+        }
     }
     var reply = execute(ctx, argv);
     if (type(reply) == "Instance" and hasField(reply, "timeout")) {
@@ -1962,8 +2033,8 @@ fun writeBulks(conn, reply) {
 
 // Collects reply parts and writes them in steps of at most
 // ELEMENTS_PER_YIELD parts and about STEP_BYTES bytes, and yields after each
-// step. A part longer than a step is written alone, so no step copies a long
-// reply into one String.
+// step. A part of STEP_BYTES or more goes to the socket alone, so no step
+// copies a long part.
 var STEP_BYTES = 1048576;
 
 class Output {
@@ -1974,11 +2045,28 @@ class Output {
     }
 
     add(part) {
+        if (len(part) >= STEP_BYTES) {
+            this.flush();
+            this.conn.sock.write(part);
+            yield nil;
+            return;
+        }
         this.parts.append(part);
         this.bytes = this.bytes + len(part);
         if (len(this.parts) >= ELEMENTS_PER_YIELD or this.bytes >= STEP_BYTES) {
             this.flush();
             yield nil;
+        }
+    }
+
+    // A bulk string, with no copy of a long value.
+    addBulk(s) {
+        if (len(s) >= STEP_BYTES) {
+            this.add("$" + str(len(s)) + "\r\n");
+            this.add(s);
+            this.add("\r\n");
+        } else {
+            this.add(bulk(s));
         }
     }
 
@@ -1997,15 +2085,20 @@ fun writeSegments(conn, reply) {
         out.add(reply.head);
     }
     var i = 0;
-    while (i < len(reply.ranges)) {
-        out.add(reply.prefixes[i]);
-        var r = reply.ranges[i];
-        var j = 0;
-        while (j < len(r.ms)) {
-            var fields = r.fields[j];
-            out.add("*2\r\n" + bulk(idText(r.ms[j], r.seq[j])) + "*" + str(len(fields)) + "\r\n");
+    while (i < len(reply.keys)) {
+        var stream = reply.streams[i];
+        var j = reply.froms[i];
+        var to = reply.tos[i];
+        if (reply.keys[i] != nil) {
+            out.add("*2\r\n");
+            out.addBulk(reply.keys[i]);
+        }
+        out.add("*" + str(to - j) + "\r\n");
+        while (j < to) {
+            var fields = stream.fields[j];
+            out.add("*2\r\n" + bulk(idText(stream.ms[j], stream.seq[j])) + "*" + str(len(fields)) + "\r\n");
             for (var f in fields) {
-                out.add(bulk(f));
+                out.addBulk(f);
             }
             j = j + 1;
         }
