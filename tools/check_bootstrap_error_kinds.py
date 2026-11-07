@@ -139,6 +139,7 @@ EXPECTED_CALLS = [
     ('NetworkError', 'e.message', JUDGED),
     ('SocketClosedError', 'e.message', JUDGED),
     ('BusyError', 'e.message', JUDGED),
+    ('DirectoryError', 'e.message', JUDGED),
     ('YieldAcrossNativeError', '"Cannot receive across a native callback."', JUDGED),
     ('SendError', '"Value of type " + reflectTypeName(msg) + " is not a message."', JUDGED),
     ('DeadTaskError', '"Cannot send to a task that has ended."', JUDGED),
@@ -216,7 +217,7 @@ EXPECTED_CALLS = [
 # review. See --report for the current judged/recorded split; this script
 # does not restate that split in prose here, to avoid a second hand-written
 # copy of a number the data already holds.
-EXPECTED_SPEC_TABLE_KIND_COUNT = 32
+EXPECTED_SPEC_TABLE_KIND_COUNT = 33
 
 
 def strip_string_literals(text: str) -> str:

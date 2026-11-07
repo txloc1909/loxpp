@@ -383,6 +383,15 @@ CATCHABLE_ROWS = [
         setup='var a = listen("127.0.0.1", 0);\n',
         expected_kind="NetworkError",
     ),
+    # --- mkdir (spec/05-stdlib.md, mkdir) -------------------------------
+    # The missing parent is a deterministic cause: the run's own workdir
+    # exists, and nothing in this row creates its "missing" entry.
+    Row(
+        "directory_error",
+        "caught",
+        'mkdir("__WORKDIR__/missing/child");',
+        expected_kind="DirectoryError",
+    ),
     # --- Int (docs/decisions/integer-kind.md) -----------------------------
     # The mixed-kind operand rows widen three existing spec rows to a Number
     # together with an Int, so they are regression-only rows below.
