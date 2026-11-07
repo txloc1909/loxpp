@@ -1584,6 +1584,10 @@ bool Runtime::runTask(ObjTask* task) {
     // later, the one value the pending suspend point evaluates to. A task
     // that is receiving gets the head of its mailbox, which the send
     // that woke it put there; a `yield` gets nil.
+    // The first resume's window is the callee slot and the arguments; a later
+    // resume's window is the one received value. A suspend leaves the stack
+    // at the top of the window, so the whole window goes after the resume.
+    Value* const windowBase = stackTop;
     int argCount = 0;
     if (!co->started) {
         push(from<Nil>(Nil{}));
@@ -1641,7 +1645,7 @@ bool Runtime::runTask(ObjTask* task) {
         }
         return false;
     }
-    pop(); // the resume window
+    stackTop = windowBase;
     if (co->state == CoroutineState::DEAD) {
         // spec/04-semantics.md, Ending: the return value and the messages
         // still in the mailbox are discarded.
