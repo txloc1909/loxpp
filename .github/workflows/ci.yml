@@ -100,6 +100,14 @@ jobs:
           tools/check_int_fault_rows.py
           tools/check_int_edge_rows.py
 
+      # Every standard-library parameter that the spec calls an integer, its
+      # native call site, and its spec probe must stay in lockstep
+      # (spec/05-stdlib.md, "Integer arguments"). A new parameter with no row
+      # fails, and so does a row with no probe. Pure Python, so it needs no
+      # build.
+      - name: Check integer argument rows
+        run: tools/check_integer_arg_rows.py
+
       # Lox++ has no import, so the credit channel library of
       # examples/credit_channel.lox is also in each probe that tests it. This
       # fails when a copy differs from the example. Pure Python, so it needs

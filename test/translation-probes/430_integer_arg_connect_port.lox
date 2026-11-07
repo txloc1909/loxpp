@@ -1,0 +1,14 @@
+// The port of connect() must be an integer, and an integer is an Int or an
+// integer-valued Number (spec/05-stdlib.md, Integer arguments). A program that
+// computed a port writes int(l.port()), so the Int form is the natural one. A
+// fractional port is a runtime error that halts the program, and the check
+// comes before any connection attempt.
+// COVERS: integer-arg connect-port
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: connected
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", int(l.port()));
+print "connected";
+connect("127.0.0.1", 1.5);
+print "unreachable";

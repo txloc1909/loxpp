@@ -1,0 +1,9 @@
+// An exit code must fit a signed 32-bit integer, and an Int is a code as a
+// Number is (spec/05-stdlib.md, exit). An Int above the range is a runtime
+// error that halts the program, so the exit code is not 1 or 0: the halt
+// status is non-zero and no CHECK line binds it.
+// STATUS: error
+// CHECK: before
+print "before";
+exit(2147483648i);
+print "unreachable";

@@ -1,0 +1,12 @@
+// The port of listen() must be an integer, and an integer is an Int or an
+// integer-valued Number (spec/05-stdlib.md, Integer arguments). `0i` asks the
+// operating system for a free port as `0` does, so the Server binds one. A
+// fractional port is a runtime error that halts the program.
+// COVERS: integer-arg listen-port
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: true
+var l = listen("127.0.0.1", 0i);
+print l.port() > 0;
+listen("127.0.0.1", 1.5);
+print "unreachable";

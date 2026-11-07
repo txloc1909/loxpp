@@ -1,0 +1,17 @@
+// The count of Socket.read_some() must be an integer, and an integer is an Int
+// or an integer-valued Number (spec/05-stdlib.md, Integer arguments). The
+// number of bytes in one result is not specified, so the probe checks the
+// bound the spec binds: at least one byte and at most the Int count. A
+// fractional count is a runtime error that halts the program.
+// COVERS: integer-arg socket-read-some
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: true
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", l.port());
+var s = l.accept();
+c.write("abcdef");
+var got = s.read_some(2i);
+print len(got) >= 1 and len(got) <= 2;
+s.read_some(2.5);
+print "unreachable";

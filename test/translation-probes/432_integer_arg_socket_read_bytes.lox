@@ -1,0 +1,15 @@
+// The count of Socket.read_bytes() must be an integer, and an integer is an
+// Int or an integer-valued Number (spec/05-stdlib.md, Integer arguments). The
+// Int count reads the same two bytes; a fractional count is a runtime error
+// that halts the program.
+// COVERS: integer-arg socket-read-bytes
+// STATUS: error
+// TIMEOUT: 10
+// CHECK: ab
+var l = listen("127.0.0.1", 0);
+var c = connect("127.0.0.1", l.port());
+var s = l.accept();
+c.write("abcdef");
+print s.read_bytes(2i);
+s.read_bytes(2.5);
+print "unreachable";
