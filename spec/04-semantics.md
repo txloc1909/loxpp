@@ -2235,7 +2235,7 @@ whose text is implementation-defined.
 | A shift count outside `0i` to `63i` | `1i << 64i` | `"ShiftCountError"` |
 | Int `/` or `%` with a zero divisor | `1i / 0i`, `1i % 0i` | `"DivisionByZeroError"` |
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
-| Wrong argument count | `fun f(a) {} f(1, 2)` | `"ArityError"` |
+| Wrong argument count of a call to a Lox function, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)) | `fun f(a) {} f(1, 2)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
@@ -2279,7 +2279,7 @@ run before the program ends is implementation-defined, as for every halt.
 | Cause | Example |
 |---|---|
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
-| A native function is called with an argument count other than its arity | `clock(1);` |
+| A stdlib native function is called with an argument count other than its arity, where no [Runtime Errors](#runtime-errors) row gives that fault | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
 | A stdlib native function reports its own error while running, except a fault that a [Runtime Errors](#runtime-errors) row or a [Worker and Task Faults](#worker-and-task-faults) row gives it | `open("/no/such/path", "r");` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
