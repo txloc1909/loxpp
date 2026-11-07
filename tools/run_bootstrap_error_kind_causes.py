@@ -141,11 +141,11 @@ PROBES = [
     ("accept on a closed server",
      'var l = listen("127.0.0.1", 0); l.close(); try { l.accept(); } catch (e) { print e.kind; }',
      CATCHABLE, "SocketClosedError", "e.message"),
-    # mkdir with a missing parent. The one-directory form never creates a
-    # parent, so this cause does not depend on the working directory and holds
-    # for a program that runs as root too.
-    ("mkdir with a missing parent",
-     'try { mkdir("/loxpp-no-such-parent-dir/child"); } catch (e) { print e.kind; }',
+    # mkdir below a regular file. A file as the parent is a fault for every
+    # user, root included, and the attempt leaves nothing behind.
+    ("mkdir below a regular file",
+     'var f = open("/tmp/loxpp-mkdir-cause-probe", "w"); f.close(); '
+     'try { mkdir("/tmp/loxpp-mkdir-cause-probe/child"); } catch (e) { print e.kind; }',
      CATCHABLE, "DirectoryError", "e.message"),
     ("accept on a server whose accept side another task holds",
      'var l = listen("127.0.0.1", 0); fun a() { try { l.accept(); } catch (e) {} } task.spawn(a); yield; '
