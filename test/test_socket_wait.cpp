@@ -1,15 +1,15 @@
-// test_socket_wait.cpp — the read side of a socket on a task that parks.
+// test_socket_wait.cpp — the read side of a socket on a task that waits.
 //
 // The spec probes 261 to 265, 278, 280, 281, 284 and 285 pin what a program
 // sees. These tests look at what a probe cannot see well: a call that waits
 // many times, the bytes at each chunk boundary, the level-triggered re-arm, a
 // close while a reader and a writer wait, a descriptor number that comes back,
-// the roots of a parked call, a signal in the blocking wait, and the
+// the roots of a waiting call, a signal in the blocking wait, and the
 // descriptor that the end of the program closes. The probes 347 to 365 pin the
 // rule of one call per side; the tests here look at its parts that a probe
 // cannot reach, such as a failed registration and the roots of a holder. A
 // feeder task writes in pieces with a sleep between them, on the same worker as
-// the reader, so every piece makes the reader park again. The `_gc` twin runs
+// the reader, so every piece makes the reader wait again. The `_gc` twin runs
 // the suite under LOXPP_STRESS_GC.
 
 #include "container_objects.h"
@@ -123,7 +123,7 @@ TEST_F(SocketWaitTest, TheEndOfALineClosesTheSocketOfAnAbandonedWaitingHolder) {
     EXPECT_EQ(globalString(vm, "next"), "SocketClosedError");
 }
 
-// A line that comes in three chunks: the reader parks at each chunk, and the
+// A line that comes in three chunks: the reader waits at each chunk, and the
 // bytes of the three joined, in order, are the line.
 TEST_F(SocketWaitTest, ALineInThreeChunks) {
     VM vm;
@@ -287,8 +287,8 @@ TEST_F(SocketWaitTest, ReadBytesAndReadlinesAtEndAfterPartialData) {
 }
 
 // A read of zero bytes, and a read that the input buffer already satisfies,
-// return at once and park nothing: no poller exists afterwards.
-TEST_F(SocketWaitTest, ACallWithNoWaitDoesNotPark) {
+// return at once and wait for nothing: no poller exists afterwards.
+TEST_F(SocketWaitTest, ACallWithNoWaitDoesNotSuspend) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.write("x\ny\nz");
@@ -305,7 +305,7 @@ TEST_F(SocketWaitTest, ACallWithNoWaitDoesNotPark) {
 
 // A close while tasks wait on the sockets fails each call with
 // SocketClosedError, and the message names each call.
-TEST_F(SocketWaitTest, ACloseFailsEveryParkedCallWithItsOwnName) {
+TEST_F(SocketWaitTest, ACloseFailsEveryWaitingCallWithItsOwnName) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         var peer2 = connect("127.0.0.1", srv.port());
@@ -379,9 +379,9 @@ TEST_F(SocketWaitTest, ADescriptorNumberThatComesBackMeetsNoStaleWait) {
 }
 
 // The collector runs while the call waits. The socket has no other holder
-// than the parked task, and the line is built from chunks that arrive during
+// than the waiting task, and the line is built from chunks that arrive during
 // collections.
-TEST_F(SocketWaitTest, TheSocketOfAParkedCallStaysAliveAcrossCollections) {
+TEST_F(SocketWaitTest, TheSocketOfAWaitingCallStaysAliveAcrossCollections) {
     VM vm;
     ASSERT_EQ(vm.interpret(R"(
         var srv = listen("127.0.0.1", 0);
@@ -465,7 +465,7 @@ TEST_F(SocketWaitTest, AReadlineScansEachByteOnce) {
 // first takes its line when its end arrives; the second must then find the
 // next newline in the bytes that are in the buffer now, and not wait for more
 // data or return a line with a newline inside it because an offset from
-// before the park points past the first line.
+// before the wait points past the first line.
 TEST_F(SocketWaitTest, AReadlineAfterAWaitScansTheBufferAsItIsNow) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
@@ -627,9 +627,9 @@ TEST_F(SocketWaitTest, ABlockingWaitSurvivesSignals) {
     EXPECT_EQ(globalString(vm, "after"), "nil");
 }
 
-// The end of the program closes the descriptor of a parked call: the host
+// The end of the program closes the descriptor of a waiting call: the host
 // peer sees the end of the stream, and the program has not waited for it.
-TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedCall) {
+TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAWaitingCall) {
     HostListener host;
     std::atomic<ssize_t> seen{-2};
     std::thread peer([&] {
@@ -880,7 +880,7 @@ long millisSince(std::chrono::steady_clock::time_point start) {
 } // namespace
 
 // A write that waits many times sends every byte once and in order: the
-// offset of the parked call is the only record of the progress. The text is a
+// offset of the waiting call is the only record of the progress. The text is a
 // counter pattern, so a byte sent twice or skipped shows at its position.
 TEST_F(SocketWaitTest, AWriteThatWaitsManyTimesSendsEveryByteInOrder) {
     HostListener host;
@@ -958,10 +958,10 @@ TEST_F(SocketWaitTest, ALargeWritelineKeepsItsNewlineAtTheEnd) {
 }
 
 // A writer in a context where the task cannot suspend, on a write side that
-// a parked writer holds, raises BusyError at the call and sends nothing
+// a waiting writer holds, raises BusyError at the call and sends nothing
 // (spec/04-semantics.md, The Task Machine, Sides, rules 2 and 5). Without the
 // check it would block the worker, and its bytes would follow or split the
-// bytes of the parked call.
+// bytes of the waiting call.
 TEST_F(SocketWaitTest, ABlockingWriterOnAHeldWriteSideRaisesBusyError) {
     constexpr size_t kHalf = size_t{1} << 22;
     HostListener host;
@@ -1204,7 +1204,7 @@ TEST_F(SocketWaitTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
 // close_write while a writer waits: the call fails with SocketClosedError,
 // like a write after close_write(). The peer sees the bytes sent so far and
 // then the end of the stream.
-TEST_F(SocketWaitTest, CloseWriteFailsAParkedWriter) {
+TEST_F(SocketWaitTest, CloseWriteFailsAWaitingWriter) {
     HostListener host;
     std::atomic<size_t> total{0};
     std::atomic<bool> sawEof{false};
@@ -1253,7 +1253,7 @@ TEST_F(SocketWaitTest, CloseWriteFailsAParkedWriter) {
 // A peer that resets the connection while a writer waits: the call raises
 // NetworkError (EPIPE or ECONNRESET), and the other tasks ran meanwhile. A
 // second writer meanwhile finds the write side held and raises BusyError.
-TEST_F(SocketWaitTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
+TEST_F(SocketWaitTest, APeerThatResetsFailsAWaitingWriterWithNetworkError) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1288,7 +1288,7 @@ TEST_F(SocketWaitTest, APeerThatResetsFailsAParkedWriterWithNetworkError) {
     EXPECT_EQ(globalString(vm, "ticks"), "1");
 }
 
-// EPIPE, with no task parked: a write to a peer that closed raises
+// EPIPE, with no task waiting: a write to a peer that closed raises
 // NetworkError, can be caught, and does not end the process by SIGPIPE.
 TEST_F(SocketWaitTest, EpipeIsANetworkErrorThatACatchSees) {
     VM vm;
@@ -1311,7 +1311,7 @@ TEST_F(SocketWaitTest, EpipeIsANetworkErrorThatACatchSees) {
 // A failed write does not change what a later read returns: the host sends
 // "bye" and then closes while the program still writes, and the program reads
 // "bye" after its write fails.
-TEST_F(SocketWaitTest, AFailedParkedWriteLeavesTheNextReadAlone) {
+TEST_F(SocketWaitTest, AFailedWaitingWriteLeavesTheNextReadAlone) {
     HostListener host;
     std::thread peer([&] {
         int fd = host.accept();
@@ -1335,7 +1335,7 @@ TEST_F(SocketWaitTest, AFailedParkedWriteLeavesTheNextReadAlone) {
     EXPECT_EQ(globalString(vm, "got"), "bye");
 }
 
-// Zero-length writes: write("") sends nothing, parks nothing and raises
+// Zero-length writes: write("") sends nothing, waits for nothing and raises
 // nothing, also when the connection is full; writeline("") sends one newline.
 TEST_F(SocketWaitTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
     VM vm;
@@ -1354,7 +1354,7 @@ TEST_F(SocketWaitTest, ZeroLengthWritesSendNothingAndWritelineSendsANewline) {
     EXPECT_FALSE(vm.runtime().hasPoller());
 }
 
-// A zero-length write on a write side that a parked writer holds raises
+// A zero-length write on a write side that a waiting writer holds raises
 // BusyError, although it could return at once (spec/04-semantics.md, The Task
 // Machine, Sides, rule 2).
 TEST_F(SocketWaitTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
@@ -1383,8 +1383,8 @@ TEST_F(SocketWaitTest, AZeroLengthWriteOnAHeldWriteSideRaisesBusyError) {
     EXPECT_EQ(globalString(vm, "log"), "BusyErrorW");
 }
 
-// A write that is not full does not park and builds no poller.
-TEST_F(SocketWaitTest, AWriteThatFitsDoesNotPark) {
+// A write that is not full does not wait and builds no poller.
+TEST_F(SocketWaitTest, AWriteThatFitsDoesNotWait) {
     VM vm;
     ASSERT_EQ(run(vm, R"(
         peer.write("hello"); peer.writeline(" world");
@@ -1395,13 +1395,13 @@ TEST_F(SocketWaitTest, AWriteThatFitsDoesNotPark) {
     EXPECT_FALSE(vm.runtime().hasPoller());
 }
 
-// The end of the program closes the descriptor of a parked write: the host
+// The end of the program closes the descriptor of a waiting write: the host
 // peer reads the end of the stream, and the program has not waited for the
 // peer to read the whole text. The peer reads until the stream ends, so it
 // sees the end only if the program closed the descriptor; the bytes it got
 // are fewer than the text, so the write did not finish first. No wall-clock
 // bound is used: building the text takes seconds in a debug build under load.
-TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
+TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAWaitingWrite) {
     constexpr size_t kBytes = size_t{1} << 27;
     HostListener host;
     std::atomic<bool> sawEnd{false};
@@ -1429,9 +1429,9 @@ TEST_F(SocketWaitTest, TheEndOfTheProgramClosesTheDescriptorOfAParkedWrite) {
 }
 
 // The collector runs while the call waits. The only holder of the text is the
-// parked call: the writer builds it in the argument, and the ticker allocates
+// waiting call: the writer builds it in the argument, and the ticker allocates
 // meanwhile.
-TEST_F(SocketWaitTest, TheTextOfAParkedWriteStaysAliveAcrossCollections) {
+TEST_F(SocketWaitTest, TheTextOfAWaitingWriteStaysAliveAcrossCollections) {
     constexpr size_t kBytes = size_t{1} << 22;
     HostListener host;
     std::atomic<size_t> total{0};
@@ -1541,8 +1541,8 @@ namespace {
 // Runs in a forked child, because a defect here is a crash that would end the
 // test runner. Returns the exit code: 0 when the program behaved.
 //
-// The write fills the send buffer and parks. The hook makes the registration
-// of that one park fail, so the task is READY with the error, and its call
+// The write fills the send buffer and waits. The hook makes the registration
+// of that one wait fail, so the task is READY with the error, and its call
 // raises when it runs. The call has ended then, so it holds the write side no
 // more: the second write must send its bytes, not raise BusyError.
 int writeWithFailedRegistration() {
@@ -1613,9 +1613,9 @@ int writeWithFailedRegistration() {
 
 } // namespace
 
-// A park that fails to register leaves no holder of the write side. The next
+// A wait that fails to register leaves no holder of the write side. The next
 // write on the socket finishes, and the stream ends with its bytes.
-TEST_F(SocketWaitTest, AFailedParkRegistrationLeavesNoHolder) {
+TEST_F(SocketWaitTest, AFailedWaitRegistrationLeavesNoHolder) {
     fflush(nullptr);
     const pid_t pid = fork();
     ASSERT_GE(pid, 0);
