@@ -240,6 +240,15 @@ class Segments {
     }
 }
 
+// A reply of one bulk string, kept as its value: the session encodes it
+// when it writes it (Output.addBulk), so a command does not copy a long
+// value, and EXEC holds only a reference to it.
+class Bulk {
+    init(bulkValue) {
+        this.bulkValue = bulkValue;
+    }
+}
+
 fun bulkArray(strings) {
     var items = [];
     for (var s in strings) {
@@ -411,7 +420,7 @@ fun cmdSet(argv) {
     if (returnOld) {
         reply = NULL_BULK;
         if (old != nil) {
-            reply = bulk(old.value);
+            reply = Bulk(old.value);
         }
     }
     if ((condition == "NX" and old != nil) or (condition == "XX" and old == nil)) {
@@ -458,7 +467,7 @@ fun cmdGet(argv) {
     if (entry.kind != "string") {
         return WRONGTYPE;
     }
-    return bulk(entry.value);
+    return Bulk(entry.value);
 }
 
 // The text of Redis 7.0: the name and the start of the arguments, each cut
@@ -626,6 +635,13 @@ class WaitQueue {
     // Called once for each waiter that leaves without a pusher.
     left() {
         this.live = this.live - 1;
+        this.compact();
+    }
+
+    // Drops the waiters that are no longer active when they are more than
+    // the active ones, so the queue does not grow without bound; each drop
+    // copies fewer entries than the waiters that left since the last one.
+    compact() {
         if (this.size() > 2 * this.live + 16) {
             var kept = [];
             for (var w in this.items[this.head:len(this.items)]) {
@@ -776,7 +792,7 @@ fun cmdPush(argv, left) {
         i = i + 1;
     }
     var n = entry.value.size();
-    serveWaiters(argv[1]);
+    listReady(argv[1]);
     return integerReply(n);
 }
 
@@ -834,6 +850,9 @@ fun cmdLrange(ctx, argv) {
     if (start > stop) {
         return arrayReply([]);
     }
+    if (!spendElements(stop + 1 - start)) {
+        return EXEC_TOO_LARGE;
+    }
     return entry.value.range(start, stop + 1);
 }
 
@@ -859,10 +878,13 @@ fun cmdLpop(ctx, argv) {
         return NULL_ARRAY;
     }
     if (count == nil) {
-        return bulk(popLeft(argv[1], entry));
+        return Bulk(popLeft(argv[1], entry));
     }
     if (count > entry.value.size()) {
         count = entry.value.size();
+    }
+    if (!spendElements(count)) {
+        return EXEC_TOO_LARGE;
     }
     var reply = entry.value.takeLeft(count);
     if (entry.value.size() == 0) {
@@ -1364,7 +1386,7 @@ fun cmdXadd(ctx, argv) {
         store[key] = Entry("stream", stream, nil);
     }
     stream.add(id.ms, id.seq, argv[3:len(argv)]);
-    wakeReaders(key, stream);
+    streamReady(key, stream);
     return bulk(idText(id.ms, id.seq));
 }
 
@@ -1625,48 +1647,374 @@ fun cmdXread(ctx, argv) {
 
 // Hands each session that waits in XREAD BLOCK on key, and has entries to
 // read in stream now, its reply: the entries of this one stream, as Redis
-// replies. A waiter whose ID is still above the top waits on. It runs at the
-// end of XADD, so the reply holds the entries up to this one.
-fun wakeReaders(key, stream) {
-    var later = [];
-    while (true) {
-        var w = takeWaiter(readers, key);
-        if (w == nil) {
-            break;
-        }
-        var reply = Segments("*1\r\n");
-        var after = w.read.after[key];
-        var has = true;
-        if (after == stream) {
-            // "$" on this same Stream: each XADD on it wakes the reader at
-            // once, so the entries above the top that "$" named are the one
-            // entry of this XADD.
-            var n = stream.size();
-            reply.add(key, stream, n - 1, n);
-        } else {
-            if (hasField(after, "fields")) {
-                // "$" on a Stream that the key no longer holds: nothing
-                // appends to it now, so its top is the top at the wait.
-                after = StreamId(after.topMs(), after.topSeq());
+// replies. It runs at the end of XADD, or after EXEC (serveReady), so the
+// reply holds the entries up to that point. firstNew is the index of the
+// first entry that this XADD or EXEC added. A reader whose ID is still above
+// the top stays where it is in the queue: the pass serves in place. It can
+// run once for each reader on each key of an EXEC, so it checks a reader
+// with no call and makes no object for a reader that waits on.
+fun wakeReaders(key, stream, firstNew) {
+    var queue = readers[key];
+    if (queue == nil) {
+        return;
+    }
+    var items = nil;
+    var i = 0;
+    if (isWaiter(queue)) {
+        items = [queue];
+    } else {
+        items = queue.items;
+        i = queue.head;
+    }
+    var top = stream.size() - 1;
+    var topMs = stream.ms[top];
+    var topSeq = stream.seq[top];
+    var served = 0;
+    var n = len(items);
+    while (i < n) {
+        var w = items[i];
+        if (w.active) {
+            var after = w.read.after[key];
+            // "$" on this same Stream: each XADD on it, or the end of each
+            // EXEC that added to it, wakes the reader at once, so the entries
+            // above the top that "$" named are the new ones, from firstNew.
+            var from = firstNew;
+            var waits = false;
+            if (after != stream) {
+                if (hasField(after, "fields")) {
+                    // "$" on a Stream that the key no longer holds: nothing
+                    // appends to it now, so its top is the top at the wait.
+                    after = StreamId(after.topMs(), after.topSeq());
+                }
+                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);
+                if (!waits) {
+                    from = stream.find(after.ms, after.seq, false);
+                }
             }
-            has = addEntriesAfter(reply, w.read.count, key, stream, after);
-        }
-        if (!has) {
-            later.append(w);
-        } else {
-            w.active = false;
-            w.servedBy = key;
-            w.ready = reply;
-            try {
-                task.send(w.handle, Msg.Ready());
-            } catch (ignored) {
-                // The waiter's task has ended. XREAD takes nothing, so
-                // nothing goes back.
+            if (!waits) {
+                serveReader(w, key, stream, from);
+                served = served + 1;
             }
+        }
+        i = i + 1;
+    }
+    if (isWaiter(queue)) {
+        if (served > 0) {
+            readers.del(key);
+        }
+        return;
+    }
+    queue.live = queue.live - served;
+    if (queue.live == 0) {
+        readers.del(key);
+    } else {
+        queue.compact();
+    }
+}
+
+// Hands w the entries of stream from the index from, at most w.read.count
+// of them when it is above 0.
+fun serveReader(w, key, stream, from) {
+    var to = stream.size();
+    if (w.read.count > 0 and to - from > w.read.count) {
+        to = from + w.read.count;
+    }
+    var reply = Segments("*1\r\n");
+    reply.add(key, stream, from, to);
+    w.active = false;
+    w.servedBy = key;
+    w.ready = reply;
+    try {
+        task.send(w.handle, Msg.Ready());
+    } catch (ignored) {
+        // The waiter's task has ended. XREAD takes nothing, so nothing goes
+        // back.
+    }
+}
+
+// ===========================================================================
+// Transactions
+// ===========================================================================
+
+// During EXEC, a push or an XADD only notes that its key is ready, and the
+// waiting clients are served one time after the last command, as Redis
+// does: a waiter acts before or after a transaction, never in it, and an
+// EXEC of many XADDs passes over the readers of a key once. Outside EXEC
+// these are nil, and a push serves at once.
+var readyLists = nil;
+var readyListSeen = nil;
+var readyStreamKeys = nil;
+// key -> StreamMark: the Stream that the key held at the first XADD of this
+// EXEC on it, and the index of that first new entry.
+var readyStreams = nil;
+
+// During EXEC, how many more list elements the replies of the transaction
+// may copy (LRANGE, LPOP with a count). EXEC keeps every reply until its
+// step ends, so this bounds the step and its memory (README rules 1, 4 and
+// 6). nil outside EXEC: a command alone is bounded by its list.
+var EXEC_ELEMENTS = 8388608;
+var execElements = nil;
+var EXEC_TOO_LARGE = "-ERR the replies of this transaction are over the limit of list elements\r\n";
+
+// Takes k elements from the budget of EXEC. Returns false, and takes
+// nothing, when the budget is too small; the command then does nothing.
+fun spendElements(k) {
+    if (execElements == nil) {
+        return true;
+    }
+    if (k > execElements) {
+        return false;
+    }
+    execElements = execElements - k;
+    return true;
+}
+
+class StreamMark {
+    init(stream, first) {
+        this.stream = stream;
+        this.first = first;
+    }
+}
+
+fun listReady(key) {
+    if (readyLists == nil) {
+        serveWaiters(key);
+        return;
+    }
+    if (!readyListSeen.has(key)) {
+        readyListSeen[key] = true;
+        readyLists.append(key);
+    }
+}
+
+fun streamReady(key, stream) {
+    if (readyStreams == nil) {
+        wakeReaders(key, stream, stream.size() - 1);
+        return;
+    }
+    var mark = readyStreams[key];
+    if (mark == nil) {
+        readyStreamKeys.append(key);
+    }
+    if (mark == nil or mark.stream != stream) {
+        readyStreams[key] = StreamMark(stream, stream.size() - 1);
+    }
+}
+
+// Serves the keys that EXEC made ready, from the state after its last
+// command. A stream key that no longer holds the marked Stream (a command
+// replaced it after the XADD) wakes nobody.
+fun serveReady() {
+    var lists = readyLists;
+    var streamKeys = readyStreamKeys;
+    var marks = readyStreams;
+    readyLists = nil;
+    readyListSeen = nil;
+    readyStreamKeys = nil;
+    readyStreams = nil;
+    for (var key in lists) {
+        serveWaiters(key);
+    }
+    for (var key in streamKeys) {
+        var mark = marks[key];
+        if (streamEntry(key) == mark.stream) {
+            wakeReaders(key, mark.stream, mark.first);
         }
     }
-    for (var w in later) {
-        joinQueues(readers, w, [key]);
+}
+
+// The largest value that INCR gives: a value has at most 15 digits, so that
+// it is exact in a Number. Redis allows the full 64-bit range.
+var INCR_MAX = 999999999999999;
+
+fun cmdIncr(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("incr");
+    }
+    var entry = lookup(argv[1]);
+    if (entry == nil) {
+        store[argv[1]] = Entry("string", "1", nil);
+        return integerReply(1);
+    }
+    if (entry.kind != "string") {
+        return WRONGTYPE;
+    }
+    var n = parseInteger(entry.value);
+    if (n == nil) {
+        return NOT_INTEGER;
+    }
+    if (n >= INCR_MAX) {
+        return errorReply("ERR increment or decrement would overflow");
+    }
+    n = n + 1;
+    // The key keeps its expiry, as in Redis.
+    entry.value = str(n);
+    return integerReply(n);
+}
+
+// The commands that a client queued after MULTI. dirty is true when one of
+// them was rejected, so that EXEC runs none of them. args counts the
+// arguments of the queued commands, for the bound of README rule 4.
+// ctxs[i] is the parse of queued[i] (PARSERS), or nil.
+class Transaction {
+    init() {
+        this.queued = [];
+        this.ctxs = [];
+        this.dirty = false;
+        this.args = 0;
+        this.bytes = 0;
+    }
+}
+
+// The bounds of one transaction: at most TX_COMMANDS commands, TX_ARGS
+// arguments and the query limit (QUERY_MAX) of bytes in all. EXEC runs the
+// whole queue in one step, so these bound that step and the queue (README
+// rules 4 and 6). Redis has no such bound.
+var TX_COMMANDS = 65536;
+var TX_ARGS = 1048576;
+
+// The number of arguments of each command, as Redis 7.0 checks it before it
+// runs or queues the command: n for exactly n, -n for at least n.
+var ARITY = {
+    "PING": -1, "ECHO": 2, "SET": -3, "GET": 2, "INFO": -1,
+    "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
+    "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
+    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1
+};
+
+fun arityOk(name, count) {
+    var a = ARITY[name];
+    if (a < 0) {
+        return count >= -a;
+    }
+    return count == a;
+}
+
+// Redis 7.0 gives this text for EXEC with arguments, also with no MULTI.
+var EXEC_ARITY = "-EXECABORT Transaction discarded because of: wrong number of arguments for 'exec' command\r\n";
+
+// MULTI, EXEC and DISCARD outside a transaction. Returns the reply.
+fun beginOrRefuse(conn, name, argv) {
+    if (!arityOk(name, len(argv))) {
+        if (name == "EXEC") {
+            return EXEC_ARITY;
+        }
+        return wrongArgs(lower(name));
+    }
+    if (name == "MULTI") {
+        conn.tx = Transaction();
+        return simple("OK");
+    }
+    return errorReply("ERR " + name + " without MULTI");
+}
+
+// A command of a client in a transaction: queue it, or end the
+// transaction. Returns the reply: a String, or the List of the replies of
+// EXEC.
+fun inTransaction(conn, name, argv, nbytes) {
+    var tx = conn.tx;
+    if (COMMANDS[name] == nil and ARITY[name] == nil) {
+        tx.dirty = true;
+        return unknownCommand(argv);
+    }
+    if (!arityOk(name, len(argv))) {
+        if (name == "EXEC") {
+            conn.tx = nil;
+            return EXEC_ARITY;
+        }
+        tx.dirty = true;
+        return wrongArgs(lower(name));
+    }
+    if (name == "MULTI") {
+        return errorReply("ERR MULTI calls can not be nested");
+    }
+    if (name == "DISCARD") {
+        conn.tx = nil;
+        return simple("OK");
+    }
+    if (name == "EXEC") {
+        conn.tx = nil;
+        if (tx.dirty) {
+            return errorReply("EXECABORT Transaction discarded because of previous errors.");
+        }
+        return execQueued(tx);
+    }
+    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {
+        tx.dirty = true;
+        return errorReply("ERR the transaction holds too many commands or arguments");
+    }
+    if (tx.bytes + nbytes > QUERY_MAX) {
+        tx.dirty = true;
+        return errorReply("ERR the transaction is over the query limit of bytes");
+    }
+    // The parse reads no key, so it runs now, with yields, and EXEC passes
+    // it to the command. A parse error is a reply of EXEC, as in Redis.
+    var ctx = nil;
+    var parse = PARSERS[name];
+    if (parse != nil) {
+        ctx = parse(argv, true);
+    }
+    tx.queued.append(argv);
+    tx.ctxs.append(ctx);
+    tx.args = tx.args + len(argv);
+    tx.bytes = tx.bytes + nbytes;
+    return simple("QUEUED");
+}
+
+// Runs the queued commands in one step, with no suspend point: each command
+// gets the parse that was made when it was queued. A command that would
+// wait (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis.
+// Returns the List of the replies; the session writes them after the step.
+fun execQueued(tx) {
+    execElements = EXEC_ELEMENTS;
+    readyLists = [];
+    readyListSeen = {};
+    readyStreamKeys = [];
+    readyStreams = {};
+    var replies = [];
+    var i = 0;
+    for (var argv in tx.queued) {
+        var reply = execute(tx.ctxs[i], argv);
+        i = i + 1;
+        if (type(reply) == "Instance" and hasField(reply, "timeout")) {
+            reply = NULL_ARRAY;
+        }
+        replies.append(reply);
+    }
+    execElements = nil;
+    serveReady();
+    return replies;
+}
+
+// Writes the replies of EXEC as one array, in steps.
+fun writeReplies(conn, replies) {
+    var out = Output(conn);
+    out.add("*" + str(len(replies)) + "\r\n");
+    for (var reply in replies) {
+        if (type(reply) == "String") {
+            out.add(reply);
+        } else if (hasField(reply, "bulkValue")) {
+            out.addBulk(reply.bulkValue);
+        } else {
+            out.flush();
+            writeReply(conn, reply);
+        }
+    }
+    out.flush();
+}
+
+// Writes one reply of a command: a String, Bulk, Bulks or Segments.
+fun writeReply(conn, reply) {
+    if (type(reply) == "Instance" and hasField(reply, "bulkValue")) {
+        var out = Output(conn);
+        out.addBulk(reply.bulkValue);
+        out.flush();
+    } else if (type(reply) == "Instance" and hasField(reply, "fwd")) {
+        writeBulks(conn, reply);
+    } else if (type(reply) == "Instance") {
+        writeSegments(conn, reply);
+    } else if (reply != "") {
+        conn.sock.write(reply);
     }
 }
 
@@ -1679,7 +2027,7 @@ fun cmdPing(ctx, argv) {
         return simple("PONG");
     }
     if (len(argv) == 2) {
-        return bulk(argv[1]);
+        return Bulk(argv[1]);
     }
     return wrongArgs("ping");
 }
@@ -1688,7 +2036,7 @@ fun cmdEcho(ctx, argv) {
     if (len(argv) != 2) {
         return wrongArgs("echo");
     }
-    return bulk(argv[1]);
+    return Bulk(argv[1]);
 }
 
 fun cmdSetEntry(ctx, argv) {
@@ -1718,7 +2066,8 @@ var COMMANDS = {
     "TYPE": cmdType,
     "XADD": cmdXadd,
     "XRANGE": cmdXrange,
-    "XREAD": cmdXread
+    "XREAD": cmdXread,
+    "INCR": cmdIncr
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -1865,6 +2214,8 @@ class Conn {
         // True while the session waits in BLPOP. The reader reads on then,
         // past its credit, so that it sees the end of the stream.
         this.blocked = false;
+        // The Transaction after MULTI, or nil.
+        this.tx = nil;
     }
 }
 
@@ -1990,10 +2341,26 @@ fun readLoop(conn) {
 
 // Returns true while the session goes on. A Block reply waits in the
 // session; the client's next commands stay in the mailbox until it ends.
-fun runCommand(conn, argv) {
+fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
     if (len(argv) > 0) {
-        var parse = PARSERS[upper(argv[0])];
+        var name = upper(argv[0]);
+        if (conn.tx != nil or name == "MULTI" or name == "EXEC" or name == "DISCARD") {
+            var reply = nil;
+            if (conn.tx != nil) {
+                reply = inTransaction(conn, name, argv, nbytes);
+            } else {
+                reply = beginOrRefuse(conn, name, argv);
+            }
+            if (type(reply) == "List") {
+                writeReplies(conn, reply);
+            } else {
+                conn.sock.write(reply);
+            }
+            giveCredit(conn);
+            return true;
+        }
+        var parse = PARSERS[name];
         if (parse != nil) {
             ctx = parse(argv, true);
         }
@@ -2005,13 +2372,7 @@ fun runCommand(conn, argv) {
             return false;
         }
     }
-    if (type(reply) == "Instance" and hasField(reply, "fwd")) {
-        writeBulks(conn, reply);
-    } else if (type(reply) == "Instance") {
-        writeSegments(conn, reply);
-    } else if (reply != "") {
-        conn.sock.write(reply);
-    }
+    writeReply(conn, reply);
     giveCredit(conn);
     return true;
 }
@@ -2151,7 +2512,7 @@ fun sessionLoop(conn) {
         while (running) {
             var msg = task.receive();
             running = match msg {
-                case Msg.Cmd(args, nbytes) => runCommand(conn, fromArgs(args))
+                case Msg.Cmd(args, nbytes) => runCommand(conn, fromArgs(args), nbytes)
                 case Msg.Fail(text) => failConnection(conn, text)
                 case Msg.Closed => false
                 // Only the reader sends to the session, and it never sends

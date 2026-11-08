@@ -66,8 +66,8 @@
  },
  {
   "name": "missing key not null",
-  "old": "        return NULL_BULK;\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
-  "new": "        return bulk(\"\");\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return bulk(entry.value);",
+  "old": "        return NULL_BULK;\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
+  "new": "        return bulk(\"\");\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
   "cases": [
    "local: GET of a missing key is a null bulk string",
    "base-07 GET after expiry"
@@ -91,8 +91,8 @@
  },
  {
   "name": "unknown command not an error",
-  "old": "    return unknownCommand(argv);",
-  "new": "    return simple(\"OK\");",
+  "old": "    if (run == nil) {\n        return unknownCommand(argv);",
+  "new": "    if (run == nil) {\n        return simple(\"OK\");",
   "cases": [
    "local: unknown command is an error"
   ]

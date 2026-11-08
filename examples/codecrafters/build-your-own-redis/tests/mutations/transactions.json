@@ -1,0 +1,290 @@
+[
+ {
+  "name": "INCR adds 2",
+  "old": "    n = n + 1;\n    // The key keeps its expiry",
+  "new": "    n = n + 2;\n    // The key keeps its expiry",
+  "cases": [
+   "transactions-01 INCR of a number"
+  ]
+ },
+ {
+  "name": "INCR of a missing key gives 0",
+  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        return integerReply(1);",
+  "new": "        store[argv[1]] = Entry(\"string\", \"0\", nil);\n        return integerReply(0);",
+  "cases": [
+   "transactions-02 INCR of a missing key"
+  ]
+ },
+ {
+  "name": "INCR of a word counts from 0",
+  "old": "    if (n == nil) {\n        return NOT_INTEGER;\n    }\n    if (n >= INCR_MAX) {",
+  "new": "    if (n == nil) {\n        n = 0;\n    }\n    if (n >= INCR_MAX) {",
+  "cases": [
+   "transactions-03 INCR of a word"
+  ]
+ },
+ {
+  "name": "INCR ignores the key kind",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    var n = parseInteger(entry.value);",
+  "new": "    var n = parseInteger(entry.value);",
+  "cases": [
+   "local: INCR of a list is WRONGTYPE"
+  ]
+ },
+ {
+  "name": "INCR has no overflow bound",
+  "old": "    if (n >= INCR_MAX) {\n        return errorReply(\"ERR increment or decrement would overflow\");\n    }",
+  "new": "",
+  "cases": [
+   "local: INCR above 15 digits is an overflow error"
+  ]
+ },
+ {
+  "name": "INCR drops the expiry",
+  "old": "    entry.value = str(n);\n    return integerReply(n);",
+  "new": "    store[argv[1]] = Entry(\"string\", str(n), nil);\n    return integerReply(n);",
+  "cases": [
+   "local: INCR keeps the expiry"
+  ]
+ },
+ {
+  "name": "MULTI does not start a transaction",
+  "old": "        conn.tx = Transaction();\n        return simple(\"OK\");",
+  "new": "        return simple(\"OK\");",
+  "cases": [
+   "transactions-07 SET is queued"
+  ]
+ },
+ {
+  "name": "EXEC without MULTI gives an empty array",
+  "old": "    return errorReply(\"ERR \" + name + \" without MULTI\");",
+  "new": "    return \"*0\\r\\n\";",
+  "cases": [
+   "transactions-05 EXEC without MULTI"
+  ]
+ },
+ {
+  "name": "a queued command runs at once",
+  "old": "    tx.queued.append(argv);\n    tx.ctxs.append(ctx);",
+  "new": "    execute(ctx, argv);\n    tx.queued.append(argv);\n    tx.ctxs.append(ctx);",
+  "cases": [
+   "transactions-07 another client sees nothing yet"
+  ]
+ },
+ {
+  "name": "EXEC runs nothing",
+  "old": "        var reply = execute(tx.ctxs[i], argv);",
+  "new": "        var reply = simple(\"OK\");",
+  "cases": [
+   "transactions-08 the commands ran"
+  ]
+ },
+ {
+  "name": "EXEC keeps the transaction",
+  "old": "        conn.tx = nil;\n        if (tx.dirty) {",
+  "new": "        if (tx.dirty) {",
+  "cases": [
+   "transactions-05 EXEC without MULTI"
+  ]
+ },
+ {
+  "name": "DISCARD keeps the transaction",
+  "old": "    if (name == \"DISCARD\") {\n        conn.tx = nil;\n        return simple(\"OK\");",
+  "new": "    if (name == \"DISCARD\") {\n        return simple(\"OK\");",
+  "cases": [
+   "transactions-09 DISCARD again"
+  ]
+ },
+ {
+  "name": "EXEC stops at the first error",
+  "old": "        replies.append(reply);\n    }\n    execElements = nil;",
+  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    execElements = nil;",
+  "cases": [
+   "transactions-10 a failed command does not stop the others"
+  ]
+ },
+ {
+  "name": "one transaction for all clients",
+  "old": "        conn.tx = Transaction();\n        return simple(\"OK\");",
+  "new": "        if (COMMANDS[\"__tx\"] == nil) {\n            COMMANDS[\"__tx\"] = Transaction();\n        }\n        conn.tx = COMMANDS[\"__tx\"];\n        return simple(\"OK\");",
+  "cases": [
+   "transactions-11 two transactions at once"
+  ]
+ },
+ {
+  "name": "nested MULTI resets the transaction",
+  "old": "    if (name == \"MULTI\") {\n        return errorReply(\"ERR MULTI calls can not be nested\");",
+  "new": "    if (name == \"MULTI\") {\n        conn.tx = Transaction();\n        return errorReply(\"ERR MULTI calls can not be nested\");",
+  "cases": [
+   "local: the transaction goes on after it"
+  ]
+ },
+ {
+  "name": "an unknown command in MULTI is queued",
+  "old": "    if (COMMANDS[name] == nil and ARITY[name] == nil) {\n        tx.dirty = true;",
+  "new": "    if (false) {\n        tx.dirty = true;",
+  "cases": [
+   "local: an unknown command in MULTI is an error"
+  ]
+ },
+ {
+  "name": "an unknown command does not abort EXEC",
+  "old": "    if (COMMANDS[name] == nil and ARITY[name] == nil) {\n        tx.dirty = true;\n        return unknownCommand(argv);",
+  "new": "    if (COMMANDS[name] == nil and ARITY[name] == nil) {\n        return unknownCommand(argv);",
+  "cases": [
+   "local: EXEC after an unknown command is EXECABORT"
+  ]
+ },
+ {
+  "name": "no arity check in MULTI",
+  "old": "        tx.dirty = true;\n        return wrongArgs(lower(name));",
+  "new": "        tx.dirty = false;\n        return wrongArgs(lower(name));",
+  "cases": [
+   "local: EXEC after a wrong argument count is EXECABORT"
+  ]
+ },
+ {
+  "name": "EXEC x keeps the transaction",
+  "old": "        if (name == \"EXEC\") {\n            conn.tx = nil;\n            return EXEC_ARITY;",
+  "new": "        if (name == \"EXEC\") {\n            return EXEC_ARITY;",
+  "cases": [
+   "local: no transaction after it"
+  ]
+ },
+ {
+  "name": "EXEC x with no MULTI gives the plain arity error",
+  "old": "        if (name == \"EXEC\") {\n            return EXEC_ARITY;\n        }\n        return wrongArgs(lower(name));\n    }\n    if (name == \"MULTI\") {\n        conn.tx",
+  "new": "        return wrongArgs(lower(name));\n    }\n    if (name == \"MULTI\") {\n        conn.tx",
+  "cases": [
+   "local: EXEC with an argument and no MULTI is EXECABORT too"
+  ]
+ },
+ {
+  "name": "a waiting command waits in EXEC",
+  "old": "            reply = NULL_ARRAY;\n        }\n        replies.append(reply);",
+  "new": "            reply = \"\";\n        }\n        replies.append(reply);",
+  "cases": [
+   "local: BLPOP and XREAD BLOCK in EXEC give null arrays at once"
+  ]
+ },
+ {
+  "name": "EXEC drops list and stream replies",
+  "old": "        } else {\n            out.flush();\n            writeReply(conn, reply);\n        }",
+  "new": "        } else {\n            out.add(\"*0\\r\\n\");\n        }",
+  "cases": [
+   "local: EXEC with list and stream replies"
+  ]
+ },
+ {
+  "name": "EXEC is not atomic",
+  "old": "        var reply = execute(tx.ctxs[i], argv);",
+  "new": "        if (i % 100 == 0) {\n            yield nil;\n        }\n        var reply = execute(tx.ctxs[i], argv);",
+  "cases": [
+   "local: another client sees the key before or after EXEC, never in between"
+  ]
+ },
+ {
+  "name": "no command bound",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
+  "new": "    if (tx.args + len(argv) > TX_ARGS) {",
+  "cases": [
+   "local: the 65537th command of a transaction is refused"
+  ]
+ },
+ {
+  "name": "no argument bound",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
+  "new": "    if (len(tx.queued) >= TX_COMMANDS) {",
+  "cases": [
+   "local: a transaction over 1048576 arguments is refused"
+  ]
+ },
+ {
+  "name": "T2 the parse of a queued command runs in EXEC",
+  "old": "    var parse = PARSERS[name];\n    if (parse != nil) {\n        ctx = parse(argv, true);\n    }\n    tx.queued.append(argv);",
+  "new": "    tx.queued.append(argv);",
+  "cases": [
+   "local: T2 EXEC of an XREAD of 524286 streams stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "no byte bound",
+  "old": "    if (tx.bytes + nbytes > QUERY_MAX) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: a transaction over the query limit of bytes is refused"
+  ]
+ },
+ {
+  "name": "a push in EXEC serves the waiters at once",
+  "old": "    if (readyLists == nil) {\n        serveWaiters(key);\n        return;\n    }",
+  "new": "    if (true) {\n        serveWaiters(key);\n        return;\n    }",
+  "cases": [
+   "local: a push and a pop in EXEC are not seen by a BLPOP waiter"
+  ]
+ },
+ {
+  "name": "EXEC serves no waiter after it",
+  "old": "    execElements = nil;\n    serveReady();",
+  "new": "    execElements = nil;\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "cases": [
+   "local: the waiter gets the first element after EXEC"
+  ]
+ },
+ {
+  "name": "a $ reader gets only the last entry of an EXEC",
+  "old": "    if (mark == nil or mark.stream != stream) {\n        readyStreams[key] = StreamMark(stream, stream.size() - 1);\n    }",
+  "new": "    readyStreams[key] = StreamMark(stream, stream.size() - 1);",
+  "cases": [
+   "local: an XREAD BLOCK $ reader gets every entry of an EXEC"
+  ]
+ },
+ {
+  "name": "T4 GET copies its value",
+  "old": "    return Bulk(entry.value);\n}",
+  "new": "    return bulk(entry.value);\n}",
+  "cases": [
+   "local: T4 EXEC of 8 GET of a 64 MB value stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "T5 the replies of EXEC are written in one step",
+  "old": "        } else if (hasField(reply, \"bulkValue\")) {\n            out.addBulk(reply.bulkValue);",
+  "new": "        } else if (hasField(reply, \"bulkValue\")) {\n            out.parts.append(bulk(reply.bulkValue));",
+  "cases": [
+   "local: T5 EXEC of 65535 GET of a 1 KB value stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "T6 no element budget in EXEC",
+  "old": "    if (k > execElements) {\n        return false;\n    }",
+  "new": "    if (false) {\n        return false;\n    }",
+  "cases": [
+   "local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192"
+  ]
+ },
+ {
+  "name": "T6 LPOP with a count spends no budget",
+  "old": "    if (!spendElements(count)) {\n        return EXEC_TOO_LARGE;\n    }\n    var reply = entry.value.takeLeft(count);",
+  "new": "    var reply = entry.value.takeLeft(count);",
+  "cases": [
+   "local: T6 an LPOP over the rest of the budget is refused, one under it runs"
+  ]
+ },
+ {
+  "name": "a replaced stream still wakes its $ reader",
+  "old": "        if (streamEntry(key) == mark.stream) {",
+  "new": "        if (true) {",
+  "cases": [
+   "local: a stream that EXEC replaces does not serve its $ reader"
+  ]
+ },
+ {
+  "name": "COUNT does not cap a $ reader",
+  "old": "    if (w.read.count > 0 and to - from > w.read.count) {\n        to = from + w.read.count;\n    }\n    var reply = Segments(\"*1\\r\\n\");",
+  "new": "    var reply = Segments(\"*1\\r\\n\");",
+  "cases": [
+   "local: COUNT 1 caps what a $ reader gets from an EXEC"
+  ]
+ }
+]

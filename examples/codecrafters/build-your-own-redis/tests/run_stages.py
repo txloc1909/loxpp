@@ -1223,9 +1223,9 @@ def stages_streams(prog):
             ka, kb = rand_word(), rand_word()
             r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", ka, kb, "$", "$"))
             time.sleep(0.05)
-            c.c.send_raw(encode("XADD", ka, "1-1", "f", "a") + encode("XADD", kb, "1-1", "f", "b"))
-            c.c.try_read(3)
-            c.c.try_read(3)
+            c.raw().send_raw(encode("XADD", ka, "1-1", "f", "a") + encode("XADD", kb, "1-1", "f", "b"))
+            c.raw().try_read(3)
+            c.raw().try_read(3)
             if r.try_read(3) != [[ka, [["1-1", ["f", "a"]]]]]:
                 break
             served_a += 1
@@ -1242,10 +1242,15 @@ def stages_streams(prog):
         r3.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "9-0"))
         time.sleep(0.1)
         r2.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
+        r4 = srv.client()
+        r4.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
         time.sleep(0.2)
         c.call("XADD", key, "2-0", "f", "v")
-        check("local: XREAD BLOCK with $ gets the lower XADD",
-              r2.try_read(3) == [[key, [["2-0", ["f", "v"]]]]])
+        low = [[key, [["2-0", ["f", "v"]]]]]
+        got2, got4 = r2.try_read(3), r4.try_read(3)
+        r4.close()
+        check("local: XREAD BLOCK with $ gets the lower XADD (two readers)",
+              got2 == low and got4 == low, "%r %r" % (got2, got4))
         r.sock.settimeout(0.5)
         try:
             early = r.sock.recv(65536)
@@ -1343,17 +1348,28 @@ class Asker:
 
     def call(self, *args):
         try:
+            if self.c is None:
+                self.c = self.srv.client()
             self.c.send_raw(encode(*args))
             got = self.c.try_read(3)
         except (OSError, ValueError, EOFError):
             got = CLOSED
         if got is TIMEOUT or got is CLOSED or got is BAD_REPLY:
-            self.c.close()
-            self.c = self.srv.client()
+            if self.c is not None:
+                self.c.close()
+            self.c = None
         return got
 
+    def raw(self):
+        """The connection, for a case that sends raw bytes. It opens a new
+        one when a failed call closed the last one."""
+        if self.c is None:
+            self.c = self.srv.client()
+        return self.c
+
     def close(self):
-        self.c.close()
+        if self.c is not None:
+            self.c.close()
 
 
 def make_streams(c, keys):
@@ -1516,10 +1532,479 @@ def stages_streams_large(prog):
     finally:
         srv.stop()
 
+def stages_transactions(prog):
+    srv = Server(prog, [])
+    try:
+        check("transactions: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = Asker(srv)
+
+        key = rand_word()
+        c.call("SET", key, "41")
+        check("transactions-01 INCR of a number", c.call("INCR", key) == 42)
+        check("transactions-01 INCR again", c.call("INCR", key) == 43)
+        check("transactions-02 INCR of a missing key", c.call("INCR", rand_word()) == 1)
+        key = rand_word()
+        c.call("SET", key, "xyz")
+        check("transactions-03 INCR of a word",
+              c.call("INCR", key) == "ERR value is not an integer or out of range")
+        lkey = rand_word()
+        c.call("RPUSH", lkey, "a")
+        got = c.call("INCR", lkey)
+        check("local: INCR of a list is WRONGTYPE",
+              isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        key = rand_word()
+        c.call("SET", key, "999999999999999")
+        check("local: INCR above 15 digits is an overflow error",
+              c.call("INCR", key) == "ERR increment or decrement would overflow")
+        key = rand_word()
+        c.call("SET", key, "5", "PX", "300")
+        c.call("INCR", key)
+        time.sleep(0.5)
+        check("local: INCR keeps the expiry", c.call("GET", key) is None)
+
+        check("transactions-04 MULTI", c.call("MULTI") == "OK")
+        check("transactions-06 empty EXEC", c.call("EXEC") == [])
+        check("transactions-05 EXEC without MULTI",
+              c.call("EXEC") == "ERR EXEC without MULTI")
+        check("local: DISCARD without MULTI",
+              c.call("DISCARD") == "ERR DISCARD without MULTI")
+
+        key = rand_word()
+        other = Asker(srv)
+        c.call("MULTI")
+        check("transactions-07 SET is queued", c.call("SET", key, "41") == "QUEUED")
+        check("transactions-07 INCR is queued", c.call("INCR", key) == "QUEUED")
+        check("transactions-07 another client sees nothing yet",
+              other.call("GET", key) is None)
+        check("transactions-08 EXEC gives each reply", c.call("EXEC") == ["OK", 42])
+        check("transactions-08 the commands ran", other.call("GET", key) == "42")
+
+        key = rand_word()
+        c.call("MULTI")
+        c.call("SET", key, "41")
+        check("transactions-09 DISCARD", c.call("DISCARD") == "OK")
+        check("transactions-09 the commands did not run", c.call("GET", key) is None)
+        check("transactions-09 DISCARD again",
+              c.call("DISCARD") == "ERR DISCARD without MULTI")
+
+        a, b = rand_word(), rand_word()
+        c.call("SET", a, "abc")
+        c.call("MULTI")
+        c.call("INCR", a)
+        c.call("SET", b, "7")
+        got = c.call("EXEC")
+        check("transactions-10 a failed command does not stop the others",
+              got == ["ERR value is not an integer or out of range", "OK"], repr(got))
+        check("transactions-10 the next command ran", c.call("GET", b) == "7")
+
+        key = rand_word()
+        c.call("MULTI")
+        other.call("MULTI")
+        c.call("INCR", key)
+        other.call("INCR", key)
+        c.call("INCR", key)
+        got1 = other.call("EXEC")
+        got2 = c.call("EXEC")
+        check("transactions-11 two transactions at once",
+              got1 == [1] and got2 == [2, 3], "%r %r" % (got1, got2))
+
+        c.call("MULTI")
+        c.call("PING")
+        check("local: MULTI in MULTI is an error",
+              c.call("MULTI") == "ERR MULTI calls can not be nested")
+        check("local: the transaction goes on after it", c.call("EXEC") == ["PONG"])
+        c.call("MULTI")
+        got = c.call("NOSUCH", "a")
+        check("local: an unknown command in MULTI is an error",
+              isinstance(got, Error) and got.startswith("ERR unknown command"), repr(got))
+        check("local: EXEC after an unknown command is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        check("local: a wrong argument count in MULTI is an error",
+              c.call("GET") == "ERR wrong number of arguments for 'get' command")
+        check("local: EXEC after a wrong argument count is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        check("local: EXEC with an argument ends the transaction",
+              c.call("EXEC", "x") == "EXECABORT Transaction discarded because of: "
+              "wrong number of arguments for 'exec' command")
+        check("local: no transaction after it", c.call("EXEC") == "ERR EXEC without MULTI")
+        check("local: EXEC with an argument and no MULTI is EXECABORT too",
+              c.call("EXEC", "x") == "EXECABORT Transaction discarded because of: "
+              "wrong number of arguments for 'exec' command")
+
+        # A command that would wait does not wait in EXEC.
+        key, skey = rand_word(), rand_word()
+        c.call("MULTI")
+        c.call("BLPOP", key, "0")
+        c.call("XREAD", "BLOCK", "0", "STREAMS", skey, "$")
+        start = time.time()
+        got = c.call("EXEC")
+        check("local: BLPOP and XREAD BLOCK in EXEC give null arrays at once",
+              got == [None, None] and time.time() - start < 1.0, repr(got))
+
+        # Replies that the session writes in steps.
+        lkey, skey = rand_word(), rand_word()
+        c.call("MULTI")
+        c.call("RPUSH", lkey, "a", "b")
+        c.call("LRANGE", lkey, "0", "-1")
+        c.call("XADD", skey, "1-1", "f", "v")
+        c.call("XRANGE", skey, "-", "+")
+        c.call("XREAD", "STREAMS", skey, "0")
+        got = c.call("EXEC")
+        check("local: EXEC with list and stream replies",
+              got == [2, ["a", "b"], "1-1", [["1-1", ["f", "v"]]],
+                      [[skey, [["1-1", ["f", "v"]]]]]], repr(got))
+
+        # A client that waits acts before or after a transaction, never in
+        # it: EXEC serves the waiters one time, after its last command.
+        key = rand_word()
+        waiter = srv.client()
+        waiter.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("RPUSH", key, "a")
+        c.call("LPOP", key)
+        got = c.call("EXEC")
+        check("local: a push and a pop in EXEC are not seen by a BLPOP waiter",
+              got == [1, "a"], repr(got))
+        check("local: the waiter still waits after that EXEC", waiter.try_read(0.3) is TIMEOUT)
+        c.call("MULTI")
+        c.call("RPUSH", key, "a", "b")
+        c.call("LRANGE", key, "0", "-1")
+        got = c.call("EXEC")
+        check("local: EXEC sees its own push whole while a client waits",
+              got == [2, ["a", "b"]], repr(got))
+        check("local: the waiter gets the first element after EXEC",
+              waiter.try_read(3) == [key, "a"])
+        waiter.close()
+        skey = rand_word()
+        c.call("XADD", skey, "1-1", "f", "v")
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "2-1", "f", "a")
+        c.call("XADD", skey, "3-1", "f", "b")
+        c.call("EXEC")
+        got = reader.try_read(3)
+        check("local: an XREAD BLOCK $ reader gets every entry of an EXEC",
+              got == [[skey, [["2-1", ["f", "a"]], ["3-1", ["f", "b"]]]]], repr(got))
+        reader.close()
+
+        # A key that EXEC pushes to and then replaces wakes nobody.
+        key = rand_word()
+        waiter = srv.client()
+        waiter.send_raw(encode("BLPOP", key, "1"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("RPUSH", key, "a")
+        c.call("SET", key, "str")
+        c.call("EXEC")
+        check("local: a list that EXEC replaces does not serve its BLPOP waiter",
+              waiter.try_read(3) is None)
+        waiter.close()
+        skey = rand_word()
+        c.call("XADD", skey, "1-1", "f", "v")
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "BLOCK", "1000", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "2-1", "f", "a")
+        c.call("SET", skey, "str")
+        c.call("EXEC")
+        check("local: a stream that EXEC replaces does not serve its $ reader",
+              reader.try_read(3) is None)
+        reader.close()
+        skey = rand_word()
+        c.call("XADD", skey, "1-1", "f", "v")
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "COUNT", "1", "BLOCK", "0", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "2-1", "f", "a")
+        c.call("XADD", skey, "3-1", "f", "b")
+        c.call("EXEC")
+        check("local: COUNT 1 caps what a $ reader gets from an EXEC",
+              reader.try_read(3) == [[skey, [["2-1", ["f", "a"]]]]])
+        reader.close()
+
+        # EXEC is atomic: a client that reads the key during a long EXEC
+        # sees it before or after, never in between.
+        key = rand_word()
+        c.call("SET", key, "0")
+        c.call("MULTI")
+        for _ in range(5):
+            c.raw().send_raw(encode("INCR", key) * 4000)
+            for _ in range(4000):
+                c.raw().try_read(3)
+        seen = set()
+        stop = threading.Event()
+
+        def poll():
+            p = srv.client()
+            while not stop.is_set():
+                seen.add(p.call("GET", key))
+            p.close()
+        th = threading.Thread(target=poll)
+        th.start()
+        time.sleep(0.1)
+        got = c.call("EXEC")
+        time.sleep(0.1)
+        stop.set()
+        th.join(10)
+        check("local: EXEC of 20000 INCR gives each reply",
+              isinstance(got, list) and len(got) == 20000 and got[-1] == 20000)
+        check("local: another client sees the key before or after EXEC, never in between",
+              seen <= {"0", "20000"} and "20000" in seen, repr(sorted(seen)[:5]))
+
+        # The bound of a transaction (README rule 4).
+        c.call("MULTI")
+        for _ in range(16):
+            c.raw().send_raw(encode("PING") * 4096)
+            for _ in range(4096):
+                c.raw().try_read(3)
+        got = c.call("PING")
+        check("local: the 65537th command of a transaction is refused",
+              isinstance(got, Error) and "too many" in got, repr(got))
+        check("local: EXEC after it is EXECABORT",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.call("MULTI")
+        c.raw().send_raw(encode("RPUSH", "big", *(["a"] * 1048574)))
+        c.raw().try_read(10)
+        got = c.call("PING", "x")
+        check("local: a transaction over 1048576 arguments is refused",
+              isinstance(got, Error) and "too many" in got, repr(got))
+        c.call("DISCARD")
+
+        def clients_now():
+            info = c.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        base = clients_now()
+        gone = srv.client()
+        gone.send_raw(encode("MULTI") + encode("SET", "g", "1") * 100)
+        time.sleep(0.2)
+        gone.close()
+        deadline = time.time() + 5
+        now = clients_now()
+        while time.time() < deadline and now != base:
+            time.sleep(0.05)
+            now = clients_now()
+        check("local: a client that goes during MULTI ends its tasks",
+              now == base, "connected_clients %d, before %d" % (now, base))
+        check("local: its queued commands did not run", c.call("GET", "g") is None)
+
+        # T1, T2: EXEC of the largest transactions.
+        def exec_stall(cmds):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.raw().send_raw(b"".join(part))
+                for _ in part:
+                    c.raw().try_read(10)
+            out = [None]
+
+            def run():
+                c.raw().send_raw(encode("EXEC"))
+                out[0] = c.raw().try_read(30)
+                time.sleep(0.2)
+            worst, wrong, _ = measure_while(srv, run)
+            return worst, wrong, out[0]
+        worst, wrong, got = exec_stall([encode("RPUSH", "t1", *(["a"] * 14))] * 65535)
+        check("local: T1 EXEC of 65535 RPUSH of 14 elements stalls PING at most 0.6 s",
+              worst <= 0.6 and not wrong and isinstance(got, list) and len(got) == 65535,
+              "worst %.3f s" % worst)
+        keys = ["t2-%d" % i for i in range(524286)]
+        worst, wrong, got = exec_stall([encode("XREAD", "STREAMS", *keys, *(["0"] * len(keys)))])
+        check("local: T2 EXEC of an XREAD of 524286 streams stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and got == [None], "worst %.3f s, %r" % (worst, got))
+        c.close()
+        other.close()
+    finally:
+        srv.stop()
+    stages_transactions_large(prog)
+
+
+def stages_transactions_large(prog):
+    """The byte bound of a transaction, and T3-T5, on servers of their
+    own."""
+    srv = Server(prog, ["--client-query-buffer-limit", "100000"])
+    try:
+        check("transactions (bytes): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        c.call("MULTI")
+        first = c.call("SET", "k", "x" * 60000)
+        got = c.call("SET", "k", "x" * 60000)
+        check("local: a transaction over the query limit of bytes is refused",
+              first == "QUEUED" and isinstance(got, Error) and "query limit of bytes" in got,
+              repr(got))
+        check("local: EXEC after it is EXECABORT (bytes)",
+              c.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        c.close()
+    finally:
+        srv.stop()
+
+    srv = Server(prog, [])
+    try:
+        check("transactions (large): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+
+        def exec_stall(cmds, drain=None):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.send_raw(b"".join(part))
+                for _ in part:
+                    c.try_read(10)
+            got = [None]
+
+            def run():
+                c.send_raw(encode("EXEC"))
+                if drain is None:
+                    got[0] = c.try_read(30)
+                else:
+                    c.sock.settimeout(30)
+                    n = 0
+                    try:
+                        while n < drain:
+                            chunk = c.sock.recv(1 << 22)
+                            if not chunk:
+                                break
+                            n += len(chunk)
+                    except OSError:
+                        pass
+                    c.sock.settimeout(5)
+                    got[0] = n
+                time.sleep(0.2)
+            worst, wrong, _ = measure_while(srv, run)
+            return worst, wrong, got[0]
+
+        def exec_stall_raw(cmds, read):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.send_raw(b"".join(part))
+                for _ in part:
+                    c.try_read(10)
+
+            def run():
+                c.send_raw(encode("EXEC"))
+                read()
+                time.sleep(0.2)
+            return measure_while(srv, run)
+
+        # T3: 200 readers wait above the top, and EXEC adds 10000 entries.
+        # EXEC passes over the readers once, not once for each XADD.
+        c.call("XADD", "t3", "1-1", "f", "v")
+        readers = []
+        for _ in range(200):
+            r = srv.client()
+            r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", "t3", "999999999-0"))
+            readers.append(r)
+        time.sleep(0.5)
+        worst, wrong, got = exec_stall(
+            [encode("XADD", "t3", "%d-1" % (i + 2), "f", "v") for i in range(10000)])
+        check("local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and isinstance(got, list) and len(got) == 10000,
+              "worst %.3f s" % worst)
+        for r in readers:
+            r.close()
+
+        # T4: GET gives its value with no copy, and the session writes a
+        # long value alone.
+        size = 64 << 20
+        c.call("SET", "t4", "x" * size)
+        want = 8 * (len("$%d\r\n" % size) + size + 2) + len("*8\r\n")
+        worst, wrong, got = exec_stall([encode("GET", "t4")] * 8, drain=want)
+        check("local: T4 EXEC of 8 GET of a 64 MB value stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong and got == want, "worst %.3f s, %r bytes" % (worst, got))
+
+        # T5: the session writes the replies of EXEC in steps.
+        c.call("SET", "t5", "y" * 1024)
+        want = 65535 * (len("$1024\r\n") + 1024 + 2) + len("*65535\r\n")
+        worst, wrong, got = exec_stall([encode("GET", "t5")] * 65535, drain=want)
+        check("local: T5 EXEC of 65535 GET of a 1 KB value stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and got == want, "worst %.3f s, %r bytes" % (worst, got))
+
+        # T6: the replies of one EXEC copy at most 8388608 list elements.
+        n = 1048573
+        c.send_raw(encode("RPUSH", "t6", *(["abcd"] * n)))
+        c.try_read(30)
+        # The reply is read as bytes: 8 arrays of the list, then the
+        # replies after them, which must be errors. With no budget the
+        # ninth reply is a whole copy, and the case fails at its first line.
+        array = b"*%d\r\n" % n + b"$4\r\nabcd\r\n" * n
+        head = b"*202\r\n" + array * 8
+        tail = [None]
+
+        def read_t6():
+            c.sock.settimeout(30)
+            buf = b""
+            try:
+                while len(buf) < len(head) + 4096:
+                    chunk = c.sock.recv(1 << 22)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if len(buf) >= len(head) and buf[len(head):].count(b"\r\n") >= 194:
+                        break
+            except OSError:
+                pass
+            c.sock.settimeout(5)
+            tail[0] = buf
+        worst, wrong, _ = exec_stall_raw([encode("LRANGE", "t6", "0", "-1")] * 200
+                                         + [encode("LPOP", "t6", "100"), encode("LPOP", "t6", "10")],
+                                         read_t6)
+        buf = tail[0] or b""
+        lines = buf[len(head):].split(b"\r\n") if buf.startswith(head) else []
+        refused = [x for x in lines[:192] if x.startswith(b"-ERR")]
+        check("local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192",
+              buf.startswith(head) and len(refused) == 192,
+              "%d bytes, %d refused, next %r" % (len(buf), len(refused), lines[:1]))
+        check("local: T6 an LPOP over the rest of the budget is refused, one under it runs",
+              len(lines) > 193 and lines[192].startswith(b"-ERR") and lines[193] == b"*10",
+              repr(lines[192:195]))
+        c.close()
+        c = srv.client()
+        check("local: T6 that EXEC stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+
+        # T7: 5 readers each wait above the top on 65535 keys, and one EXEC
+        # adds to each key. The pass after EXEC checks each reader on each
+        # key once, as Redis does.
+        keys = ["t7-%d" % i for i in range(65535)]
+        waiting = []
+        for _ in range(5):
+            r = srv.client()
+            r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", *keys, *(["999999999-0"] * len(keys))))
+            waiting.append(r)
+        time.sleep(3)
+        worst, wrong, got = exec_stall([encode("XADD", k, "1-1", "f", "v") for k in keys])
+        check("local: T7 EXEC of 65535 XADD with 5 readers above the top on each key stalls PING at most 1 s",
+              worst <= 1.0 and not wrong and isinstance(got, list) and len(got) == 65535,
+              "worst %.3f s" % worst)
+        for r in waiting:
+            r.close()
+        c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
     ("streams", stages_streams),
+    ("transactions", stages_transactions),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]

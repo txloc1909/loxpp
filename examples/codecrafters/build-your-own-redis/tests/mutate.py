@@ -30,7 +30,7 @@ for m in json.load(open(spec)):
     open(wrap, "w").write('#!/bin/sh\nexec %s %s "$@"\n' % (loxpp, lox))
     os.chmod(wrap, 0o755)
     try:
-        out = subprocess.run([sys.executable, suite, wrap], capture_output=True,
+        out = subprocess.run([sys.executable, "-u", suite, wrap], capture_output=True,
                              text=True, timeout=420).stdout
     except subprocess.TimeoutExpired as e:
         out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
