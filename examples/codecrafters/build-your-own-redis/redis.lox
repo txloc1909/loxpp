@@ -278,7 +278,10 @@ enum Args { Cons(head, tail) Empty }
 // Served(key, value), from a pusher to a session that waits in BLPOP,
 // hands it a popped element. Ready, from XADD to a session that waits in
 // XREAD BLOCK, says that its reply is in its Waiter.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready }
+// Propagate, from a write command to a replica session, says that the
+// replication log has entries for it. Ack, from REPLCONF ACK to a session
+// in WAIT, says that a replica acknowledged.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready Propagate Ack }
 
 // Both run over up to ARRAY_MAX arguments, so they yield as the reader does
 // (rule 2 of the README). toArgs runs in the reader and fromArgs in the
@@ -435,6 +438,7 @@ fun cmdSet(argv) {
     }
     store[key] = Entry("string", argv[2], expiresAt);
     touch(key);
+    replicate(argv, nil);
     return reply;
 }
 
@@ -442,18 +446,29 @@ fun cmdSet(argv) {
 // nothing, as in Redis.
 fun cmdInfo(argv) {
     var clients = len(argv) == 1;
+    var replication = len(argv) == 1;
     var i = 1;
     while (i < len(argv)) {
         var want = lower(argv[i]);
-        if (want == "all" or want == "default" or want == "everything"
-            or want == "clients") {
+        if (want == "all" or want == "default" or want == "everything") {
             clients = true;
+            replication = true;
+        } else if (want == "clients") {
+            clients = true;
+        } else if (want == "replication") {
+            replication = true;
         }
         i = i + 1;
     }
     var out = "";
     if (clients) {
         out = out + "# Clients\r\nconnected_clients:" + str(connectedClients) + "\r\n";
+    }
+    if (replication) {
+        if (out != "") {
+            out = out + "\r\n";
+        }
+        out = out + replicationInfo();
     }
     return bulk(out);
 }
@@ -728,6 +743,7 @@ fun serveWaiters(key) {
             break;
         }
         var value = popLeft(key, entry);
+        replicate(["LPOP", key], nil);
         w.active = false;
         w.servedBy = key;
         try {
@@ -741,6 +757,7 @@ fun serveWaiters(key) {
             }
             back.value.pushLeft(value);
             touch(key);
+            replicate(["LPUSH", key, value], nil);
         }
     }
 }
@@ -797,6 +814,7 @@ fun cmdPush(argv, left) {
     }
     var n = entry.value.size();
     touch(argv[1]);
+    replicate(argv, nil);
     listReady(argv[1]);
     return integerReply(n);
 }
@@ -883,6 +901,7 @@ fun cmdLpop(ctx, argv) {
         return NULL_ARRAY;
     }
     if (count == nil) {
+        replicate(["LPOP", argv[1]], nil);
         return Bulk(popLeft(argv[1], entry));
     }
     if (count > entry.value.size()) {
@@ -896,6 +915,7 @@ fun cmdLpop(ctx, argv) {
         // LPOP with a count of 0 changes nothing, so it marks no watcher,
         // as in Redis.
         touch(argv[1]);
+        replicate(argv, nil);
     }
     if (entry.value.size() == 0) {
         store.del(argv[1]);
@@ -997,6 +1017,8 @@ fun cmdBlpop(ctx, argv) {
             return WRONGTYPE;
         }
         if (entry != nil) {
+            // Redis propagates the pop of BLPOP as LPOP.
+            replicate(["LPOP", key], nil);
             return bulkArray([key, popLeft(key, entry)]);
         }
     }
@@ -1162,6 +1184,7 @@ fun giveBack(key, value) {
     }
     entry.value.pushLeft(value);
     touch(key);
+    replicate(["LPUSH", key, value], nil);
     serveWaiters(key);
 }
 
@@ -1398,6 +1421,8 @@ fun cmdXadd(ctx, argv) {
     }
     stream.add(id.ms, id.seq, argv[3:len(argv)]);
     touch(key);
+    // The ID that this server gave, not "*", so the replicas add the same.
+    replicate(["XADD", key, idText(id.ms, id.seq)], stream.fields[stream.size() - 1]);
     streamReady(key, stream);
     return bulk(idText(id.ms, id.seq));
 }
@@ -1847,6 +1872,7 @@ fun cmdIncr(ctx, argv) {
     if (entry == nil) {
         store[argv[1]] = Entry("string", "1", nil);
         touch(argv[1]);
+        replicate(argv, nil);
         return integerReply(1);
     }
     if (entry.kind != "string") {
@@ -1863,6 +1889,7 @@ fun cmdIncr(ctx, argv) {
     // The key keeps its expiry, as in Redis.
     entry.value = str(n);
     touch(argv[1]);
+    replicate(argv, nil);
     return integerReply(n);
 }
 
@@ -1960,6 +1987,10 @@ fun inTransaction(conn, name, argv, nbytes) {
         }
         return execQueued(tx);
     }
+    if (REPL_ROLE != "master" and WRITES.has(name)) {
+        tx.dirty = true;
+        return READONLY;
+    }
     if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {
         tx.dirty = true;
         return errorReply("ERR the transaction holds too many commands or arguments");
@@ -1988,6 +2019,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 // Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
+    replInExec = true;
     readyLists = [];
     readyListSeen = {};
     readyStreamKeys = [];
@@ -2003,6 +2035,7 @@ fun execQueued(tx) {
         replies.append(reply);
     }
     execElements = nil;
+    endExecReplication();
     serveReady();
     return replies;
 }
@@ -2388,6 +2421,12 @@ fun loadRdb(path) {
     var f = open(path, "r");
     var data = f.read();
     f.close();
+    loadRdbData(data);
+}
+
+// Loads the string keys of database 0 from the bytes of an RDB file: the
+// file at start, or the file that a master sends with FULLRESYNC.
+fun loadRdbData(data) {
     var r = RdbReader(data);
     if (r.take(5) != "REDIS") {
         throw RdbError("the file does not start with REDIS");
@@ -2669,6 +2708,458 @@ fun writeKeys(conn, reply) {
 }
 
 // ===========================================================================
+// Replication
+// ===========================================================================
+
+var REPL_ROLE = "master";
+var REPL_ID = "";
+// On a master: the bytes of the replication stream so far. Redis counts
+// them from the first replica, so a master with no replica stays at 0.
+var replOffset = 0;
+// On a master: the Conns of the replicas.
+var replicas = [];
+// On a replica: the bytes of the commands from the master that it applied.
+var replicaOffset = 0;
+var masterHost = nil;
+var masterPort = 0;
+var listenPort = 6379;
+
+// The replication log of a master: entries in order, from replLogBase on.
+// A write command appends its entry in its own step, so the order of the
+// log is the order of the commands; each replica session encodes and writes
+// the entries from its own position, with yields (writeReplLog).
+class ReplEntry {
+    init(head, tail, endOffset) {
+        this.head = head;
+        this.tail = tail;
+        this.endOffset = endOffset;
+    }
+}
+var replLog = [];
+var replLogBase = 0;
+// True while EXEC runs, and true after its first write: EXEC wraps its
+// writes in MULTI and EXEC, as Redis propagates a transaction.
+var replInExec = false;
+var replExecWrote = false;
+// A replica that has not got this many bytes of the stream is dropped
+// (README rule 4), as Redis drops it at its output buffer limit.
+var REPLICA_LAG_MAX = 67108864;
+
+// An empty RDB file: the header and the end byte, with no checksum.
+var EMPTY_RDB = "REDIS0011" + chr(255) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0);
+
+// 40 hexadecimal digits from the time, as Redis makes a random ID. The
+// standard library has no random numbers.
+fun makeReplId() {
+    var seed = time() * 1000 + clock() * 1000000;
+    seed = seed - seed % 1;
+    var hex = "0123456789abcdef";
+    var out = "";
+    var i = 0;
+    while (i < 40) {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        var d = (seed - seed % 65536) / 65536 % 16;
+        out = out + hex[d];
+        i = i + 1;
+    }
+    return out;
+}
+
+fun digitsOf(n) {
+    var d = 1;
+    while (n >= 10) {
+        n = (n - n % 10) / 10;
+        d = d + 1;
+    }
+    return d;
+}
+
+// The bytes of argv as a RESP array.
+fun respLength(parts) {
+    var total = 0;
+    for (var a in parts) {
+        total = total + 1 + digitsOf(len(a)) + 2 + len(a) + 2;
+    }
+    return total;
+}
+
+// Notes a write for the replicas: head and tail are Lists of arguments,
+// tail can be nil. It runs in the step of the command that writes.
+fun replicate(head, tail) {
+    if (len(replicas) == 0) {
+        return;
+    }
+    if (replInExec and !replExecWrote) {
+        replExecWrote = true;
+        appendRepl(["MULTI"], nil);
+    }
+    appendRepl(head, tail);
+}
+
+fun appendRepl(head, tail) {
+    var n = len(head);
+    var size = respLength(head);
+    if (tail != nil) {
+        n = n + len(tail);
+        size = size + respLength(tail);
+    }
+    size = size + 1 + digitsOf(n) + 2;
+    replOffset = replOffset + size;
+    replLog.append(ReplEntry(head, tail, replOffset));
+    var keep = [];
+    for (var r in replicas) {
+        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX) {
+            // The replica does not read fast enough: drop it.
+            r.isReplica = false;
+            try {
+                r.sock.close();
+            } catch (ignored) {
+            }
+        } else {
+            keep.append(r);
+            if (!r.replWoken) {
+                r.replWoken = true;
+                try {
+                    task.send(r.session, Msg.Propagate());
+                } catch (ignored) {
+                }
+            }
+        }
+    }
+    replicas = keep;
+}
+
+// Called by EXEC after its step: closes the MULTI of its writes.
+fun endExecReplication() {
+    if (replExecWrote) {
+        appendRepl(["EXEC"], nil);
+    }
+    replInExec = false;
+    replExecWrote = false;
+}
+
+// Writes the log entries that the replica has not got, in steps.
+fun writeReplLog(conn) {
+    var out = Output(conn);
+    while (conn.isReplica and conn.logPos < replLogBase + len(replLog)) {
+        var entry = replLog[conn.logPos - replLogBase];
+        var n = len(entry.head);
+        if (entry.tail != nil) {
+            n = n + len(entry.tail);
+        }
+        out.add("*" + str(n) + "\r\n");
+        for (var a in entry.head) {
+            out.addBulk(a);
+        }
+        if (entry.tail != nil) {
+            for (var a in entry.tail) {
+                out.addBulk(a);
+            }
+        }
+        conn.logPos = conn.logPos + 1;
+        conn.replSentOffset = entry.endOffset;
+    }
+    out.flush();
+    conn.replWoken = false;
+    trimReplLog();
+}
+
+// Drops the entries that every replica has got.
+fun trimReplLog() {
+    var low = replLogBase + len(replLog);
+    for (var r in replicas) {
+        if (r.logPos < low) {
+            low = r.logPos;
+        }
+    }
+    var drop = low - replLogBase;
+    if (drop > 1024 and drop * 2 > len(replLog)) {
+        replLog = replLog[drop:len(replLog)];
+        replLogBase = low;
+    }
+}
+
+fun dropReplica(conn) {
+    conn.isReplica = false;
+    var keep = [];
+    for (var r in replicas) {
+        if (r != conn) {
+            keep.append(r);
+        }
+    }
+    replicas = keep;
+    if (len(replicas) == 0) {
+        // No replica reads the log: its positions go on from the end.
+        replLogBase = replLogBase + len(replLog);
+        replLog = [];
+    }
+}
+
+// The replica handshake on a master: REPLCONF and PSYNC. Returns the reply.
+fun cmdReplconf(conn, argv) {
+    if (len(argv) < 2) {
+        return wrongArgs("replconf");
+    }
+    var sub = lower(argv[1]);
+    if (sub == "ack" and len(argv) == 3) {
+        var off = parseInteger(argv[2]);
+        if (off != nil and conn.isReplica) {
+            conn.ackOffset = off;
+            notifyAckWaiters();
+        }
+        return "";
+    }
+    if (sub == "getack") {
+        return "";
+    }
+    return simple("OK");
+}
+
+fun cmdPsync(conn, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("psync");
+    }
+    if (REPL_ROLE != "master") {
+        return errorReply("ERR this server is a replica");
+    }
+    conn.sock.write("+FULLRESYNC " + REPL_ID + " " + str(replOffset) + "\r\n");
+    conn.sock.write("$" + str(len(EMPTY_RDB)) + "\r\n" + EMPTY_RDB);
+    conn.isReplica = true;
+    conn.logPos = replLogBase + len(replLog);
+    conn.replSentOffset = replOffset;
+    conn.ackOffset = replOffset;
+    replicas.append(conn);
+    return "";
+}
+
+// WAIT: the clients that wait for acknowledgements.
+var ackWaiters = {};
+
+fun notifyAckWaiters() {
+    for (var id in ackWaiters.keys()) {
+        try {
+            task.send(ackWaiters[id], Msg.Ack());
+        } catch (ignored) {
+        }
+    }
+}
+
+fun countAcked(target) {
+    var n = 0;
+    for (var r in replicas) {
+        if (r.ackOffset >= target) {
+            n = n + 1;
+        }
+    }
+    return n;
+}
+
+fun isClosedMsg(msg) {
+    return match msg {
+        case Msg.Closed => true
+        case _ => false
+    };
+}
+
+fun isAckWake(msg) {
+    return match msg {
+        case Msg.Ack => true
+        case Msg.Closed => true
+        case _ => false
+    };
+}
+
+// WAIT numreplicas timeout. Returns the reply, or nil when the client went
+// away while it waited.
+fun cmdWait(conn, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("wait");
+    }
+    if (REPL_ROLE != "master") {
+        return errorReply("ERR WAIT cannot be used with replica instances. Please also note that since Redis 4.0 if a replica is configured to be writable (which is not the default) writes to replicas are just local and are not propagated.");
+    }
+    var want = parseInteger(argv[1]);
+    if (want == nil) {
+        return NOT_INTEGER;
+    }
+    var ms = parseInteger(argv[2]);
+    if (ms == nil) {
+        return errorReply("ERR timeout is not an integer or out of range");
+    }
+    if (ms < 0) {
+        return errorReply("ERR timeout is negative");
+    }
+    var target = replOffset;
+    var acked = countAcked(target);
+    if (acked >= want or len(replicas) == 0) {
+        return integerReply(acked);
+    }
+    replicate(["REPLCONF", "GETACK", "*"], nil);
+    var deadline = nowMs() + ms;
+    ackWaiters[conn.id] = task.self();
+    conn.blocked = true;
+    try {
+        task.send(conn.reader, Msg.Blocked());
+    } catch (ignored) {
+    }
+    var closed = false;
+    while (countAcked(target) < want and !closed) {
+        var msg = nil;
+        try {
+            if (ms == 0) {
+                msg = task.receive_where(isAckWake);
+            } else {
+                var left = deadline - nowMs();
+                if (left <= 0) {
+                    break;
+                }
+                msg = task.receive_where_within(isAckWake, left / 1000);
+            }
+        } catch (e) {
+            if (faultKind(e) != "TimeoutError") {
+                conn.blocked = false;
+                ackWaiters.del(conn.id);
+                throw e;
+            }
+            break;
+        }
+        // A call, not a match: a match here, after a try whose catch has
+        // break, gets a wrong value on the native VM (#1183).
+        closed = isClosedMsg(msg);
+    }
+    conn.blocked = false;
+    ackWaiters.del(conn.id);
+    if (closed) {
+        return nil;
+    }
+    return integerReply(countAcked(target));
+}
+
+// The commands that write, which a replica refuses from its clients.
+var WRITES = {"SET": true, "INCR": true, "RPUSH": true, "LPUSH": true, "LPOP": true,
+              "BLPOP": true, "XADD": true};
+var READONLY = "-READONLY You can't write against a read only replica.\r\n";
+
+fun replicationInfo() {
+    var role = "master";
+    if (REPL_ROLE != "master") {
+        role = "slave";
+    }
+    var out = "# Replication\r\nrole:" + role + "\r\n";
+    if (REPL_ROLE == "master") {
+        out = out + "connected_slaves:" + str(len(replicas)) + "\r\n";
+    }
+    out = out + "master_replid:" + REPL_ID + "\r\nmaster_repl_offset:";
+    if (REPL_ROLE == "master") {
+        out = out + str(replOffset);
+    } else {
+        out = out + str(replicaOffset);
+    }
+    return out + "\r\n";
+}
+
+// The replica side: one task that connects to the master, does the
+// handshake, loads the RDB file that comes with FULLRESYNC, then applies
+// each command of the stream, with no reply except REPLCONF ACK. When the
+// link breaks, it connects again after one second.
+fun expectLine(sock, prefix) {
+    var line = sock.readline();
+    if (line == nil) {
+        throw ProtocolError("the master closed the link");
+    }
+    line = trimCR(line);
+    if (len(line) < len(prefix) or line[0:len(prefix)] != prefix) {
+        throw ProtocolError("the master replied " + line[0:80]);
+    }
+    return line;
+}
+
+fun sendCommand(sock, parts) {
+    var out = "*" + str(len(parts)) + "\r\n";
+    for (var p in parts) {
+        out = out + bulk(p);
+    }
+    sock.write(out);
+}
+
+fun masterLink() {
+    while (true) {
+        try {
+            replicaSession();
+        } catch (e) {
+            var kind = faultKind(e);
+            if (kind != "NetworkError" and kind != "SocketClosedError") {
+                printFault("master link: ", e);
+            }
+        }
+        sleep(1);
+    }
+}
+
+fun replicaSession() {
+    var sock = connect(masterHost, masterPort);
+    defer sock.close();
+    sendCommand(sock, ["PING"]);
+    expectLine(sock, "+PONG");
+    sendCommand(sock, ["REPLCONF", "listening-port", str(listenPort)]);
+    expectLine(sock, "+OK");
+    sendCommand(sock, ["REPLCONF", "capa", "psync2"]);
+    expectLine(sock, "+OK");
+    sendCommand(sock, ["PSYNC", "?", "-1"]);
+    var full = expectLine(sock, "+FULLRESYNC");
+    var words = splitWords(full);
+    if (len(words) >= 2) {
+        REPL_ID = words[1];
+    }
+    var header = expectLine(sock, "$");
+    var size = parseInteger(header[1:len(header)]);
+    if (size == nil or size < 0 or size > BULK_MAX) {
+        throw ProtocolError("the master sent a bad RDB length");
+    }
+    var data = sock.read_bytes(size);
+    if (len(data) < size) {
+        throw ProtocolError("the master closed the link during the RDB file");
+    }
+    store = {};
+    loadRdbData(data);
+    replicaOffset = 0;
+    var n = 0;
+    // A transaction of the master comes as MULTI, its writes, and EXEC: the
+    // replica applies the writes in one step, after EXEC.
+    var queued = nil;
+    while (true) {
+        var got = readCommand(sock);
+        if (got == nil) {
+            return;
+        }
+        var argv = got[0];
+        var name = "";
+        if (len(argv) > 0) {
+            name = upper(argv[0]);
+        }
+        if (name == "REPLCONF" and len(argv) >= 2 and lower(argv[1]) == "getack") {
+            sendCommand(sock, ["REPLCONF", "ACK", str(replicaOffset)]);
+        } else if (name == "MULTI") {
+            queued = [];
+        } else if (name == "EXEC" and queued != nil) {
+            for (var q in queued) {
+                execute(nil, q);
+            }
+            queued = nil;
+        } else if (queued != nil) {
+            queued.append(argv);
+        } else if (len(argv) > 0) {
+            execute(nil, argv);
+        }
+        replicaOffset = replicaOffset + got[1];
+        n = n + 1;
+        if (n % WINDOW == 0) {
+            yield nil;
+        }
+    }
+}
+
+// ===========================================================================
 // Command table
 // ===========================================================================
 
@@ -2879,6 +3370,14 @@ class Conn {
         this.watchDirty = false;
         this.expiringKeys = [];
         this.expiringAt = [];
+        // Replication: true after PSYNC; the next log entry to write, the
+        // stream offset after the entries written, whether a Propagate
+        // message is on its way, and the last offset that it acknowledged.
+        this.isReplica = false;
+        this.logPos = -1;
+        this.replSentOffset = 0;
+        this.replWoken = false;
+        this.ackOffset = 0;
     }
 }
 
@@ -2925,7 +3424,8 @@ fun awaitCredit() {
             case Msg.Stop => -1
             // Only the session sends to the reader, and it sends only these
             // three.
-            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) or Msg.Ready => -1
+            case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) or Msg.Ready
+                or Msg.Propagate or Msg.Ack => -1
         };
         if (got < 0) {
             return nil;
@@ -3010,6 +3510,29 @@ fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
     if (len(argv) > 0) {
         var name = upper(argv[0]);
+        if (conn.tx == nil and (name == "REPLCONF" or name == "PSYNC" or name == "WAIT")) {
+            var reply = nil;
+            if (name == "REPLCONF") {
+                reply = cmdReplconf(conn, argv);
+            } else if (name == "PSYNC") {
+                reply = cmdPsync(conn, argv);
+            } else {
+                reply = cmdWait(conn, argv);
+                if (reply == nil) {
+                    return false;
+                }
+            }
+            if (reply != "") {
+                conn.sock.write(reply);
+            }
+            giveCredit(conn);
+            return true;
+        }
+        if (REPL_ROLE != "master" and conn.tx == nil and WRITES.has(name)) {
+            conn.sock.write(READONLY);
+            giveCredit(conn);
+            return true;
+        }
         if (conn.tx == nil and (name == "WATCH" or name == "UNWATCH")) {
             var reply = nil;
             if (!arityOk(name, len(argv))) {
@@ -3206,6 +3729,10 @@ fun sessionLoop(conn) {
                 // A pusher sends Served, and XADD sends Ready, only to a
                 // session that waits in waitForElement, which takes it there.
                 case Msg.Served(_, _) or Msg.Ready => true
+                // A write command sends Propagate to a replica session.
+                case Msg.Propagate => replicaWrite(conn)
+                // A late Ack after WAIT ended.
+                case Msg.Ack => true
             };
         }
     } catch (e) {
@@ -3217,6 +3744,18 @@ fun sessionLoop(conn) {
     // Here and not in endSession: unwatchAll yields, and a deferred call
     // cannot suspend (YieldAcrossNativeError).
     unwatchAll(conn);
+    if (conn.isReplica) {
+        dropReplica(conn);
+    }
+    ackWaiters.del(conn.id);
+}
+
+// Writes the replication log to a replica session. Returns true.
+fun replicaWrite(conn) {
+    if (conn.isReplica) {
+        writeReplLog(conn);
+    }
+    return true;
 }
 
 // task.spawn passes no arguments, so closures hold the connection. Both
@@ -3263,6 +3802,23 @@ fun main() {
         print "redis.lox: --port needs an integer";
         exit(64);
     }
+    listenPort = port;
+    REPL_ID = makeReplId();
+    var replicaOf = flagValue("--replicaof", nil);
+    if (replicaOf != nil) {
+        var hp = splitWords(replicaOf);
+        var mport = nil;
+        if (len(hp) == 2) {
+            mport = parseInteger(hp[1]);
+        }
+        if (mport == nil) {
+            print "redis.lox: --replicaof needs \"<host> <port>\"";
+            exit(64);
+        }
+        REPL_ROLE = "replica";
+        masterHost = hp[0];
+        masterPort = mport;
+    }
     CONFIG_DIR = flagValue("--dir", CONFIG_DIR);
     CONFIG_DBFILENAME = flagValue("--dbfilename", CONFIG_DBFILENAME);
     try {
@@ -3272,6 +3828,9 @@ fun main() {
         exit(1);
     }
     var server = listen("0.0.0.0", port);
+    if (REPL_ROLE != "master") {
+        task.spawn(masterLink);
+    }
     // A fault of accept() that does not go away would print every 20 ms, so
     // the first one is the only one printed.
     var acceptFaultPrinted = false;
