@@ -499,6 +499,12 @@ switch, and two things stay outside the rule on purpose: a task that never
 reaches a suspend point keeps the worker (#1132), and the messages of a task of
 another worker keep their own paragraph.
 
+Probe `451_ended_wait_is_seen_while_tasks_are_ready` pins the reachable case:
+two tasks that are ready at every instant, and a third parked in `readline`
+when the line arrives. No current backend can fail it, so it was shown to fail
+against the scheduler the old text allowed, with `pollWhileBusy()` disabled:
+the probe then times out with no output at all, because the reader never wakes.
+
 ### Readiness registry
 
 A descriptor maps to its wait records: the task, the interest (read or
