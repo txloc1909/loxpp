@@ -227,7 +227,7 @@ call would wait although its result is already held. The probe
 smaller than any useful bound, so the choice weakens a rule that no probe then
 covers. So the task's stretch keeps the rule it has. The points at which the
 worker sees a wait that has ended are a separate rule, not a switch point at a
-site that names nothing, and #1131 is where that rule is to be stated.
+site that names nothing, and #1131 states that rule in the spec.
 
 **The lever is the program.** The runtime cannot know whether the peer will
 keep up: the placement of a task is chosen at spawn and the rate of a peer is
@@ -488,6 +488,14 @@ The QBE backend links the native runtime, so it has the native bound.
 
 The JVM backend calls `selectNow` at every task switch while a wait is
 registered, so it sees an ended wait at the first switch after the wait ends.
+
+The spec binds this bound: `spec/04-semantics.md`, Scheduling, says the worker
+sees an ended wait "at a task switch no more than a bounded time after the end
+of the wait", and Conformance, Limits, makes that time a limit. Native's 1 ms
+is inside it, and the JVM's poll at every switch is the bound of zero. The bound
+is per switch, and two things are outside it on purpose: a task that never
+reaches a suspend point keeps the worker (#1132), and the messages of a task of
+another worker keep their own paragraph.
 
 ### Readiness registry
 

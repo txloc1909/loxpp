@@ -120,8 +120,9 @@ them:
    before a halted program ends, and what they do.
 4. **Limits**: the call depth; the number of arguments of a call, of
    parameters of a function, of elements of a list literal, and of pairs of a
-   map literal; the nesting depth of a canonical string; memory use; and the
-   timing of garbage collection. Going past a limit is a static error or a
+   map literal; the nesting depth of a canonical string; memory use; the
+   timing of garbage collection; and the delay from the end of a wait, or the
+   passing of a limit, to the task switch at which the worker sees it. Going past a limit is a static error or a
    fault; this specification does not say which. A
    [self tail call](04-semantics.md#self-tail-calls) is not subject to the
    call-depth limit.

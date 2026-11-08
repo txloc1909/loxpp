@@ -2068,7 +2068,14 @@ the head of the run queue runs next.
 
 A worker sees the end of a wait, and a limit that has passed, at points that
 the implementation chooses, and at the latest when the worker has no task
-that is ready to run. When it sees several at one point, the tasks join the
+that is ready to run. While tasks are ready to run, it sees them at a task
+switch no more than a bounded time after the end of the wait or the passing of
+the limit; the bound is a limit (see [Conformance](README.md#conformance),
+Limits). A program whose tasks reach a suspend point therefore does not starve
+a wait of another task. A task that never reaches one keeps the worker, as
+[Suspend Points](#suspend-points) says, and the bound above is per switch: it
+says nothing about a worker whose running task does not switch. When it sees
+several at one point, the tasks join the
 run queue in this order: first the tasks
 whose wait is for a connection, a Socket, or a Server and has ended, in the
 order in which their calls began to wait, then the tasks whose time has run
