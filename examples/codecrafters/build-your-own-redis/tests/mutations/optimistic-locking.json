@@ -1,0 +1,186 @@
+[
+ {
+  "name": "WATCH does not record the key",
+  "old": "            watched[key] = true;\n            conn.watchCount",
+  "new": "            conn.watchCount",
+  "cases": [
+   "optimistic-locking-03 a write by another client makes EXEC fail"
+  ]
+ },
+ {
+  "name": "EXEC ignores a broken WATCH",
+  "old": "        if (watchBroken(conn)) {\n            return NULL_ARRAY;\n        }",
+  "new": "",
+  "cases": [
+   "optimistic-locking-03 a write by another client makes EXEC fail"
+  ]
+ },
+ {
+  "name": "WATCH in MULTI is queued",
+  "old": "    if (name == \"WATCH\") {\n        return errorReply(\"ERR WATCH inside MULTI is not allowed\");\n    }",
+  "new": "",
+  "cases": [
+   "optimistic-locking-02 WATCH inside MULTI"
+  ]
+ },
+ {
+  "name": "WATCH in MULTI spoils the transaction",
+  "old": "    if (name == \"WATCH\") {\n        return errorReply(\"ERR WATCH inside MULTI is not allowed\");",
+  "new": "    if (name == \"WATCH\") {\n        tx.dirty = true;\n        return errorReply(\"ERR WATCH inside MULTI is not allowed\");",
+  "cases": [
+   "local: the transaction goes on after WATCH in MULTI"
+  ]
+ },
+ {
+  "name": "WATCH records only the first key",
+  "old": "        i = i + 1;\n    }\n    return simple(\"OK\");",
+  "new": "        i = len(argv);\n    }\n    return simple(\"OK\");",
+  "cases": [
+   "optimistic-locking-04 a write to the second watched key makes EXEC fail"
+  ]
+ },
+ {
+  "name": "UNWATCH does nothing",
+  "old": "            } else {\n                unwatchAll(conn);\n                reply = simple(\"OK\");",
+  "new": "            } else {\n                reply = simple(\"OK\");",
+  "cases": [
+   "optimistic-locking-06 UNWATCH"
+  ]
+ },
+ {
+  "name": "EXEC keeps the watched keys",
+  "old": "            if (wasIn and conn.tx == nil) {",
+  "new": "            if (false) {",
+  "cases": [
+   "optimistic-locking-07 EXEC forgets the watched keys"
+  ]
+ },
+ {
+  "name": "SET does not mark",
+  "old": "    store[key] = Entry(\"string\", argv[2], expiresAt);\n    touch(key);",
+  "new": "    store[key] = Entry(\"string\", argv[2], expiresAt);",
+  "cases": [
+   "local: WATCH and SET of the same value"
+  ]
+ },
+ {
+  "name": "INCR does not mark",
+  "old": "    entry.value = str(n);\n    touch(argv[1]);",
+  "new": "    entry.value = str(n);",
+  "cases": [
+   "local: WATCH and INCR"
+  ]
+ },
+ {
+  "name": "INCR of a missing key does not mark",
+  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        touch(argv[1]);",
+  "new": "        store[argv[1]] = Entry(\"string\", \"1\", nil);",
+  "cases": [
+   "local: WATCH and INCR of a missing key"
+  ]
+ },
+ {
+  "name": "a push does not mark",
+  "old": "    var n = entry.value.size();\n    touch(argv[1]);",
+  "new": "    var n = entry.value.size();",
+  "cases": [
+   "local: WATCH and RPUSH"
+  ]
+ },
+ {
+  "name": "a pop does not mark",
+  "old": "fun popLeft(key, entry) {\n    touch(key);",
+  "new": "fun popLeft(key, entry) {",
+  "cases": [
+   "local: WATCH and LPOP"
+  ]
+ },
+ {
+  "name": "LPOP with a count does not mark",
+  "old": "    var reply = entry.value.takeLeft(count);\n    touch(argv[1]);",
+  "new": "    var reply = entry.value.takeLeft(count);",
+  "cases": [
+   "local: WATCH and LPOP with a count"
+  ]
+ },
+ {
+  "name": "XADD does not mark",
+  "old": "    stream.add(id.ms, id.seq, argv[3:len(argv)]);\n    touch(key);",
+  "new": "    stream.add(id.ms, id.seq, argv[3:len(argv)]);",
+  "cases": [
+   "local: WATCH and XADD"
+  ]
+ },
+ {
+  "name": "an expired key that is read does not mark",
+  "old": "        store.del(key);\n        touch(key);\n        return nil;",
+  "new": "        store.del(key);\n        return nil;",
+  "cases": [
+   "local: a watched key that expires and is read makes EXEC fail"
+  ]
+ },
+ {
+  "name": "an expiry that nobody reads does not break WATCH",
+  "old": "    var now = nowMs();\n    var i = 0;",
+  "new": "    var now = 0;\n    var i = 0;",
+  "cases": [
+   "local: a watched key that expires makes EXEC fail"
+  ]
+ },
+ {
+  "name": "every expiring key breaks WATCH",
+  "old": "        if (now >= conn.expiringAt[i]) {",
+  "new": "        if (true) {",
+  "cases": [
+   "local: a watched key with an expiry that has not come lets EXEC run"
+  ]
+ },
+ {
+  "name": "a broken WATCH comes before EXECABORT",
+  "old": "        if (tx.dirty) {\n            return errorReply(\"EXECABORT Transaction discarded because of previous errors.\");\n        }\n        if (watchBroken(conn)) {\n            return NULL_ARRAY;\n        }",
+  "new": "        if (watchBroken(conn)) {\n            return NULL_ARRAY;\n        }\n        if (tx.dirty) {\n            return errorReply(\"EXECABORT Transaction discarded because of previous errors.\");\n        }",
+  "cases": [
+   "local: EXECABORT comes before a broken WATCH"
+  ]
+ },
+ {
+  "name": "a write marks only one watcher",
+  "old": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n    }",
+  "new": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n        return;\n    }",
+  "cases": [
+   "local: a write marks every client that watches the key"
+  ]
+ },
+ {
+  "name": "no bound on watched keys",
+  "old": "    if (conn.watchCount + len(argv) - 1 > WATCH_MAX) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: a client may not watch more than 1048576 keys"
+  ]
+ },
+ {
+  "name": "W2 no yield when the watched keys are dropped",
+  "old": "        n = n + 1;\n        if (n % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n}",
+  "new": "        n = n + 1;\n    }\n}",
+  "cases": [
+   "local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "unwatchAll runs in a deferred call",
+  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n}",
+  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n}",
+  "cases": [
+   "local: the server serves on after a client that watched 5000 keys goes"
+  ]
+ },
+ {
+  "name": "a failed EXEC keeps the watched keys",
+  "old": "            if (wasIn and conn.tx == nil) {",
+  "new": "            if (wasIn and conn.tx == nil and type(reply) == \"List\") {",
+  "cases": [
+   "local: a failed EXEC forgets the watched keys"
+  ]
+ }
+]

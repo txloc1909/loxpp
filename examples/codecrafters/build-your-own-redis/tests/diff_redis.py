@@ -138,6 +138,28 @@ SCRIPTS = {
         ("unknown", [["NOSUCHCOMMAND"], ["NOSUCH", "a", "b"],
                      ["NOSUCH", "x" * 200, "y"], ["PING"]]),
     ],
+    "optimistic-locking": [
+        ("watch-own-writes", [
+            ["SET", "k", "1"], ["WATCH", "k"], ["SET", "k", "2"], ["MULTI"], ["SET", "k", "3"], ["EXEC"],
+            ["GET", "k"], ["WATCH", "k"], ["SET", "k", "2", "NX"], ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "nol"], ["LPOP", "nol"], ["MULTI"], ["PING"], ["EXEC"],
+            ["XADD", "s2", "5-1", "f", "v"], ["WATCH", "s2"], ["XADD", "s2", "1-1", "f", "v"],
+            ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "g"], ["GET", "g"], ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "i"], ["INCR", "i"], ["MULTI"], ["PING"], ["EXEC"],
+            ["RPUSH", "l", "a"], ["WATCH", "l"], ["LPOP", "l"], ["MULTI"], ["PING"], ["EXEC"],
+        ]),
+        ("watch-state", [
+            ["MULTI"], ["WATCH", "k"], ["UNWATCH"], ["PING"], ["EXEC"],
+            ["WATCH", "k"], ["MULTI"], ["EXEC"], ["SET", "k", "9"], ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "k"], ["MULTI"], ["DISCARD"], ["SET", "k", "9"], ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "k"], ["UNWATCH"], ["SET", "k", "8"], ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH", "k"], ["SET", "k", "1"], ["MULTI"], ["NOSUCH"], ["EXEC"],
+            ["MULTI"], ["PING"], ["EXEC"],
+            ["WATCH"], ["UNWATCH", "x"], ["watch", "k", "k2"], ["unwatch"],
+            ["WATCH", "a", "a", "b"], ["SET", "b", "1"], ["MULTI"], ["PING"], ["EXEC"],
+        ]),
+    ],
     "transactions": [
         ("incr", [
             ["SET", "n", "41"], ["INCR", "n"], ["INCR", "new"], ["SET", "x", "abc"],

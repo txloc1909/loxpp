@@ -2000,11 +2000,232 @@ def stages_transactions_large(prog):
         srv.stop()
 
 
+def stages_optimistic_locking(prog):
+    srv = Server(prog, [])
+    try:
+        check("optimistic-locking: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        a = Asker(srv)
+        b = Asker(srv)
+
+        def tx_after(watch_keys, between, key="t"):
+            """WATCH, run between(), then MULTI / SET key / EXEC. Returns
+            the reply of EXEC."""
+            a.call("WATCH", *watch_keys)
+            between()
+            a.call("MULTI")
+            a.call("SET", key, "fromtx")
+            return a.call("EXEC")
+
+        check("optimistic-locking-01 WATCH", a.call("WATCH", rand_word()) == "OK")
+        a.call("UNWATCH")
+        a.call("MULTI")
+        check("optimistic-locking-02 WATCH inside MULTI",
+              a.call("WATCH", rand_word()) == "ERR WATCH inside MULTI is not allowed")
+        check("local: the transaction goes on after WATCH in MULTI", a.call("EXEC") == [])
+
+        foo, bar = rand_word(), rand_word()
+        a.call("SET", foo, "100")
+        a.call("SET", bar, "200")
+        got = tx_after([foo, bar], lambda: b.call("SET", foo, "200"), key=bar)
+        check("optimistic-locking-03 a write by another client makes EXEC fail",
+              got is None, repr(got))
+        check("optimistic-locking-03 the transaction did not run", a.call("GET", bar) == "200")
+
+        got = tx_after([foo, bar], lambda: b.call("SET", bar, "300"), key=foo)
+        check("optimistic-locking-04 a write to the second watched key makes EXEC fail",
+              got is None, repr(got))
+
+        missing = rand_word()
+        got = tx_after([missing], lambda: b.call("SET", missing, "1"))
+        check("optimistic-locking-05 a watched missing key that is set makes EXEC fail",
+              got is None, repr(got))
+
+        k = rand_word()
+        a.call("SET", k, "1")
+
+        def unwatch_then_write():
+            a.call("UNWATCH")
+            b.call("SET", k, "2")
+        got = tx_after([k], unwatch_then_write)
+        check("optimistic-locking-06 UNWATCH", got == ["OK"], repr(got))
+
+        a.call("WATCH", k)
+        a.call("MULTI")
+        a.call("EXEC")
+        b.call("SET", k, "3")
+        a.call("MULTI")
+        a.call("PING")
+        check("optimistic-locking-07 EXEC forgets the watched keys", a.call("EXEC") == ["PONG"])
+
+        a.call("WATCH", k)
+        a.call("MULTI")
+        a.call("DISCARD")
+        b.call("SET", k, "4")
+        a.call("MULTI")
+        a.call("PING")
+        check("optimistic-locking-08 DISCARD forgets the watched keys", a.call("EXEC") == ["PONG"])
+
+        # Each kind of write makes EXEC fail; a command that changes
+        # nothing does not.
+        def writes(name, setup, write, fails):
+            key = rand_word()
+            for cmd in setup:
+                b.call(*[key if x == "K" else x for x in cmd])
+            got = tx_after([key], lambda: b.call(*[key if x == "K" else x for x in write]))
+            want = None if fails else ["OK"]
+            check("local: WATCH and %s" % name, got == want, repr(got))
+        writes("SET of the same value", [["SET", "K", "1"]], ["SET", "K", "1"], True)
+        writes("SET NX that fails", [["SET", "K", "1"]], ["SET", "K", "2", "NX"], False)
+        writes("INCR", [["SET", "K", "1"]], ["INCR", "K"], True)
+        writes("INCR of a missing key", [], ["INCR", "K"], True)
+        writes("RPUSH", [["RPUSH", "K", "a"]], ["RPUSH", "K", "b"], True)
+        writes("LPUSH", [], ["LPUSH", "K", "a"], True)
+        writes("LPOP", [["RPUSH", "K", "a", "b"]], ["LPOP", "K"], True)
+        writes("LPOP with a count", [["RPUSH", "K", "a", "b"]], ["LPOP", "K", "2"], True)
+        writes("LPOP of a missing key", [], ["LPOP", "K"], False)
+        writes("BLPOP that pops at once", [["RPUSH", "K", "a"]], ["BLPOP", "K", "1"], True)
+        writes("XADD", [], ["XADD", "K", "1-1", "f", "v"], True)
+        writes("XADD that fails", [["XADD", "K", "5-1", "f", "v"]], ["XADD", "K", "1-1", "f", "v"], False)
+        writes("GET", [["SET", "K", "1"]], ["GET", "K"], False)
+
+        key = rand_word()
+        a.call("SET", key, "1")
+        got = tx_after([key], lambda: a.call("SET", key, "2"))
+        check("local: a write by the same client makes EXEC fail", got is None, repr(got))
+
+        # A push that serves a waiting client writes the key too.
+        key = rand_word()
+        waiter = srv.client()
+        waiter.send_raw(encode("BLPOP", key, "0"))
+        time.sleep(0.1)
+
+        def push_to_waiter():
+            b.call("RPUSH", key, "x")
+            waiter.try_read(3)
+        got = tx_after([key], push_to_waiter)
+        check("local: WATCH and a push that a waiting client takes", got is None, repr(got))
+        waiter.close()
+
+        # A watched key that expires makes EXEC fail, also when no command
+        # reads it.
+        key = rand_word()
+        a.call("SET", key, "1", "PX", "100")
+        got = tx_after([key], lambda: time.sleep(0.3), key=rand_word())
+        check("local: a watched key that expires makes EXEC fail", got is None, repr(got))
+        key = rand_word()
+        a.call("SET", key, "1", "PX", "100")
+
+        def expire_and_read():
+            time.sleep(0.3)
+            b.call("GET", key)
+        got = tx_after([key], expire_and_read, key=rand_word())
+        check("local: a watched key that expires and is read makes EXEC fail", got is None, repr(got))
+        key = rand_word()
+        a.call("SET", key, "1", "PX", "5000")
+        got = tx_after([key], lambda: None, key=rand_word())
+        check("local: a watched key with an expiry that has not come lets EXEC run",
+              got == ["OK"], repr(got))
+
+        # A failed EXEC forgets the watched keys too.
+        key = rand_word()
+        tx_after([key], lambda: b.call("SET", key, "1"))
+        b.call("SET", key, "2")
+        a.call("MULTI")
+        a.call("PING")
+        check("local: a failed EXEC forgets the watched keys", a.call("EXEC") == ["PONG"])
+
+        # EXECABORT comes before the check of the watched keys.
+        key = rand_word()
+        a.call("WATCH", key)
+        b.call("SET", key, "1")
+        a.call("MULTI")
+        a.call("NOSUCH")
+        check("local: EXECABORT comes before a broken WATCH",
+              a.call("EXEC") == "EXECABORT Transaction discarded because of previous errors.")
+        a.call("MULTI")
+        check("local: UNWATCH in MULTI is queued", a.call("UNWATCH") == "QUEUED")
+        check("local: and gives OK in EXEC", a.call("EXEC") == ["OK"])
+
+        # Two clients watch one key; a write marks both.
+        key = rand_word()
+        c2 = Asker(srv)
+        a.call("WATCH", key)
+        c2.call("WATCH", key)
+        b.call("SET", key, "1")
+        a.call("MULTI")
+        c2.call("MULTI")
+        got1, got2 = a.call("EXEC"), c2.call("EXEC")
+        check("local: a write marks every client that watches the key",
+              got1 is None and got2 is None, "%r %r" % (got1, got2))
+        c2.close()
+
+        # A client that goes while it watches keys ends its tasks.
+        def clients_now():
+            info = a.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+        base = clients_now()
+        gone = srv.client()
+        gone.send_raw(encode("WATCH", *["g%d" % i for i in range(5000)]))
+        gone.try_read(5)
+        gone.close()
+        deadline = time.time() + 5
+        now = clients_now()
+        while time.time() < deadline and now != base:
+            time.sleep(0.05)
+            now = clients_now()
+        check("local: a client that goes while it watches keys ends its tasks",
+              now == base, "connected_clients %d, before %d" % (now, base))
+        check("local: the server serves on after a client that watched 5000 keys goes",
+              a.call("PING") == "PONG")
+        a.close()
+        b.close()
+    finally:
+        srv.stop()
+
+    # W1, W2: the most keys that a client may watch, on a server of their own.
+    srv = Server(prog, [])
+    try:
+        check("optimistic-locking (large): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        keys = ["w%d" % i for i in range(1048575)]
+        got = [None]
+
+        def run(cmd):
+            def go():
+                c.send_raw(cmd)
+                got[0] = c.try_read(30)
+                time.sleep(0.2)
+            return go
+        worst, wrong, _ = measure_while(srv, run(encode("WATCH", *keys)))
+        check("local: W1 WATCH of 1048575 keys stalls PING at most 1 s",
+              worst <= 1.0 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        got2 = c.call("WATCH", "x1", "x2")
+        check("local: a client may not watch more than 1048576 keys",
+              isinstance(got2, Error) and "too many" in got2, repr(got2))
+        c.call("MULTI")
+        c.call("PING")
+        worst, wrong, _ = measure_while(srv, run(encode("EXEC")))
+        check("local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong and got[0] == ["PONG"], "worst %.3f s, %r" % (worst, got[0]))
+        check("local: after it the client may watch again", c.call("WATCH", "x1") == "OK")
+        c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
     ("streams", stages_streams),
     ("transactions", stages_transactions),
+    ("optimistic-locking", stages_optimistic_locking),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]

@@ -2038,9 +2038,16 @@ fun writeReply(conn, reply) {
 // Optimistic locking
 // ===========================================================================
 
-// key -> Map of Conn id -> Conn: the clients that WATCH the key. A Conn is
-// not a Map key (it defines no __hash__), so its id is.
+// key -> the clients that WATCH the key: the Conn itself for one client,
+// and a Map of Conn id -> Conn from the second one, because WATCH can join
+// many keys in one step. A Conn is not a Map key (it defines no __hash__),
+// so its id is.
 var watchers = {};
+
+// hasField on a Map is a halting fault, so the kind comes first.
+fun isConn(x) {
+    return type(x) == "Instance" and hasField(x, "sock");
+}
 
 // The most keys that one client may watch at a time (README rule 4): as
 // many as one command can name.
@@ -2050,12 +2057,18 @@ var WATCH_MAX = 1048576;
 // command that writes the keyspace calls it, also a write that keeps the
 // value, as Redis does.
 fun touch(key) {
-    var map = watchers[key];
-    if (map == nil) {
+    var w = watchers[key];
+    if (w == nil) {
         return;
     }
-    for (var id in map.keys()) {
-        var conn = map[id];
+    if (isConn(w)) {
+        if (w.watched.has(key)) {
+            w.watchDirty = true;
+        }
+        return;
+    }
+    for (var id in w.keys()) {
+        var conn = w[id];
         if (conn.watched.has(key)) {
             conn.watchDirty = true;
         }
@@ -2068,22 +2081,36 @@ fun cmdWatch(conn, argv) {
     if (conn.watchCount + len(argv) - 1 > WATCH_MAX) {
         return errorReply("ERR the client watches too many keys");
     }
+    // This loop can run over 1048575 keys in one step, so it reads each key
+    // with one Map access, and makes an object only for a key that a second
+    // client watches.
+    var watched = conn.watched;
     var i = 1;
     while (i < len(argv)) {
         var key = argv[i];
-        if (!conn.watched.has(key)) {
-            conn.watched[key] = true;
-            conn.watchCount = conn.watchCount + 1;
-            var map = watchers[key];
-            if (map == nil) {
-                map = {};
-                watchers[key] = map;
-            }
-            map[conn.id] = conn;
-            var entry = lookup(key);
+        if (!watched.has(key)) {
+            var entry = store[key];
             if (entry != nil and entry.expiresAt != nil) {
-                conn.expiringKeys.append(key);
-                conn.expiringAt.append(entry.expiresAt);
+                // lookup removes an expired key now, before this client
+                // watches it, so that the removal marks only the others.
+                entry = lookup(key);
+                if (entry != nil) {
+                    conn.expiringKeys.append(key);
+                    conn.expiringAt.append(entry.expiresAt);
+                }
+            }
+            watched[key] = true;
+            conn.watchCount = conn.watchCount + 1;
+            var w = watchers[key];
+            if (w == nil or w == conn) {
+                watchers[key] = conn;
+            } else if (isConn(w)) {
+                var map = {};
+                map[w.id] = w;
+                map[conn.id] = conn;
+                watchers[key] = map;
+            } else {
+                w[conn.id] = conn;
             }
         }
         i = i + 1;
@@ -2127,10 +2154,12 @@ fun unwatchAll(conn) {
     conn.expiringAt = [];
     var n = 0;
     for (var key in old.keys()) {
-        var map = watchers[key];
-        if (map != nil and map[conn.id] == conn and !conn.watched.has(key)) {
-            map.del(conn.id);
-            if (len(map) == 0) {
+        var w = watchers[key];
+        if (w == conn) {
+            watchers.del(key);
+        } else if (w != nil and !isConn(w) and w[conn.id] == conn) {
+            w.del(conn.id);
+            if (len(w) == 0) {
                 watchers.del(key);
             }
         }
@@ -2660,7 +2689,6 @@ fun failConnection(conn, text) {
 // waits for credit, so no task of the connection outlives it.
 fun endSession(conn) {
     conn.sock.close();
-    unwatchAll(conn);
     try {
         task.send(conn.reader, Msg.Stop());
     } catch (ignored) {
@@ -2692,6 +2720,9 @@ fun sessionLoop(conn) {
             printFault("connection fault: ", e);
         }
     }
+    // Here and not in endSession: unwatchAll yields, and a deferred call
+    // cannot suspend (YieldAcrossNativeError).
+    unwatchAll(conn);
 }
 
 // task.spawn passes no arguments, so closures hold the connection. Both
