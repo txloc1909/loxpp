@@ -2,6 +2,8 @@ package lox;
 
 import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
+import static lox.TestSupport.checkFatal;
+import static lox.TestSupport.checkNotFatal;
 import static lox.TestSupport.checkThrows;
 
 public final class RuntimeStdlibTest {
@@ -79,6 +81,7 @@ public final class RuntimeStdlibTest {
 
         checkOpenRoundtrip(globals);
         checkOsAccess(globals);
+        checkIntegerArguments(globals);
 
         System.exit(TestSupport.finish("RuntimeStdlibTest"));
     }
@@ -117,6 +120,62 @@ public final class RuntimeStdlibTest {
         checkThrows(() -> call(globals, "sleep", "long"), LoxError.class, "sleep() rejects a non-number");
 
         checkFsOsAccess(globals);
+    }
+
+    // Mirrors test/test_net_process.cpp's NetProcessTest.InvalidPortFatal for
+    // the JVM's own copy of the check. A parameter that spec/05-stdlib.md
+    // calls an integer is an Int or an integer-valued Number ("Integer
+    // arguments"), and a port outside its range is a fatal fault. The kind
+    // matters: a caught fault would mean the call reached the connection
+    // attempt, whose NetworkError is catchable, so a `try` in the program
+    // would catch it and the port was not refused at all.
+    private static void checkIntegerArguments(LoxGlobals globals) {
+        String host = "127.0.0.1";
+
+        // connect and connect_within take a port from 1 through 65535, and
+        // listen from 0 through 65535.
+        checkFatal(() -> call(globals, "connect", host, 0L),
+                   "connect() rejects port 0i");
+        checkFatal(() -> call(globals, "connect_within", host, 0L, 5.0),
+                   "connect_within() rejects port 0i");
+        checkFatal(() -> call(globals, "connect", host, 1.5),
+                   "connect() rejects a fractional port");
+        checkFatal(() -> call(globals, "connect_within", host, 1.5, 5.0),
+                   "connect_within() rejects a fractional port");
+        checkFatal(() -> call(globals, "listen", host, 1.5),
+                   "listen() rejects a fractional port");
+        checkFatal(() -> call(globals, "connect", host, 65536L),
+                   "connect() rejects port 65536i");
+        checkFatal(() -> call(globals, "connect_within", host, 65536L, 5.0),
+                   "connect_within() rejects port 65536i");
+        checkFatal(() -> call(globals, "listen", host, 65536L),
+                   "listen() rejects port 65536i");
+
+        // 65535 is the highest port, in both kinds. The call then reaches the
+        // network, where a fault is catchable, so a fatal fault here would
+        // mean that the port was wrongly refused.
+        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 65535L)),
+                      "connect() accepts port 65535i");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 65535L, 5.0)),
+                      "connect_within() accepts port 65535i");
+        checkNotFatal(() -> closeQuietly(call(globals, "listen", host, 65535.0)),
+                      "listen() accepts port 65535");
+
+        // listen takes 0 as an Int too, and asks the OS for a free port.
+        Object server = call(globals, "listen", host, 0L);
+        check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
+              "listen() accepts port 0i and binds a free port");
+        closeQuietly(server);
+    }
+
+    // A Socket or a Server that a call returned, closed, so a check that only
+    // wants to see that the call reached the network leaves nothing open.
+    private static void closeQuietly(Object value) {
+        if (value instanceof LoxSocket) {
+            ((LoxSocket) value).close();
+        } else if (value instanceof LoxServer) {
+            ((LoxServer) value).close();
+        }
     }
 
     private static void checkFsOsAccess(LoxGlobals globals) {
