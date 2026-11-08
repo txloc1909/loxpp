@@ -571,6 +571,18 @@ TEST(NetProcessTest, InvalidPortFatal) {
     EXPECT_EQ(h.run("try { connect_within(\"127.0.0.1\", 65536i, 5); } "
                     "catch (e) { print e.kind; }"),
               InterpretResult::RUNTIME_ERROR);
+    // The lowest port of each range is legal, so the call reaches the network,
+    // where a fault is the catchable NetworkError of a refused connection. A
+    // fatal fault here would mean that a legal port was refused; listen's own
+    // lowest port, 0, is legal because it asks the OS for a free one.
+    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 1); } "
+                    "catch (e) { print e.kind; } "
+                    "try { connect_within(\"127.0.0.1\", 1i, 5); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.run("try { listen(\"127.0.0.1\", -1); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------

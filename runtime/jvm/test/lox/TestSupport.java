@@ -60,6 +60,7 @@ public final class TestSupport {
     public static void checkNotFatal(Runnable action, String description) {
         try {
             action.run();
+            check(true, description);
         } catch (LoxError e) {
             check(e.isCatchable(),
                     description + " (expected no fatal fault but got: " + e.getMessage() + ")");

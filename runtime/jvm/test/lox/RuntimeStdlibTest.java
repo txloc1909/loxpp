@@ -132,12 +132,15 @@ public final class RuntimeStdlibTest {
     private static void checkIntegerArguments(LoxGlobals globals) {
         String host = "127.0.0.1";
 
-        // connect and connect_within take a port from 1 through 65535, and
-        // listen from 0 through 65535.
+        // 1 is the lowest port of connect and connect_within, and 0 of listen.
         checkFatal(() -> call(globals, "connect", host, 0L),
                    "connect() rejects port 0i");
         checkFatal(() -> call(globals, "connect_within", host, 0L, 5.0),
                    "connect_within() rejects port 0i");
+        checkFatal(() -> call(globals, "listen", host, -1L),
+                   "listen() rejects port -1i");
+        checkFatal(() -> call(globals, "listen", host, -1.0),
+                   "listen() rejects port -1");
         checkFatal(() -> call(globals, "connect", host, 1.5),
                    "connect() rejects a fractional port");
         checkFatal(() -> call(globals, "connect_within", host, 1.5, 5.0),
@@ -151,13 +154,18 @@ public final class RuntimeStdlibTest {
         checkFatal(() -> call(globals, "listen", host, 65536L),
                    "listen() rejects port 65536i");
 
-        // 65535 is the highest port, in both kinds. The call then reaches the
-        // network, where a fault is catchable, so a fatal fault here would
-        // mean that the port was wrongly refused.
-        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 65535L)),
-                      "connect() accepts port 65535i");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 65535L, 5.0)),
-                      "connect_within() accepts port 65535i");
+        // 1 is the lowest port of connect and connect_within, and 65535 the
+        // highest port of all three. Such a call reaches the network, where a
+        // fault is catchable, so a fatal fault here would mean that a legal
+        // port was wrongly refused.
+        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 1L)),
+                      "connect() accepts port 1i");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 1L, 5.0)),
+                      "connect_within() accepts port 1i");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 65535.0)),
+                      "connect() accepts port 65535");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 65535.0, 5.0)),
+                      "connect_within() accepts port 65535");
         checkNotFatal(() -> closeQuietly(call(globals, "listen", host, 65535.0)),
                       "listen() accepts port 65535");
 
