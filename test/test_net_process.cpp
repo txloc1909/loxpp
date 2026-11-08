@@ -18,6 +18,7 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <netinet/in.h>
+#include <set>
 #include <string>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -559,13 +560,15 @@ TEST(NetProcessTest, InvalidPortFatal) {
     // refused side of each end of the range. An accepted port reaches the
     // network, where the fault is the catchable NetworkError of a refused
     // connection, so a `try` catches it and the run ends OK; a refused port is
-    // a fatal fault that no `try` catches.
+    // a fatal fault that no `try` catches. A port that is not an integer is
+    // refused too: a Number that is not integer-valued, and a value of any
+    // other kind.
     struct PortCase {
         const char* function;
         const char* port;
         bool accepted;
     };
-    static const PortCase kPortGrid[] = {
+    static const PortCase kPorts[] = {
         {"connect", "0", false},
         {"connect", "0i", false},
         {"connect", "1", true},
@@ -574,6 +577,11 @@ TEST(NetProcessTest, InvalidPortFatal) {
         {"connect", "65535i", true},
         {"connect", "65536", false},
         {"connect", "65536i", false},
+        {"connect", "1.5", false},
+        {"connect", "math.nan", false},
+        {"connect", "math.inf", false},
+        {"connect", "-math.inf", false},
+        {"connect", "\"3\"", false},
         {"connect_within", "0", false},
         {"connect_within", "0i", false},
         {"connect_within", "1", true},
@@ -582,6 +590,11 @@ TEST(NetProcessTest, InvalidPortFatal) {
         {"connect_within", "65535i", true},
         {"connect_within", "65536", false},
         {"connect_within", "65536i", false},
+        {"connect_within", "1.5", false},
+        {"connect_within", "math.nan", false},
+        {"connect_within", "math.inf", false},
+        {"connect_within", "-math.inf", false},
+        {"connect_within", "\"3\"", false},
         {"listen", "-1", false},
         {"listen", "-1i", false},
         {"listen", "0", true},
@@ -590,27 +603,36 @@ TEST(NetProcessTest, InvalidPortFatal) {
         {"listen", "65535i", true},
         {"listen", "65536", false},
         {"listen", "65536i", false},
+        {"listen", "1.5", false},
+        {"listen", "math.nan", false},
+        {"listen", "math.inf", false},
+        {"listen", "-math.inf", false},
+        {"listen", "\"3\"", false},
     };
-    ASSERT_EQ(sizeof(kPortGrid) / sizeof(kPortGrid[0]), 24u)
+    ASSERT_EQ(sizeof(kPorts) / sizeof(kPorts[0]), 39u)
         << "the port grid has one case per cell";
-    for (const PortCase& c : kPortGrid) {
+    // The count alone cannot see one row copied over another, so the cells
+    // must also be distinct.
+    {
+        std::set<std::string> cells;
+        for (const PortCase& c : kPorts) {
+            cells.insert(std::string(c.function) + "/" + c.port);
+        }
+        ASSERT_EQ(cells.size(), sizeof(kPorts) / sizeof(kPorts[0]))
+            << "no port case repeats another";
+    }
+    for (const PortCase& c : kPorts) {
+        // The socket or listener of an accepted port is closed at once, so one
+        // case cannot make the next one fail with an address in use.
         std::string program =
-            std::string("try { ") + c.function + "(\"127.0.0.1\", " + c.port +
+            std::string("try { var v = ") + c.function + "(\"127.0.0.1\", " +
+            c.port +
             (std::string(c.function) == "connect_within" ? ", 5" : "") +
-            "); } catch (e) { print e.kind; }";
+            "); if (v != nil) { v.close(); } } catch (e) { print e.kind; }";
         EXPECT_EQ(h.run(program), c.accepted ? InterpretResult::OK
                                              : InterpretResult::RUNTIME_ERROR)
             << c.function << " port " << c.port;
     }
-
-    // A port that is not integer-valued is a fatal fault of its own, and a
-    // Number far above the range is refused as well.
-    EXPECT_EQ(h.run("listen(\"127.0.0.1\", 70000);"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("listen(\"127.0.0.1\", 1.5);"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("connect(\"127.0.0.1\", 1.5);"),
-              InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------

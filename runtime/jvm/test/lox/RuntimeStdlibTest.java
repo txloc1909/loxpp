@@ -156,44 +156,62 @@ public final class RuntimeStdlibTest {
         {"listen", 65536.0, Boolean.FALSE},
     };
 
+    // A port that is not an integer at all is refused by every function: a
+    // Number that is not integer-valued, and a value of any other kind
+    // (spec/05-stdlib.md, "Integer arguments").
+    private static final Object[][] NOT_INTEGER_PORTS = {
+        {"connect", 1.5, Boolean.FALSE},
+        {"connect", Double.NaN, Boolean.FALSE},
+        {"connect", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"connect", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"connect", "3", Boolean.FALSE},
+        {"connect_within", 1.5, Boolean.FALSE},
+        {"connect_within", Double.NaN, Boolean.FALSE},
+        {"connect_within", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"connect_within", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"connect_within", "3", Boolean.FALSE},
+        {"listen", 1.5, Boolean.FALSE},
+        {"listen", Double.NaN, Boolean.FALSE},
+        {"listen", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"listen", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"listen", "3", Boolean.FALSE},
+    };
+
     // Mirrors test/test_net_process.cpp's NetProcessTest.InvalidPortFatal for
-    // the JVM's own copy of the check. A parameter that spec/05-stdlib.md
-    // calls an integer is an Int or an integer-valued Number ("Integer
-    // arguments"). A port outside its range is a fatal fault: a catchable one
-    // would mean the call reached the connection attempt, whose NetworkError a
-    // program's `try` can catch, so the port was not refused at all.
+    // the JVM's own copy of the check. A port outside its range, and a port
+    // that is not an integer, is a fatal fault: a catchable one would mean the
+    // call reached the connection attempt, whose NetworkError a program's
+    // `try` can catch, so the port was not refused at all.
     private static void checkIntegerArguments(LoxGlobals globals) {
-        check(PORT_GRID.length == 24, "the port grid has one row per cell");
-        for (Object[] row : PORT_GRID) {
-            checkPort(globals, (String) row[0], row[1], (Boolean) row[2]);
+        checkGrid(globals, PORT_GRID, 24, "port range");
+        checkGrid(globals, NOT_INTEGER_PORTS, 15, "not an integer");
+    }
+
+    // Runs one check per row, and one check that the table has `expected` rows
+    // with no repeat, so a row that is lost or copied cannot pass.
+    private static void checkGrid(LoxGlobals globals, Object[][] grid, int expected,
+                                  String noun) {
+        check(grid.length == expected, "the " + noun + " grid has one row per cell");
+        java.util.Set<String> cells = new java.util.HashSet<>();
+        for (Object[] row : grid) {
+            cells.add(row[0] + "/" + LoxOps.str(row[1]) + "/"
+                      + row[1].getClass().getSimpleName() + "/" + row[2]);
         }
-
-        // A port that is not integer-valued is a fatal fault of its own.
-        checkFatal(() -> call(globals, "connect", "127.0.0.1", 1.5),
-                   "connect() rejects a fractional port");
-        checkFatal(() -> call(globals, "connect_within", "127.0.0.1", 1.5, 5.0),
-                   "connect_within() rejects a fractional port");
-        checkFatal(() -> call(globals, "listen", "127.0.0.1", 1.5),
-                   "listen() rejects a fractional port");
-
-        // listen with 0 asks the OS for a free port, in both kinds.
-        for (Object port : new Object[] {0L, 0.0}) {
-            Object server = call(globals, "listen", "127.0.0.1", port);
-            check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
-                  "listen() accepts port " + LoxOps.str(port) + " and binds a free port");
-            closeQuietly(server);
+        check(cells.size() == grid.length, "no " + noun + " grid row repeats another");
+        for (Object[] row : grid) {
+            checkPort(globals, (String) row[0], row[1], (Boolean) row[2]);
         }
     }
 
-    // One cell of the grid: an accepted port must reach the network, where a
-    // fault is catchable, and a refused one must be a fatal fault.
+    // One cell: an accepted port must reach the network, where a fault is
+    // catchable, and a refused one must be a fatal fault.
     private static void checkPort(LoxGlobals globals, String function, Object port,
                                   boolean accepted) {
+        String shown = function + "() " + (accepted ? "accepts port " : "rejects port ")
+                + LoxOps.str(port) + (port instanceof Long ? "i" : "");
         Object[] args = function.equals("connect_within")
                 ? new Object[] {"127.0.0.1", port, 5.0}
                 : new Object[] {"127.0.0.1", port};
-        String shown = function + "() " + (accepted ? "accepts port " : "rejects port ")
-                + LoxOps.str(port) + (port instanceof Long ? "i" : "");
         if (accepted) {
             checkNotFatal(() -> closeQuietly(call(globals, function, args)), shown);
         } else {
