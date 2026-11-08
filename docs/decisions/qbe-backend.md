@@ -337,6 +337,21 @@ Any new reason to leave a slot in its stack cell must go through the same
 post-fixpoint spill pass, and must come with a probe that carries a promoted
 value across it.
 
+The pass leaves a slot in its stack cell at three sites. A probe is a check
+only if removing the site it names makes it fail, so this table records which
+sites have one, measured at #1103:
+
+| Site | Probe that fails without it |
+|---|---|
+| a predecessor carries no value | `s8_promotion_giveup_loop`, `s8_promotion_catch_join` (the build aborts with `unordered_map::at`, exit 70: a phi needs a value from every predecessor) |
+| the phi would name itself | none: removing the site changes no probe and no program of `examples/`, `test/translation-probes/` or `test/coroutine-probes/` |
+| a later merge contradicts a collapse | `s8_promotion_collapsed_giveup` (QBE never ends) |
+
+`#1107` carries the gap in the second row. The spill pass itself is bound by
+three probes: removing it makes `s8_promotion_giveup_loop` hang and
+`s8_promotion_loop_exit` and `s8_promotion_catch_join` diverge. A site without
+a probe that fails is named in this table rather than claimed.
+
 ## Staged plan
 
 Each stage ends with a check that can be run, in the style of
