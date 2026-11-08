@@ -2069,11 +2069,13 @@ the head of the run queue runs next.
 A worker sees the end of a wait, and a limit that has passed, at points that
 the implementation chooses, and at the latest when the worker has no task that
 is ready to run. While tasks are ready to run, it looks for them at a task
-switch, and no later than the first switch that follows its previous look by a
-bounded delay. So a wait that ends is seen at the first look after it ends,
-which is within that delay plus the length of the running stretch that ends at
-the switch. The specification does not bind the value of that delay (see
-[Conformance](README.md#conformance), Speed); it binds that the delay is finite.
+switch, and no later than the first switch at which at least a bounded delay
+has passed since its previous look. So a wait on a connection, a Socket, or a
+Server, and a limit that has passed, are seen at the first look after the end or
+the passing, which is within that delay plus the length of the running stretch
+that ends at the switch. The specification does not bind the value of that delay
+(see [Conformance](README.md#conformance), Speed); it binds that the delay is
+finite.
 A message from a task of another worker keeps the paragraph below, and a task
 that never reaches a suspend point keeps the worker, as [Suspend
 Points](#suspend-points) says. When it sees several at one point, the tasks

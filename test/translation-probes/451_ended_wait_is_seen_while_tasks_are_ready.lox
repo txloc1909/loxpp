@@ -1,8 +1,9 @@
 // A worker whose run queue is never empty still sees the end of a socket wait
-// (spec/04-semantics.md, Scheduling: the worker sees an ended wait at a task
-// switch, and no later than the first switch that follows the wait by a bounded
-// delay). `reader` parks in readline on `conn`. `busy` yields in a loop, so a
-// task is ready at every instant and the worker never goes idle. The peer writes
+// (spec/04-semantics.md, Scheduling: while tasks are ready to run the worker
+// looks for ended waits at a task switch, and no later than the first switch at
+// which at least a bounded delay has passed since its previous look).
+// `reader` parks in readline on `conn`. `busy` yields in a loop, so a task is
+// ready at every instant and the worker never goes idle. The peer writes
 // the line after the reader has parked, and the reader must wake and print it.
 // A scheduler that looks at the network only when its run queue is empty never
 // wakes the reader, and this probe times out. That is what the probe proves: it
