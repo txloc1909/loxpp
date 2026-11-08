@@ -105,8 +105,8 @@
  },
  {
   "name": "a new replica has acknowledged nothing",
-  "old": "    conn.ackOffset = replOffset;\n    replicas.append(conn);",
-  "new": "    conn.ackOffset = -1;\n    replicas.append(conn);",
+  "old": "    conn.ackOffset = replOffset;\n    if (!conn.isReplica) {",
+  "new": "    conn.ackOffset = -1;\n    if (!conn.isReplica) {",
   "cases": [
    "replication-17 WAIT with no write since the replicas came gives their number at once"
   ]
@@ -185,8 +185,8 @@
  },
  {
   "name": "ACK gives the offset plus one",
-  "old": "            sendCommand(sock, [\"REPLCONF\", \"ACK\", str(replicaOffset)]);",
-  "new": "            sendCommand(sock, [\"REPLCONF\", \"ACK\", str(replicaOffset + 1)]);",
+  "old": "                task.send(writer, Msg.SendAck(replicaOffset));",
+  "new": "                task.send(writer, Msg.SendAck(replicaOffset + 1));",
   "cases": [
    "replication-14 REPLCONF GETACK with no command first gives ACK 0"
   ]
@@ -217,8 +217,8 @@
  },
  {
   "name": "RP1 a replica that does not read is kept",
-  "old": "        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX) {",
-  "new": "        if (false) {",
+  "old": "        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX\n",
+  "new": "        if (false\n",
   "cases": [
    "local: RP1 a replica that does not read is dropped after 64 MB"
   ]
@@ -229,6 +229,118 @@
   "new": "        closed = false;",
   "cases": [
    "local: a client that goes during WAIT ends its tasks"
+  ]
+ },
+ {
+  "name": "a lazy expiry is not propagated",
+  "old": "        // As Redis does, the master tells its replicas, so that a write\n        // after the expiry finds the same keyspace there.\n        replicate([\"DEL\", key], nil);",
+  "new": "",
+  "cases": [
+   "local: a lazy expiry on the master is propagated as DEL"
+  ]
+ },
+ {
+  "name": "the replica offset starts at 0",
+  "old": "    replicaOffset = startOffset;",
+  "new": "    replicaOffset = 0;",
+  "cases": [
+   "local: the offset of a replica starts at the offset of FULLRESYNC"
+  ]
+ },
+ {
+  "name": "the replica sends no ACK of its own",
+  "old": "        return task.receive_where_within(isSendAck, 1);",
+  "new": "        return task.receive_where(isSendAck);",
+  "cases": [
+   "local: the replica sends REPLCONF ACK every second"
+  ]
+ },
+ {
+  "name": "the wake is cleared after the last write",
+  "old": "    // Cleared first: an entry that comes while a write below suspends sends\n    // a new Propagate, so it is not left for the next write.\n    conn.replWoken = false;\n    var out = Output(conn);",
+  "new": "    var out = Output(conn);",
+  "cases": [
+   "local: a write made while the replica session waits in a write reaches the replica"
+  ]
+ },
+ {
+  "name": "RP3 no bound on entries behind",
+  "old": "            or replLogBase + len(replLog) - r.logPos > REPLICA_LAG_ENTRIES) {",
+  "new": "            or false) {",
+  "cases": [
+   "local: RP3 a replica that does not read is dropped after 131072 entries"
+  ]
+ },
+ {
+  "name": "a full resync loads in one step",
+  "old": "    loadRdbData(data, fresh, true);",
+  "new": "    loadRdbData(data, fresh, false);",
+  "cases": [
+   "local: a full resync of 262144 keys stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "a full resync marks no watcher",
+  "old": "    for (var key in watchers.keys()) {\n        touch(key);\n    }\n    // The offset",
+  "new": "    // The offset",
+  "cases": [
+   "local: a full resync makes EXEC of a client that watches a key fail"
+  ]
+ },
+ {
+  "name": "a full resync keeps the old keyspace",
+  "old": "    store = fresh;\n",
+  "new": "",
+  "cases": [
+   "local: a full resync replaces the keyspace"
+  ]
+ },
+ {
+  "name": "a replica queues a write in MULTI",
+  "old": "    if (REPL_ROLE != \"master\" and WRITES.has(name)) {\n        tx.dirty = true;\n        return READONLY;\n    }",
+  "new": "",
+  "cases": [
+   "local: a replica refuses a write in MULTI"
+  ]
+ },
+ {
+  "name": "LPUSH is not propagated",
+  "old": "    touch(argv[1]);\n    replicate(argv, nil);\n    listReady(argv[1]);",
+  "new": "    touch(argv[1]);\n    listReady(argv[1]);",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "LPOP is not propagated",
+  "old": "        replicate([\"LPOP\", argv[1]], nil);\n        return Bulk(popLeft(argv[1], entry));",
+  "new": "        return Bulk(popLeft(argv[1], entry));",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "INCR of a key is not propagated",
+  "old": "    entry.value = str(n);\n    touch(argv[1]);\n    replicate(argv, nil);",
+  "new": "    entry.value = str(n);\n    touch(argv[1]);",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "the pop of a served waiter is not propagated",
+  "old": "        var value = popLeft(key, entry);\n        replicate([\"LPOP\", key], nil);",
+  "new": "        var value = popLeft(key, entry);",
+  "cases": [
+   "local: a push that serves a waiting BLPOP is propagated before its LPOP"
+  ]
+ },
+ {
+  "name": "the waiters of EXEC are served inside its MULTI",
+  "old": "    endExecReplication();\n    serveReady();",
+  "new": "    serveReady();\n    endExecReplication();",
+  "cases": [
+   "local: the pop of a waiter that EXEC served comes after its EXEC"
   ]
  }
 ]

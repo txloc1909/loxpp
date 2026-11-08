@@ -281,7 +281,9 @@ enum Args { Cons(head, tail) Empty }
 // Propagate, from a write command to a replica session, says that the
 // replication log has entries for it. Ack, from REPLCONF ACK to a session
 // in WAIT, says that a replica acknowledged.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready Propagate Ack }
+// SendAck(offset), from the apply loop of a replica to its ACK writer, asks
+// it to send REPLCONF ACK offset.
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready Propagate Ack SendAck(offset) }
 
 // Both run over up to ARRAY_MAX arguments, so they yield as the reader does
 // (rule 2 of the README). toArgs runs in the reader and fromArgs in the
@@ -357,6 +359,9 @@ fun lookup(key) {
     if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {
         store.del(key);
         touch(key);
+        // As Redis does, the master tells its replicas, so that a write
+        // after the expiry finds the same keyspace there.
+        replicate(["DEL", key], nil);
         return nil;
     }
     return entry;
@@ -471,6 +476,24 @@ fun cmdInfo(argv) {
         out = out + replicationInfo();
     }
     return bulk(out);
+}
+
+fun cmdDel(ctx, argv) {
+    if (len(argv) < 2) {
+        return wrongArgs("del");
+    }
+    var n = 0;
+    for (var key in argv[1:len(argv)]) {
+        if (lookup(key) != nil) {
+            store.del(key);
+            touch(key);
+            n = n + 1;
+        }
+    }
+    if (n > 0) {
+        replicate(argv, nil);
+    }
+    return integerReply(n);
 }
 
 fun cmdGet(argv) {
@@ -1920,7 +1943,7 @@ var ARITY = {
     "PING": -1, "ECHO": 2, "SET": -3, "GET": 2, "INFO": -1,
     "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
     "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
-    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1,
+    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1, "DEL": -2,
     "CONFIG": -2, "KEYS": 2
 };
 
@@ -2363,10 +2386,18 @@ class RdbReader {
 // under 32 starts a run of that many plus one literal bytes; a larger one is
 // a back reference: its top three bits are the length (7 means one more
 // length byte follows), and the rest, with the next byte, the offset.
+var rdbMayYield = false;
+var LZF_BYTES_PER_YIELD = 65536;
+
 fun lzfDecompress(input, ulen) {
     var out = [];
     var i = 0;
+    var steps = 0;
     while (i < len(input)) {
+        steps = steps + 1;
+        if (rdbMayYield and steps % LZF_BYTES_PER_YIELD == 0) {
+            yield nil;
+        }
         var ctrl = ord(input[i]);
         i = i + 1;
         if (ctrl < 32) {
@@ -2421,12 +2452,17 @@ fun loadRdb(path) {
     var f = open(path, "r");
     var data = f.read();
     f.close();
-    loadRdbData(data);
+    loadRdbData(data, store, false);
 }
 
-// Loads the string keys of database 0 from the bytes of an RDB file: the
-// file at start, or the file that a master sends with FULLRESYNC.
-fun loadRdbData(data) {
+// Loads the string keys of database 0 from the bytes of an RDB file into the
+// Map target: the file at start, or the file that a master sends with
+// FULLRESYNC. On a live replica (mayYield), it yields every
+// ELEMENTS_PER_YIELD keys and every LZF_BYTES_PER_YIELD bytes of an LZF
+// string, so the clients go on; they see the old keyspace until it ends.
+fun loadRdbData(data, target, mayYield) {
+    rdbMayYield = mayYield;
+    var loaded = 0;
     var r = RdbReader(data);
     if (r.take(5) != "REDIS") {
         throw RdbError("the file does not start with REDIS");
@@ -2482,9 +2518,13 @@ fun loadRdbData(data) {
                 throw RdbError("the file has keys in database " + str(db) + "; this server has database 0 only");
             }
             if (expiresAt == nil or expiresAt > now) {
-                store[key] = Entry("string", value, expiresAt);
+                target[key] = Entry("string", value, expiresAt);
             }
             expiresAt = nil;
+            loaded = loaded + 1;
+            if (mayYield and loaded % ELEMENTS_PER_YIELD == 0) {
+                yield nil;
+            }
         } else {
             throw RdbError("the file has the opcode or value kind " + str(op) + "; this server loads strings only");
         }
@@ -2744,6 +2784,9 @@ var replExecWrote = false;
 // A replica that has not got this many bytes of the stream is dropped
 // (README rule 4), as Redis drops it at its output buffer limit.
 var REPLICA_LAG_MAX = 67108864;
+// The log holds Lox++ objects, which are larger than their RESP bytes, so a
+// replica is also dropped when it is this many entries behind.
+var REPLICA_LAG_ENTRIES = 131072;
 
 // An empty RDB file: the header and the end byte, with no checksum.
 // Version 10, the version of Redis 7.0, so that a Redis 7.0 replica loads it.
@@ -2809,7 +2852,8 @@ fun appendRepl(head, tail) {
     replLog.append(ReplEntry(head, tail, replOffset));
     var keep = [];
     for (var r in replicas) {
-        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX) {
+        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX
+            or replLogBase + len(replLog) - r.logPos > REPLICA_LAG_ENTRIES) {
             // The replica does not read fast enough: drop it.
             r.isReplica = false;
             try {
@@ -2841,6 +2885,9 @@ fun endExecReplication() {
 
 // Writes the log entries that the replica has not got, in steps.
 fun writeReplLog(conn) {
+    // Cleared first: an entry that comes while a write below suspends sends
+    // a new Propagate, so it is not left for the next write.
+    conn.replWoken = false;
     var out = Output(conn);
     while (conn.isReplica and conn.logPos < replLogBase + len(replLog)) {
         var entry = replLog[conn.logPos - replLogBase];
@@ -2861,7 +2908,6 @@ fun writeReplLog(conn) {
         conn.replSentOffset = entry.endOffset;
     }
     out.flush();
-    conn.replWoken = false;
     trimReplLog();
 }
 
@@ -2925,11 +2971,14 @@ fun cmdPsync(conn, argv) {
     }
     conn.sock.write("+FULLRESYNC " + REPL_ID + " " + str(replOffset) + "\r\n");
     conn.sock.write("$" + str(len(EMPTY_RDB)) + "\r\n" + EMPTY_RDB);
-    conn.isReplica = true;
     conn.logPos = replLogBase + len(replLog);
     conn.replSentOffset = replOffset;
     conn.ackOffset = replOffset;
-    replicas.append(conn);
+    if (!conn.isReplica) {
+        // A second PSYNC on the link starts again; it is still one replica.
+        conn.isReplica = true;
+        replicas.append(conn);
+    }
     return "";
 }
 
@@ -3038,7 +3087,7 @@ fun cmdWait(conn, argv) {
 
 // The commands that write, which a replica refuses from its clients.
 var WRITES = {"SET": true, "INCR": true, "RPUSH": true, "LPUSH": true, "LPOP": true,
-              "BLPOP": true, "XADD": true};
+              "BLPOP": true, "XADD": true, "DEL": true};
 var READONLY = "-READONLY You can't write against a read only replica.\r\n";
 
 fun replicationInfo() {
@@ -3083,6 +3132,42 @@ fun sendCommand(sock, parts) {
     sock.write(out);
 }
 
+// Waits up to one second for an ACK request. Returns the message, or nil
+// at the time limit.
+fun waitForAckRequest() {
+    try {
+        return task.receive_where_within(isSendAck, 1);
+    } catch (e) {
+        return nil;
+    }
+}
+
+fun isSendAck(msg) {
+    return match msg {
+        case Msg.SendAck(offset) => true
+        case _ => false
+    };
+}
+
+fun ackOffsetOf(msg, fallback) {
+    if (msg == nil) {
+        return fallback;
+    }
+    return match msg {
+        case Msg.SendAck(offset) => offset
+        case _ => fallback
+    };
+}
+
+// The ACK writer ends at its next wake: a Stop message makes it check the
+// link at once.
+fun stopWriter(writer) {
+    try {
+        task.send(writer, Msg.SendAck(-1));
+    } catch (ignored) {
+    }
+}
+
 fun masterLink() {
     while (true) {
         try {
@@ -3109,8 +3194,13 @@ fun replicaSession() {
     sendCommand(sock, ["PSYNC", "?", "-1"]);
     var full = expectLine(sock, "+FULLRESYNC");
     var words = splitWords(full);
-    if (len(words) >= 2) {
+    var startOffset = nil;
+    if (len(words) >= 3) {
         REPL_ID = words[1];
+        startOffset = parseInteger(words[2]);
+    }
+    if (startOffset == nil) {
+        throw ProtocolError("the master sent a bad FULLRESYNC line");
     }
     var header = expectLine(sock, "$");
     var size = parseInteger(header[1:len(header)]);
@@ -3121,9 +3211,39 @@ fun replicaSession() {
     if (len(data) < size) {
         throw ProtocolError("the master closed the link during the RDB file");
     }
-    store = {};
-    loadRdbData(data);
-    replicaOffset = 0;
+    var fresh = {};
+    loadRdbData(data, fresh, true);
+    // One step: the clients see the old keyspace or the new one, and each
+    // client that watches a key is marked, as the keys change.
+    store = fresh;
+    for (var key in watchers.keys()) {
+        touch(key);
+    }
+    // The offset of the stream goes on from the offset of FULLRESYNC.
+    replicaOffset = startOffset;
+    // One task writes to the master: the answer to GETACK, and an ACK of
+    // its own every second, as Redis replicas send, so that a master does
+    // not drop the link after its repl-timeout.
+    var linkAlive = true;
+    fun ackWriter() {
+        while (linkAlive) {
+            var off = ackOffsetOf(waitForAckRequest(), replicaOffset);
+            if (!linkAlive or off < 0) {
+                return;
+            }
+            try {
+                sendCommand(sock, ["REPLCONF", "ACK", str(off)]);
+            } catch (e) {
+                return;
+            }
+        }
+    }
+    var writer = task.spawn(ackWriter);
+    fun endLink() {
+        linkAlive = false;
+        stopWriter(writer);
+    }
+    defer endLink();
     var n = 0;
     // A transaction of the master comes as MULTI, its writes, and EXEC: the
     // replica applies the writes in one step, after EXEC.
@@ -3139,7 +3259,11 @@ fun replicaSession() {
             name = upper(argv[0]);
         }
         if (name == "REPLCONF" and len(argv) >= 2 and lower(argv[1]) == "getack") {
-            sendCommand(sock, ["REPLCONF", "ACK", str(replicaOffset)]);
+            // The offset before this GETACK, as Redis answers.
+            try {
+                task.send(writer, Msg.SendAck(replicaOffset));
+            } catch (ignored) {
+            }
         } else if (name == "MULTI") {
             queued = [];
         } else if (name == "EXEC" and queued != nil) {
@@ -3210,6 +3334,7 @@ var COMMANDS = {
     "XRANGE": cmdXrange,
     "XREAD": cmdXread,
     "INCR": cmdIncr,
+    "DEL": cmdDel,
     "UNWATCH": cmdUnwatchQueued,
     "CONFIG": cmdConfig,
     "KEYS": cmdKeys
@@ -3426,7 +3551,7 @@ fun awaitCredit() {
             // Only the session sends to the reader, and it sends only these
             // three.
             case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) or Msg.Ready
-                or Msg.Propagate or Msg.Ack => -1
+                or Msg.Propagate or Msg.Ack or Msg.SendAck(_) => -1
         };
         if (got < 0) {
             return nil;
@@ -3734,6 +3859,8 @@ fun sessionLoop(conn) {
                 case Msg.Propagate => replicaWrite(conn)
                 // A late Ack after WAIT ended.
                 case Msg.Ack => true
+                // Only the ACK writer of a replica gets SendAck.
+                case Msg.SendAck(_) => true
             };
         }
     } catch (e) {
