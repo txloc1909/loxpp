@@ -2222,8 +2222,10 @@ def stages_optimistic_locking(prog):
             got[0] = second.try_read(30)
             time.sleep(0.2)
         worst, wrong, _ = measure_while(srv, second_watch)
-        check("local: W3 a second client that watches the same 1048575 keys stalls PING at most 0.3 s",
-              worst <= 0.3 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        # W3 holds rule 6 only (no mutation), so its limit is the 1 s of
+        # the rule: a slower host must not fail it.
+        check("local: W3 a second client that watches the same 1048575 keys stalls PING at most 1 s",
+              worst <= 1.0 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
         second.close()
         check("local: a client may watch 1048576 keys", c.call("WATCH", "x0") == "OK")
         got2 = c.call("WATCH", "x1")
@@ -2510,8 +2512,10 @@ def stages_rdb(prog):
         worst, wrong, _ = measure_while(srv, keys_all)
         check("local: K1 KEYS k* of 524288 keys gives each one",
               isinstance(got[0], list) and len(got[0]) == n)
-        check("local: K1 KEYS k* of 524288 keys stalls PING at most 0.5 s",
-              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+        # K1 holds rule 6 only (no mutation), so its limit is the 1 s of
+        # the rule.
+        check("local: K1 KEYS k* of 524288 keys stalls PING at most 1 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
         # K4: a pattern that fails at the first byte does one step of glob
         # work for each key, so the filter loop must yield by itself.
         def keys_none():
