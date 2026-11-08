@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 // gtest prints an enum of this scope as its underlying byte otherwise, and the
@@ -512,12 +513,19 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
 // A send must write the wakeup descriptor only while the worker sleeps in its
 // poller. Once wait() returned, `polling` is false again, so a send does not
 // leave a pending wake for the next wait() to read.
+//
+// The wait ends on a descriptor that is readable before the script runs, not
+// on a wall-clock deadline: a deadline can expire on a busy host before the
+// script sets `me`, and the handler would then run too early.
 TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     VM vm;
     int fired = 0;
     Runtime& rt = vm.runtime();
     rt.setSchedulerClock(&noSwitchPoll);
-    rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(50));
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    ASSERT_EQ(write(fds[1], "x", 1), 1);
+    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
         Inbox& inbox = rt.memoryManager().inbox();
@@ -537,6 +545,10 @@ TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     )"),
               InterpretResult::OK);
     EXPECT_EQ(fired, 1);
+    std::vector<Poller::Token> cancelled;
+    rt.poller().cancelFd(fds[0], cancelled);
+    close(fds[0]);
+    close(fds[1]);
 }
 
 // The runtime clears the pointers that senders use before the poller is
