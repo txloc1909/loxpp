@@ -489,13 +489,14 @@ The QBE backend links the native runtime, so it has the native bound.
 The JVM backend calls `selectNow` at every task switch while a wait is
 registered, so it sees an ended wait at the first switch after the wait ends.
 
-The spec binds this bound: `spec/04-semantics.md`, Scheduling, says the worker
-sees an ended wait "at a task switch no more than a bounded time after the end
-of the wait", and Conformance, Limits, makes that time a limit. Native's 1 ms
-is inside it, and the JVM's poll at every switch is the bound of zero. The bound
-is per switch, and two things are outside it on purpose: a task that never
-reaches a suspend point keeps the worker (#1132), and the messages of a task of
-another worker keep their own paragraph.
+The spec binds this rule: `spec/04-semantics.md`, Scheduling, says the worker
+sees an ended wait "at a task switch, and no later than the first switch that
+follows the end of the wait or the passing of the limit by a bounded delay",
+and that the value of that delay is not bound, only that it is finite. Native's
+1 ms is such a delay, and the JVM's poll at every switch makes it zero. The
+delay is measured to a switch, so two things are outside it on purpose: a task
+that never reaches a suspend point keeps the worker (#1132), and the messages
+of a task of another worker keep their own paragraph.
 
 ### Readiness registry
 
