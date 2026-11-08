@@ -1242,10 +1242,15 @@ def stages_streams(prog):
         r3.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "9-0"))
         time.sleep(0.1)
         r2.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
+        r4 = srv.client()
+        r4.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, "$"))
         time.sleep(0.2)
         c.call("XADD", key, "2-0", "f", "v")
-        check("local: XREAD BLOCK with $ gets the lower XADD",
-              r2.try_read(3) == [[key, [["2-0", ["f", "v"]]]]])
+        low = [[key, [["2-0", ["f", "v"]]]]]
+        got2, got4 = r2.try_read(3), r4.try_read(3)
+        r4.close()
+        check("local: XREAD BLOCK with $ gets the lower XADD (two readers)",
+              got2 == low and got4 == low, "%r %r" % (got2, got4))
         r.sock.settimeout(0.5)
         try:
             early = r.sock.recv(65536)
@@ -1884,6 +1889,20 @@ def stages_transactions_large(prog):
             worst, wrong, _ = measure_while(srv, run)
             return worst, wrong, got[0]
 
+        def exec_stall_raw(cmds, read):
+            c.call("MULTI")
+            for i in range(0, len(cmds), 4096):
+                part = cmds[i:i + 4096]
+                c.send_raw(b"".join(part))
+                for _ in part:
+                    c.try_read(10)
+
+            def run():
+                c.send_raw(encode("EXEC"))
+                read()
+                time.sleep(0.2)
+            return measure_while(srv, run)
+
         # T3: 200 readers wait above the top, and EXEC adds 10000 entries.
         # EXEC passes over the readers once, not once for each XADD.
         c.call("XADD", "t3", "1-1", "f", "v")
@@ -1921,17 +1940,42 @@ def stages_transactions_large(prog):
         n = 1048573
         c.send_raw(encode("RPUSH", "t6", *(["abcd"] * n)))
         c.try_read(30)
-        worst, wrong, got = exec_stall([encode("LRANGE", "t6", "0", "-1")] * 200
-                                       + [encode("LPOP", "t6", "100"), encode("LPOP", "t6", "10")])
-        ok = isinstance(got, list) and len(got) == 202
-        done = [x for x in got[:200] if isinstance(x, list)] if ok else []
-        refused = [x for x in got[:200] if isinstance(x, Error)] if ok else []
+        # The reply is read as bytes: 8 arrays of the list, then the
+        # replies after them, which must be errors. With no budget the
+        # ninth reply is a whole copy, and the case fails at its first line.
+        array = b"*%d\r\n" % n + b"$4\r\nabcd\r\n" * n
+        head = b"*202\r\n" + array * 8
+        tail = [None]
+
+        def read_t6():
+            c.sock.settimeout(30)
+            buf = b""
+            try:
+                while len(buf) < len(head) + 4096:
+                    chunk = c.sock.recv(1 << 22)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if len(buf) >= len(head) and buf[len(head):].count(b"\r\n") >= 194:
+                        break
+            except OSError:
+                pass
+            c.sock.settimeout(5)
+            tail[0] = buf
+        worst, wrong, _ = exec_stall_raw([encode("LRANGE", "t6", "0", "-1")] * 200
+                                         + [encode("LPOP", "t6", "100"), encode("LPOP", "t6", "10")],
+                                         read_t6)
+        buf = tail[0] or b""
+        lines = buf[len(head):].split(b"\r\n") if buf.startswith(head) else []
+        refused = [x for x in lines[:192] if x.startswith(b"-ERR")]
         check("local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192",
-              len(done) == 8 and len(refused) == 192 and len(done[0]) == n,
-              "%d done, %d refused" % (len(done), len(refused)))
+              buf.startswith(head) and len(refused) == 192,
+              "%d bytes, %d refused, next %r" % (len(buf), len(refused), lines[:1]))
         check("local: T6 an LPOP over the rest of the budget is refused, one under it runs",
-              ok and isinstance(got[200], Error) and got[201] == ["abcd"] * 10,
-              repr(got[200:]) if ok else repr(got)[:80])
+              len(lines) > 193 and lines[192].startswith(b"-ERR") and lines[193] == b"*10",
+              repr(lines[192:195]))
+        c.close()
+        c = srv.client()
         check("local: T6 that EXEC stalls PING at most 0.5 s",
               worst <= 0.5 and not wrong, "worst %.3f s" % worst)
 
