@@ -892,7 +892,11 @@ fun cmdLpop(ctx, argv) {
         return EXEC_TOO_LARGE;
     }
     var reply = entry.value.takeLeft(count);
-    touch(argv[1]);
+    if (count > 0) {
+        // LPOP with a count of 0 changes nothing, so it marks no watcher,
+        // as in Redis.
+        touch(argv[1]);
+    }
     if (entry.value.size() == 0) {
         store.del(argv[1]);
     }
@@ -2056,11 +2060,16 @@ var WATCH_MAX = 1048576;
 // Marks each client that watches key, so that its next EXEC fails. Every
 // command that writes the keyspace calls it, also a write that keeps the
 // value, as Redis does.
+//
+// A marked client stays marked until its next EXEC, so touch drops the key
+// from watchers after it marks them: each later write of the key costs one
+// Map read, not one step for each watcher, as in Redis.
 fun touch(key) {
     var w = watchers[key];
     if (w == nil) {
         return;
     }
+    watchers.del(key);
     if (isConn(w)) {
         if (w.watched.has(key)) {
             w.watchDirty = true;
@@ -2075,15 +2084,18 @@ fun touch(key) {
     }
 }
 
-// WATCH outside a transaction. It joins all keys in one step, with no
-// suspend point: a write between two keys would not mark the keys after it.
+// WATCH outside a transaction. It yields every ELEMENTS_PER_YIELD keys,
+// because one WATCH can name 1048575 keys. A write while WATCH runs is
+// concurrent with it: a write of a key that WATCH has not joined yet comes
+// before WATCH, and a write of a key that it has joined marks the client,
+// which can make one EXEC fail that could have run, never the other way.
+// So no write after the reply of WATCH is missed.
 fun cmdWatch(conn, argv) {
     if (conn.watchCount + len(argv) - 1 > WATCH_MAX) {
         return errorReply("ERR the client watches too many keys");
     }
-    // This loop can run over 1048575 keys in one step, so it reads each key
-    // with one Map access, and makes an object only for a key that a second
-    // client watches.
+    // It reads each key with one Map access, and makes an object only for
+    // a key that a second client watches.
     var watched = conn.watched;
     var i = 1;
     while (i < len(argv)) {
@@ -2102,7 +2114,7 @@ fun cmdWatch(conn, argv) {
             watched[key] = true;
             conn.watchCount = conn.watchCount + 1;
             var w = watchers[key];
-            if (w == nil or w == conn) {
+            if (w == nil) {
                 watchers[key] = conn;
             } else if (isConn(w)) {
                 var map = {};
@@ -2114,6 +2126,9 @@ fun cmdWatch(conn, argv) {
             }
         }
         i = i + 1;
+        if (i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
     }
     return simple("OK");
 }

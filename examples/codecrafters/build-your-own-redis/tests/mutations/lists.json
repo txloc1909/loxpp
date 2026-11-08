@@ -170,8 +170,8 @@
  },
  {
   "name": "L23 no yield in leaveQueues",
-  "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n",
-  "new": "",
+  "old": " queues.del(key);\n                }\n            }\n        }\n        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n}\n",
+  "new": " queues.del(key);\n                }\n            }\n        }\n        i = i + 1;\n    }\n}\n",
   "cases": [
    "local: P9 it leaves the other 1048573 queues and PING waits at most 0.2 s"
   ]

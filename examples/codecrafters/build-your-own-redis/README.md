@@ -180,10 +180,14 @@ it reads, and T7 shows one case that grows with the number of readers.
 ### Optimistic locking
 
 `WATCH` puts the client in `watchers` for each key: the `Conn` itself for
-one client, a Map of client ids from the second one. Each command that
-writes the keyspace calls `touch(key)`, also a write that keeps the value,
-and a lazy expiry. `touch` marks each client that watches the key
-(`watchDirty`). `EXEC` gives a null array when the mark is set, or when a
+one client, a Map of client ids from the second one. It yields every 1024
+keys: a write while it runs is concurrent with it, so a write of a key that
+it has not joined yet comes before it, and no write after its reply is
+missed. Each command that writes the keyspace calls `touch(key)`, also a
+write that keeps the value, and a lazy expiry. `touch` marks each client
+that watches the key (`watchDirty`), and drops the key from `watchers`: a
+marked client stays marked until its next `EXEC`, so each later write of
+the key costs one Map read. `EXEC` gives a null array when the mark is set, or when a
 watched key that had an expiry at `WATCH` has expired since, also with no
 read, as Redis 7.0 does. `EXECABORT` comes first.
 
@@ -350,8 +354,10 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 200 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 4.28 s) | 0.07 s |
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
-| W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 1.0 s, while it joins all keys in one step | 0.76–0.80 s |
-| W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.015 s |
+| W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 0.3 s (without the yield of `WATCH`: 0.76–1.13 s) | 0.10 s |
+| W3: a second client that watches the same 1048575 keys | PING within 0.3 s | 0.19 s |
+| W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.016 s |
+| W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
@@ -372,8 +378,11 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` that removes
-its guard (S4, T1, T7 and W1 hold rule 6 only: no single change removes their
-guard).
+its guard (S4, T1, T7 and W3 hold rule 6 only: no single change removes their
+guard). The `touch` in the lazy expiry of `lookup` has no case: the check
+of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
+key that expires, so no reply shows it. It stays for a client that watches
+the key after the read and before the removal.
 
 A large heap brings a second kind of stall: the native VM stops the worker
 for each full collection, and the pause grows with the live heap. With

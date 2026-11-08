@@ -1951,7 +1951,8 @@ def stages_transactions_large(prog):
             c.sock.settimeout(30)
             buf = b""
             try:
-                while len(buf) < len(head) + 4096:
+                # The tail after the eight arrays is about 15 KB.
+                while len(buf) < len(head) + 65536:
                     chunk = c.sock.recv(1 << 22)
                     if not chunk:
                         break
@@ -2085,6 +2086,7 @@ def stages_optimistic_locking(prog):
         writes("LPOP", [["RPUSH", "K", "a", "b"]], ["LPOP", "K"], True)
         writes("LPOP with a count", [["RPUSH", "K", "a", "b"]], ["LPOP", "K", "2"], True)
         writes("LPOP of a missing key", [], ["LPOP", "K"], False)
+        writes("LPOP with a count of 0", [["RPUSH", "K", "a"]], ["LPOP", "K", "0"], False)
         writes("BLPOP that pops at once", [["RPUSH", "K", "a"]], ["BLPOP", "K", "1"], True)
         writes("XADD", [], ["XADD", "K", "1-1", "f", "v"], True)
         writes("XADD that fails", [["XADD", "K", "5-1", "f", "v"]], ["XADD", "K", "1-1", "f", "v"], False)
@@ -2122,6 +2124,12 @@ def stages_optimistic_locking(prog):
             b.call("GET", key)
         got = tx_after([key], expire_and_read, key=rand_word())
         check("local: a watched key that expires and is read makes EXEC fail", got is None, repr(got))
+        key = rand_word()
+        a.call("SET", key, "1", "PX", "50")
+        time.sleep(0.2)
+        got = tx_after([key], lambda: None, key=rand_word())
+        check("local: WATCH of a key that has expired already lets EXEC run",
+              got == ["OK"], repr(got))
         key = rand_word()
         a.call("SET", key, "1", "PX", "5000")
         got = tx_after([key], lambda: None, key=rand_word())
@@ -2204,9 +2212,20 @@ def stages_optimistic_locking(prog):
                 time.sleep(0.2)
             return go
         worst, wrong, _ = measure_while(srv, run(encode("WATCH", *keys)))
-        check("local: W1 WATCH of 1048575 keys stalls PING at most 1 s",
-              worst <= 1.0 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
-        got2 = c.call("WATCH", "x1", "x2")
+        check("local: W1 WATCH of 1048575 keys stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        second = srv.client()
+
+        def second_watch():
+            second.send_raw(encode("WATCH", *keys))
+            got[0] = second.try_read(30)
+            time.sleep(0.2)
+        worst, wrong, _ = measure_while(srv, second_watch)
+        check("local: W3 a second client that watches the same 1048575 keys stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        second.close()
+        check("local: a client may watch 1048576 keys", c.call("WATCH", "x0") == "OK")
+        got2 = c.call("WATCH", "x1")
         check("local: a client may not watch more than 1048576 keys",
               isinstance(got2, Error) and "too many" in got2, repr(got2))
         c.call("MULTI")
@@ -2215,6 +2234,31 @@ def stages_optimistic_locking(prog):
         check("local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.15 s",
               worst <= 0.15 and not wrong and got[0] == ["PONG"], "worst %.3f s, %r" % (worst, got[0]))
         check("local: after it the client may watch again", c.call("WATCH", "x1") == "OK")
+        c.call("UNWATCH")
+
+        # W4: 100 clients watch one key, and one EXEC writes it 65535 times.
+        # The first write marks them all; the next ones cost no more.
+        hot = []
+        for _ in range(100):
+            h = srv.client()
+            h.call("WATCH", "hot")
+            hot.append(h)
+        c.call("MULTI")
+        for i in range(0, 65535, 4096):
+            n = min(4096, 65535 - i)
+            c.send_raw(encode("INCR", "hot") * n)
+            for _ in range(n):
+                c.try_read(10)
+        worst, wrong, _ = measure_while(srv, run(encode("EXEC")))
+        check("local: W4 EXEC of 65535 INCR of a key that 100 clients watch stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and isinstance(got[0], list) and got[0][-1] == 65535,
+              "worst %.3f s" % worst)
+        h = hot[0]
+        h.call("MULTI")
+        h.call("PING")
+        check("local: W4 the watchers are marked", h.call("EXEC") is None)
+        for h in hot:
+            h.close()
         c.close()
     finally:
         srv.stop()

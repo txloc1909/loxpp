@@ -33,7 +33,7 @@
  },
  {
   "name": "WATCH records only the first key",
-  "old": "        i = i + 1;\n    }\n    return simple(\"OK\");",
+  "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    return simple(\"OK\");",
   "new": "        i = len(argv);\n    }\n    return simple(\"OK\");",
   "cases": [
    "optimistic-locking-04 a write to the second watched key makes EXEC fail"
@@ -97,8 +97,8 @@
  },
  {
   "name": "LPOP with a count does not mark",
-  "old": "    var reply = entry.value.takeLeft(count);\n    touch(argv[1]);",
-  "new": "    var reply = entry.value.takeLeft(count);",
+  "old": "        // as in Redis.\n        touch(argv[1]);\n    }",
+  "new": "        // as in Redis.\n    }",
   "cases": [
    "local: WATCH and LPOP with a count"
   ]
@@ -109,14 +109,6 @@
   "new": "    stream.add(id.ms, id.seq, argv[3:len(argv)]);",
   "cases": [
    "local: WATCH and XADD"
-  ]
- },
- {
-  "name": "an expired key that is read does not mark",
-  "old": "        store.del(key);\n        touch(key);\n        return nil;",
-  "new": "        store.del(key);\n        return nil;",
-  "cases": [
-   "local: a watched key that expires and is read makes EXEC fail"
   ]
  },
  {
@@ -181,6 +173,46 @@
   "new": "            if (wasIn and conn.tx == nil and type(reply) == \"List\") {",
   "cases": [
    "local: a failed EXEC forgets the watched keys"
+  ]
+ },
+ {
+  "name": "W1 no yield in WATCH",
+  "old": "        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    return simple(\"OK\");",
+  "new": "    }\n    return simple(\"OK\");",
+  "cases": [
+   "local: W1 WATCH of 1048575 keys stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "W4 touch keeps the marked watchers",
+  "old": "    watchers.del(key);\n    if (isConn(w)) {",
+  "new": "    if (isConn(w)) {",
+  "cases": [
+   "local: W4 EXEC of 65535 INCR of a key that 100 clients watch stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "LPOP with a count of 0 marks",
+  "old": "    if (count > 0) {\n        // LPOP with a count of 0",
+  "new": "    if (true) {\n        // LPOP with a count of 0",
+  "cases": [
+   "local: WATCH and LPOP with a count of 0"
+  ]
+ },
+ {
+  "name": "WATCH registers an expired key before it removes it",
+  "old": "            var entry = store[key];\n            if (entry != nil and entry.expiresAt != nil) {\n                // lookup",
+  "new": "            watched[key] = true;\n            var entry = store[key];\n            if (entry != nil and entry.expiresAt != nil) {\n                watchers[key] = conn;\n                // lookup",
+  "cases": [
+   "local: WATCH of a key that has expired already lets EXEC run"
+  ]
+ },
+ {
+  "name": "the watch bound is one key short",
+  "old": "    if (conn.watchCount + len(argv) - 1 > WATCH_MAX) {",
+  "new": "    if (conn.watchCount + len(argv) - 1 >= WATCH_MAX) {",
+  "cases": [
+   "local: a client may watch 1048576 keys"
   ]
  }
 ]
