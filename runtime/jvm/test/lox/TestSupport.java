@@ -31,6 +31,45 @@ public final class TestSupport {
         }
     }
 
+    /**
+     * Asserts that the action raises a fatal Lox++ fault: an internally raised
+     * one, which no Lox++ `try` can catch ({@link LoxError#isCatchable()} is
+     * false). A catchable fault is a Lox++ value, such as the NetworkError of
+     * a refused connection, so a `try` in the program would catch it and it
+     * fails here. Use this where the kind of fault, not only the fact of one,
+     * is the rule under test.
+     */
+    public static void checkFatal(Runnable action, String description) {
+        try {
+            action.run();
+            check(false, description + " (expected a fatal fault but nothing was thrown)");
+        } catch (LoxError e) {
+            check(!e.isCatchable(),
+                    description + " (expected a fatal fault but got the catchable one: "
+                            + e.getMessage() + ")");
+        } catch (Throwable t) {
+            check(false, description + " (expected a fatal fault but got "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage() + ")");
+        }
+    }
+
+    /**
+     * Asserts that the action raises no fatal Lox++ fault. It may succeed, or
+     * raise a catchable one, as a connection attempt does when it is refused.
+     */
+    public static void checkNotFatal(Runnable action, String description) {
+        try {
+            action.run();
+            check(true, description);
+        } catch (LoxError e) {
+            check(e.isCatchable(),
+                    description + " (expected no fatal fault but got: " + e.getMessage() + ")");
+        } catch (Throwable t) {
+            check(false, description + " (expected no fatal fault but got "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage() + ")");
+        }
+    }
+
     public static int finish(String suiteName) {
         System.out.println(suiteName + ": " + (checks - failures) + "/" + checks + " checks passed");
         return (failures == 0) ? 0 : 1;

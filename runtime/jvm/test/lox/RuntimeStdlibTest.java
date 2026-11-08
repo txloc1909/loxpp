@@ -2,6 +2,8 @@ package lox;
 
 import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
+import static lox.TestSupport.checkFatal;
+import static lox.TestSupport.checkNotFatal;
 import static lox.TestSupport.checkThrows;
 
 public final class RuntimeStdlibTest {
@@ -79,6 +81,7 @@ public final class RuntimeStdlibTest {
 
         checkOpenRoundtrip(globals);
         checkOsAccess(globals);
+        checkIntegerArguments(globals);
 
         System.exit(TestSupport.finish("RuntimeStdlibTest"));
     }
@@ -117,6 +120,113 @@ public final class RuntimeStdlibTest {
         checkThrows(() -> call(globals, "sleep", "long"), LoxError.class, "sleep() rejects a non-number");
 
         checkFsOsAccess(globals);
+    }
+
+    // The port-range grid of spec/05-stdlib.md, "Integer arguments": one row
+    // per cell of three functions, two kinds of port, and the accepted and
+    // refused side of each end of the range. One check per row, so a bound
+    // that changes for one kind or one end alone fails.
+    private static final Object[][] PORT_GRID = {
+        // connect takes a port from 1 through 65535.
+        {"connect", 0L, Boolean.FALSE},
+        {"connect", 0.0, Boolean.FALSE},
+        {"connect", 1L, Boolean.TRUE},
+        {"connect", 1.0, Boolean.TRUE},
+        {"connect", 65535L, Boolean.TRUE},
+        {"connect", 65535.0, Boolean.TRUE},
+        {"connect", 65536L, Boolean.FALSE},
+        {"connect", 65536.0, Boolean.FALSE},
+        // connect_within takes the same port.
+        {"connect_within", 0L, Boolean.FALSE},
+        {"connect_within", 0.0, Boolean.FALSE},
+        {"connect_within", 1L, Boolean.TRUE},
+        {"connect_within", 1.0, Boolean.TRUE},
+        {"connect_within", 65535L, Boolean.TRUE},
+        {"connect_within", 65535.0, Boolean.TRUE},
+        {"connect_within", 65536L, Boolean.FALSE},
+        {"connect_within", 65536.0, Boolean.FALSE},
+        // listen takes a port from 0 through 65535.
+        {"listen", -1L, Boolean.FALSE},
+        {"listen", -1.0, Boolean.FALSE},
+        {"listen", 0L, Boolean.TRUE},
+        {"listen", 0.0, Boolean.TRUE},
+        {"listen", 65535L, Boolean.TRUE},
+        {"listen", 65535.0, Boolean.TRUE},
+        {"listen", 65536L, Boolean.FALSE},
+        {"listen", 65536.0, Boolean.FALSE},
+    };
+
+    // A port that is not an integer at all is refused by every function: a
+    // Number that is not integer-valued, and a value of any other kind
+    // (spec/05-stdlib.md, "Integer arguments").
+    private static final Object[][] NOT_INTEGER_PORTS = {
+        {"connect", 1.5, Boolean.FALSE},
+        {"connect", Double.NaN, Boolean.FALSE},
+        {"connect", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"connect", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"connect", "3", Boolean.FALSE},
+        {"connect_within", 1.5, Boolean.FALSE},
+        {"connect_within", Double.NaN, Boolean.FALSE},
+        {"connect_within", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"connect_within", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"connect_within", "3", Boolean.FALSE},
+        {"listen", 1.5, Boolean.FALSE},
+        {"listen", Double.NaN, Boolean.FALSE},
+        {"listen", Double.POSITIVE_INFINITY, Boolean.FALSE},
+        {"listen", Double.NEGATIVE_INFINITY, Boolean.FALSE},
+        {"listen", "3", Boolean.FALSE},
+    };
+
+    // Mirrors test/test_net_process.cpp's NetProcessTest.InvalidPortFatal for
+    // the JVM's own copy of the check. A port outside its range, and a port
+    // that is not an integer, is a fatal fault: a catchable one would mean the
+    // call reached the connection attempt, whose NetworkError a program's
+    // `try` can catch, so the port was not refused at all.
+    private static void checkIntegerArguments(LoxGlobals globals) {
+        checkGrid(globals, PORT_GRID, 24, "port range");
+        checkGrid(globals, NOT_INTEGER_PORTS, 15, "not an integer");
+    }
+
+    // Runs one check per row, and one check that the table has `expected` rows
+    // with no repeat, so a row that is lost or copied cannot pass.
+    private static void checkGrid(LoxGlobals globals, Object[][] grid, int expected,
+                                  String noun) {
+        check(grid.length == expected, "the " + noun + " grid has one row per cell");
+        java.util.Set<String> cells = new java.util.HashSet<>();
+        for (Object[] row : grid) {
+            cells.add(row[0] + "/" + LoxOps.str(row[1]) + "/"
+                      + row[1].getClass().getSimpleName() + "/" + row[2]);
+        }
+        check(cells.size() == grid.length, "no " + noun + " grid row repeats another");
+        for (Object[] row : grid) {
+            checkPort(globals, (String) row[0], row[1], (Boolean) row[2]);
+        }
+    }
+
+    // One cell: an accepted port must reach the network, where a fault is
+    // catchable, and a refused one must be a fatal fault.
+    private static void checkPort(LoxGlobals globals, String function, Object port,
+                                  boolean accepted) {
+        String shown = function + "() " + (accepted ? "accepts port " : "rejects port ")
+                + LoxOps.str(port) + (port instanceof Long ? "i" : "");
+        Object[] args = function.equals("connect_within")
+                ? new Object[] {"127.0.0.1", port, 5.0}
+                : new Object[] {"127.0.0.1", port};
+        if (accepted) {
+            checkNotFatal(() -> closeQuietly(call(globals, function, args)), shown);
+        } else {
+            checkFatal(() -> call(globals, function, args), shown);
+        }
+    }
+
+    // A Socket or a Server that a call returned, closed, so a check that only
+    // wants to see that the call reached the network leaves nothing open.
+    private static void closeQuietly(Object value) {
+        if (value instanceof LoxSocket) {
+            ((LoxSocket) value).close();
+        } else if (value instanceof LoxServer) {
+            ((LoxServer) value).close();
+        }
     }
 
     private static void checkFsOsAccess(LoxGlobals globals) {
