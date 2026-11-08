@@ -160,6 +160,25 @@ SCRIPTS = {
             ["WATCH", "a", "a", "b"], ["SET", "b", "1"], ["MULTI"], ["PING"], ["EXEC"],
         ]),
     ],
+    "keys-config": [
+        ("keys-patterns", [
+            ["SET", "foo", "1"], ["SET", "fob", "1"], ["SET", "bar", "1"], ["SET", "a*b", "1"],
+            ["SET", "x?y", "1"], ["SET", "[z]", "1"], ["RPUSH", "list", "a"],
+            ["XADD", "stream", "1-1", "f", "v"], ["SET", "", "empty"],
+            ["KEYS", "*"], ["KEYS", "f*"], ["KEYS", "fo?"], ["KEYS", "?o?"], ["KEYS", "[ab]*"],
+            ["KEYS", "[a-c]*"], ["KEYS", "[^f]*"], ["KEYS", "a\\*b"], ["KEYS", "a*b"],
+            ["KEYS", "x\\?y"], ["KEYS", "\\[z\\]"], ["KEYS", "*o*"], ["KEYS", "nothing"],
+            ["KEYS", ""], ["KEYS", "[z"], ["KEYS", "*[b]"], ["KEYS", "[c-a]*"],
+            ["KEYS", "[a-]"], ["KEYS", "**"], ["KEYS", "?**"], ["KEYS", "[fb"],
+            ["SET", "_", "1"], ["KEYS", "[a-]"],
+            ["SET", "\xff", "1"], ["KEYS", "[a-\xff]"], ["KEYS", "[\xff-a]"],
+            ["KEYS"], ["KEYS", "a", "b"], ["keys", "f*"],
+        ]),
+        ("config", [
+            ["CONFIG", "GET", "nosuch"], ["CONFIG"], ["CONFIG", "GET"],
+            ["CONFIG", "NOSUCH"], ["config", "get", "NOSUCH"],
+        ]),
+    ],
     "transactions": [
         ("incr", [
             ["SET", "n", "41"], ["INCR", "n"], ["INCR", "new"], ["SET", "x", "abc"],
@@ -319,7 +338,14 @@ class RedisServer:
 def run_script(server, script):
     c = server.client()
     try:
-        return [normalize(c.call(*cmd)) for cmd in script]
+        out = []
+        for cmd in script:
+            reply = normalize(c.call(*cmd))
+            # KEYS gives no order.
+            if cmd and cmd[0].upper() == "KEYS" and isinstance(reply, list):
+                reply = sorted(reply)
+            out.append(reply)
+        return out
     finally:
         c.close()
 
@@ -361,8 +387,104 @@ def main():
             finally:
                 oracle.stop()
                 ours.stop()
+    rdb_checks(prog)
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
+
+
+RDB_CASES = [
+    ("rdb-strings", [
+        ["SET", "short", "bar"], ["SET", "i8", "12"], ["SET", "neg8", "-100"],
+        ["SET", "i16", "30000"], ["SET", "neg16", "-30000"], ["SET", "i32", "70000"],
+        ["SET", "neg32", "-2000000000"], ["SET", "big", "3000000000"],
+        ["SET", "long", "abcabcabc" * 60], ["SET", "bin", "\x00\xff\r\n\x80"],
+        ["SET", "empty", ""], ["SET", "a key", "a value"], ["SET", "007", "lead"],
+        ["SET", "1e3", "x"],
+    ], [["KEYS", "*"], ["GET", "short"], ["GET", "i8"], ["GET", "neg8"], ["GET", "i16"],
+        ["GET", "neg16"], ["GET", "i32"], ["GET", "neg32"], ["GET", "big"], ["GET", "long"],
+        ["GET", "bin"], ["GET", "empty"], ["GET", "a key"], ["GET", "007"], ["GET", "1e3"],
+        ["KEYS", "i*"], ["CONFIG", "GET", "dbfilename"]]),
+    ("rdb-expiry", [
+        ["SET", "later", "v", "PX", "600000"], ["SET", "later-s", "v", "EX", "600"],
+        ["SET", "soon", "v", "PX", "1500"], ["SET", "plain", "v"],
+    ], [["KEYS", "*"], ["GET", "later"], ["GET", "later-s"], ["GET", "soon"], ["GET", "plain"]]),
+]
+
+
+def rdb_checks(prog):
+    """Each case: a seed redis-server gets the commands and saves an RDB
+    file; then redis-server and the Lox++ server load the same file from
+    the same directory and get the same read commands. A key that expires
+    while the file waits checks that the load skips an expired key."""
+    global PASS, FAIL
+    print("== rdb (one file, loaded by both servers)")
+    for name, setup, reads in RDB_CASES:
+        d = tempfile.mkdtemp(prefix="loxpp-rdb-")
+        seed_port = free_port()
+        seed = subprocess.Popen(
+            ["redis-server", "--port", str(seed_port), "--bind", "127.0.0.1", "--save", "",
+             "--appendonly", "no", "--dir", d, "--dbfilename", "seed.rdb"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        oracle = ours = None
+        try:
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    socket.create_connection(("127.0.0.1", seed_port), timeout=0.2).close()
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            c = Client(seed_port)
+            for cmd in setup:
+                c.call(*[x.encode("latin-1").decode("unicode_escape") if "\\x" in x else x
+                         for x in cmd])
+            c.call("SAVE")
+            c.close()
+            seed.terminate()
+            seed.wait(timeout=5)
+            time.sleep(2)
+            oracle_port = free_port()
+            oracle = subprocess.Popen(
+                ["redis-server", "--port", str(oracle_port), "--bind", "127.0.0.1",
+                 "--save", "", "--appendonly", "no", "--dir", d, "--dbfilename", "seed.rdb"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ours = Server(prog, ["--dir", d, "--dbfilename", "seed.rdb"])
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                try:
+                    socket.create_connection(("127.0.0.1", oracle_port), timeout=0.2).close()
+                    break
+                except OSError:
+                    time.sleep(0.05)
+
+            class Port:
+                def __init__(self, port):
+                    self.port = port
+
+                def client(self):
+                    return Client(self.port)
+            want = run_script(Port(oracle_port), reads)
+            got = run_script(ours, reads)
+            if want == got:
+                PASS += 1
+                print("  ok   %s" % name)
+            else:
+                FAIL += 1
+                print("  FAIL %s" % name)
+                for cmd, w, g in zip(reads, want, got):
+                    if w != g:
+                        print("       %r: redis %r, lox %r" % (cmd, w, g))
+        except (OSError, EOFError, ValueError) as e:
+            FAIL += 1
+            print("  FAIL %s  %r" % (name, e))
+        finally:
+            for proc in (seed, oracle):
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+            if ours is not None:
+                ours.stop()
+            shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,354 @@
+[
+ {
+  "name": "CONFIG GET dir gives the file name",
+  "old": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DIR);",
+  "new": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DBFILENAME);",
+  "cases": [
+   "persistence-rdb-01 CONFIG GET dir"
+  ]
+ },
+ {
+  "name": "--dbfilename ignored",
+  "old": "    CONFIG_DBFILENAME = flagValue(\"--dbfilename\", CONFIG_DBFILENAME);\n",
+  "new": "",
+  "cases": [
+   "persistence-rdb-01 CONFIG GET dbfilename"
+  ]
+ },
+ {
+  "name": "the RDB file is not loaded",
+  "old": "    try {\n        loadRdb(CONFIG_DIR + \"/\" + CONFIG_DBFILENAME);",
+  "new": "    try {\n        CONFIG_DIR + \"/\" + CONFIG_DBFILENAME;",
+  "cases": [
+   "persistence-rdb-02 KEYS * gives the key"
+  ]
+ },
+ {
+  "name": "KEYS gives no key",
+  "old": "    return KeysReply(argv[1], store.keys(), store.values(), nowMs());",
+  "new": "    return arrayReply([]);",
+  "cases": [
+   "persistence-rdb-02 KEYS * gives the key"
+  ]
+ },
+ {
+  "name": "the load stops after one key",
+  "old": "            expiresAt = nil;\n        } else {\n            throw RdbError(\"the file has the opcode",
+  "new": "            expiresAt = nil;\n            return;\n        } else {\n            throw RdbError(\"the file has the opcode",
+  "cases": [
+   "persistence-rdb-04 KEYS * gives every key"
+  ]
+ },
+ {
+  "name": "an RDB value is the key",
+  "old": "                store[key] = Entry(\"string\", value, expiresAt);",
+  "new": "                store[key] = Entry(\"string\", key, expiresAt);",
+  "cases": [
+   "persistence-rdb-03 GET gives the value"
+  ]
+ },
+ {
+  "name": "the expiry in ms is dropped",
+  "old": "            expiresAt = r.le(8);",
+  "new": "            r.le(8);",
+  "cases": [
+   "persistence-rdb-06 a key that has expired"
+  ]
+ },
+ {
+  "name": "the expiry in seconds is read as ms",
+  "old": "            expiresAt = expiresAt * 1000;",
+  "new": "",
+  "cases": [
+   "local: a key with a future expiry in seconds"
+  ]
+ },
+ {
+  "name": "the expiry passes to the next key",
+  "old": "            expiresAt = nil;\n        } else {",
+  "new": "        } else {",
+  "cases": [
+   "local: a key with no expiry after an expired key"
+  ]
+ },
+ {
+  "name": "little-endian read as big-endian",
+  "old": "            v = v + this.byte() * m;\n            m = m * 256;",
+  "new": "            v = v * 256 + this.byte();",
+  "cases": [
+   "local: RDB integer strings of 1, 2 and 4 bytes"
+  ]
+ },
+ {
+  "name": "an integer string is unsigned",
+  "old": "        if (v >= half) {\n            return v - 2 * half;\n        }",
+  "new": "",
+  "cases": [
+   "local: RDB integer strings of 1, 2 and 4 bytes"
+  ]
+ },
+ {
+  "name": "a 14-bit length drops its high bits",
+  "old": "            return (b % 64) * 256 + this.byte();",
+  "new": "            return this.byte();",
+  "cases": [
+   "local: RDB lengths of 14 and 32 bits"
+  ]
+ },
+ {
+  "name": "a 32-bit length read as 16 bits",
+  "old": "            if (b == 128) {\n                return this.be(4);",
+  "new": "            if (b == 128) {\n                return this.be(2);",
+  "cases": [
+   "local: RDB lengths of 14 and 32 bits"
+  ]
+ },
+ {
+  "name": "an LZF back reference is off by one",
+  "old": "            var ref = len(out) - (ctrl % 32) * 256 - ord(input[i]) - 1;",
+  "new": "            var ref = len(out) - (ctrl % 32) * 256 - ord(input[i]);",
+  "cases": [
+   "local: an RDB string compressed with LZF"
+  ]
+ },
+ {
+  "name": "an integer key is read as text",
+  "old": "        if (k == 0) {\n            return str(this.signed(this.byte(), 8));",
+  "new": "        if (k == 0) {\n            return \"k\" + str(this.signed(this.byte(), 8));",
+  "cases": [
+   "local: an RDB key stored as an integer"
+  ]
+ },
+ {
+  "name": "no REDIS header check",
+  "old": "    if (r.take(5) != \"REDIS\") {",
+  "new": "    if (r.take(5) == \"\") {",
+  "cases": [
+   "local: a file with no REDIS header stops the start"
+  ]
+ },
+ {
+  "name": "another value kind is skipped",
+  "old": "            throw RdbError(\"the file has the opcode or value kind \" + str(op) + \"; this server loads strings only\");",
+  "new": "            r.string();\n            r.string();",
+  "cases": [
+   "local: a value kind that this server has not stops the start"
+  ]
+ },
+ {
+  "name": "a key of database 1 is loaded",
+  "old": "            if (db != 0) {\n                throw RdbError",
+  "new": "            if (false) {\n                throw RdbError",
+  "cases": [
+   "local: a key in database 1 stops the start"
+  ]
+ },
+ {
+  "name": "KEYS lists an expired key",
+  "old": "        if ((entry.expiresAt == nil or reply.now < entry.expiresAt)",
+  "new": "        if ((true)",
+  "cases": [
+   "local: KEYS skips a key that expired after the load"
+  ]
+ },
+ {
+  "name": "glob ? needs a letter o",
+  "old": "    if (ch == \"?\") {\n        return 1;",
+  "new": "    if (ch == \"?\") {\n        if (c == \"o\") {\n            return 1;\n        }\n        return -1;",
+  "cases": [
+   "local: KEYS fo?"
+  ]
+ },
+ {
+  "name": "glob [^] is not negated",
+  "old": "            negate = true;\n            j = j + 1;",
+  "new": "            j = j + 1;",
+  "cases": [
+   "local: KEYS [^fkx_]*"
+  ]
+ },
+ {
+  "name": "glob ranges are ignored",
+  "old": "                if (code >= lo and code <= hi) {",
+  "new": "                if (false) {",
+  "cases": [
+   "local: KEYS [a-b]?r"
+  ]
+ },
+ {
+  "name": "glob escape is ignored",
+  "old": "    if (ch == \"\\\\\" and pi + 1 < len(p)) {\n        if (p[pi + 1] == c) {",
+  "new": "    if (ch == \"\\\\\" and pi + 1 < len(p)) {\n        if (true) {",
+  "cases": [
+   "local: KEYS a\\*b"
+  ]
+ },
+ {
+  "name": "glob * matches one byte only",
+  "old": "            starP = pi;\n            starS = si;\n            pi = pi + 1;",
+  "new": "            starP = -1;\n            starS = si;\n            pi = pi + 1;\n            si = si + 1;",
+  "cases": [
+   "local: KEYS [ab]*"
+  ]
+ },
+ {
+  "name": "K4 no yield while KEYS filters",
+  "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    var out = Output(conn);",
+  "new": "        i = i + 1;\n    }\n    var out = Output(conn);",
+  "cases": [
+   "local: K4 KEYS nomatch of 524288 keys stalls PING at most 0.1 s"
+  ]
+ },
+ {
+  "name": "K2 no yield in glob work",
+  "old": "    if (globSteps >= GLOB_STEPS_PER_YIELD) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: K2 KEYS with a slow pattern stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "no version check",
+  "old": "    if (!isDigits(version) or version == \"0000\") {",
+  "new": "    if (version == \"\") {",
+  "cases": [
+   "local: a version that is not a number stops the start"
+  ]
+ },
+ {
+  "name": "a negative expiry is far away",
+  "old": "            if (top >= 128) {\n                expiresAt = 0;\n            }",
+  "new": "",
+  "cases": [
+   "local: a negative expiry in ms has passed"
+  ]
+ },
+ {
+  "name": "an LRU idle time is not skipped",
+  "old": "        } else if (op == 248) {\n            // The idle time of the next key, for an LRU policy.\n            r.length();",
+  "new": "        } else if (op == 247) {\n            r.length();",
+  "cases": [
+   "local: an RDB file with an LRU idle time loads"
+  ]
+ },
+ {
+  "name": "an LFU count is not skipped",
+  "old": "        } else if (op == 249) {\n            // The access count of the next key, for an LFU policy.\n            r.byte();",
+  "new": "        } else if (op == 246) {\n            r.byte();",
+  "cases": [
+   "local: an RDB file with an LFU count loads"
+  ]
+ },
+ {
+  "name": "a 64-bit length read as 32 bits",
+  "old": "            if (b == 129) {\n                return this.be(8);",
+  "new": "            if (b == 129) {\n                return this.be(4);",
+  "cases": [
+   "local: an RDB length of 64 bits"
+  ]
+ },
+ {
+  "name": "CONFIG GET gives names in lower case",
+  "old": "        out.append(found[i]);\n        if (lower(found[i]) == \"dir\") {",
+  "new": "        out.append(lower(found[i]));\n        if (lower(found[i]) == \"dir\") {",
+  "cases": [
+   "local: CONFIG GET of two names gives each once, as sent"
+  ]
+ },
+ {
+  "name": "KEYS in EXEC spends no budget",
+  "old": "    if (!spendElements(2 * len(store))) {\n        return EXEC_TOO_LARGE;\n    }\n    return KeysReply",
+  "new": "    return KeysReply",
+  "cases": [
+   "local: KEYS in EXEC spends the element budget"
+  ]
+ },
+ {
+  "name": "K3 the bytes of a set are not glob steps",
+  "old": "        while (j < len(p) and p[j] != \"]\") {\n            globStep();",
+  "new": "        while (j < len(p) and p[j] != \"]\") {",
+  "cases": [
+   "local: K3 KEYS with a long set stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "a set with no ] fails",
+  "old": "            // No \"]\": the set takes the rest of the pattern.\n            j = len(p) - 1;",
+  "new": "            return -1;",
+  "cases": [
+   "local: KEYS [fb"
+  ]
+ },
+ {
+  "name": "[a-] has no range to ]",
+  "old": "            } else if (j + 2 < len(p) and p[j + 1] == \"-\") {",
+  "new": "            } else if (j + 2 < len(p) and p[j + 1] == \"-\" and p[j + 2] != \"]\") {",
+  "cases": [
+   "local: KEYS [a-]"
+  ]
+ },
+ {
+  "name": "an escape in a set is ignored",
+  "old": "            if (p[j] == \"\\\\\" and j + 1 < len(p)) {\n                if (p[j + 1] == c) {",
+  "new": "            if (p[j] == \"\\\\\" and j + 1 < len(p)) {\n                if (true) {",
+  "cases": [
+   "local: KEYS x[\\]]"
+  ]
+ },
+ {
+  "name": "K5 no step for the stars at the end",
+  "old": "    while (pi < len(p) and p[pi] == \"*\") {\n        globStep();\n        pi = pi + 1;",
+  "new": "    while (pi < len(p) and p[pi] == \"*\") {\n        pi = pi + 1;",
+  "cases": [
+   "local: K5 KEYS ? and 262144 stars stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "range ends compared as unsigned",
+  "old": "    if (v >= 128) {\n        return v - 256;\n    }\n    return v;",
+  "new": "    return v;",
+  "cases": [
+   "local: KEYS [a-\u00ff]"
+  ]
+ },
+ {
+  "name": "FD is unsigned",
+  "old": "            if (expiresAt >= 2147483648) {\n                expiresAt = 0;\n            }",
+  "new": "",
+  "cases": [
+   "local: a negative expiry in seconds has passed"
+  ]
+ },
+ {
+  "name": "FC sign from the rounded sum",
+  "old": "            if (top >= 128) {",
+  "new": "            if (expiresAt >= 9223372036854775808) {",
+  "cases": [
+   "local: the greatest expiry in ms has not passed"
+  ]
+ },
+ {
+  "name": "version 0 accepted",
+  "old": "    if (!isDigits(version) or version == \"0000\") {",
+  "new": "    if (!isDigits(version)) {",
+  "cases": [
+   "local: version 0 stops the start"
+  ]
+ },
+ {
+  "name": "an empty key matches any pattern",
+  "old": "    if (len(s) == 0) {\n        return len(p) == 0;\n    }",
+  "new": "",
+  "cases": [
+   "local: KEYS ** does not give the empty key"
+  ]
+ },
+ {
+  "name": "an LRU idle time read as one byte",
+  "old": "            // The idle time of the next key, for an LRU policy.\n            r.length();",
+  "new": "            // The idle time of the next key, for an LRU policy.\n            r.byte();",
+  "cases": [
+   "local: an RDB file with an LRU idle time of 14 bits loads"
+  ]
+ }
+]
