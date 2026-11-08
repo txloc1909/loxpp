@@ -353,6 +353,7 @@ fun lookup(key) {
     }
     if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {
         store.del(key);
+        touch(key);
         return nil;
     }
     return entry;
@@ -433,6 +434,7 @@ fun cmdSet(argv) {
         expiresAt = old.expiresAt;
     }
     store[key] = Entry("string", argv[2], expiresAt);
+    touch(key);
     return reply;
 }
 
@@ -704,6 +706,7 @@ fun newList(key) {
 }
 
 fun popLeft(key, entry) {
+    touch(key);
     var v = entry.value.popLeft();
     if (entry.value.size() == 0) {
         store.del(key);
@@ -737,6 +740,7 @@ fun serveWaiters(key) {
                 back = newList(key);
             }
             back.value.pushLeft(value);
+            touch(key);
         }
     }
 }
@@ -792,6 +796,7 @@ fun cmdPush(argv, left) {
         i = i + 1;
     }
     var n = entry.value.size();
+    touch(argv[1]);
     listReady(argv[1]);
     return integerReply(n);
 }
@@ -887,6 +892,11 @@ fun cmdLpop(ctx, argv) {
         return EXEC_TOO_LARGE;
     }
     var reply = entry.value.takeLeft(count);
+    if (count > 0) {
+        // LPOP with a count of 0 changes nothing, so it marks no watcher,
+        // as in Redis.
+        touch(argv[1]);
+    }
     if (entry.value.size() == 0) {
         store.del(argv[1]);
     }
@@ -1151,6 +1161,7 @@ fun giveBack(key, value) {
         entry = newList(key);
     }
     entry.value.pushLeft(value);
+    touch(key);
     serveWaiters(key);
 }
 
@@ -1386,6 +1397,7 @@ fun cmdXadd(ctx, argv) {
         store[key] = Entry("stream", stream, nil);
     }
     stream.add(id.ms, id.seq, argv[3:len(argv)]);
+    touch(key);
     streamReady(key, stream);
     return bulk(idText(id.ms, id.seq));
 }
@@ -1834,6 +1846,7 @@ fun cmdIncr(ctx, argv) {
     var entry = lookup(argv[1]);
     if (entry == nil) {
         store[argv[1]] = Entry("string", "1", nil);
+        touch(argv[1]);
         return integerReply(1);
     }
     if (entry.kind != "string") {
@@ -1849,6 +1862,7 @@ fun cmdIncr(ctx, argv) {
     n = n + 1;
     // The key keeps its expiry, as in Redis.
     entry.value = str(n);
+    touch(argv[1]);
     return integerReply(n);
 }
 
@@ -1879,7 +1893,7 @@ var ARITY = {
     "PING": -1, "ECHO": 2, "SET": -3, "GET": 2, "INFO": -1,
     "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
     "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
-    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1
+    "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1
 };
 
 fun arityOk(name, count) {
@@ -1928,6 +1942,9 @@ fun inTransaction(conn, name, argv, nbytes) {
     if (name == "MULTI") {
         return errorReply("ERR MULTI calls can not be nested");
     }
+    if (name == "WATCH") {
+        return errorReply("ERR WATCH inside MULTI is not allowed");
+    }
     if (name == "DISCARD") {
         conn.tx = nil;
         return simple("OK");
@@ -1936,6 +1953,9 @@ fun inTransaction(conn, name, argv, nbytes) {
         conn.tx = nil;
         if (tx.dirty) {
             return errorReply("EXECABORT Transaction discarded because of previous errors.");
+        }
+        if (watchBroken(conn)) {
+            return NULL_ARRAY;
         }
         return execQueued(tx);
     }
@@ -2019,6 +2039,159 @@ fun writeReply(conn, reply) {
 }
 
 // ===========================================================================
+// Optimistic locking
+// ===========================================================================
+
+// key -> the clients that WATCH the key: the Conn itself for one client,
+// and a Map of Conn id -> Conn from the second one, because WATCH can join
+// many keys in one step. A Conn is not a Map key (it defines no __hash__),
+// so its id is.
+var watchers = {};
+
+// hasField on a Map is a halting fault, so the kind comes first.
+fun isConn(x) {
+    return type(x) == "Instance" and hasField(x, "sock");
+}
+
+// The most keys that one client may watch at a time (README rule 4): as
+// many as one command can name.
+var WATCH_MAX = 1048576;
+
+// Marks each client that watches key, so that its next EXEC fails. Every
+// command that writes the keyspace calls it, also a write that keeps the
+// value, as Redis does.
+//
+// A marked client stays marked until its next EXEC, so touch drops the key
+// from watchers after it marks them: each later write of the key costs one
+// Map read, not one step for each watcher, as in Redis.
+fun touch(key) {
+    var w = watchers[key];
+    if (w == nil) {
+        return;
+    }
+    watchers.del(key);
+    if (isConn(w)) {
+        if (w.watched.has(key)) {
+            w.watchDirty = true;
+        }
+        return;
+    }
+    for (var id in w.keys()) {
+        var conn = w[id];
+        if (conn.watched.has(key)) {
+            conn.watchDirty = true;
+        }
+    }
+}
+
+// WATCH outside a transaction. It yields every ELEMENTS_PER_YIELD keys,
+// because one WATCH can name 1048575 keys. A write while WATCH runs is
+// concurrent with it: a write of a key that WATCH has not joined yet comes
+// before WATCH, and a write of a key that it has joined marks the client,
+// which can make one EXEC fail that could have run, never the other way.
+// So no write after the reply of WATCH is missed.
+fun cmdWatch(conn, argv) {
+    if (conn.watchCount + len(argv) - 1 > WATCH_MAX) {
+        return errorReply("ERR the client watches too many keys");
+    }
+    // It reads each key with one Map access, and makes an object only for
+    // a key that a second client watches.
+    var watched = conn.watched;
+    var i = 1;
+    while (i < len(argv)) {
+        var key = argv[i];
+        if (!watched.has(key)) {
+            var entry = store[key];
+            if (entry != nil and entry.expiresAt != nil) {
+                // lookup removes an expired key now, before this client
+                // watches it, so that the removal marks only the others.
+                entry = lookup(key);
+                if (entry != nil) {
+                    conn.expiringKeys.append(key);
+                    conn.expiringAt.append(entry.expiresAt);
+                }
+            }
+            watched[key] = true;
+            conn.watchCount = conn.watchCount + 1;
+            var w = watchers[key];
+            if (w == nil) {
+                watchers[key] = conn;
+            } else if (isConn(w)) {
+                var map = {};
+                map[w.id] = w;
+                map[conn.id] = conn;
+                watchers[key] = map;
+            } else {
+                w[conn.id] = conn;
+            }
+        }
+        i = i + 1;
+        if (i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    return simple("OK");
+}
+
+// True when EXEC must fail: a command wrote a watched key, or a watched key
+// that had an expiry at WATCH has expired since, also when no command read
+// it, as Redis 7.0 does.
+fun watchBroken(conn) {
+    if (conn.watchDirty) {
+        return true;
+    }
+    var now = nowMs();
+    var i = 0;
+    while (i < len(conn.expiringKeys)) {
+        if (now >= conn.expiringAt[i]) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Forgets the watched keys of conn. The client watches nothing at once;
+// the old entries in watchers are dropped after, with a yield every
+// ELEMENTS_PER_YIELD keys, because a client can watch WATCH_MAX keys.
+// An old entry that touch() meets meanwhile marks nothing: the key is no
+// longer in conn.watched.
+fun unwatchAll(conn) {
+    if (conn.watchCount == 0) {
+        conn.watchDirty = false;
+        return;
+    }
+    var old = conn.watched;
+    conn.watched = {};
+    conn.watchCount = 0;
+    conn.watchDirty = false;
+    conn.expiringKeys = [];
+    conn.expiringAt = [];
+    var n = 0;
+    for (var key in old.keys()) {
+        var w = watchers[key];
+        if (w == conn) {
+            watchers.del(key);
+        } else if (w != nil and !isConn(w) and w[conn.id] == conn) {
+            w.del(conn.id);
+            if (len(w) == 0) {
+                watchers.del(key);
+            }
+        }
+        n = n + 1;
+        if (n % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+}
+
+// UNWATCH in a transaction runs in EXEC, which forgets the watched keys
+// after its step anyway.
+fun cmdUnwatchQueued(ctx, argv) {
+    return simple("OK");
+}
+
+// ===========================================================================
 // Command table
 // ===========================================================================
 
@@ -2067,7 +2240,8 @@ var COMMANDS = {
     "XADD": cmdXadd,
     "XRANGE": cmdXrange,
     "XREAD": cmdXread,
-    "INCR": cmdIncr
+    "INCR": cmdIncr,
+    "UNWATCH": cmdUnwatchQueued
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -2216,8 +2390,20 @@ class Conn {
         this.blocked = false;
         // The Transaction after MULTI, or nil.
         this.tx = nil;
+        // WATCH: key -> true for each watched key; watchDirty turns true
+        // when a command writes one of them. expiring lists the watched
+        // keys that had an expiry at WATCH, with that time.
+        this.id = nextConnId;
+        nextConnId = nextConnId + 1;
+        this.watched = {};
+        this.watchCount = 0;
+        this.watchDirty = false;
+        this.expiringKeys = [];
+        this.expiringAt = [];
     }
 }
+
+var nextConnId = 1;
 
 // The connections with a task that has not ended. INFO reports it as
 // connected_clients, so a task that outlives its connection shows there.
@@ -2345,12 +2531,32 @@ fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
     if (len(argv) > 0) {
         var name = upper(argv[0]);
+        if (conn.tx == nil and (name == "WATCH" or name == "UNWATCH")) {
+            var reply = nil;
+            if (!arityOk(name, len(argv))) {
+                reply = wrongArgs(lower(name));
+            } else if (name == "WATCH") {
+                reply = cmdWatch(conn, argv);
+            } else {
+                unwatchAll(conn);
+                reply = simple("OK");
+            }
+            conn.sock.write(reply);
+            giveCredit(conn);
+            return true;
+        }
         if (conn.tx != nil or name == "MULTI" or name == "EXEC" or name == "DISCARD") {
             var reply = nil;
-            if (conn.tx != nil) {
+            var wasIn = conn.tx != nil;
+            if (wasIn) {
                 reply = inTransaction(conn, name, argv, nbytes);
             } else {
                 reply = beginOrRefuse(conn, name, argv);
+            }
+            if (wasIn and conn.tx == nil) {
+                // EXEC or DISCARD ended the transaction: the client watches
+                // nothing after it, as in Redis.
+                unwatchAll(conn);
             }
             if (type(reply) == "List") {
                 writeReplies(conn, reply);
@@ -2529,6 +2735,9 @@ fun sessionLoop(conn) {
             printFault("connection fault: ", e);
         }
     }
+    // Here and not in endSession: unwatchAll yields, and a deferred call
+    // cannot suspend (YieldAcrossNativeError).
+    unwatchAll(conn);
 }
 
 // task.spawn passes no arguments, so closures hold the connection. Both

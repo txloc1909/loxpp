@@ -9,8 +9,8 @@
  },
  {
   "name": "INCR of a missing key gives 0",
-  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        return integerReply(1);",
-  "new": "        store[argv[1]] = Entry(\"string\", \"0\", nil);\n        return integerReply(0);",
+  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        touch(argv[1]);\n        return integerReply(1);",
+  "new": "        store[argv[1]] = Entry(\"string\", \"0\", nil);\n        touch(argv[1]);\n        return integerReply(0);",
   "cases": [
    "transactions-02 INCR of a missing key"
   ]
@@ -41,8 +41,8 @@
  },
  {
   "name": "INCR drops the expiry",
-  "old": "    entry.value = str(n);\n    return integerReply(n);",
-  "new": "    store[argv[1]] = Entry(\"string\", str(n), nil);\n    return integerReply(n);",
+  "old": "    entry.value = str(n);\n    touch(argv[1]);",
+  "new": "    store[argv[1]] = Entry(\"string\", str(n), nil);\n    touch(argv[1]);",
   "cases": [
    "local: INCR keeps the expiry"
   ]
