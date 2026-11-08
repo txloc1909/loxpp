@@ -2612,6 +2612,263 @@ def stages_rdb(prog):
         srv.stop()
 
 
+class FakeMaster:
+    """A master played by the test: it listens, takes one replica, and
+    records the handshake commands that it gets."""
+
+    def __init__(self):
+        self.lsock = socket.socket()
+        self.lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.lsock.bind(("127.0.0.1", 0))
+        self.lsock.listen(4)
+        self.port = self.lsock.getsockname()[1]
+        self.link = None
+
+    def accept(self, timeout=5):
+        self.lsock.settimeout(timeout)
+        conn, _ = self.lsock.accept()
+        conn.settimeout(5)
+        link = Client.__new__(Client)
+        link.sock = conn
+        link.buf = b""
+        self.link = link
+        return link
+
+    def close(self):
+        if self.link is not None:
+            self.link.close()
+        self.lsock.close()
+
+
+def fake_handshake(link, rdb=b"REDIS0011\xff" + b"\x00" * 8):
+    """Plays the master side of the handshake on link. Returns the commands
+    that the replica sent."""
+    got = []
+    for reply in (b"+PONG\r\n", b"+OK\r\n", b"+OK\r\n"):
+        got.append(link.read())
+        link.send_raw(reply)
+    got.append(link.read())
+    link.send_raw(b"+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0\r\n")
+    link.send_raw(b"$%d\r\n" % len(rdb) + rdb)
+    return got
+
+
+def replica_handshake(port):
+    """A replica played by the test: does the handshake with the server at
+    port. Returns (client, the FULLRESYNC line, the RDB bytes)."""
+    r = Client(port)
+    r.call("PING")
+    r.call("REPLCONF", "listening-port", "6380")
+    r.call("REPLCONF", "capa", "psync2")
+    r.send_raw(encode("PSYNC", "?", "-1"))
+    full = r._line().decode("latin-1")
+    header = r._line()
+    rdb = r._exact(int(header[1:]))
+    return r, full, rdb
+
+
+def stages_replication(prog):
+    srv = Server(prog, [])
+    try:
+        check("replication: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = Asker(srv)
+        check("replication-01 the server listens on --port", c.call("PING") == "PONG")
+        info = c.call("INFO", "replication")
+        check("replication-02 INFO replication of a master gives role:master",
+              isinstance(info, str) and "role:master" in info, repr(info)[:80])
+        lines = dict(l.split(":", 1) for l in info.split("\r\n") if ":" in l)
+        replid = lines.get("master_replid", "")
+        check("replication-04 master_replid has 40 letters and digits",
+              len(replid) == 40 and replid.isalnum(), repr(replid))
+        check("replication-04 master_repl_offset is 0", lines.get("master_repl_offset") == "0")
+
+        # The master side of the handshake, with a replica played here.
+        r = Client(srv.port)
+        check("replication-08 PING gives PONG", r.call("PING") == "PONG")
+        check("replication-08 REPLCONF listening-port gives OK",
+              r.call("REPLCONF", "listening-port", "6380") == "OK")
+        check("replication-08 REPLCONF capa gives OK", r.call("REPLCONF", "capa", "psync2") == "OK")
+        r.send_raw(encode("PSYNC", "?", "-1"))
+        full = r._line().decode("latin-1")
+        parts = full.split()
+        check("replication-09 PSYNC gives FULLRESYNC with the ID and offset 0",
+              len(parts) == 3 and parts[0] == "+FULLRESYNC" and parts[1] == replid and parts[2] == "0",
+              repr(full))
+        header = r._line()
+        rdb = r._exact(int(header[1:]))
+        check("replication-10 then an RDB file, with no CRLF after it",
+              rdb.startswith(b"REDIS") and rdb.endswith(b"\xff" + b"\x00" * 8) and r.buf == b"",
+              repr(rdb[:20]))
+
+        # Propagation to one replica and to three.
+        r2, _, _ = replica_handshake(srv.port)
+        r3, _, _ = replica_handshake(srv.port)
+        start = time.time()
+        got = c.call("WAIT", "3", "500")
+        check("replication-17 WAIT with no write since the replicas came gives their number at once",
+              got == 3 and time.time() - start < 0.4, repr(got))
+        c.call("SET", "foo", "123")
+        c.call("SET", "bar", "456")
+        c.call("SET", "baz", "789")
+        want = [["SET", "foo", "123"], ["SET", "bar", "456"], ["SET", "baz", "789"]]
+        got1 = [r.try_read(3) for _ in range(3)]
+        check("replication-11 the writes reach the replica, in order", got1 == want, repr(got1))
+        got2 = [r2.try_read(3) for _ in range(3)]
+        got3 = [r3.try_read(3) for _ in range(3)]
+        check("replication-12 the writes reach every replica", got2 == want and got3 == want,
+              "%r %r" % (got2, got3))
+        c.call("GET", "foo")
+        r.sock.settimeout(0.3)
+        try:
+            extra = r.sock.recv(4096)
+        except socket.timeout:
+            extra = b""
+        r.sock.settimeout(5)
+        check("local: a read is not propagated", extra == b"", repr(extra))
+
+        # The effective form of each write.
+        c.call("XADD", "s", "*", "f", "v")
+        got = r.try_read(3)
+        check("local: XADD * is propagated with the ID that the master gave",
+              isinstance(got, list) and got[:2] == ["XADD", "s"] and got[2] != "*" and got[3:] == ["f", "v"],
+              repr(got))
+        r2.try_read(3)
+        r3.try_read(3)
+        c.call("RPUSH", "l", "a", "b")
+        c.call("BLPOP", "l", "0")
+        got = [r.try_read(3) for _ in range(2)]
+        check("local: the pop of BLPOP is propagated as LPOP",
+              got == [["RPUSH", "l", "a", "b"], ["LPOP", "l"]], repr(got))
+        c.call("MULTI")
+        c.call("SET", "t", "1")
+        c.call("INCR", "t")
+        c.call("EXEC")
+        got = [r.try_read(3) for _ in range(4)]
+        check("local: a transaction is propagated in MULTI and EXEC",
+              got == [["MULTI"], ["SET", "t", "1"], ["INCR", "t"], ["EXEC"]], repr(got))
+        for x in (r2, r3):
+            for _ in range(6):
+                x.try_read(3)
+
+        # WAIT.
+        alone = Server(prog, [])
+        try:
+            a = alone.client()
+            check("replication-16 WAIT with no replica gives 0 at once", a.call("WAIT", "0", "60000") == 0)
+            a.close()
+        finally:
+            alone.stop()
+        c.call("SET", "w", "1")
+        for x in (r, r2, r3):
+            x.try_read(3)
+        # The replicas played here acknowledge the offset of the master
+        # before WAIT, which is what WAIT waits for.
+        info = c.call("INFO", "replication")
+        target = dict(l.split(":", 1) for l in info.split("\r\n") if ":" in l)["master_repl_offset"]
+        start = time.time()
+        c.raw().send_raw(encode("WAIT", "2", "2000"))
+        acks = 0
+        for x in (r, r2):
+            got = x.try_read(3)
+            if got == ["REPLCONF", "GETACK", "*"]:
+                x.send_raw(encode("REPLCONF", "ACK", target))
+                acks += 1
+        reply = c.raw().try_read(3)
+        check("replication-18 WAIT gives the replicas that acknowledged",
+              acks == 2 and reply == 2 and time.time() - start < 1.5, "%r %r" % (acks, reply))
+        r3.try_read(3)
+        c.call("SET", "w2", "1")
+        for x in (r, r2, r3):
+            x.try_read(3)
+        start = time.time()
+        reply = c.call("WAIT", "3", "500")
+        waited = time.time() - start
+        check("replication-18 WAIT ends at its time limit with the count so far",
+              reply == 0 and 0.4 <= waited <= 2.5, "%r after %.2f s" % (reply, waited))
+        for x in (r, r2, r3):
+            x.close()
+        time.sleep(0.2)
+        info = c.call("INFO", "replication")
+        check("local: replicas that go leave connected_slaves", "connected_slaves:0" in info, repr(info)[:120])
+        c.close()
+    finally:
+        srv.stop()
+
+    # The replica side, with a master played here.
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        check("replication: replica starts", rep.up, rep.log_text())
+        if not rep.up:
+            return
+        link = m.accept()
+        got = fake_handshake(link)
+        check("replication-05 the replica sends PING", got[0] == ["PING"], repr(got))
+        check("replication-06 the replica sends REPLCONF listening-port and capa",
+              got[1] == ["REPLCONF", "listening-port", str(rep.port)] and got[2] == ["REPLCONF", "capa", "psync2"],
+              repr(got))
+        check("replication-07 the replica sends PSYNC ? -1", got[3] == ["PSYNC", "?", "-1"], repr(got))
+        c = Asker(rep)
+        info = c.call("INFO", "replication")
+        check("replication-03 INFO replication of a replica gives role:slave",
+              isinstance(info, str) and "role:slave" in info, repr(info)[:80])
+        link.send_raw(encode("SET", "foo", "123") + encode("SET", "bar", "456") + encode("SET", "baz", "789"))
+        time.sleep(0.3)
+        check("replication-13 the replica applies the commands of the master",
+              [c.call("GET", k) for k in ("foo", "bar", "baz")] == ["123", "456", "789"])
+        link.sock.settimeout(0.3)
+        try:
+            extra = link.sock.recv(4096)
+        except socket.timeout:
+            extra = b""
+        link.sock.settimeout(5)
+        check("local: the replica sends no reply to the master", extra == b"", repr(extra))
+        offset = len(encode("SET", "foo", "123") + encode("SET", "bar", "456") + encode("SET", "baz", "789"))
+        link.send_raw(encode("REPLCONF", "GETACK", "*"))
+        got = link.try_read(3)
+        check("replication-15 REPLCONF GETACK gives the offset of the commands so far",
+              got == ["REPLCONF", "ACK", str(offset)], repr(got))
+        offset += len(encode("REPLCONF", "GETACK", "*"))
+        link.send_raw(encode("PING"))
+        link.send_raw(encode("REPLCONF", "GETACK", "*"))
+        got = link.try_read(3)
+        check("replication-15 the GETACK and a PING count in the offset",
+              got == ["REPLCONF", "ACK", str(offset + len(encode("PING")))], repr(got))
+        got = c.call("SET", "x", "1")
+        check("local: a replica refuses a write from a client",
+              isinstance(got, Error) and got.startswith("READONLY"), repr(got))
+        link.send_raw(encode("MULTI") + encode("SET", "t1", "a") + encode("SET", "t2", "b") + encode("EXEC"))
+        time.sleep(0.3)
+        check("local: the replica applies a transaction of the master",
+              [c.call("GET", "t1"), c.call("GET", "t2")] == ["a", "b"])
+        # When the link breaks, the replica connects again and syncs.
+        link.close()
+        link = m.accept(timeout=5)
+        got = fake_handshake(link)
+        check("local: the replica connects again after the link breaks",
+              got[3] == ["PSYNC", "?", "-1"], repr(got))
+        c.close()
+    finally:
+        rep.stop()
+        m.close()
+
+    # GETACK with no command first (stage 14), on a new replica.
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        link = m.accept()
+        fake_handshake(link)
+        link.send_raw(encode("REPLCONF", "GETACK", "*"))
+        got = link.try_read(3)
+        check("replication-14 REPLCONF GETACK with no command first gives ACK 0",
+              got == ["REPLCONF", "ACK", "0"], repr(got))
+    finally:
+        rep.stop()
+        m.close()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -2619,6 +2876,7 @@ GROUPS = [
     ("transactions", stages_transactions),
     ("optimistic-locking", stages_optimistic_locking),
     ("persistence-rdb", stages_rdb),
+    ("replication", stages_replication),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
