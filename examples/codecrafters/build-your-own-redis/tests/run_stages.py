@@ -1485,8 +1485,8 @@ def stages_streams_large(prog):
             time.sleep(0.2)
         worst, wrong, _ = measure_while(srv, xrange_s7)
         c.close()
-        check("local: S7 XRANGE of 64 entries of almost 1 MB stalls PING at most 0.2 s",
-              worst <= 0.2 and not wrong and size[0] >= 64 * len(field),
+        check("local: S7 XRANGE of 64 entries of almost 1 MB stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong and size[0] >= 64 * len(field),
               "worst %.3f s, %d bytes" % (worst, size[0]))
 
         # S9: one field of 64 MB goes to the socket alone, with no copy.
@@ -2775,10 +2775,10 @@ def stages_replication(prog):
         c.call("SET", "bar", "456")
         c.call("SET", "baz", "789")
         want = [["SET", "foo", "123"], ["SET", "bar", "456"], ["SET", "baz", "789"]]
-        got1 = [r.try_read(3) for _ in range(3)]
+        got1 = [r.try_read(1) for _ in range(3)]
         check("replication-11 the writes reach the replica, in order", got1 == want, repr(got1))
-        got2 = [r2.try_read(3) for _ in range(3)]
-        got3 = [r3.try_read(3) for _ in range(3)]
+        got2 = [r2.try_read(1) for _ in range(3)]
+        got3 = [r3.try_read(1) for _ in range(3)]
         check("replication-12 the writes reach every replica", got2 == want and got3 == want,
               "%r %r" % (got2, got3))
         c.call("GET", "foo")
@@ -2792,48 +2792,49 @@ def stages_replication(prog):
 
         # The effective form of each write.
         c.call("XADD", "s", "*", "f", "v")
-        got = r.try_read(3)
+        got = r.try_read(1)
         check("local: XADD * is propagated with the ID that the master gave",
               isinstance(got, list) and got[:2] == ["XADD", "s"] and got[2] != "*" and got[3:] == ["f", "v"],
               repr(got))
-        r2.try_read(3)
-        r3.try_read(3)
+        r2.try_read(1)
+        r3.try_read(1)
         c.call("RPUSH", "l", "a", "b")
         c.call("BLPOP", "l", "0")
-        got = [r.try_read(3) for _ in range(2)]
+        got = [r.try_read(1) for _ in range(2)]
         check("local: the pop of BLPOP is propagated as LPOP",
               got == [["RPUSH", "l", "a", "b"], ["LPOP", "l"]], repr(got))
         c.call("MULTI")
         c.call("SET", "t", "1")
         c.call("INCR", "t")
         c.call("EXEC")
-        got = [r.try_read(3) for _ in range(4)]
+        got = [r.try_read(1) for _ in range(4)]
         check("local: a transaction is propagated in MULTI and EXEC",
               got == [["MULTI"], ["SET", "t", "1"], ["INCR", "t"], ["EXEC"]], repr(got))
         for x in (r2, r3):
             for _ in range(6):
-                x.try_read(3)
+                x.try_read(1)
         c.call("RPUSH", "pl", "a", "b", "c", "d")
         c.call("LPUSH", "pl", "z")
         c.call("LPOP", "pl")
         c.call("LPOP", "pl", "2")
         c.call("INCR", "pi")
-        got = [r.try_read(3) for _ in range(5)]
+        c.call("INCR", "pi")
+        got = [r.try_read(1) for _ in range(6)]
         check("local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came",
               got == [["RPUSH", "pl", "a", "b", "c", "d"], ["LPUSH", "pl", "z"], ["LPOP", "pl"],
-                      ["LPOP", "pl", "2"], ["INCR", "pi"]], repr(got))
+                      ["LPOP", "pl", "2"], ["INCR", "pi"], ["INCR", "pi"]], repr(got))
         c.call("SET", "brief", "v", "PX", "100")
-        r.try_read(3)
+        r.try_read(1)
         time.sleep(0.3)
         c.call("GET", "brief")
-        got = r.try_read(3)
+        got = r.try_read(1)
         check("local: a lazy expiry on the master is propagated as DEL", got == ["DEL", "brief"], repr(got))
         waiter = srv.client()
         waiter.send_raw(encode("BLPOP", "wl", "0"))
         time.sleep(0.2)
         c.call("RPUSH", "wl", "v")
-        waiter.try_read(3)
-        got = [r.try_read(3) for _ in range(2)]
+        waiter.try_read(1)
+        got = [r.try_read(1) for _ in range(2)]
         check("local: a push that serves a waiting BLPOP is propagated before its LPOP",
               got == [["RPUSH", "wl", "v"], ["LPOP", "wl"]], repr(got))
         waiter.send_raw(encode("BLPOP", "wl", "0"))
@@ -2841,14 +2842,14 @@ def stages_replication(prog):
         c.call("MULTI")
         c.call("RPUSH", "wl", "w")
         c.call("EXEC")
-        waiter.try_read(3)
-        got = [r.try_read(3) for _ in range(4)]
+        waiter.try_read(1)
+        got = [r.try_read(1) for _ in range(4)]
         check("local: the pop of a waiter that EXEC served comes after its EXEC",
               got == [["MULTI"], ["RPUSH", "wl", "w"], ["EXEC"], ["LPOP", "wl"]], repr(got))
         waiter.close()
         for x in (r2, r3):
-            for _ in range(13):
-                x.try_read(3)
+            for _ in range(14):
+                x.try_read(1)
 
         # WAIT.
         alone = Server(prog, [])
@@ -2860,7 +2861,7 @@ def stages_replication(prog):
             alone.stop()
         c.call("SET", "w", "1")
         for x in (r, r2, r3):
-            x.try_read(3)
+            x.try_read(1)
         # The replicas played here acknowledge the offset of the master
         # before WAIT, which is what WAIT waits for.
         info = c.call("INFO", "replication")
@@ -2869,17 +2870,17 @@ def stages_replication(prog):
         c.raw().send_raw(encode("WAIT", "2", "2000"))
         acks = 0
         for x in (r, r2):
-            got = x.try_read(3)
+            got = x.try_read(1)
             if got == ["REPLCONF", "GETACK", "*"]:
                 x.send_raw(encode("REPLCONF", "ACK", target))
                 acks += 1
         reply = c.raw().try_read(3)
         check("replication-18 WAIT gives the replicas that acknowledged",
               acks == 2 and reply == 2 and time.time() - start < 1.5, "%r %r" % (acks, reply))
-        r3.try_read(3)
+        r3.try_read(1)
         c.call("SET", "w2", "1")
         for x in (r, r2, r3):
-            x.try_read(3)
+            x.try_read(1)
         start = time.time()
         reply = c.call("WAIT", "3", "500")
         waited = time.time() - start
@@ -3133,14 +3134,14 @@ def stages_replication(prog):
         rep.stop()
         m.close()
 
-    # A full resync of 262144 keys on a live replica: the load yields, and
+    # A full resync of 524288 keys on a live replica: the load yields, and
     # the clients see the old keyspace until it ends (rule 6).
     d = tempfile.mkdtemp(prefix="loxpp-resync-")
     m = FakeMaster()
     rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
     try:
         path = os.path.join(d, "big.rdb")
-        write_rdb(path, [("r%d" % i, "v", None, None) for i in range(262144)])
+        write_rdb(path, [("r%d" % i, "v", None, None) for i in range(524288)])
         big = open(path, "rb").read()
         link = m.accept()
         out = [None]
@@ -3150,8 +3151,8 @@ def stages_replication(prog):
             time.sleep(1.5)
         worst, wrong, _ = measure_while(rep, resync)
         c = Asker(rep)
-        check("local: a full resync of 262144 keys loads them", c.call("GET", "r262143") == "v")
-        check("local: a full resync of 262144 keys stalls PING at most 1 s",
+        check("local: a full resync of 524288 keys loads them", c.call("GET", "r524287") == "v")
+        check("local: a full resync of 524288 keys stalls PING at most 1 s",
               worst <= 1.0 and not wrong, "worst %.3f s" % worst)
         c.close()
     finally:

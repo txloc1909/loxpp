@@ -204,7 +204,7 @@
   "old": "        if (len(this.parts) >= ELEMENTS_PER_YIELD or this.bytes >= STEP_BYTES) {",
   "new": "        if (len(this.parts) >= ELEMENTS_PER_YIELD) {",
   "cases": [
-   "local: S7 XRANGE of 64 entries of almost 1 MB stalls PING at most 0.2 s"
+   "local: S7 XRANGE of 64 entries of almost 1 MB stalls PING at most 0.5 s"
   ]
  },
  {

@@ -256,14 +256,6 @@
   ]
  },
  {
-  "name": "the wake is cleared after the last write",
-  "old": "    // Cleared first: an entry that comes while a write below suspends sends\n    // a new Propagate, so it is not left for the next write.\n    conn.replWoken = false;\n    var out = Output(conn);",
-  "new": "    var out = Output(conn);",
-  "cases": [
-   "local: a write made while the replica session waits in a write reaches the replica"
-  ]
- },
- {
   "name": "RP3 no bound on entries behind",
   "old": "            or replLogBase + len(replLog) - r.logPos > REPLICA_LAG_ENTRIES) {",
   "new": "            or false) {",
@@ -276,7 +268,7 @@
   "old": "    loadRdbData(data, fresh, true);",
   "new": "    loadRdbData(data, fresh, false);",
   "cases": [
-   "local: a full resync of 262144 keys stalls PING at most 1 s"
+   "local: a full resync of 524288 keys stalls PING at most 1 s"
   ]
  },
  {

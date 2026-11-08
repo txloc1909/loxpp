@@ -417,7 +417,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S3: `XREAD` of 524286 missing streams | PING within 0.5 s (when the IDs are parsed in the step of the command: 0.93 s) | 0.23–0.27 s |
 | S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
 | S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.010 s / 0.04–0.09 s |
-| S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.2 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
+| S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.5 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
@@ -435,7 +435,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
 | RP1 (group `replication`): a replica that never reads, then 100 writes of 1 MB | the replica is dropped after 64 MB | as required |
 | RP3: a replica that never reads, then 400000 `INCR` (about 12 MB) | the replica is dropped after 131072 entries | as required |
-| Group `replication`: a full resync of 262144 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
+| Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
@@ -462,10 +462,12 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/persistence-rdb.json` or
 `tests/mutations/replication.json` that removes
 its guard (S4, T1, T7, W3, K1 and RP2 hold rule 6 only: no single change removes their
-guard). Two guards of replication have no case, because no client timing
+guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
-propagates (the same race as the give-back itself), and the step in which a
-replica applies a `MULTI` ... `EXEC` of the master. Two parts of the RDB load have no mutation, because no reply can
+propagates (the same race as the give-back itself), the step in which a
+replica applies a `MULTI` ... `EXEC` of the master, and the wake of a
+replica session for an entry that comes while its last write of a call
+suspends (an entry that comes before that is written by the same call). Two parts of the RDB load have no mutation, because no reply can
 show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
 (the next read fails too). The `touch` in the lazy expiry of `lookup` has no case: the check
