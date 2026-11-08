@@ -28,8 +28,11 @@
 // CHECK: the reader got 2048 bytes
 // CHECK: the ticker ran during the read: true
 
-var total = 2048; // small enough that the buffers of one connection hold it,
-var part = 256;   // so the write below does not wait
+var bulk = "abcdefgh";
+for (var i = 0; i < 8; i = i + 1) bulk = bulk + bulk; // 2048 bytes
+var total = len(bulk); // small enough that the buffers of one connection hold
+                       // it, so the write below does not wait
+var part = 256;
 
 var srv = listen("127.0.0.1", 0);
 var peer = connect("127.0.0.1", srv.port());
@@ -70,14 +73,12 @@ fun ticker() {
     }
 }
 
-var bulk = "abcdefgh";
-for (var i = 0; i < 12; i = i + 1) bulk = bulk + bulk;
 peer.write(bulk);
 
 task.spawn(ticker);
 task.spawn(reader);
 task.receive();
-print "the client wrote " + str(total) + " bytes";
+print "the client wrote " + str(len(bulk)) + " bytes";
 print "the reader got " + str(got) + " bytes";
 print "the ticker ran during the read: " + str(ticksDuringRead);
 
