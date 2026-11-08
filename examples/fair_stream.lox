@@ -13,7 +13,10 @@
 // Here the whole bulk is in the socket before the reader starts, so the reader
 // never has to wait for the network: nothing but the `yield` in `readParts`
 // can give the ticker a turn. Take that `yield` out and the last line of the
-// output says false.
+// output says false. The bulk is 2 KiB, which fits in the buffers of a
+// connection on any host; a bulk larger than those buffers would make the
+// write at the end of the program wait, and this task is the only one that can
+// read it.
 //
 // A server reads a bulk string this way when it must answer other clients
 // meanwhile. A single `conn.read_bytes(n)` does the same work with no turns.
@@ -21,12 +24,12 @@
 // up in (#1172).
 // STATUS: ok
 // TIMEOUT: 20
-// CHECK: the client wrote 32768 bytes
-// CHECK: the reader got 32768 bytes
+// CHECK: the client wrote 2048 bytes
+// CHECK: the reader got 2048 bytes
 // CHECK: the ticker ran during the read: true
 
-var total = 32768; // fits in the buffers of one connection, so the write does
-var part = 4096;   // not wait, and the parts come from the socket, not the peer
+var total = 2048; // small enough that the buffers of one connection hold it,
+var part = 256;   // so the write below does not wait
 
 var srv = listen("127.0.0.1", 0);
 var peer = connect("127.0.0.1", srv.port());

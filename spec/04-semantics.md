@@ -1993,7 +1993,7 @@ cannot suspend (see [Contexts where a task cannot
 suspend](#contexts-where-a-task-cannot-suspend)), during the name resolution of
 `connect`, and while a connection keeps up with the bytes the call moves (see
 the last paragraph of this section). In the first two cases the call waits as a
-call of class blocks does; in the third it does not wait at all.
+call of class blocks does; in the third it waits for no part of that time.
 
 A call of class suspends waits only when the wait is not over at the call. A
 `read` of a Socket that holds bytes returns at once, and a `sleep` of zero
@@ -2011,14 +2011,17 @@ raised. A fault of the wait is raised in the waiting task when it runs again.
 A task that computes without reaching a suspend point keeps every other task
 of its worker from running. A program gives such a task a worker of its own.
 
-A call that keeps up keeps the worker. A call of class suspends reaches its
-wait only when the wait is not over at the call (see [Blocking
-calls](#blocking-calls)), so while a stream of a Socket keeps arriving the
-call does not reach a wait, and its task keeps the worker as a task that
-computes does. A program that moves a large stream therefore moves it in parts
-and yields between the parts, or it gives the task that moves it a worker of
-its own. The `Fair mode` column above is where a later version can bound such
-a stretch.
+A call that keeps up keeps the worker. A call of class suspends on a Socket
+waits only when its next transfer would block: while the connection keeps up,
+each transfer moves bytes, so the call does not wait for as long as the bytes
+keep arriving, and its task keeps the worker as a task that computes does. A
+program that moves a large stream therefore moves it in parts and yields
+between the parts, or it gives the task that moves it a worker of its own. A
+yield gives a turn to each task of the worker that is ready to run; whether the
+worker also sees a wait that has ended at that point is the rule of
+[Scheduling](#scheduling). The `Fair mode` column above is where a later
+version can bound such a stretch; the points at which the worker sees a wait
+that has ended are the rule of Scheduling, not a suspend point.
 
 ### Contexts where a task cannot suspend
 
