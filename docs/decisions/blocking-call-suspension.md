@@ -227,7 +227,8 @@ call would wait although its result is already held. The probe
 smaller than any useful bound, so the choice weakens a rule that no probe then
 covers. So the task's stretch keeps the rule it has. The points at which the
 worker sees a wait that has ended are a separate rule, not a switch point at a
-site that names nothing, and #1131 states that rule in the spec.
+site that names nothing. `spec/04-semantics.md`, Scheduling, states that rule,
+and #1131 is the issue that added it.
 
 **The lever is the program.** The runtime cannot know whether the peer will
 keep up: the placement of a task is chosen at spawn and the rate of a peer is
@@ -235,8 +236,8 @@ chosen later by a program outside this one. A program that must keep its other
 tasks alive during a large transfer moves the stream in parts and yields
 between them, which is a switch point it names, or it gives the moving task a
 worker of its own. A yield is bound to give a turn to each task that is ready
-to run; a wait that has ended is seen there only as far as Scheduling says,
-which is #1131. `examples/fair_stream.lox` is the pattern, and the follow-up
+to run; a wait that has ended is seen there only as far as Scheduling says
+(`spec/04-semantics.md`, Scheduling; #1131). `examples/fair_stream.lox` is the pattern, and the follow-up
 issue makes the Codecrafters example use it.
 
 **What this costs.** Any of the seven Socket calls that move data still holds
@@ -491,8 +492,8 @@ registered, so it sees an ended wait at the first switch after the wait ends.
 
 The spec binds this rule: `spec/04-semantics.md`, Scheduling, says the worker
 sees an ended wait "at a task switch, and no later than the first switch that
-follows the end of the wait or the passing of the limit by a bounded delay",
-and that the value of that delay is not bound, only that it is finite. Native's
+follows its previous look by a bounded delay", and that the value of that delay
+is not bound, only that it is finite. Native's
 1 ms is the interval of that delay, and the JVM's poll at every switch makes the
 delay zero at a switch. In both, the delay also includes the running stretch
 that ends at the switch, so no implementation constant bounds it. A wait is
@@ -511,10 +512,16 @@ of #1123 require. A rule that binds a maximum here would be a decision about
 speed on every backend, and that is a separate decision.
 
 Probe `451_ended_wait_is_seen_while_tasks_are_ready` pins the reachable case:
-two tasks that are ready at every instant, and a third parked in `readline`
-when the line arrives. No current backend can fail it, so it was shown to fail
+one task that is ready at every instant, and a second parked in `readline` when
+the line arrives. No current backend can fail it, so it was shown to fail
 against the scheduler the old text allowed, with `pollWhileBusy()` disabled:
 the probe then times out with no output at all, because the reader never wakes.
+
+The probe's `TIMEOUT: 10` is a limit of the runner and not of the spec, and it
+therefore does bind a practical maximum: a poll interval of 20 s conforms and
+fails the probe, and 4 s conforms and passes it in 8 s. So the probe pins the
+deferral, not the size of the delay, and its `TIMEOUT` is the only maximum in
+the tree.
 
 ### Readiness registry
 

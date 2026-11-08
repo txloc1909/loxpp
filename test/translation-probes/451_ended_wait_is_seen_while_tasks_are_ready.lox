@@ -7,7 +7,9 @@
 // A scheduler that looks at the network only when its run queue is empty never
 // wakes the reader, and this probe times out. That is what the probe proves: it
 // does not pin the size of the delay, which the spec leaves to the
-// implementation.
+// implementation. The TIMEOUT below is a limit of the runner, not of the spec,
+// and it is the only maximum here: a poll interval of 4 s still passes this
+// probe, and 20 s does not.
 // STATUS: ok
 // TIMEOUT: 10
 // CHECK: the reader got the line: line
