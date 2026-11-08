@@ -1,6 +1,12 @@
 // A break or continue in a catch block pops the loop locals only on the
 // path that leaves the loop. A match after the try/catch must still put its
 // result above the loop locals, or the assignment reads another slot.
+// STATUS: ok
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: 0
+// CHECK: 1
 enum E { A B }
 
 var count = 0;
@@ -44,3 +50,48 @@ fun afterContinue() {
     print closed;
 }
 afterContinue();
+
+fun afterBreakInForIn() {
+    var closed = false;
+    for (var it in [1, 2, 3]) {
+        var x = E.B();
+        try {
+            if (it == 3) throw "t";
+        } catch (e) {
+            break;
+        }
+        closed = match x {
+            case E.A => true
+            case _ => false
+        };
+    }
+    print closed;
+}
+afterBreakInForIn();
+
+// The loop local `c` is captured, so the break closes its cell. The closure
+// made in each iteration must keep the value of that iteration.
+var get0 = nil;
+var get1 = nil;
+fun capturedLocal() {
+    var i = 0;
+    while (i < 2) {
+        var c = i;
+        fun get() { return c; }
+        try {
+            i = i + 1;
+        } catch (e) {
+            break;
+        }
+        var k = match E.B() {
+            case E.A => 0
+            case _ => 1
+        };
+        if (k == 1) {
+            if (c == 0) get0 = get; else get1 = get;
+        }
+    }
+    print get0();
+    print get1();
+}
+capturedLocal();

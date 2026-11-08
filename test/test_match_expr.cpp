@@ -244,6 +244,73 @@ TEST_F(MatchExpressionTest, MatchAfterContinueInCatch) {
     EXPECT_FALSE(as<bool>(*v));
 }
 
+TEST_F(MatchExpressionTest, MatchAfterBreakInCatchInForIn) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var out = nil;
+        fun f() {
+            var closed = false;
+            for (var it in [1, 2, 3]) {
+                var x = E.B();
+                try {
+                    if (it == 3) throw "t";
+                } catch (e) {
+                    break;
+                }
+                closed = match x {
+                    case E.A => true
+                    case _ => false
+                };
+            }
+            out = closed;
+        }
+        f();
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("out");
+    ASSERT_TRUE(v.has_value());
+    ASSERT_TRUE(is<bool>(*v));
+    EXPECT_FALSE(as<bool>(*v));
+}
+
+// The break closes the cell of the captured loop local `c`. Each closure must
+// keep the value of its own iteration.
+TEST_F(MatchExpressionTest, MatchAfterBreakInCatchWithCapturedLocal) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var get0 = nil;
+        var get1 = nil;
+        var out = nil;
+        fun f() {
+            var i = 0;
+            while (i < 2) {
+                var c = i;
+                fun get() { return c; }
+                try {
+                    i = i + 1;
+                } catch (e) {
+                    break;
+                }
+                var k = match E.B() {
+                    case E.A => 0
+                    case _ => 1
+                };
+                if (k == 1) {
+                    if (c == 0) get0 = get; else get1 = get;
+                }
+            }
+            out = get0() * 10 + get1();
+        }
+        f();
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("out");
+    ASSERT_TRUE(v.has_value());
+    expect_num(*v, 1); // get0() == 0, get1() == 1
+}
+
 // ---------------------------------------------------------------------------
 // JUMP_TABLE optimisation tests
 // ---------------------------------------------------------------------------
