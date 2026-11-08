@@ -535,11 +535,11 @@ class HostListener {
     ~HostListener() { close(m_fd); }
     HostListener(const HostListener&) = delete;
     HostListener& operator=(const HostListener&) = delete;
-    // The next connection, or -1 after 10 seconds. A signal does not end the
+    // The next connection, or -1 after `seconds`. A signal does not end the
     // wait, and a program that never connects does not hang the test.
-    int accept() const {
+    int accept(int seconds = 10) const {
         const auto end =
-            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
         while (std::chrono::steady_clock::now() < end) {
             struct pollfd pfd = {m_fd, POLLIN, 0};
             if (poll(&pfd, 1, 100) > 0) {
@@ -1204,14 +1204,32 @@ TEST_F(SocketWaitTest, ACloseEndsTheHolderOfEachSideInTheOrderTheyBeganToWait) {
 // close_write while a writer waits: the call fails with SocketClosedError,
 // like a write after close_write(). The peer sees the bytes sent so far and
 // then the end of the stream.
+//
+// Nothing here waits for a time. The peer holds every byte back, so the write
+// of 64 MiB cannot end in one turn of the worker: it gives up its turn by the
+// move that waits, and the closer is the next task of the queue
+// (spec/04-semantics.md, Scheduling). So the writer's call has already failed
+// when the program makes the peer's second connection, and the peer drains
+// only after it. Whichever way the host schedules the two threads, those three
+// steps keep that order.
 TEST_F(SocketWaitTest, CloseWriteFailsAWaitingWriter) {
+    // A hang guard only: it ends a run in which the program never reports.
+    constexpr int kHangSeconds = 120;
     HostListener host;
     std::atomic<size_t> total{0};
     std::atomic<bool> sawEof{false};
     std::thread peer([&] {
         int fd = host.accept();
-        sawEof =
-            drainHost(fd, 400, 0, [&](const char*, size_t n) { total += n; });
+        // The peer reads nothing until the program reports close_write() on a
+        // second connection. The end of the stream is queued behind the bytes
+        // still in the socket, so a drain that began earlier could let the
+        // write finish before close_write() runs.
+        int report = host.accept(kHangSeconds);
+        if (report >= 0) {
+            close(report);
+            sawEof =
+                drainHost(fd, 0, 0, [&](const char*, size_t n) { total += n; });
+        }
         // The client keeps the socket open until it reads this verdict, so
         // the end of the stream can only come from close_write().
         const char* verdict = sawEof ? "eof\n" : "no-eof\n";
@@ -1219,7 +1237,9 @@ TEST_F(SocketWaitTest, CloseWriteFailsAWaitingWriter) {
         close(fd);
     });
     VM vm;
-    InterpretResult result = vm.interpret(connectToHost(host) + R"(
+    InterpretResult result = vm.interpret(
+        connectToHost(host) + "var ctlPort = " + std::to_string(host.port()) +
+        ";\n" + R"(
         var big = "x";
         var i = 0;
         while (i < 26) { big = big + big; i = i + 1; }
@@ -1230,10 +1250,13 @@ TEST_F(SocketWaitTest, CloseWriteFailsAWaitingWriter) {
             catch (e) { kind = e.kind; msg = e.message; }
             task.send(me, 1);
         }
+        fun closer() { c.close_write(); }
         task.spawn(writer);
-        sleep(0.1);
-        c.close_write();
+        task.spawn(closer);
         task.receive();
+        // The write has failed by now, so the peer may drain.
+        var report = connect("127.0.0.1", ctlPort);
+        report.close();
         var again = "none";
         try { c.write("more"); } catch (e) { again = e.kind; }
         var verdict = c.readline();
@@ -1247,6 +1270,7 @@ TEST_F(SocketWaitTest, CloseWriteFailsAWaitingWriter) {
               "Cannot write to a socket after close_write().");
     EXPECT_EQ(globalString(vm, "again"), "SocketClosedError");
     EXPECT_TRUE(sawEof.load());
+    EXPECT_GT(total.load(), size_t{0});
     EXPECT_LT(total.load(), size_t{1} << 26);
 }
 
