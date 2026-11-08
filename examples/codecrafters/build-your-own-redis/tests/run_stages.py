@@ -2991,6 +2991,48 @@ def stages_replication(prog):
         link.send_raw(encode("SET", "ex", "7", "XX"))
         time.sleep(0.2)
         check("local: a command of the master sees an expired key on the replica", c.call("GET", "ex") == "7")
+        # A key that has expired at WATCH: its DEL from the master changes
+        # nothing that the client saw, and a write of it does, as on a
+        # redis-server 7.0 replica.
+        link.send_raw(encode("SET", "wx", "5", "PX", "100") + encode("SET", "wy", "5", "PX", "100"))
+        time.sleep(0.3)
+        c.call("WATCH", "wx")
+        link.send_raw(encode("DEL", "wx"))
+        time.sleep(0.2)
+        c.call("MULTI")
+        c.call("GET", "wx")
+        got = c.call("EXEC")
+        check("local: the DEL of a key that had expired at WATCH does not fail EXEC", got == [None], repr(got))
+        c.call("WATCH", "wy")
+        link.send_raw(encode("SET", "wy", "6"))
+        time.sleep(0.2)
+        c.call("MULTI")
+        c.call("GET", "wy")
+        got = c.call("EXEC")
+        check("local: a write of a key that had expired at WATCH fails EXEC", got is None, repr(got))
+        # After such a DEL, the client still watches the key: a later write
+        # fails EXEC. Both forms of an entry in watchers: one client, and
+        # two clients.
+        c2 = Asker(rep)
+        link.send_raw(encode("SET", "wq", "5", "PX", "100") + encode("SET", "wz", "5", "PX", "100"))
+        time.sleep(0.3)
+        c.call("WATCH", "wq")
+        link.send_raw(encode("DEL", "wq") + encode("SET", "wq", "8"))
+        time.sleep(0.2)
+        c.call("MULTI")
+        got = c.call("EXEC")
+        check("local: after the DEL of a key that had expired at WATCH, one watcher still sees a write",
+              got is None, repr(got))
+        c.call("WATCH", "wz")
+        c2.call("WATCH", "wz")
+        link.send_raw(encode("DEL", "wz") + encode("SET", "wz", "8"))
+        time.sleep(0.2)
+        c.call("MULTI")
+        c2.call("MULTI")
+        got = [c.call("EXEC"), c2.call("EXEC")]
+        check("local: after the DEL of a key that had expired at WATCH, two watchers still see a write",
+              got == [None, None], repr(got))
+        c2.close()
         # A transaction of the master: no client of the replica sees its
         # writes before its EXEC.
         link.send_raw(encode("MULTI") + encode("SET", "ma", "1"))
@@ -3014,10 +3056,19 @@ def stages_replication(prog):
         link.close()
         m.link = None
         link = m.accept(timeout=5)
-        got = fake_handshake(link)
+        # The new RDB holds a key that has expired. A replica keeps it for
+        # the commands of its master, as a redis-server replica does.
+        d = tempfile.mkdtemp(prefix="loxpp-repl-rdb-")
+        path = os.path.join(d, "exp.rdb")
+        write_rdb(path, [("rk", "5", 1000, "ms")])
+        got = fake_handshake(link, rdb=open(path, "rb").read())
+        shutil.rmtree(d, ignore_errors=True)
         check("local: the replica connects again after the link breaks",
               got[3] == ["PSYNC", "?", "-1"], repr(got))
         time.sleep(0.3)
+        link.send_raw(encode("SET", "rk", "7", "XX"))
+        time.sleep(0.2)
+        check("local: a replica keeps an expired key of the RDB for its master", c.call("GET", "rk") == "7")
         c.call("MULTI")
         c.call("PING")
         check("local: a full resync makes EXEC of a client that watches a key fail", c.call("EXEC") is None)
@@ -3142,10 +3193,11 @@ def stages_replication(prog):
     finally:
         srv.stop()
 
-    # RP3: the soft limit, with a soft time of 1 s. A replica over 64 MB
+    # RP3: the soft limit, with a soft time of 3 s, so that a slow host
+    # writes the 80 MB in time. A replica over 64 MB
     # stays while the soft time runs (one large write must not drop it),
     # and goes when it is still over after that time.
-    srv = Server(prog, ["--replica-soft-seconds", "1"])
+    srv = Server(prog, ["--replica-soft-seconds", "3"])
     try:
         c = Asker(srv)
 
@@ -3161,7 +3213,7 @@ def stages_replication(prog):
             c.call("SET", "s", big + str(i))
         check("local: RP3 a replica over the soft limit stays while the soft time runs",
               slaves3() == 1, "connected_slaves %d" % slaves3())
-        time.sleep(1.5)
+        time.sleep(3.5)
         c.call("SET", "s", "after")
         time.sleep(0.2)
         check("local: RP3 a replica that is still over the soft limit after its time is dropped",

@@ -252,7 +252,9 @@ A second task writes to the master: the answer to `REPLCONF GETACK`, with
 the offset before the GETACK, and an ACK of its own every second, as Redis
 replicas send. As in Redis, a replica does not remove an expired key: its
 clients read it as missing, and the commands of its master see it until the
-`DEL` of the master comes. A full resync marks each client that watches a
+`DEL` of the master comes. This also holds for an expired key in the RDB
+of a full resync. A client that watches a key that has expired sees no
+change when the `DEL` of the master comes, as in Redis 7.0. A full resync marks each client that watches a
 key, one step for each such client. It applies a
 `MULTI` ... `EXEC` of the master in one step, yields every 64 commands, and
 connects again one second after the link breaks. It refuses a write from a
@@ -440,7 +442,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
 | RP1 (group `replication`): a replica that never reads, then 300 writes of 1 MB | the replica is dropped over the hard limit of 256 MB | as required |
-| RP3 (with `--replica-soft-seconds 1`): a replica that never reads, then 80 writes of 1 MB, then one more write after 1.5 s | the replica stays while the soft time runs, then goes | as required |
+| RP3 (with `--replica-soft-seconds 3`): a replica that never reads, then 80 writes of 1 MB, then one more write after 3.5 s | the replica stays while the soft time runs, then goes | as required |
 | Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
 | Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |

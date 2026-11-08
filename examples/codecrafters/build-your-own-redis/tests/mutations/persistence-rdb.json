@@ -33,7 +33,7 @@
  },
  {
   "name": "the load stops after one key",
-  "old": "            loaded = loaded + 1;\n            if (mayYield and loaded % ELEMENTS_PER_YIELD == 0) {\n                yield nil;\n            }",
+  "old": "            loaded = loaded + 1;\n            if (forReplica and loaded % ELEMENTS_PER_YIELD == 0) {\n                yield nil;\n            }",
   "new": "            return;",
   "cases": [
    "persistence-rdb-04 KEYS * gives every key"

@@ -406,5 +406,53 @@
   "cases": [
    "local: a second PSYNC on one link is still one replica"
   ]
+ },
+ {
+  "name": "a replica skips an expired key of the RDB",
+  "old": "expiresAt == nil or expiresAt > now or forReplica)",
+  "new": "expiresAt == nil or expiresAt > now)",
+  "cases": [
+   "local: a replica keeps an expired key of the RDB for its master"
+  ]
+ },
+ {
+  "name": "WATCH does not note a key that has expired",
+  "old": "                    flag = \"expired\";",
+  "new": "                    flag = true;",
+  "cases": [
+   "local: the DEL of a key that had expired at WATCH does not fail EXEC"
+  ]
+ },
+ {
+  "name": "the DEL of a key that had expired at WATCH marks",
+  "old": "    if (flag == \"expired\" and store[key] == nil) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: the DEL of a key that had expired at WATCH does not fail EXEC"
+  ]
+ },
+ {
+  "name": "a write of a key that had expired at WATCH does not mark",
+  "old": "    if (flag == \"expired\" and store[key] == nil) {",
+  "new": "    if (flag == \"expired\") {",
+  "cases": [
+   "local: a write of a key that had expired at WATCH fails EXEC"
+  ]
+ },
+ {
+  "name": "touch drops one kept watcher",
+  "old": "        if (markWatcher(w, key)) {\n            watchers[key] = w;\n        }",
+  "new": "        markWatcher(w, key);",
+  "cases": [
+   "local: after the DEL of a key that had expired at WATCH, one watcher still sees a write"
+  ]
+ },
+ {
+  "name": "touch drops kept watchers",
+  "old": "    if (keep) {\n        watchers[key] = kept;\n    }",
+  "new": "",
+  "cases": [
+   "local: after the DEL of a key that had expired at WATCH, two watchers still see a write"
+  ]
  }
 ]

@@ -1,7 +1,7 @@
 [
  {
   "name": "WATCH does not record the key",
-  "old": "            watched[key] = true;\n            conn.watchCount",
+  "old": "            watched[key] = flag;\n            conn.watchCount",
   "new": "            conn.watchCount",
   "cases": [
    "optimistic-locking-03 a write by another client makes EXEC fail"
@@ -137,8 +137,8 @@
  },
  {
   "name": "a write marks only one watcher",
-  "old": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n    }",
-  "new": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n        return;\n    }",
+  "old": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (markWatcher(conn, key)) {\n            kept[id] = conn;\n            keep = true;\n        }\n    }",
+  "new": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (markWatcher(conn, key)) {\n            kept[id] = conn;\n            keep = true;\n        }\n        return;\n    }",
   "cases": [
    "local: a write marks every client that watches the key"
   ]

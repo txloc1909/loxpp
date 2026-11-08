@@ -2153,17 +2153,40 @@ fun touch(key) {
     }
     watchers.del(key);
     if (isConn(w)) {
-        if (w.watched.has(key)) {
-            w.watchDirty = true;
+        if (markWatcher(w, key)) {
+            watchers[key] = w;
         }
         return;
     }
+    var kept = {};
+    var keep = false;
     for (var id in w.keys()) {
         var conn = w[id];
-        if (conn.watched.has(key)) {
-            conn.watchDirty = true;
+        if (markWatcher(conn, key)) {
+            kept[id] = conn;
+            keep = true;
         }
     }
+    if (keep) {
+        watchers[key] = kept;
+    }
+}
+
+// Marks conn for a write of key, and returns true when conn still watches
+// key and was not marked. On a replica a watched key can be expired at
+// WATCH and still be in the store; as in Redis 7.0, its removal changes
+// nothing that the client saw, so it does not mark the client.
+fun markWatcher(conn, key) {
+    var flag = conn.watched[key];
+    if (flag == nil) {
+        return false;
+    }
+    if (flag == "expired" and store[key] == nil) {
+        conn.watched[key] = true;
+        return true;
+    }
+    conn.watchDirty = true;
+    return false;
 }
 
 // WATCH outside a transaction. It yields every ELEMENTS_PER_YIELD keys,
@@ -2183,17 +2206,21 @@ fun cmdWatch(conn, argv) {
     while (i < len(argv)) {
         var key = argv[i];
         if (!watched.has(key)) {
+            var flag = true;
             var entry = store[key];
             if (entry != nil and entry.expiresAt != nil) {
                 // lookup removes an expired key now, before this client
                 // watches it, so that the removal marks only the others.
-                entry = lookup(key);
-                if (entry != nil) {
+                var live = lookup(key);
+                if (live != nil) {
                     conn.expiringKeys.append(key);
-                    conn.expiringAt.append(entry.expiresAt);
+                    conn.expiringAt.append(live.expiresAt);
+                } else if (store[key] != nil) {
+                    // Only a replica keeps an expired key.
+                    flag = "expired";
                 }
             }
-            watched[key] = true;
+            watched[key] = flag;
             conn.watchCount = conn.watchCount + 1;
             watchingConns[conn.id] = conn;
             var w = watchers[key];
@@ -2481,11 +2508,11 @@ fun loadRdb(path) {
 
 // Loads the string keys of database 0 from the bytes of an RDB file into the
 // Map target: the file at start, or the file that a master sends with
-// FULLRESYNC. On a live replica (mayYield), it yields every
+// FULLRESYNC. On a live replica (forReplica), it yields every
 // ELEMENTS_PER_YIELD keys and every LZF_BYTES_PER_YIELD bytes of an LZF
 // string, so the clients go on; they see the old keyspace until it ends.
-fun loadRdbData(data, target, mayYield) {
-    rdbMayYield = mayYield;
+fun loadRdbData(data, target, forReplica) {
+    rdbMayYield = forReplica;
     var loaded = 0;
     var r = RdbReader(data);
     if (r.take(5) != "REDIS") {
@@ -2541,12 +2568,14 @@ fun loadRdbData(data, target, mayYield) {
             if (db != 0) {
                 throw RdbError("the file has keys in database " + str(db) + "; this server has database 0 only");
             }
-            if (expiresAt == nil or expiresAt > now) {
+            // As in Redis 7.0, only a master skips an expired key: a
+            // replica keeps it until the DEL of its master comes.
+            if (expiresAt == nil or expiresAt > now or forReplica) {
                 target[key] = Entry("string", value, expiresAt);
             }
             expiresAt = nil;
             loaded = loaded + 1;
-            if (mayYield and loaded % ELEMENTS_PER_YIELD == 0) {
+            if (forReplica and loaded % ELEMENTS_PER_YIELD == 0) {
                 yield nil;
             }
         } else {
