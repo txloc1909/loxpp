@@ -1023,8 +1023,8 @@ void Compiler::breakStatement() {
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
     // The cleanup POPs run only on the path that jumps away. Code after the
     // jump is reached by other paths, which still hold those cells, so the
-    // linear counter must not keep the POPs. A try/catch does not re-anchor
-    // the counter after itself, so a drift here reaches a later match.
+    // linear counter must not keep the POPs, or a construct that does not
+    // re-anchor after itself carries the drift to a later match.
     int heightBefore = m_stackHeight;
     emitLoopCleanup(m_loopStack.back().localCount,
                     m_loopStack.back().handlerCount);
@@ -2686,6 +2686,11 @@ void Compiler::returnStatement() {
 
 void Compiler::tryStatement() {
     // try block catch (name) block
+    // The try path and the catch path join after the statement, and the
+    // statement is net-neutral, so re-anchor the counter at the end as
+    // ifStatement() does. A drift on either path then cannot reach the code
+    // after the statement.
+    int savedOperandDepth = m_stackHeight - m_localCount;
     m_parser->consume(TokenType::LEFT_BRACE, "Expect '{' after 'try'.");
     int handlerOffset = emitJump(Op::PUSH_HANDLER);
     m_openHandlerCount++;
@@ -2754,6 +2759,8 @@ void Compiler::tryStatement() {
     m_openHandlerCount--;
 
     patchJump(skipPopJump);
+
+    m_stackHeight = m_localCount + savedOperandDepth;
 }
 
 void Compiler::throwStatement() {
