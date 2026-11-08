@@ -2212,8 +2212,8 @@ def stages_optimistic_locking(prog):
         c.call("MULTI")
         c.call("PING")
         worst, wrong, _ = measure_while(srv, run(encode("EXEC")))
-        check("local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.3 s",
-              worst <= 0.3 and not wrong and got[0] == ["PONG"], "worst %.3f s, %r" % (worst, got[0]))
+        check("local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.15 s",
+              worst <= 0.15 and not wrong and got[0] == ["PONG"], "worst %.3f s, %r" % (worst, got[0]))
         check("local: after it the client may watch again", c.call("WATCH", "x1") == "OK")
         c.close()
     finally:

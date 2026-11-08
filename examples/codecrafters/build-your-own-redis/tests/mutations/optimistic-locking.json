@@ -164,7 +164,7 @@
   "old": "        n = n + 1;\n        if (n % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n}",
   "new": "        n = n + 1;\n    }\n}",
   "cases": [
-   "local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.3 s"
+   "local: W2 EXEC that forgets 1048575 watched keys stalls PING at most 0.15 s"
   ]
  },
  {

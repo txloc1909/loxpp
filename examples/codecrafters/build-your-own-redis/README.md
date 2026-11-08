@@ -27,7 +27,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | lists | 11 | pass |
 | streams | 13 | pass |
 | transactions | 11 | pass |
-| optimistic-locking | 8 | not started |
+| optimistic-locking | 8 | pass |
 | persistence-rdb | 6 | not started |
 | replication | 18 | not started |
 | persistence-aof | 10 | not started |
@@ -177,6 +177,22 @@ The probes T1-T7 measure large steps of `EXEC` under these bounds. They do
 not prove a bound on every step: the cost of a command depends on the data
 it reads, and T7 shows one case that grows with the number of readers.
 
+### Optimistic locking
+
+`WATCH` puts the client in `watchers` for each key: the `Conn` itself for
+one client, a Map of client ids from the second one. Each command that
+writes the keyspace calls `touch(key)`, also a write that keeps the value,
+and a lazy expiry. `touch` marks each client that watches the key
+(`watchDirty`). `EXEC` gives a null array when the mark is set, or when a
+watched key that had an expiry at `WATCH` has expired since, also with no
+read, as Redis 7.0 does. `EXECABORT` comes first.
+
+`EXEC`, `DISCARD`, `UNWATCH` and the end of the connection forget the
+watched keys (`unwatchAll`). The client watches nothing at once, and the
+old entries go after, with a yield every 1024 keys. So it runs in the body
+of `sessionLoop`, not in a deferred call: a deferred call cannot suspend.
+A client may watch at most 1048576 keys at a time (rule 4).
+
 ### Large replies
 
 `LRANGE` and `LPOP` with a count take their elements from the keyspace with
@@ -215,6 +231,8 @@ printed.
   range.
 - `INCR` stops at 999999999999999 (15 digits) with "increment or decrement
   would overflow". Redis goes on to 9223372036854775807.
+- A client may watch at most 1048576 keys at a time. Redis has no such
+  bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
   query limit of bytes, and its `LRANGE` and `LPOP` replies copy at most
   8388608 list elements. Redis has no such bound.
@@ -332,6 +350,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 200 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 4.28 s) | 0.07 s |
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
+| W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 1.0 s, while it joins all keys in one step | 0.76–0.80 s |
+| W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.015 s |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
@@ -350,8 +370,9 @@ Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
-`tests/mutations/transactions.json` that removes
-its guard (S4, T1 and T7 hold rule 6 only: no single change removes their
+`tests/mutations/transactions.json` or
+`tests/mutations/optimistic-locking.json` that removes
+its guard (S4, T1, T7 and W1 hold rule 6 only: no single change removes their
 guard).
 
 A large heap brings a second kind of stall: the native VM stops the worker
@@ -402,7 +423,8 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/redis.lox \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
-# the same with tests/mutations/lists.json, streams.json and transactions.json
+# the same with tests/mutations/lists.json, streams.json, transactions.json
+# and optimistic-locking.json
 ```
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
