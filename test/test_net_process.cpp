@@ -559,6 +559,18 @@ TEST(NetProcessTest, InvalidPortFatal) {
               InterpretResult::RUNTIME_ERROR);
     EXPECT_EQ(h.run("listen(\"127.0.0.1\", 1.5);"),
               InterpretResult::RUNTIME_ERROR);
+    // connect_within's port follows connect's, row by row: 1 is its lowest
+    // port and 65535 its highest (spec/05-stdlib.md, Integer arguments). A
+    // port fault is fatal, not the catchable NetworkError of a refused
+    // connection, so a `try` around it does not catch it; a port that the
+    // function wrongly accepts reaches the connection attempt, which the
+    // `try` does catch, and the run then ends OK.
+    EXPECT_EQ(h.run("try { connect_within(\"127.0.0.1\", 0i, 5); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("try { connect_within(\"127.0.0.1\", 65536i, 5); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------

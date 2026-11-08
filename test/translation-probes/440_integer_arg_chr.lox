@@ -1,0 +1,12 @@
+// The parameter of chr() must be an integer, and an integer is an Int or an
+// integer-valued Number (spec/05-stdlib.md, Integer arguments). The Int form
+// prints the same byte as the Number form; a fractional Number is still a
+// runtime error that halts the program.
+// COVERS: integer-arg chr
+// STATUS: error
+// CHECK: A
+// CHECK: A
+print chr(65);
+print chr(65i);
+chr(65.5);
+print "unreachable";

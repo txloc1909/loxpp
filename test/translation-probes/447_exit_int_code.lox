@@ -1,0 +1,8 @@
+// exit(code) accepts an Int code as it accepts a Number code
+// (spec/05-stdlib.md, exit). The Int is already an integer, so nothing is
+// truncated: the program ends with that code.
+// STATUS: error
+// EXIT: 3
+// CHECK: before
+print "before";
+exit(3i);

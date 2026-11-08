@@ -1,0 +1,13 @@
+// The count of Process.err_read_bytes() must be an integer, and an integer is
+// an Int or an integer-valued Number (spec/05-stdlib.md, Integer arguments).
+// The child writes six bytes to its standard error, so the Int count reads the
+// same two bytes. A fractional count is a runtime error that halts the
+// program.
+// COVERS: integer-arg process-err-read-bytes
+// STATUS: error
+// TIMEOUT: 30
+// CHECK: ab
+var p = spawn("/bin/sh", ["-c", "printf abcdef 1>&2"]);
+print p.err_read_bytes(2i);
+p.err_read_bytes(2.5);
+print "unreachable";

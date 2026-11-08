@@ -207,7 +207,6 @@ each has an off-the-shelf solution.
 | `180_int_match_patterns` | a literal pattern of `match` follows `==`: `1i` matches the Int and not the Number, for inline and heap-held Ints | none (spec probe of the Int kind, N2 #826) |
 | `181_int_messages` | an Int is always a message, inline or heap-held, alone or as a field of an Enum, and it arrives equal to what was sent | none (spec probe of the Int kind, N2 #826) |
 | `182_int_boxed_gc` | Ints that an implementation may hold in the heap survive collections and stay equal to their literals | none (spec probe of the Int kind, N2 #826) |
-| `183_int_fault_chr_int` | `chr` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
 | `184_int_fault_math_int` | `math.floor` of an Int is a halting fault: an Int is not a Number | none (spec probe of the Int kind, N2 #826) |
 | `185_int_truthiness` | an Int is always truthy, `0i` included; `!` of an Int is `false` | none (spec probe of the Int kind, N3 #827) |
 | `186_int_arithmetic` | `+`, `-`, `*` and unary `-` on two Ints wrap in two's complement, for values inside and outside the range of an inline Int | none (spec probe of the Int kind, N3 #827) |
@@ -424,6 +423,17 @@ each has an off-the-shelf solution.
 | `427_task_state_overflow_unwind` | invariant I1 of `docs/decisions/concurrency-invariant-probes.md`: each of two tasks catches a `StackOverflowError`, suspends, and catches a second one after it runs again; the part of the row that a program can see, because no task suspends in an unwind (spec/04-semantics.md, The Task Machine, the table of task-owned state; issue #1101) — a spec probe | none (spec probe) |
 | `428_task_state_waiting_call` | invariant I1 of `docs/decisions/concurrency-invariant-probes.md`: two tasks wait in `task.receive_within` with different limits: only the task whose limit ended gets `TimeoutError`, and each then gets only its own message (spec/04-semantics.md, The Task Machine, the table of task-owned state; issue #1101) — a spec probe | none (spec probe) |
 | `429_task_switch_keeps_open_upvalues` | two tasks each make a closure over a local of their own frame and wait while the local is open: after the switch each changes its own local through the closure and reads it through the frame (spec/04-semantics.md, The Task Machine, the table of task-owned state) | none (spec probe) |
+| `440_integer_arg_chr` | `chr` accepts an Int as it accepts an integer-valued Number, and a fractional Number still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `441_integer_arg_connect_port` | `connect` accepts an Int port, the form `int(l.port())` makes, and a fractional port still halts before any connection attempt (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `442_integer_arg_listen_port` | `listen` accepts an Int port, so `0i` binds a free port, and a fractional port still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `443_integer_arg_socket_read_bytes` | `read_bytes` accepts an Int count, and a fractional count still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `444_integer_arg_socket_read_some` | `read_some` accepts an Int count with the bound the spec binds, and a fractional count still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `445_integer_arg_process_read_bytes` | `Process.read_bytes` accepts an Int count, and a fractional count still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `446_integer_arg_process_err_read_bytes` | `Process.err_read_bytes` accepts an Int count, and a fractional count still halts (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
+| `447_exit_int_code` | `exit` accepts an Int code, which ends the program with that code as a Number code does (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
+| `448_exit_number_code_truncates` | a Number exit code is truncated toward zero, so `exit(3.7)` ends with code 3 (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
+| `449_exit_int_code_too_large` | an Int exit code above the signed 32-bit range is a runtime error, not a code (spec/05-stdlib.md, exit; issue #1135) — a spec probe | none (spec probe) |
+| `450_integer_arg_connect_within_port` | `connect_within` accepts an Int port while its limit stays a Number, and a fractional port still halts before the limit (spec/05-stdlib.md, Integer arguments; issue #1135) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
 | `321_selective_receive_two_channel_ends` | a task takes the credits and the items of two channel ends out of one mailbox, with nothing lost or reordered (issue #632) — a spec probe | none (spec probe) |
 | `322_receive_where_sees_the_mailbox` | `task.pending()` in `want` counts the whole mailbox, and a message that `want` sends to its own task is tested in the same call — a spec probe | none (spec probe) |
@@ -576,6 +586,13 @@ fails its script. Two fault rows hold one fault for each function of the
 function names from the member table of the module in `spec/05-stdlib.md`, and
 it fails for a function that has no probe of its non-Int fault, or, for `udiv`
 and `urem`, of its zero divisor.
+
+The probes `429` to `435` are the spec probes of `spec/05-stdlib.md`, "Integer
+arguments": the standard-library parameters that accept an Int as well as an
+integer-valued Number. Each carries `// COVERS: integer-arg <row>`, and
+`tools/check_integer_arg_rows.py` reads them: a row of that table with no
+probe fails, and so does a native stdlib function that reads an integer
+argument without a row naming it.
 
 Each native node makes a group of these probes pass: the value layer and the
 literals (`165`, `166`, `177` to `184`, and the static-error probes `237` to
