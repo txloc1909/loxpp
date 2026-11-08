@@ -2854,6 +2854,12 @@ def stages_replication(prog):
         got = r.try_read(1)
         check("local: DEL is propagated", got == ["DEL", "dk", "nosuch"], repr(got))
         check("local: DEL of missing keys gives 0", c.call("DEL", "nosuch") == 0)
+        c.call("SET", "de", "v", "PX", "50")
+        r.try_read(1)
+        time.sleep(0.2)
+        check("local: DEL of an expired key gives 0", c.call("DEL", "de") == 0)
+        got = r.try_read(1)
+        check("local: DEL of an expired key is still propagated", got == ["DEL", "de"], repr(got))
         c.call("SET", "dw", "1")
         r.try_read(1)
         watcher = Asker(srv)
@@ -2873,7 +2879,7 @@ def stages_replication(prog):
               isinstance(again, str) and again.startswith("FULLRESYNC") and "connected_slaves:3" in info,
               "%r %r" % (again, info[:80]))
         for x in (r2, r3):
-            for _ in range(18):
+            for _ in range(20):
                 x.try_read(1)
 
         # WAIT.

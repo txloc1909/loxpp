@@ -384,11 +384,11 @@
   ]
  },
  {
-  "name": "DEL counts every argument",
+  "name": "DEL counts an expired key",
   "old": "                if (live or applyingFromMaster) {\n                    n = n + 1;\n                }",
   "new": "                n = n + 1;",
   "cases": [
-   "local: DEL counts the keys that it removes"
+   "local: DEL of an expired key gives 0"
   ]
  },
  {
