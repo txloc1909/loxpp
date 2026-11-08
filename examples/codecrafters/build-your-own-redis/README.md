@@ -29,7 +29,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | transactions | 11 | pass |
 | optimistic-locking | 8 | pass |
 | persistence-rdb | 6 | pass |
-| replication | 18 | not started |
+| replication | 18 | pass |
 | persistence-aof | 10 | not started |
 | pub-sub | 7 | not started |
 | sorted-sets | 8 | not started |
@@ -218,6 +218,36 @@ counts each byte of the pattern that it reads as a step, in a set too, so
 it takes at most len(key) x len(pattern) steps, and it yields every 65536
 steps.
 
+### Replication
+
+A master keeps a replication log (`replLog`). Each write command appends
+its effective form to the log in its own step (`replicate`), at the point
+where it writes: a push comes before the pop of the client that it serves,
+`XADD *` goes with the ID that the master gave, the pop of `BLPOP` goes as
+`LPOP`, and `EXEC` wraps its writes in `MULTI` and `EXEC`. So the order of
+the log is the order of the writes, and the offset (`replOffset`) counts the
+RESP bytes of each entry when it is appended. Each replica session writes
+the log from its own position, in steps (`writeReplLog`). A replica that is
+64 MB behind is dropped, and the entries that every replica has got are
+dropped (rule 4). As in Redis, a master with no replica keeps no log, and
+its offset stays 0.
+
+`PSYNC` gives `FULLRESYNC` and an empty RDB file of version 10, the version
+of Redis 7.0, so a Redis 7.0 replica loads it. `REPLCONF ACK` keeps the
+offset that a replica acknowledged and wakes the clients in `WAIT`. `WAIT`
+sends `REPLCONF GETACK *` and waits, as `BLPOP` does, until enough replicas
+have acknowledged the offset at its start, or until its time limit.
+
+A replica (`--replicaof "host port"`) runs one task (`masterLink`): it
+connects, does the handshake, loads the RDB file of `FULLRESYNC`, then
+applies each command of the stream with no reply, and answers
+`REPLCONF GETACK` with the bytes that it has applied. It applies a
+`MULTI` ... `EXEC` of the master in one step, yields every 64 commands, and
+connects again one second after the link breaks. It refuses a write from a
+client with `READONLY`. The cross checks of `diff_redis.py` run a Lox++
+master with a redis-server replica, and a redis-server master with a Lox++
+replica.
+
 ### Large replies
 
 `LRANGE` and `LPOP` with a count take their elements from the keyspace with
@@ -262,6 +292,12 @@ printed.
   no glob pattern, and its order of names is one order that Redis can
   give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
+- A full resync sends an empty RDB file, so a replica gets only the writes
+  after it connects. A replica uses its own clock for expiry; Redis sends
+  a `DEL` from the master. `SET` with a relative `EX` or `PX` goes to a
+  replica as it came, not as `PXAT`. A replica sends no `REPLCONF ACK` of
+  its own every second, only when the master asks. `WAIT`, `REPLCONF` and
+  `PSYNC` cannot be queued in `MULTI`.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
@@ -390,6 +426,10 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | K5 (on the K3 server): `KEYS ?` and 262144 stars on 256 keys of one byte; each key ends at once and the rest of the pattern is stars | PING within 0.3 s (when the stars at the end are not steps: 5.13 s) | 0.04–0.06 s |
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
+| RP1 (group `replication`): a replica that never reads, then 100 writes of 1 MB | the replica is dropped after 64 MB | as required |
+| RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
+| Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
+| Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
@@ -410,8 +450,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` or
-`tests/mutations/persistence-rdb.json` that removes
-its guard (S4, T1, T7, W3 and K1 hold rule 6 only: no single change removes their
+`tests/mutations/persistence-rdb.json` or
+`tests/mutations/replication.json` that removes
+its guard (S4, T1, T7, W3, K1 and RP2 hold rule 6 only: no single change removes their
 guard). Two parts of the RDB load have no mutation, because no reply can
 show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
@@ -469,7 +510,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
-# and optimistic-locking.json, persistence-rdb.json
+# and optimistic-locking.json, persistence-rdb.json, replication.json
 ```
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the

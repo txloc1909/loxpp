@@ -2612,6 +2612,45 @@ def stages_rdb(prog):
         srv.stop()
 
 
+class SafeLink(Client):
+    """A link of the fake master: a send to a replica that closed the link
+    does nothing, so the cases after it fail by their names."""
+
+    def send_raw(self, raw):
+        try:
+            self.sock.sendall(raw)
+        except OSError:
+            pass
+
+
+class NullLink:
+    """The link of a replica that did not connect: each read times out and
+    each send does nothing, so the cases that need it fail by their names."""
+
+    class _Sock:
+        def settimeout(self, t):
+            pass
+
+        def recv(self, n):
+            raise socket.timeout()
+
+    def __init__(self):
+        self.sock = NullLink._Sock()
+        self.buf = b""
+
+    def try_read(self, timeout=2):
+        return TIMEOUT
+
+    def read(self):
+        raise EOFError("no link")
+
+    def send_raw(self, raw):
+        pass
+
+    def close(self):
+        pass
+
+
 class FakeMaster:
     """A master played by the test: it listens, takes one replica, and
     records the handshake commands that it gets."""
@@ -2625,10 +2664,15 @@ class FakeMaster:
         self.link = None
 
     def accept(self, timeout=5):
+        """The link of the replica, or a NullLink when it does not connect
+        in time."""
         self.lsock.settimeout(timeout)
-        conn, _ = self.lsock.accept()
+        try:
+            conn, _ = self.lsock.accept()
+        except OSError:
+            return NullLink()
         conn.settimeout(5)
-        link = Client.__new__(Client)
+        link = SafeLink.__new__(SafeLink)
         link.sock = conn
         link.buf = b""
         self.link = link
@@ -2645,9 +2689,9 @@ def fake_handshake(link, rdb=b"REDIS0011\xff" + b"\x00" * 8):
     that the replica sent."""
     got = []
     for reply in (b"+PONG\r\n", b"+OK\r\n", b"+OK\r\n"):
-        got.append(link.read())
+        got.append(link.try_read(3))
         link.send_raw(reply)
-    got.append(link.read())
+    got.append(link.try_read(3))
     link.send_raw(b"+FULLRESYNC 75cd7bc10c49047e0d163660f3b90625b1af31dc 0\r\n")
     link.send_raw(b"$%d\r\n" % len(rdb) + rdb)
     return got
@@ -2845,6 +2889,7 @@ def stages_replication(prog):
               [c.call("GET", "t1"), c.call("GET", "t2")] == ["a", "b"])
         # When the link breaks, the replica connects again and syncs.
         link.close()
+        m.link = None
         link = m.accept(timeout=5)
         got = fake_handshake(link)
         check("local: the replica connects again after the link breaks",
