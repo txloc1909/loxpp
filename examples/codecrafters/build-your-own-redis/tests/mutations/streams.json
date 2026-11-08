@@ -105,24 +105,24 @@
  },
  {
   "name": "XADD wakes one reader only",
-  "old": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n",
-  "new": "                // The waiter's task has ended. XREAD takes nothing, so\n                // nothing goes back.\n            }\n            break;\n",
+  "old": "                serveReader(w, key, stream, from);\n                served = served + 1;",
+  "new": "                serveReader(w, key, stream, from);\n                served = served + 1;\n                i = n;",
   "cases": [
    "local: XADD wakes every reader of the key"
   ]
  },
  {
   "name": "a reader above the top is dropped",
-  "old": "    for (var w in later) {\n        joinQueues(readers, w, [key]);\n    }",
-  "new": "",
+  "old": "            if (!waits) {\n                serveReader(w, key, stream, from);",
+  "new": "            if (waits) {\n                w.active = false;\n                served = served + 1;\n            }\n            if (!waits) {\n                serveReader(w, key, stream, from);",
   "cases": [
    "local: XREAD BLOCK above the top gets the entry above it"
   ]
  },
  {
   "name": "a served reader counted out twice",
-  "old": "            w.servedBy = key;\n            w.ready = reply;",
-  "new": "            w.ready = reply;",
+  "old": "    w.active = false;\n    w.servedBy = key;\n    w.ready = reply;",
+  "new": "    w.active = false;\n    w.ready = reply;",
   "cases": [
    "local: XREAD BLOCK above the top gets the entry above it"
   ]
@@ -177,8 +177,8 @@
  },
  {
   "name": "a served reader stays active",
-  "old": "            w.active = false;\n            w.servedBy = key;\n            w.ready = reply;",
-  "new": "            w.servedBy = key;\n            w.ready = reply;",
+  "old": "    w.active = false;\n    w.servedBy = key;\n    w.ready = reply;",
+  "new": "    w.servedBy = key;\n    w.ready = reply;",
   "cases": [
    "local: a reader that XADD served is not served again by the next XADD (20 rounds)"
   ]
@@ -249,16 +249,16 @@
  },
  {
   "name": "XREAD $ reads from the first entry",
-  "old": "            reply.add(key, stream, firstNew, n);",
-  "new": "            reply.add(key, stream, 0, n);",
+  "old": "            var from = firstNew;",
+  "new": "            var from = 0;",
   "cases": [
    "streams-13 XREAD BLOCK with $ gets only the new entry"
   ]
  },
  {
   "name": "a reader above the top is served empty",
-  "old": "            has = addEntriesAfter(reply, w.read.count, key, stream, after);",
-  "new": "            addEntriesAfter(reply, w.read.count, key, stream, after);",
+  "old": "                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
+  "new": "                waits = false;",
   "cases": [
    "local: XREAD BLOCK above the top waits after a lower XADD (no byte comes)"
   ]
@@ -273,8 +273,8 @@
  },
  {
   "name": "$ on a replaced key reads from its last entry",
-  "old": "            if (hasField(after, \"fields\")) {\n                // \"$\" on a Stream that the key no longer holds: nothing\n                // appends to it now, so its top is the top at the wait.\n                after = StreamId(after.topMs(), after.topSeq());\n            }",
-  "new": "            if (hasField(after, \"fields\")) {\n                after = StreamId(stream.ms[stream.size() - 1], stream.seq[stream.size() - 1] - 1);\n            }",
+  "old": "                    after = StreamId(after.topMs(), after.topSeq());\n                }\n                waits",
+  "new": "                    after = StreamId(stream.ms[top], stream.seq[top] - 1);\n                }\n                waits",
   "cases": [
    "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
   ]

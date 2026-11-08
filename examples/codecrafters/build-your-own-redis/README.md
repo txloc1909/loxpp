@@ -166,8 +166,16 @@ The session writes the replies after the step, in steps of its own
 
 A transaction holds at most 65536 commands, 1048576 arguments and the query
 limit of bytes (`--client-query-buffer-limit`, 1 GB by default). A command
-over a bound gets an error and makes `EXEC` give `EXECABORT`. The probes
-T1-T5 measure the largest steps of `EXEC` that the bounds allow.
+over a bound gets an error and makes `EXEC` give `EXECABORT`.
+
+In one `EXEC`, the replies of `LRANGE` and `LPOP` with a count may copy at
+most 8388608 list elements in all (`spendElements`), because `EXEC` keeps
+every reply until its step ends. A command over that budget gets an error
+and does nothing, so the transaction stays atomic.
+
+The probes T1-T7 measure large steps of `EXEC` under these bounds. They do
+not prove a bound on every step: the cost of a command depends on the data
+it reads, and T7 shows one case that grows with the number of readers.
 
 ### Large replies
 
@@ -208,7 +216,8 @@ printed.
 - `INCR` stops at 999999999999999 (15 digits) with "increment or decrement
   would overflow". Redis goes on to 9223372036854775807.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
-  query limit of bytes. Redis has no such bound.
+  query limit of bytes, and its `LRANGE` and `LPOP` replies copy at most
+  8388608 list elements. Redis has no such bound.
 - `XADD` takes no options (`NOMKSTREAM`, `MAXLEN`, `MINID`, `LIMIT`): the
   word in the ID place must be an ID. `XRANGE` takes no exclusive bounds
   (`(1-1`).
@@ -323,6 +332,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 200 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 4.28 s) | 0.07 s |
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
+| T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
+| T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code (#1169). |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |
@@ -340,7 +351,7 @@ range is the spread between runs on different days and hosts. Each
 probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
 `tests/mutations/transactions.json` that removes
-its guard (S4 and T1 hold rule 6 only: no single change removes their
+its guard (S4, T1 and T7 hold rule 6 only: no single change removes their
 guard).
 
 A large heap brings a second kind of stall: the native VM stops the worker

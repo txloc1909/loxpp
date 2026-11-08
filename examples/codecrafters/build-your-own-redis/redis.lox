@@ -635,6 +635,13 @@ class WaitQueue {
     // Called once for each waiter that leaves without a pusher.
     left() {
         this.live = this.live - 1;
+        this.compact();
+    }
+
+    // Drops the waiters that are no longer active when they are more than
+    // the active ones, so the queue does not grow without bound; each drop
+    // copies fewer entries than the waiters that left since the last one.
+    compact() {
         if (this.size() > 2 * this.live + 16) {
             var kept = [];
             for (var w in this.items[this.head:len(this.items)]) {
@@ -843,6 +850,9 @@ fun cmdLrange(ctx, argv) {
     if (start > stop) {
         return arrayReply([]);
     }
+    if (!spendElements(stop + 1 - start)) {
+        return EXEC_TOO_LARGE;
+    }
     return entry.value.range(start, stop + 1);
 }
 
@@ -872,6 +882,9 @@ fun cmdLpop(ctx, argv) {
     }
     if (count > entry.value.size()) {
         count = entry.value.size();
+    }
+    if (!spendElements(count)) {
+        return EXEC_TOO_LARGE;
     }
     var reply = entry.value.takeLeft(count);
     if (entry.value.size() == 0) {
@@ -1634,52 +1647,88 @@ fun cmdXread(ctx, argv) {
 
 // Hands each session that waits in XREAD BLOCK on key, and has entries to
 // read in stream now, its reply: the entries of this one stream, as Redis
-// replies. A waiter whose ID is still above the top waits on. It runs at the
-// end of XADD, so the reply holds the entries up to this one.
+// replies. It runs at the end of XADD, or after EXEC (serveReady), so the
+// reply holds the entries up to that point. firstNew is the index of the
+// first entry that this XADD or EXEC added. A reader whose ID is still above
+// the top stays where it is in the queue: the pass serves in place. It can
+// run once for each reader on each key of an EXEC, so it checks a reader
+// with no call and makes no object for a reader that waits on.
 fun wakeReaders(key, stream, firstNew) {
-    var later = [];
-    while (true) {
-        var w = takeWaiter(readers, key);
-        if (w == nil) {
-            break;
-        }
-        var reply = Segments("*1\r\n");
-        var after = w.read.after[key];
-        var has = true;
-        if (after == stream) {
-            // "$" on this same Stream: each XADD on it, or the end of each
-            // EXEC that added to it, wakes the reader at once, so the
-            // entries above the top that "$" named are the new ones, from
-            // firstNew.
-            var n = stream.size();
-            if (w.read.count > 0 and n - firstNew > w.read.count) {
-                n = firstNew + w.read.count;
-            }
-            reply.add(key, stream, firstNew, n);
-        } else {
-            if (hasField(after, "fields")) {
-                // "$" on a Stream that the key no longer holds: nothing
-                // appends to it now, so its top is the top at the wait.
-                after = StreamId(after.topMs(), after.topSeq());
-            }
-            has = addEntriesAfter(reply, w.read.count, key, stream, after);
-        }
-        if (!has) {
-            later.append(w);
-        } else {
-            w.active = false;
-            w.servedBy = key;
-            w.ready = reply;
-            try {
-                task.send(w.handle, Msg.Ready());
-            } catch (ignored) {
-                // The waiter's task has ended. XREAD takes nothing, so
-                // nothing goes back.
-            }
-        }
+    var queue = readers[key];
+    if (queue == nil) {
+        return;
     }
-    for (var w in later) {
-        joinQueues(readers, w, [key]);
+    var items = nil;
+    var i = 0;
+    if (isWaiter(queue)) {
+        items = [queue];
+    } else {
+        items = queue.items;
+        i = queue.head;
+    }
+    var top = stream.size() - 1;
+    var topMs = stream.ms[top];
+    var topSeq = stream.seq[top];
+    var served = 0;
+    var n = len(items);
+    while (i < n) {
+        var w = items[i];
+        if (w.active) {
+            var after = w.read.after[key];
+            // "$" on this same Stream: each XADD on it, or the end of each
+            // EXEC that added to it, wakes the reader at once, so the entries
+            // above the top that "$" named are the new ones, from firstNew.
+            var from = firstNew;
+            var waits = false;
+            if (after != stream) {
+                if (hasField(after, "fields")) {
+                    // "$" on a Stream that the key no longer holds: nothing
+                    // appends to it now, so its top is the top at the wait.
+                    after = StreamId(after.topMs(), after.topSeq());
+                }
+                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);
+                if (!waits) {
+                    from = stream.find(after.ms, after.seq, false);
+                }
+            }
+            if (!waits) {
+                serveReader(w, key, stream, from);
+                served = served + 1;
+            }
+        }
+        i = i + 1;
+    }
+    if (isWaiter(queue)) {
+        if (served > 0) {
+            readers.del(key);
+        }
+        return;
+    }
+    queue.live = queue.live - served;
+    if (queue.live == 0) {
+        readers.del(key);
+    } else {
+        queue.compact();
+    }
+}
+
+// Hands w the entries of stream from the index from, at most w.read.count
+// of them when it is above 0.
+fun serveReader(w, key, stream, from) {
+    var to = stream.size();
+    if (w.read.count > 0 and to - from > w.read.count) {
+        to = from + w.read.count;
+    }
+    var reply = Segments("*1\r\n");
+    reply.add(key, stream, from, to);
+    w.active = false;
+    w.servedBy = key;
+    w.ready = reply;
+    try {
+        task.send(w.handle, Msg.Ready());
+    } catch (ignored) {
+        // The waiter's task has ended. XREAD takes nothing, so nothing goes
+        // back.
     }
 }
 
@@ -1698,6 +1747,27 @@ var readyStreamKeys = nil;
 // key -> StreamMark: the Stream that the key held at the first XADD of this
 // EXEC on it, and the index of that first new entry.
 var readyStreams = nil;
+
+// During EXEC, how many more list elements the replies of the transaction
+// may copy (LRANGE, LPOP with a count). EXEC keeps every reply until its
+// step ends, so this bounds the step and its memory (README rules 1, 4 and
+// 6). nil outside EXEC: a command alone is bounded by its list.
+var EXEC_ELEMENTS = 8388608;
+var execElements = nil;
+var EXEC_TOO_LARGE = "-ERR the replies of this transaction are over the limit of list elements\r\n";
+
+// Takes k elements from the budget of EXEC. Returns false, and takes
+// nothing, when the budget is too small; the command then does nothing.
+fun spendElements(k) {
+    if (execElements == nil) {
+        return true;
+    }
+    if (k > execElements) {
+        return false;
+    }
+    execElements = execElements - k;
+    return true;
+}
 
 class StreamMark {
     init(stream, first) {
@@ -1869,10 +1939,13 @@ fun inTransaction(conn, name, argv, nbytes) {
         }
         return execQueued(tx);
     }
-    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS
-        or tx.bytes + nbytes > QUERY_MAX) {
+    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {
         tx.dirty = true;
         return errorReply("ERR the transaction holds too many commands or arguments");
+    }
+    if (tx.bytes + nbytes > QUERY_MAX) {
+        tx.dirty = true;
+        return errorReply("ERR the transaction is over the query limit of bytes");
     }
     // The parse reads no key, so it runs now, with yields, and EXEC passes
     // it to the command. A parse error is a reply of EXEC, as in Redis.
@@ -1893,6 +1966,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 // wait (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis.
 // Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
+    execElements = EXEC_ELEMENTS;
     readyLists = [];
     readyListSeen = {};
     readyStreamKeys = [];
@@ -1907,6 +1981,7 @@ fun execQueued(tx) {
         }
         replies.append(reply);
     }
+    execElements = nil;
     serveReady();
     return replies;
 }

@@ -97,8 +97,8 @@
  },
  {
   "name": "EXEC stops at the first error",
-  "old": "        replies.append(reply);\n    }\n    serveReady();\n    return replies;",
-  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    serveReady();\n    return replies;",
+  "old": "        replies.append(reply);\n    }\n    execElements = nil;",
+  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    execElements = nil;",
   "cases": [
    "transactions-10 a failed command does not stop the others"
   ]
@@ -185,16 +185,16 @@
  },
  {
   "name": "no command bound",
-  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS\n",
-  "new": "    if (tx.args + len(argv) > TX_ARGS\n",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
+  "new": "    if (tx.args + len(argv) > TX_ARGS) {",
   "cases": [
    "local: the 65537th command of a transaction is refused"
   ]
  },
  {
   "name": "no argument bound",
-  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS\n",
-  "new": "    if (len(tx.queued) >= TX_COMMANDS\n",
+  "old": "    if (len(tx.queued) >= TX_COMMANDS or tx.args + len(argv) > TX_ARGS) {",
+  "new": "    if (len(tx.queued) >= TX_COMMANDS) {",
   "cases": [
    "local: a transaction over 1048576 arguments is refused"
   ]
@@ -209,8 +209,8 @@
  },
  {
   "name": "no byte bound",
-  "old": "        or tx.bytes + nbytes > QUERY_MAX) {",
-  "new": "        or false) {",
+  "old": "    if (tx.bytes + nbytes > QUERY_MAX) {",
+  "new": "    if (false) {",
   "cases": [
    "local: a transaction over the query limit of bytes is refused"
   ]
@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "        replies.append(reply);\n    }\n    serveReady();",
-  "new": "        replies.append(reply);\n    }\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "old": "    execElements = nil;\n    serveReady();",
+  "new": "    execElements = nil;\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]
@@ -253,6 +253,38 @@
   "new": "        } else if (hasField(reply, \"bulkValue\")) {\n            out.parts.append(bulk(reply.bulkValue));",
   "cases": [
    "local: T5 EXEC of 65535 GET of a 1 KB value stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "T6 no element budget in EXEC",
+  "old": "    if (k > execElements) {\n        return false;\n    }",
+  "new": "    if (false) {\n        return false;\n    }",
+  "cases": [
+   "local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192"
+  ]
+ },
+ {
+  "name": "T6 LPOP with a count spends no budget",
+  "old": "    if (!spendElements(count)) {\n        return EXEC_TOO_LARGE;\n    }\n    var reply = entry.value.takeLeft(count);",
+  "new": "    var reply = entry.value.takeLeft(count);",
+  "cases": [
+   "local: T6 an LPOP over the rest of the budget is refused, one under it runs"
+  ]
+ },
+ {
+  "name": "a replaced stream still wakes its $ reader",
+  "old": "        if (streamEntry(key) == mark.stream) {",
+  "new": "        if (true) {",
+  "cases": [
+   "local: a stream that EXEC replaces does not serve its $ reader"
+  ]
+ },
+ {
+  "name": "COUNT does not cap a $ reader",
+  "old": "    if (w.read.count > 0 and to - from > w.read.count) {\n        to = from + w.read.count;\n    }\n    var reply = Segments(\"*1\\r\\n\");",
+  "new": "    var reply = Segments(\"*1\\r\\n\");",
+  "cases": [
+   "local: COUNT 1 caps what a $ reader gets from an EXEC"
   ]
  }
 ]
