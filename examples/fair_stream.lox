@@ -1,0 +1,89 @@
+// A large stream moved in parts, so the other tasks of the worker run during
+// the transfer.
+//
+// A call of class suspends reaches its wait only when the wait is not over at
+// the call (spec/04-semantics.md, Suspend Points). While a connection keeps
+// up, a read or a write never reaches a wait, so the call runs as one stretch
+// and keeps the worker: the other tasks of the worker get no turn until the
+// call returns. A program that needs them alive during a large transfer moves
+// the stream itself, in parts, and yields between the parts. `yield` is a
+// suspend point the program names, so the turn is the program's choice, not a
+// race with the peer.
+//
+// The pattern is the pair below: `readParts` moves the bytes, and the caller
+// decides when to give the worker away. A single `conn.read_bytes(n)` of a
+// large `n` does the same work without the turns, which is why a server reads
+// a bulk string this way when it must answer other clients meanwhile.
+//
+// The listener and the client are in the same program, so the example needs no
+// second process.
+// STATUS: ok
+// TIMEOUT: 20
+// CHECK: client wrote 262144 bytes
+// CHECK: reader got 262144 bytes
+// CHECK: the ticker ran during the read: true
+
+var total = 262144;
+var part = 65536;
+
+var srv = listen("127.0.0.1", 0);
+var peer = connect("127.0.0.1", srv.port());
+var conn = srv.accept();
+var me = task.self();
+
+var got = 0;
+var tickerTurns = 0;
+var ticksDuringRead = false;
+
+// Moves `n` bytes of the stream in parts, and yields after each part. The
+// result is the same as `conn.read_bytes(n)`; the turns are the difference.
+fun readParts(n) {
+    var out = "";
+    while (len(out) < n) {
+        var s = conn.read_some(n - len(out));
+        if (s == "") break;
+        out = out + s;
+        yield;
+    }
+    return out;
+}
+
+fun reader() {
+    var before = tickerTurns;
+    got = len(readParts(total));
+    ticksDuringRead = before < tickerTurns;
+    task.send(me, "read");
+}
+
+fun writer() {
+    var chunk = "abcdefgh";
+    for (var i = 0; i < 13; i = i + 1) chunk = chunk + chunk;
+    var sent = 0;
+    while (sent < total) {
+        peer.write(chunk);
+        sent = sent + len(chunk);
+        yield;
+    }
+    peer.close();
+    task.send(me, "wrote " + str(sent));
+}
+
+// Always ready, so it runs at every turn the reader gives away.
+fun ticker() {
+    while (true) {
+        tickerTurns = tickerTurns + 1;
+        yield;
+    }
+}
+
+task.spawn(writer);
+task.spawn(ticker);
+task.spawn(reader);
+task.receive();
+task.receive();
+print "client wrote " + str(total) + " bytes";
+print "reader got " + str(got) + " bytes";
+print "the ticker ran during the read: " + str(ticksDuringRead);
+
+conn.close();
+srv.close();

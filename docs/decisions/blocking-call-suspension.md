@@ -202,6 +202,53 @@ runs. A coroutine that holds a suspended call keeps the status `"running"`, so
 a resume of it from another task raises `RunningCoroutineError`, as for a
 suspended `receive`.
 
+### A call that keeps up keeps the worker (2026-11-07)
+
+A call of class suspends reaches its wait only when the wait is not over at the
+call. While a stream of a Socket keeps arriving, a read or a write never
+reaches a wait, so the transfer runs as one running stretch and its task keeps
+the worker. The same holds for a task that computes. The spec states the rule
+in `spec/04-semantics.md`, "Suspend Points", and `spec/05-stdlib.md`, "Blocking
+calls".
+
+**The defect this answers.** The referee of PR #1125 measured one
+`read_bytes` call that held its worker for 1.3 s to 1.5 s while a client sent a
+512 MB bulk string, and no other task of that worker ran in that time (#1132,
+gap G2 of #1125). The reproduction is
+`examples/codecrafters/build-your-own-redis/`.
+
+**Why no bound closes it.** A bound on one running stretch is the reserved
+fair mode: `concurrency-model-decision.md` reserves "a switch at a loop
+back-edge or a call after a budget of work", #942 was closed as not planned,
+and this decision lists fair mode as a non-goal. A bound would also cross the
+invariant I2 probe `388_read_end_held_does_not_suspend`, which holds the other
+side of the rule: a call whose result is already held returns at once. A bound
+makes such a call wait once the result is larger than the bound, so it must
+qualify I2 for every Socket point. So the runtime keeps the rule it has.
+
+**The lever is the program.** The runtime cannot know whether the peer will
+keep up: the placement of a task is chosen at spawn and the rate of a peer is
+chosen later by a program outside this one. A program that must keep its other
+tasks alive during a large transfer moves the stream in parts and yields
+between them, which is a switch point it names, or it gives the moving task a
+worker of its own. `examples/fair_stream.lox` is the pattern, and the follow-up
+issue makes the Codecrafters example use it.
+
+**What this costs.** A `read_bytes(n)`, `readline()`, `read()` or `writeline()`
+of a large result still holds the worker for as long as the peer keeps up, and a
+program that needs the other tasks alive must move the data itself.
+
+**No probe binds the case.** Whether a call keeps up depends on the rate of the
+peer, which is a race between two processes, so no probe can force the case and
+none can forbid it. The I2 probes stay as they are and stay green: a call whose
+result is already held returns at once.
+
+**The measurement a later fair-mode decision owes.** One stretch of a bulk read
+of a saturating peer: 1.3 s to 1.5 s at 512 MB in the referee's run of PR #1125,
+and 10.09 s against 5.96 s for the whole `ECHO` in the two runs of #1134. A
+later decision that bounds a stretch must beat those numbers and state the
+throughput it costs when another task of the worker is ready.
+
 ### Contexts where a task cannot suspend
 
 The runtime calls some Lox++ code from a C++ frame, and needs the result
