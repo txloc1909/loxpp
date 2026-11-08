@@ -2854,6 +2854,95 @@ def stages_replication(prog):
         rep.stop()
         m.close()
 
+    # The bounds and the liveness of replication, on a server of their own.
+    srv = Server(prog, [])
+    try:
+        c = Asker(srv)
+
+        def slaves():
+            info = c.call("INFO", "replication")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_slaves:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        def clients_now():
+            info = c.call("INFO", "clients")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_clients:"):
+                    return int(line.split(":")[1])
+            return -1
+
+        # RP1: a replica that does not read is dropped when it is 64 MB
+        # behind, so the log does not grow without bound (README rule 4).
+        lazy, _, _ = replica_handshake(srv.port)
+        big = "x" * (1 << 20)
+        for i in range(100):
+            c.call("SET", "k%d" % i, big)
+        time.sleep(0.3)
+        check("local: RP1 a replica that does not read is dropped after 64 MB", slaves() == 0,
+              "connected_slaves %d" % slaves())
+        lazy.close()
+
+        # RP2: propagation of an RPUSH of 1048573 elements to a replica
+        # that reads (rule 6 only).
+        reader, _, _ = replica_handshake(srv.port)
+        stop = threading.Event()
+        got_bytes = [0]
+
+        def drain():
+            reader.sock.settimeout(0.5)
+            while not stop.is_set():
+                try:
+                    chunk = reader.sock.recv(1 << 20)
+                    if not chunk:
+                        break
+                    got_bytes[0] += len(chunk)
+                except OSError:
+                    pass
+        th = threading.Thread(target=drain)
+        th.start()
+        n = 1048573
+        cmd = encode("RPUSH", "rp2", *(["abcd"] * n))
+        out = [None]
+
+        def push():
+            c.raw().send_raw(cmd)
+            out[0] = c.raw().try_read(60)
+            time.sleep(0.5)
+        worst, wrong, _ = measure_while(srv, push)
+        deadline = time.time() + 10
+        while got_bytes[0] < len(cmd) and time.time() < deadline:
+            time.sleep(0.05)
+        stop.set()
+        th.join(10)
+        check("local: RP2 an RPUSH of 1048573 elements reaches the replica whole",
+              out[0] == n and got_bytes[0] >= len(cmd), "%r, %d of %d bytes" % (out[0], got_bytes[0], len(cmd)))
+        check("local: RP2 that RPUSH with a replica stalls PING at most 1 s",
+              worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+        reader.close()
+        time.sleep(0.3)
+
+        # A client that goes during WAIT ends its tasks.
+        keep, _, _ = replica_handshake(srv.port)
+        c.call("SET", "w", "1")
+        base = clients_now()
+        gone = srv.client()
+        gone.send_raw(encode("WAIT", "1", "0") + encode("PING") * 100)
+        time.sleep(0.2)
+        gone.close()
+        deadline = time.time() + 5
+        now = clients_now()
+        while time.time() < deadline and now != base:
+            time.sleep(0.05)
+            now = clients_now()
+        check("local: a client that goes during WAIT ends its tasks",
+              now == base, "connected_clients %d, before %d" % (now, base))
+        keep.close()
+        c.close()
+    finally:
+        srv.stop()
+
     # GETACK with no command first (stage 14), on a new replica.
     m = FakeMaster()
     rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
