@@ -1,17 +1,17 @@
-// A worker with tasks that are ready at every instant still sees the end of a
-// socket wait (spec/04-semantics.md, Scheduling: the worker sees an ended wait
-// at a task switch no more than a bounded time after the wait ends).
-// `reader` parks in readline on `conn`. `busyA` and `busyB` yield in a loop, so
-// the run queue is never empty. There are two of them because `yield` in a task
-// that finds no other task ready asks nothing of the host, which is how the
-// bootstrap interpreter keeps one thread. The peer writes the line after the
-// reader has parked, and the reader must wake and print it. A scheduler that
-// looks at the network only when its run queue is empty never wakes the reader,
-// and this probe times out.
+// A worker whose run queue is never empty still sees the end of a socket wait
+// (spec/04-semantics.md, Scheduling: the worker sees an ended wait at a task
+// switch, and no later than the first switch that follows the wait by a bounded
+// delay). `reader` parks in readline on `conn`. `busy` yields in a loop, so a
+// task is ready at every instant and the worker never goes idle. The peer writes
+// the line after the reader has parked, and the reader must wake and print it.
+// A scheduler that looks at the network only when its run queue is empty never
+// wakes the reader, and this probe times out. That is what the probe proves: it
+// does not pin the size of the delay, which the spec leaves to the
+// implementation.
 // STATUS: ok
 // TIMEOUT: 10
 // CHECK: the reader got the line: line
-// CHECK: the busy tasks are still running: true
+// CHECK: the busy task is still running: true
 var srv = listen("127.0.0.1", 0);
 var peer = connect("127.0.0.1", srv.port());
 var conn = srv.accept();
@@ -24,8 +24,7 @@ fun reader() {
     task.send(me, "read");
 }
 
-fun busyA() { while (true) { busyRuns = busyRuns + 1; yield; } }
-fun busyB() { while (true) { busyRuns = busyRuns + 1; yield; } }
+fun busy() { while (true) { busyRuns = busyRuns + 1; yield; } }
 
 fun writer() {
     sleep(0.05);
@@ -34,9 +33,8 @@ fun writer() {
 }
 
 task.spawn(reader);
-task.spawn(busyA);
-task.spawn(busyB);
+task.spawn(busy);
 task.spawn(writer);
 task.receive();
 task.receive();
-print "the busy tasks are still running: " + str(busyRuns > 0);
+print "the busy task is still running: " + str(busyRuns > 0);

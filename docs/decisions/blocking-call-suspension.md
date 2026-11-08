@@ -493,11 +493,22 @@ The spec binds this rule: `spec/04-semantics.md`, Scheduling, says the worker
 sees an ended wait "at a task switch, and no later than the first switch that
 follows the end of the wait or the passing of the limit by a bounded delay",
 and that the value of that delay is not bound, only that it is finite. Native's
-1 ms is such a delay, and the JVM's poll at every switch makes it zero. A wait
-is therefore seen within that delay plus the running stretch that ends at the
-switch, and two things stay outside the rule on purpose: a task that never
-reaches a suspend point keeps the worker (#1132), and the messages of a task of
-another worker keep their own paragraph.
+1 ms is the interval of that delay, and the JVM's poll at every switch makes the
+delay zero at a switch. In both, the delay also includes the running stretch
+that ends at the switch, so no implementation constant bounds it. A wait is
+therefore seen within that delay plus that stretch, and two things stay outside
+the rule on purpose: a task that never reaches a suspend point keeps the worker
+(#1132), and the messages of a task of another worker keep their own paragraph,
+which binds no delay (#1187).
+
+**What the rule buys, and what it does not.** It removes starvation: a wait on a
+connection, or a limit, is seen at a switch, so it is no longer deferred until
+the run queue is empty. It does not promise a latency. The value is a speed, and
+an implementation with a 4 s interval conforms: probe 451 then passes in 8 s,
+which the reviewer of PR #1185 measured. A server that needs an answer in
+milliseconds states the number it needs in its own README, as the mission rules
+of #1123 require. A rule that binds a maximum here would be a decision about
+speed on every backend, and that is a separate decision.
 
 Probe `451_ended_wait_is_seen_while_tasks_are_ready` pins the reachable case:
 two tasks that are ready at every instant, and a third parked in `readline`
