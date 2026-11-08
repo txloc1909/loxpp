@@ -175,6 +175,75 @@ TEST_F(MatchExpressionTest, LoopLocalSlotCorruption) {
     expect_num(*v, 3); // 1 + 2
 }
 
+// A break or continue in a catch block pops the loop locals only on the path
+// that leaves the loop. A later match must still put its result slot above
+// those locals, or the assignment reads the value of another slot.
+TEST_F(MatchExpressionTest, MatchAfterBreakInCatch) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var count = 0;
+        var out = nil;
+        fun f() {
+            var want = 1;
+            var closed = false;
+            while (count < want) {
+                var x = nil;
+                try {
+                    x = E.B();
+                    count = 1;
+                } catch (e) {
+                    break;
+                }
+                closed = match x {
+                    case E.A => true
+                    case _ => false
+                };
+            }
+            out = closed;
+        }
+        f();
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("out");
+    ASSERT_TRUE(v.has_value());
+    ASSERT_TRUE(is<bool>(*v));
+    EXPECT_FALSE(as<bool>(*v));
+}
+
+TEST_F(MatchExpressionTest, MatchAfterContinueInCatch) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        enum E { A B }
+        var count = 0;
+        var out = nil;
+        fun f() {
+            var want = 1;
+            var closed = false;
+            while (count < want) {
+                var x = nil;
+                try {
+                    x = E.B();
+                    count = 1;
+                } catch (e) {
+                    continue;
+                }
+                closed = match x {
+                    case E.A => true
+                    case _ => false
+                };
+            }
+            out = closed;
+        }
+        f();
+    )"),
+              InterpretResult::OK);
+    auto v = h.getGlobal("out");
+    ASSERT_TRUE(v.has_value());
+    ASSERT_TRUE(is<bool>(*v));
+    EXPECT_FALSE(as<bool>(*v));
+}
+
 // ---------------------------------------------------------------------------
 // JUMP_TABLE optimisation tests
 // ---------------------------------------------------------------------------

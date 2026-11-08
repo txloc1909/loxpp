@@ -1,0 +1,46 @@
+// A break or continue in a catch block pops the loop locals only on the
+// path that leaves the loop. A match after the try/catch must still put its
+// result above the loop locals, or the assignment reads another slot.
+enum E { A B }
+
+var count = 0;
+fun afterBreak() {
+    var want = 1;
+    var closed = false;
+    while (count < want) {
+        var x = nil;
+        try {
+            x = E.B();
+            count = 1;
+        } catch (e) {
+            break;
+        }
+        closed = match x {
+            case E.A => true
+            case _ => false
+        };
+    }
+    print closed;
+}
+afterBreak();
+
+var turns = 0;
+fun afterContinue() {
+    var want = 1;
+    var closed = false;
+    while (turns < want) {
+        var x = nil;
+        try {
+            x = E.B();
+            turns = 1;
+        } catch (e) {
+            continue;
+        }
+        closed = match x {
+            case E.A => true
+            case _ => false
+        };
+    }
+    print closed;
+}
+afterContinue();

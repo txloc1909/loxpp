@@ -1021,10 +1021,16 @@ void Compiler::breakStatement() {
         return;
     }
     m_parser->consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
+    // The cleanup POPs run only on the path that jumps away. Code after the
+    // jump is reached by other paths, which still hold those cells, so the
+    // linear counter must not keep the POPs. A try/catch does not re-anchor
+    // the counter after itself, so a drift here reaches a later match.
+    int heightBefore = m_stackHeight;
     emitLoopCleanup(m_loopStack.back().localCount,
                     m_loopStack.back().handlerCount);
     int jump = emitJump(Op::JUMP);
     m_loopStack.back().breakJumps.push_back(jump);
+    m_stackHeight = heightBefore;
 }
 
 void Compiler::continueStatement() {
@@ -1034,9 +1040,12 @@ void Compiler::continueStatement() {
         if (m_loopStack[i].start != -1) {
             m_parser->consume(TokenType::SEMICOLON,
                               "Expect ';' after 'continue'.");
+            // Same reason as in breakStatement().
+            int heightBefore = m_stackHeight;
             emitLoopCleanup(m_loopStack[i].localCount,
                             m_loopStack[i].handlerCount);
             emitLoop(m_loopStack[i].start);
+            m_stackHeight = heightBefore;
             return;
         }
     }
