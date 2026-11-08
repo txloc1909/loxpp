@@ -2072,11 +2072,10 @@ is ready to run. While tasks are ready to run, it sees them at a task switch,
 and no later than the first switch that follows the end of the wait or the
 passing of the limit by a bounded delay. The specification does not bind the
 value of that delay (see [Conformance](README.md#conformance), Speed); it binds
-that the delay is finite. A program whose tasks reach a suspend point therefore
-does not starve a wait of another task; a task that never reaches one keeps the
-worker, as [Suspend Points](#suspend-points) says, and the delay above is
-measured to a switch, so it says nothing about a worker whose running task does
-not switch. When it sees several at one point, the tasks join the run queue in
+that the delay is finite. So a wait that ends is seen within that delay
+plus the length of the running stretch that ends at the switch, and a task that
+never reaches a suspend point keeps the worker, as [Suspend
+Points](#suspend-points) says. When it sees several at one point, the tasks join the run queue in
 this order: first the tasks whose wait is for a connection, a Socket, or a
 Server and has ended, in the order in which their calls began to wait, then the
 tasks whose time has run out, in the order of their deadlines. One group holds

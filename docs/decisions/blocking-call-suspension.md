@@ -493,10 +493,11 @@ The spec binds this rule: `spec/04-semantics.md`, Scheduling, says the worker
 sees an ended wait "at a task switch, and no later than the first switch that
 follows the end of the wait or the passing of the limit by a bounded delay",
 and that the value of that delay is not bound, only that it is finite. Native's
-1 ms is such a delay, and the JVM's poll at every switch makes it zero. The
-delay is measured to a switch, so two things are outside it on purpose: a task
-that never reaches a suspend point keeps the worker (#1132), and the messages
-of a task of another worker keep their own paragraph.
+1 ms is such a delay, and the JVM's poll at every switch makes it zero. A wait
+is therefore seen within that delay plus the running stretch that ends at the
+switch, and two things stay outside the rule on purpose: a task that never
+reaches a suspend point keeps the worker (#1132), and the messages of a task of
+another worker keep their own paragraph.
 
 ### Readiness registry
 
