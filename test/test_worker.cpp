@@ -587,6 +587,91 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
     EXPECT_GE(msSince(start), 190);
 }
 
+// --- The wait record after a wait, a line and a run --------------------------
+//
+// Inbox::waitReason is the state that WorkerGroup::busy follows (src/worker.h):
+// only a wait for a message leaves that count. Each write of the field must
+// leave the record true at every boundary where a later send reads it. These
+// tests read the record itself, the way the C7 tests of test_poller.cpp do,
+// because no program can tell `None` from `Poller`: both make idle() false, so
+// `postEnvelope()` counts a worker in neither case. `Inbox` is the one value a
+// program can tell, because a send counts that worker back in.
+
+namespace {
+
+// The record of the main inbox: why the main worker holds no task to run.
+WaitReason mainWait(VM& vm) {
+    Inbox& inbox = vm.runtime().memoryManager().inbox();
+    std::lock_guard<std::mutex> lock(inbox.mutex);
+    return inbox.waitReason;
+}
+
+// The deadlock report of a program, with the reports that the program wrote to
+// stderr checked and kept off the test output.
+void expectDeadlock(VM& vm, const std::string& source) {
+    testing::internal::CaptureStderr();
+    const InterpretResult result = vm.interpret(source);
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(result, InterpretResult::RUNTIME_ERROR);
+    EXPECT_NE(err.find("Deadlock: every task waits in receive.\n"),
+              std::string::npos)
+        << err;
+}
+
+} // namespace
+
+// The main worker's own wait takes the count to zero, so its waitForWork()
+// reports the deadlock and returns. It does not wait any more, and the record
+// must say so: left at Inbox, a later line that a worker sends a message to
+// would count the main worker a second time after beginLine() counted it, and
+// the count never reaches zero again, so a real deadlock would hang.
+TEST_F(WorkerTest, ADeadlockTheMainWorkerFindsLeavesNoWait) {
+    VM vm;
+    expectDeadlock(vm, "var x = task.receive();");
+    EXPECT_EQ(mainWait(vm), WaitReason::None);
+}
+
+// A worker's wait takes the count to zero, so it signals the deadlock and the
+// main worker, asleep in its wait, is woken to report it. The woken worker does
+// not wait any more either, and its record must say so for the reason above.
+TEST_F(WorkerTest, ADeadlockAWorkerFindsLeavesNoWaitOnTheMainWorker) {
+    VM vm;
+    // The worker sleeps first, so the main worker is idle before the worker's
+    // wait takes the count to zero: this is the path a wake takes, not the one
+    // the main worker's own wait takes.
+    expectDeadlock(vm, R"(
+        fun far(main) { sleep(0.1); task.receive(); }
+        task.spawn_worker(far, task.self());
+        var x = task.receive();
+    )");
+    EXPECT_EQ(mainWait(vm), WaitReason::None);
+}
+
+// A line that waited in the poller leaves Poller in the record: the main worker
+// woke from its poller and did not wait again. The worker of a session stays in
+// its group across the lines that make no wait of it (spec/04-semantics.md, A
+// Session), so a new line starts the record at None.
+TEST_F(WorkerTest, ANewSessionLineStartsWithNoWait) {
+    VM vm;
+    vm.setSessionMode(true);
+    ASSERT_EQ(vm.interpret("sleep(0.002);"), InterpretResult::OK);
+    EXPECT_EQ(mainWait(vm), WaitReason::Poller);
+    ASSERT_EQ(vm.interpret("var z = 1;"), InterpretResult::OK);
+    EXPECT_EQ(mainWait(vm), WaitReason::None);
+    vm.endSession();
+}
+
+// The main worker never leaves its group, so its inbox keeps the record of the
+// run that ended. A run that makes its own group starts that record at None
+// instead of the `Poller` that the wait which ended the earlier run left there.
+TEST_F(WorkerTest, ANewRunStartsWithNoWait) {
+    VM vm;
+    ASSERT_EQ(vm.interpret("sleep(0.002);"), InterpretResult::OK);
+    EXPECT_EQ(mainWait(vm), WaitReason::Poller);
+    ASSERT_EQ(vm.interpret("var z = 1;"), InterpretResult::OK);
+    EXPECT_EQ(mainWait(vm), WaitReason::None);
+}
+
 // Two workers exchange many messages, enum values with a string field, both
 // ways, under collection on both sides. The `_gc` twin collects on every
 // allocation. A count off by one in either direction frees a message that
