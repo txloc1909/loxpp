@@ -64,6 +64,9 @@ public final class TestSupport {
         } catch (LoxError e) {
             check(e.isCatchable(),
                     description + " (expected no fatal fault but got: " + e.getMessage() + ")");
+        } catch (Throwable t) {
+            check(false, description + " (expected no fatal fault but got "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage() + ")");
         }
     }
 

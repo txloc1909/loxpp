@@ -132,11 +132,17 @@ public final class RuntimeStdlibTest {
     private static void checkIntegerArguments(LoxGlobals globals) {
         String host = "127.0.0.1";
 
-        // 1 is the lowest port of connect and connect_within, and 0 of listen.
+        // 1 is the lowest port of connect and connect_within, and 0 of listen,
+        // in both kinds: the Int that a computed port is and the Number that a
+        // literal is.
         checkFatal(() -> call(globals, "connect", host, 0L),
                    "connect() rejects port 0i");
+        checkFatal(() -> call(globals, "connect", host, 0.0),
+                   "connect() rejects port 0");
         checkFatal(() -> call(globals, "connect_within", host, 0L, 5.0),
                    "connect_within() rejects port 0i");
+        checkFatal(() -> call(globals, "connect_within", host, 0.0, 5.0),
+                   "connect_within() rejects port 0");
         checkFatal(() -> call(globals, "listen", host, -1L),
                    "listen() rejects port -1i");
         checkFatal(() -> call(globals, "listen", host, -1.0),
@@ -149,10 +155,16 @@ public final class RuntimeStdlibTest {
                    "listen() rejects a fractional port");
         checkFatal(() -> call(globals, "connect", host, 65536L),
                    "connect() rejects port 65536i");
+        checkFatal(() -> call(globals, "connect", host, 65536.0),
+                   "connect() rejects port 65536");
         checkFatal(() -> call(globals, "connect_within", host, 65536L, 5.0),
                    "connect_within() rejects port 65536i");
+        checkFatal(() -> call(globals, "connect_within", host, 65536.0, 5.0),
+                   "connect_within() rejects port 65536");
         checkFatal(() -> call(globals, "listen", host, 65536L),
                    "listen() rejects port 65536i");
+        checkFatal(() -> call(globals, "listen", host, 65536.0),
+                   "listen() rejects port 65536");
 
         // 1 is the lowest port of connect and connect_within, and 65535 the
         // highest port of all three. Such a call reaches the network, where a
@@ -160,8 +172,12 @@ public final class RuntimeStdlibTest {
         // port was wrongly refused.
         checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 1L)),
                       "connect() accepts port 1i");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 1.0)),
+                      "connect() accepts port 1");
         checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 1L, 5.0)),
                       "connect_within() accepts port 1i");
+        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 1.0, 5.0)),
+                      "connect_within() accepts port 1");
         checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 65535.0)),
                       "connect() accepts port 65535");
         checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 65535.0, 5.0)),
@@ -169,10 +185,14 @@ public final class RuntimeStdlibTest {
         checkNotFatal(() -> closeQuietly(call(globals, "listen", host, 65535.0)),
                       "listen() accepts port 65535");
 
-        // listen takes 0 as an Int too, and asks the OS for a free port.
+        // listen takes 0 in both kinds and asks the OS for a free port.
         Object server = call(globals, "listen", host, 0L);
         check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
               "listen() accepts port 0i and binds a free port");
+        closeQuietly(server);
+        server = call(globals, "listen", host, 0.0);
+        check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
+              "listen() accepts port 0 and binds a free port");
         closeQuietly(server);
     }
 

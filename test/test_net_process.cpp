@@ -583,6 +583,19 @@ TEST(NetProcessTest, InvalidPortFatal) {
     EXPECT_EQ(h.run("try { listen(\"127.0.0.1\", -1); } "
                     "catch (e) { print e.kind; }"),
               InterpretResult::RUNTIME_ERROR);
+    // Both kinds of a port are refused outside the range, so the Int form of
+    // connect's lowest port and the Number form of the highest port are each
+    // a fatal fault.
+    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 0i); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 65536.0); } "
+                    "catch (e) { print e.kind; } "
+                    "try { connect_within(\"127.0.0.1\", 65536.0, 5); } "
+                    "catch (e) { print e.kind; } "
+                    "try { listen(\"127.0.0.1\", 65536.0); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
 }
 
 // ---------------------------------------------------------------------------
