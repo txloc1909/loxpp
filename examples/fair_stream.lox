@@ -1,5 +1,5 @@
-// A large stream moved in parts, so the other tasks of the worker run during
-// the transfer.
+// A large stream moved in parts, so the other tasks of the worker get a turn
+// during the transfer.
 //
 // A call of class suspends reaches its wait only when the wait is not over at
 // the call (spec/04-semantics.md, Suspend Points). While a connection keeps
@@ -7,24 +7,26 @@
 // and keeps the worker: the other tasks of the worker get no turn until the
 // call returns. A program that needs them alive during a large transfer moves
 // the stream itself, in parts, and yields between the parts. `yield` is a
-// suspend point the program names, so the turn is the program's choice, not a
-// race with the peer.
+// suspend point the program names, so the turn is the program's choice and not
+// a race with the peer.
 //
-// The pattern is the pair below: `readParts` moves the bytes, and the caller
-// decides when to give the worker away. A single `conn.read_bytes(n)` of a
-// large `n` does the same work without the turns, which is why a server reads
-// a bulk string this way when it must answer other clients meanwhile.
+// Here the whole bulk is in the socket before the reader starts, so the reader
+// never has to wait for the network: nothing but the `yield` in `readParts`
+// can give the ticker a turn. Take that `yield` out and the last line of the
+// output says false.
 //
-// The listener and the client are in the same program, so the example needs no
-// second process.
+// A server reads a bulk string this way when it must answer other clients
+// meanwhile. A single `conn.read_bytes(n)` does the same work with no turns.
+// `your_program.sh` of a Codecrafters example is the place this pattern ends
+// up in (#1172).
 // STATUS: ok
 // TIMEOUT: 20
-// CHECK: client wrote 262144 bytes
-// CHECK: reader got 262144 bytes
+// CHECK: the client wrote 32768 bytes
+// CHECK: the reader got 32768 bytes
 // CHECK: the ticker ran during the read: true
 
-var total = 262144;
-var part = 65536;
+var total = 32768; // fits in the buffers of one connection, so the write does
+var part = 4096;   // not wait, and the parts come from the socket, not the peer
 
 var srv = listen("127.0.0.1", 0);
 var peer = connect("127.0.0.1", srv.port());
@@ -55,19 +57,6 @@ fun reader() {
     task.send(me, "read");
 }
 
-fun writer() {
-    var chunk = "abcdefgh";
-    for (var i = 0; i < 13; i = i + 1) chunk = chunk + chunk;
-    var sent = 0;
-    while (sent < total) {
-        peer.write(chunk);
-        sent = sent + len(chunk);
-        yield;
-    }
-    peer.close();
-    task.send(me, "wrote " + str(sent));
-}
-
 // Always ready, so it runs at every turn the reader gives away.
 fun ticker() {
     while (true) {
@@ -76,14 +65,17 @@ fun ticker() {
     }
 }
 
-task.spawn(writer);
+var bulk = "abcdefgh";
+for (var i = 0; i < 12; i = i + 1) bulk = bulk + bulk;
+peer.write(bulk);
+
 task.spawn(ticker);
 task.spawn(reader);
 task.receive();
-task.receive();
-print "client wrote " + str(total) + " bytes";
-print "reader got " + str(got) + " bytes";
+print "the client wrote " + str(total) + " bytes";
+print "the reader got " + str(got) + " bytes";
 print "the ticker ran during the read: " + str(ticksDuringRead);
 
 conn.close();
+peer.close();
 srv.close();
