@@ -193,8 +193,8 @@ A script checks this before any backend node starts.
 ### Suspension
 
 A call in the first class suspends the calling task until its wait completes.
-Every other task on the worker keeps running. The call is a suspend point, as
-the table in `spec/04-semantics.md` says.
+Every other task on the worker keeps running while the call waits. The call is
+a suspend point, as the table in `spec/04-semantics.md` says.
 
 A suspended call suspends the whole task. Every frame of the task stays in
 place, including the frames of a coroutine the task resumed. No deferred call
@@ -217,7 +217,7 @@ Points", and `spec/05-stdlib.md`, "Blocking calls".
 gap G2 of #1125). The reproduction is
 `examples/codecrafters/build-your-own-redis/`.
 
-**Why no bound closes it.** A bound on one running stretch is the reserved
+**Why this decision has no bound.** A bound on one running stretch is the reserved
 fair mode: `concurrency-model-decision.md` reserves "a switch at a loop
 back-edge or a call after a budget of work", #942 was closed as not planned,
 and this decision lists fair mode as a non-goal. A bound would also cross the rule
@@ -227,7 +227,7 @@ call would wait although its result is already held. The probe
 smaller than any useful bound, so the choice weakens a rule that no probe then
 covers. So the task's stretch keeps the rule it has. The points at which the
 worker sees a wait that has ended are a separate rule, not a switch point at a
-site that names nothing, and #1131 states it in the spec.
+site that names nothing, and #1131 is where that rule is to be stated.
 
 **The lever is the program.** The runtime cannot know whether the peer will
 keep up: the placement of a task is chosen at spawn and the rate of a peer is

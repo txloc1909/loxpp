@@ -45,7 +45,9 @@ var ticksDuringRead = false;
 fun readParts(n) {
     var out = "";
     while (len(out) < n) {
-        var s = conn.read_some(n - len(out));
+        var want = n - len(out);
+        if (want > part) want = part;
+        var s = conn.read_some(want);
         if (s == "") break;
         out = out + s;
         yield;

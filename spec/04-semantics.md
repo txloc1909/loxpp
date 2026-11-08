@@ -1843,7 +1843,7 @@ a call can wait on. The sections after it use these terms.
 | `receive` | a receive that finds no message to take, where the task can suspend | `running` | `receiving` | — |
 | `message` | a message arrives in the mailbox of a `receiving` task | `receiving` | `ready` | joins the back |
 | `limit` | the limit of a receive passes | `receiving` | `ready` | joins the back |
-| `wait` | a call of class suspends whose wait is not over at the call, where the task can suspend | `running` | `waiting` | — |
+| `wait` | a call of class suspends that cannot go on without waiting, where the task can suspend | `running` | `waiting` | — |
 | `wait-end` | the wait of a `waiting` task ends: its event happens, a task closes the value it waits on, or its limit passes | `waiting` | `ready` | joins the back |
 | `end` | the function of the task returns, or the task ends by an uncaught throw or a halting fault | `running` | `ended` | — |
 | `abandon` | the program ends, or, in a session, the line that spawned the task ends (see [A Session](#a-session)) | `ready`, `receiving`, `waiting` | `ended` | leaves |
@@ -2017,11 +2017,9 @@ each transfer moves bytes, so the call does not wait for as long as the bytes
 keep arriving, and its task keeps the worker as a task that computes does. A
 program that moves a large stream therefore moves it in parts and yields
 between the parts, or it gives the task that moves it a worker of its own. A
-yield gives a turn to each task of the worker that is ready to run; whether the
-worker also sees a wait that has ended at that point is the rule of
-[Scheduling](#scheduling). The `Fair mode` column above is where a later
-version can bound such a stretch; the points at which the worker sees a wait
-that has ended are the rule of Scheduling, not a suspend point.
+yield gives a turn to each task of the worker that is ready to run. When the
+worker sees a wait that has ended is the rule of [Scheduling](#scheduling). The
+`Fair mode` column above is where a later version can bound such a stretch.
 
 ### Contexts where a task cannot suspend
 
