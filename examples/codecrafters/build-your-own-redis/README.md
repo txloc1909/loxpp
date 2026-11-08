@@ -229,11 +229,13 @@ and `EXEC`; the pops of the waiters that `EXEC` serves come after it. So the ord
 the log is the order of the writes, and the offset (`replOffset`) counts the
 RESP bytes of each entry when it is appended. Each replica session writes
 the log from its own position, in steps (`writeReplLog`). A replica that is
-64 MB or 131072 entries behind is dropped (the log holds Lox++ objects,
-which are larger than their bytes), and the entries that every replica has
-got are dropped (rule 4). A master keeps no log before its first replica,
-so its offset is 0 until then; after that the offset goes on, also when the
-last replica goes.
+falls behind is dropped as Redis drops it at its output buffer limits: at
+once over 256 MB, or after 60 s over 64 MB (`--replica-soft-seconds`). The
+lag counts the RESP bytes of each entry and 64 bytes for each argument,
+because the log holds Lox++ objects, which are larger than their bytes. The
+entries that every replica has got are dropped (rule 4). A master keeps no
+log while it has no replica, so its offset does not grow then; Redis keeps
+its backlog and its offset goes on.
 
 `PSYNC` gives `FULLRESYNC` and an empty RDB file of version 10, the version
 of Redis 7.0, so a Redis 7.0 replica loads it. `REPLCONF ACK` keeps the
@@ -248,7 +250,10 @@ and marks each client that watches a key. It applies each command of the
 stream with no reply, and counts the bytes from the offset of `FULLRESYNC`.
 A second task writes to the master: the answer to `REPLCONF GETACK`, with
 the offset before the GETACK, and an ACK of its own every second, as Redis
-replicas send. It applies a
+replicas send. As in Redis, a replica does not remove an expired key: its
+clients read it as missing, and the commands of its master see it until the
+`DEL` of the master comes. A full resync marks each client that watches a
+key, one step for each such client. It applies a
 `MULTI` ... `EXEC` of the master in one step, yields every 64 commands, and
 connects again one second after the link breaks. It refuses a write from a
 client with `READONLY`. The cross checks of `diff_redis.py` run a Lox++
@@ -300,7 +305,8 @@ printed.
   give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
 - A full resync sends an empty RDB file, so a replica gets only the writes
-  after it connects. `SET` with a relative `EX` or `PX` goes to a replica
+  after it connects. A master has no backlog while it has no replica, so
+  its offset does not grow then. `SET` with a relative `EX` or `PX` goes to a replica
   as it came, not as `PXAT`. `WAIT`, `REPLCONF` and `PSYNC` cannot be
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
@@ -433,8 +439,9 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | K5 (on the K3 server): `KEYS ?` and 262144 stars on 256 keys of one byte; each key ends at once and the rest of the pattern is stars | PING within 0.3 s (when the stars at the end are not steps: 5.13 s) | 0.04–0.06 s |
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
-| RP1 (group `replication`): a replica that never reads, then 100 writes of 1 MB | the replica is dropped after 64 MB | as required |
-| RP3: a replica that never reads, then 400000 `INCR` (about 12 MB) | the replica is dropped after 131072 entries | as required |
+| RP1 (group `replication`): a replica that never reads, then 300 writes of 1 MB | the replica is dropped over the hard limit of 256 MB | as required |
+| RP3 (with `--replica-soft-seconds 1`): a replica that never reads, then 80 writes of 1 MB, then one more write after 1.5 s | the replica stays while the soft time runs, then goes | as required |
+| Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
 | Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |

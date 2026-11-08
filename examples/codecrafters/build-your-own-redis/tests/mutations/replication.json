@@ -169,16 +169,16 @@
  },
  {
   "name": "the replica applies nothing",
-  "old": "        } else if (len(argv) > 0) {\n            execute(nil, argv);\n        }\n        replicaOffset",
-  "new": "        } else if (len(argv) > 0) {\n        }\n        replicaOffset",
+  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
+  "new": "        } else if (len(argv) > 0) {\n        }",
   "cases": [
    "replication-13 the replica applies the commands of the master"
   ]
  },
  {
   "name": "the replica replies to the master",
-  "old": "        } else if (len(argv) > 0) {\n            execute(nil, argv);\n        }\n        replicaOffset",
-  "new": "        } else if (len(argv) > 0) {\n            sock.write(execute(nil, argv));\n        }\n        replicaOffset",
+  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
+  "new": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            sock.write(execute(nil, argv));\n            applyingFromMaster = false;\n        }",
   "cases": [
    "local: the replica sends no reply to the master"
   ]
@@ -216,14 +216,6 @@
   ]
  },
  {
-  "name": "RP1 a replica that does not read is kept",
-  "old": "        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX\n",
-  "new": "        if (false\n",
-  "cases": [
-   "local: RP1 a replica that does not read is dropped after 64 MB"
-  ]
- },
- {
   "name": "WAIT does not see its client go",
   "old": "        closed = isClosedMsg(msg);",
   "new": "        closed = false;",
@@ -256,14 +248,6 @@
   ]
  },
  {
-  "name": "RP3 no bound on entries behind",
-  "old": "            or replLogBase + len(replLog) - r.logPos > REPLICA_LAG_ENTRIES) {",
-  "new": "            or false) {",
-  "cases": [
-   "local: RP3 a replica that does not read is dropped after 131072 entries"
-  ]
- },
- {
   "name": "a full resync loads in one step",
   "old": "    loadRdbData(data, fresh, true);",
   "new": "    loadRdbData(data, fresh, false);",
@@ -273,8 +257,8 @@
  },
  {
   "name": "a full resync marks no watcher",
-  "old": "    for (var key in watchers.keys()) {\n        touch(key);\n    }\n    // The offset",
-  "new": "    // The offset",
+  "old": "    for (var id in watchingConns.keys()) {\n        watchingConns[id].watchDirty = true;\n    }",
+  "new": "",
   "cases": [
    "local: a full resync makes EXEC of a client that watches a key fail"
   ]
@@ -333,6 +317,94 @@
   "new": "    serveReady();\n    endExecReplication();",
   "cases": [
    "local: the pop of a waiter that EXEC served comes after its EXEC"
+  ]
+ },
+ {
+  "name": "RP1 no hard limit",
+  "old": "        if (lag > REPLICA_HARD_COST\n",
+  "new": "        if (false\n",
+  "cases": [
+   "local: RP1 a replica that does not read is dropped over the hard limit"
+  ]
+ },
+ {
+  "name": "RP3 the soft limit drops at once",
+  "old": "            or (r.softSince != nil and now - r.softSince > REPLICA_SOFT_SECONDS * 1000)) {",
+  "new": "            or r.softSince != nil) {",
+  "cases": [
+   "local: RP3 a replica over the soft limit stays while the soft time runs"
+  ]
+ },
+ {
+  "name": "RP3 no soft limit",
+  "old": "            or (r.softSince != nil and now - r.softSince > REPLICA_SOFT_SECONDS * 1000)) {",
+  "new": "            or false) {",
+  "cases": [
+   "local: RP3 a replica that is still over the soft limit after its time is dropped"
+  ]
+ },
+ {
+  "name": "a replica removes an expired key for its master",
+  "old": "            if (applyingFromMaster) {\n                return entry;\n            }\n            return nil;",
+  "new": "            return nil;",
+  "cases": [
+   "local: a command of the master sees an expired key on the replica"
+  ]
+ },
+ {
+  "name": "a client of the replica reads an expired key",
+  "old": "            if (applyingFromMaster) {\n                return entry;\n            }\n            return nil;",
+  "new": "            return entry;",
+  "cases": [
+   "local: a client of the replica reads an expired key as missing"
+  ]
+ },
+ {
+  "name": "the replica applies a write of a transaction at once",
+  "old": "        } else if (queued != nil) {\n            queued.append(argv);",
+  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            execute(nil, argv);",
+  "cases": [
+   "local: a client of the replica sees no write of a transaction before its EXEC"
+  ]
+ },
+ {
+  "name": "DEL is not propagated",
+  "old": "    if (removed) {\n        replicate(argv, nil);\n    }",
+  "new": "",
+  "cases": [
+   "local: DEL is propagated"
+  ]
+ },
+ {
+  "name": "DEL marks no watcher",
+  "old": "                store.del(key);\n                touch(key);\n                removed = true;",
+  "new": "                store.del(key);\n                removed = true;",
+  "cases": [
+   "local: DEL marks a client that watches the key"
+  ]
+ },
+ {
+  "name": "DEL counts every argument",
+  "old": "                if (live or applyingFromMaster) {\n                    n = n + 1;\n                }",
+  "new": "                n = n + 1;",
+  "cases": [
+   "local: DEL counts the keys that it removes"
+  ]
+ },
+ {
+  "name": "DEL is not a write",
+  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true};",
+  "new": "\"BLPOP\": true, \"XADD\": true};",
+  "cases": [
+   "local: a replica refuses DEL from a client"
+  ]
+ },
+ {
+  "name": "a second PSYNC adds the replica again",
+  "old": "    if (!conn.isReplica) {\n        // A second PSYNC on the link starts again; it is still one replica.\n        conn.isReplica = true;\n        replicas.append(conn);\n    }",
+  "new": "    conn.isReplica = true;\n    replicas.append(conn);",
+  "cases": [
+   "local: a second PSYNC on one link is still one replica"
   ]
  }
 ]

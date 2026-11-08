@@ -357,6 +357,15 @@ fun lookup(key) {
         return nil;
     }
     if (entry.expiresAt != nil and nowMs() >= entry.expiresAt) {
+        if (REPL_ROLE != "master") {
+            // As in Redis, a replica does not remove an expired key: its
+            // clients read it as missing, and the commands of its master
+            // see it until the DEL of the master comes.
+            if (applyingFromMaster) {
+                return entry;
+            }
+            return nil;
+        }
         store.del(key);
         touch(key);
         // As Redis does, the master tells its replicas, so that a write
@@ -478,19 +487,30 @@ fun cmdInfo(argv) {
     return bulk(out);
 }
 
+// One pass with one Map read for each key, and one log entry for all the
+// keys that it removes, also the expired ones, which it does not count.
 fun cmdDel(ctx, argv) {
     if (len(argv) < 2) {
         return wrongArgs("del");
     }
     var n = 0;
+    var removed = false;
+    var now = nowMs();
     for (var key in argv[1:len(argv)]) {
-        if (lookup(key) != nil) {
-            store.del(key);
-            touch(key);
-            n = n + 1;
+        var entry = store[key];
+        if (entry != nil) {
+            var live = entry.expiresAt == nil or now < entry.expiresAt;
+            if (live or REPL_ROLE == "master" or applyingFromMaster) {
+                store.del(key);
+                touch(key);
+                removed = true;
+                if (live or applyingFromMaster) {
+                    n = n + 1;
+                }
+            }
         }
     }
-    if (n > 0) {
+    if (removed) {
         replicate(argv, nil);
     }
     return integerReply(n);
@@ -2107,6 +2127,8 @@ fun writeReply(conn, reply) {
 // many keys in one step. A Conn is not a Map key (it defines no __hash__),
 // so its id is.
 var watchers = {};
+// Conn id -> Conn: the clients that watch at least one key.
+var watchingConns = {};
 
 // hasField on a Map is a halting fault, so the kind comes first.
 fun isConn(x) {
@@ -2173,6 +2195,7 @@ fun cmdWatch(conn, argv) {
             }
             watched[key] = true;
             conn.watchCount = conn.watchCount + 1;
+            watchingConns[conn.id] = conn;
             var w = watchers[key];
             if (w == nil) {
                 watchers[key] = conn;
@@ -2222,6 +2245,7 @@ fun unwatchAll(conn) {
         return;
     }
     var old = conn.watched;
+    watchingConns.del(conn.id);
     conn.watched = {};
     conn.watchCount = 0;
     conn.watchDirty = false;
@@ -2760,6 +2784,8 @@ var replOffset = 0;
 var replicas = [];
 // On a replica: the bytes of the commands from the master that it applied.
 var replicaOffset = 0;
+// True while a replica applies a command of its master.
+var applyingFromMaster = false;
 var masterHost = nil;
 var masterPort = 0;
 var listenPort = 6379;
@@ -2769,10 +2795,11 @@ var listenPort = 6379;
 // log is the order of the commands; each replica session encodes and writes
 // the entries from its own position, with yields (writeReplLog).
 class ReplEntry {
-    init(head, tail, endOffset) {
+    init(head, tail, endOffset, endCost) {
         this.head = head;
         this.tail = tail;
         this.endOffset = endOffset;
+        this.endCost = endCost;
     }
 }
 var replLog = [];
@@ -2783,10 +2810,16 @@ var replInExec = false;
 var replExecWrote = false;
 // A replica that has not got this many bytes of the stream is dropped
 // (README rule 4), as Redis drops it at its output buffer limit.
-var REPLICA_LAG_MAX = 67108864;
-// The log holds Lox++ objects, which are larger than their RESP bytes, so a
-// replica is also dropped when it is this many entries behind.
-var REPLICA_LAG_ENTRIES = 131072;
+// The limits of a replica that falls behind, as the output buffer limits of
+// Redis: over the hard limit it is dropped at once; over the soft limit for
+// REPLICA_SOFT_SECONDS it is dropped. The lag is the cost of the entries
+// that it has not got: their RESP bytes, and 64 bytes for each argument,
+// because the log holds Lox++ objects, which are larger than their bytes.
+var REPLICA_HARD_COST = 268435456;
+var REPLICA_SOFT_COST = 67108864;
+var REPLICA_SOFT_SECONDS = 60;
+var ARG_COST = 64;
+var replCost = 0;
 
 // An empty RDB file: the header and the end byte, with no checksum.
 // Version 10, the version of Redis 7.0, so that a Redis 7.0 replica loads it.
@@ -2849,11 +2882,19 @@ fun appendRepl(head, tail) {
     }
     size = size + 1 + digitsOf(n) + 2;
     replOffset = replOffset + size;
-    replLog.append(ReplEntry(head, tail, replOffset));
+    replCost = replCost + size + ARG_COST * n;
+    replLog.append(ReplEntry(head, tail, replOffset, replCost));
+    var now = nowMs();
     var keep = [];
     for (var r in replicas) {
-        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX
-            or replLogBase + len(replLog) - r.logPos > REPLICA_LAG_ENTRIES) {
+        var lag = replCost - r.replSentCost;
+        if (lag <= REPLICA_SOFT_COST) {
+            r.softSince = nil;
+        } else if (r.softSince == nil) {
+            r.softSince = now;
+        }
+        if (lag > REPLICA_HARD_COST
+            or (r.softSince != nil and now - r.softSince > REPLICA_SOFT_SECONDS * 1000)) {
             // The replica does not read fast enough: drop it.
             r.isReplica = false;
             try {
@@ -2906,6 +2947,7 @@ fun writeReplLog(conn) {
         }
         conn.logPos = conn.logPos + 1;
         conn.replSentOffset = entry.endOffset;
+        conn.replSentCost = entry.endCost;
     }
     out.flush();
     trimReplLog();
@@ -2973,6 +3015,8 @@ fun cmdPsync(conn, argv) {
     conn.sock.write("$" + str(len(EMPTY_RDB)) + "\r\n" + EMPTY_RDB);
     conn.logPos = replLogBase + len(replLog);
     conn.replSentOffset = replOffset;
+    conn.replSentCost = replCost;
+    conn.softSince = nil;
     conn.ackOffset = replOffset;
     if (!conn.isReplica) {
         // A second PSYNC on the link starts again; it is still one replica.
@@ -3214,10 +3258,11 @@ fun replicaSession() {
     var fresh = {};
     loadRdbData(data, fresh, true);
     // One step: the clients see the old keyspace or the new one, and each
-    // client that watches a key is marked, as the keys change.
+    // client that watches a key is marked, as the keys change: one step for
+    // each such client, not for each watched key.
     store = fresh;
-    for (var key in watchers.keys()) {
-        touch(key);
+    for (var id in watchingConns.keys()) {
+        watchingConns[id].watchDirty = true;
     }
     // The offset of the stream goes on from the offset of FULLRESYNC.
     replicaOffset = startOffset;
@@ -3267,14 +3312,18 @@ fun replicaSession() {
         } else if (name == "MULTI") {
             queued = [];
         } else if (name == "EXEC" and queued != nil) {
+            applyingFromMaster = true;
             for (var q in queued) {
                 execute(nil, q);
             }
+            applyingFromMaster = false;
             queued = nil;
         } else if (queued != nil) {
             queued.append(argv);
         } else if (len(argv) > 0) {
+            applyingFromMaster = true;
             execute(nil, argv);
+            applyingFromMaster = false;
         }
         replicaOffset = replicaOffset + got[1];
         n = n + 1;
@@ -3504,6 +3553,8 @@ class Conn {
         this.replSentOffset = 0;
         this.replWoken = false;
         this.ackOffset = 0;
+        this.replSentCost = 0;
+        this.softSince = nil;
     }
 }
 
@@ -3947,6 +3998,14 @@ fun main() {
         masterHost = hp[0];
         masterPort = mport;
     }
+    // The time over the soft limit after which a replica is dropped; the
+    // tests set a short one.
+    var soft = parseInteger(flagValue("--replica-soft-seconds", str(REPLICA_SOFT_SECONDS)));
+    if (soft == nil or soft < 0) {
+        print "redis.lox: --replica-soft-seconds needs a number of seconds";
+        exit(64);
+    }
+    REPLICA_SOFT_SECONDS = soft;
     CONFIG_DIR = flagValue("--dir", CONFIG_DIR);
     CONFIG_DBFILENAME = flagValue("--dbfilename", CONFIG_DBFILENAME);
     try {

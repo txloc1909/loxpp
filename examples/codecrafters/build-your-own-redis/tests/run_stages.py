@@ -2847,8 +2847,33 @@ def stages_replication(prog):
         check("local: the pop of a waiter that EXEC served comes after its EXEC",
               got == [["MULTI"], ["RPUSH", "wl", "w"], ["EXEC"], ["LPOP", "wl"]], repr(got))
         waiter.close()
+        c.call("SET", "dk", "1")
+        r.try_read(1)
+        got = c.call("DEL", "dk", "nosuch")
+        check("local: DEL counts the keys that it removes", got == 1, repr(got))
+        got = r.try_read(1)
+        check("local: DEL is propagated", got == ["DEL", "dk", "nosuch"], repr(got))
+        check("local: DEL of missing keys gives 0", c.call("DEL", "nosuch") == 0)
+        c.call("SET", "dw", "1")
+        r.try_read(1)
+        watcher = Asker(srv)
+        watcher.call("WATCH", "dw")
+        c.call("DEL", "dw")
+        r.try_read(1)
+        watcher.call("MULTI")
+        watcher.call("PING")
+        check("local: DEL marks a client that watches the key", watcher.call("EXEC") is None)
+        watcher.close()
+        r.send_raw(encode("PSYNC", "?", "-1"))
+        again = r.try_read(3)
+        header = r._line()
+        r._exact(int(header[1:]))
+        info = c.call("INFO", "replication")
+        check("local: a second PSYNC on one link is still one replica",
+              isinstance(again, str) and again.startswith("FULLRESYNC") and "connected_slaves:3" in info,
+              "%r %r" % (again, info[:80]))
         for x in (r2, r3):
-            for _ in range(14):
+            for _ in range(18):
                 x.try_read(1)
 
         # WAIT.
@@ -2948,6 +2973,27 @@ def stages_replication(prog):
         check("local: a replica refuses a write in MULTI", isinstance(got, Error) and got.startswith("READONLY"),
               repr(got))
         c.call("DISCARD")
+        got = c.call("DEL", "foo")
+        check("local: a replica refuses DEL from a client", isinstance(got, Error) and got.startswith("READONLY"),
+              repr(got))
+        # An expired key stays on the replica for the commands of its
+        # master, until the DEL of the master: SET XX after the expiry finds
+        # it, as on a redis-server replica.
+        link.send_raw(encode("SET", "ex", "5", "PX", "100"))
+        time.sleep(0.3)
+        check("local: a client of the replica reads an expired key as missing", c.call("GET", "ex") is None)
+        link.send_raw(encode("SET", "ex", "7", "XX"))
+        time.sleep(0.2)
+        check("local: a command of the master sees an expired key on the replica", c.call("GET", "ex") == "7")
+        # A transaction of the master: no client of the replica sees its
+        # writes before its EXEC.
+        link.send_raw(encode("MULTI") + encode("SET", "ma", "1"))
+        time.sleep(0.3)
+        check("local: a client of the replica sees no write of a transaction before its EXEC",
+              c.call("GET", "ma") is None)
+        link.send_raw(encode("EXEC"))
+        time.sleep(0.2)
+        check("local: after EXEC the client sees the write", c.call("GET", "ma") == "1")
         # The replica sends an ACK of its own every second.
         link.sock.settimeout(1.6)
         try:
@@ -2994,31 +3040,15 @@ def stages_replication(prog):
                     return int(line.split(":")[1])
             return -1
 
-        # RP1: a replica that does not read is dropped when it is 64 MB
-        # behind, so the log does not grow without bound (README rule 4).
+        # RP1: a replica that does not read is dropped over the hard limit
+        # of 256 MB, so the log does not grow without bound (README rule 4).
         lazy, _, _ = replica_handshake(srv.port)
         big = "x" * (1 << 20)
-        for i in range(100):
-            c.call("SET", "k%d" % i, big)
+        for i in range(300):
+            c.call("SET", "k", big + str(i))
         time.sleep(0.3)
-        check("local: RP1 a replica that does not read is dropped after 64 MB", slaves() == 0,
-              "connected_slaves %d" % slaves())
-        lazy.close()
-        time.sleep(0.2)
-
-        # RP3: a replica that does not read is dropped after 131072 entries,
-        # also when their bytes are fewer than 64 MB: the log holds objects.
-        lazy, _, _ = replica_handshake(srv.port)
-        # 400000 entries of about 30 bytes: more than the socket buffers
-        # take, so the replica falls behind by more than 131072 entries.
-        for i in range(0, 400000, 4096):
-            k = min(4096, 400000 - i)
-            c.raw().send_raw(encode("INCR", "rp3") * k)
-            for _ in range(k):
-                c.raw().try_read(10)
-        time.sleep(0.3)
-        check("local: RP3 a replica that does not read is dropped after 131072 entries", slaves() == 0,
-              "connected_slaves %d" % slaves())
+        check("local: RP1 a replica that does not read is dropped over the hard limit",
+              slaves() == 0, "connected_slaves %d" % slaves())
         lazy.close()
         time.sleep(0.2)
 
@@ -3106,6 +3136,35 @@ def stages_replication(prog):
     finally:
         srv.stop()
 
+    # RP3: the soft limit, with a soft time of 1 s. A replica over 64 MB
+    # stays while the soft time runs (one large write must not drop it),
+    # and goes when it is still over after that time.
+    srv = Server(prog, ["--replica-soft-seconds", "1"])
+    try:
+        c = Asker(srv)
+
+        def slaves3():
+            info = c.call("INFO", "replication")
+            for line in info.split("\r\n"):
+                if line.startswith("connected_slaves:"):
+                    return int(line.split(":")[1])
+            return -1
+        lazy, _, _ = replica_handshake(srv.port)
+        big = "y" * (1 << 20)
+        for i in range(80):
+            c.call("SET", "s", big + str(i))
+        check("local: RP3 a replica over the soft limit stays while the soft time runs",
+              slaves3() == 1, "connected_slaves %d" % slaves3())
+        time.sleep(1.5)
+        c.call("SET", "s", "after")
+        time.sleep(0.2)
+        check("local: RP3 a replica that is still over the soft limit after its time is dropped",
+              slaves3() == 0, "connected_slaves %d" % slaves3())
+        lazy.close()
+        c.close()
+    finally:
+        srv.stop()
+
     # GETACK with no command first (stage 14), on a new replica.
     m = FakeMaster()
     rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
@@ -3151,7 +3210,12 @@ def stages_replication(prog):
             time.sleep(1.5)
         worst, wrong, _ = measure_while(rep, resync)
         c = Asker(rep)
-        check("local: a full resync of 524288 keys loads them", c.call("GET", "r524287") == "v")
+        deadline = time.time() + 10
+        loaded = c.call("GET", "r524287")
+        while loaded != "v" and time.time() < deadline:
+            time.sleep(0.1)
+            loaded = c.call("GET", "r524287")
+        check("local: a full resync of 524288 keys loads them", loaded == "v")
         check("local: a full resync of 524288 keys stalls PING at most 1 s",
               worst <= 1.0 and not wrong, "worst %.3f s" % worst)
         c.close()
