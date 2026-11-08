@@ -3564,7 +3564,8 @@ class Conn {
         this.blocked = false;
         // The Transaction after MULTI, or nil.
         this.tx = nil;
-        // WATCH: key -> true for each watched key; watchDirty turns true
+        // WATCH: key -> true for each watched key, or "expired" for a key
+        // that a replica keeps but that had expired at WATCH; watchDirty turns true
         // when a command writes one of them. expiring lists the watched
         // keys that had an expiry at WATCH, with that time.
         this.id = nextConnId;

@@ -185,9 +185,11 @@ keys: a write while it runs is concurrent with it, so a write of a key that
 it has not joined yet comes before it, and no write after its reply is
 missed. Each command that writes the keyspace calls `touch(key)`, also a
 write that keeps the value, and a lazy expiry. `touch` marks each client
-that watches the key (`watchDirty`), and drops the key from `watchers`: a
-marked client stays marked until its next `EXEC`, so each later write of
-the key costs one Map read. `EXEC` gives a null array when the mark is set, or when a
+that watches the key (`watchDirty`), and drops the marked clients from
+`watchers`: a marked client stays marked until its next `EXEC`, so each
+later write of the key costs one Map read. On a replica, the `DEL` from the
+master of a key that had expired at `WATCH` marks no client, and `touch`
+keeps that client in `watchers`. `EXEC` gives a null array when the mark is set, or when a
 watched key that had an expiry at `WATCH` has expired since, also with no
 read, as Redis 7.0 does. `EXECABORT` comes first.
 
@@ -313,6 +315,12 @@ printed.
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
   redis-server master makes a new RDB file each time).
+- On a replica, a write from the master of a key that had expired at
+  `WATCH` marks the client, and a full resync marks every client that
+  watches a key. Redis 7.0 marks neither: it does not mark a client when the
+  master overwrites such a key (nor the later clients of that key), and a
+  full resync does not mark a client whose watched key is missing before and
+  after it.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the

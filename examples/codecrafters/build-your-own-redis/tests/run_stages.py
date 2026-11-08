@@ -2992,8 +2992,8 @@ def stages_replication(prog):
         time.sleep(0.2)
         check("local: a command of the master sees an expired key on the replica", c.call("GET", "ex") == "7")
         # A key that has expired at WATCH: its DEL from the master changes
-        # nothing that the client saw, and a write of it does, as on a
-        # redis-server 7.0 replica.
+        # nothing that the client saw, as on a redis-server 7.0 replica. A
+        # write of it does; Redis 7.0 marks no client then (see the README).
         link.send_raw(encode("SET", "wx", "5", "PX", "100") + encode("SET", "wy", "5", "PX", "100"))
         time.sleep(0.3)
         c.call("WATCH", "wx")
