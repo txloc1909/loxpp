@@ -2746,7 +2746,8 @@ var replExecWrote = false;
 var REPLICA_LAG_MAX = 67108864;
 
 // An empty RDB file: the header and the end byte, with no checksum.
-var EMPTY_RDB = "REDIS0011" + chr(255) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0);
+// Version 10, the version of Redis 7.0, so that a Redis 7.0 replica loads it.
+var EMPTY_RDB = "REDIS0010" + chr(255) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0) + chr(0);
 
 // 40 hexadecimal digits from the time, as Redis makes a random ID. The
 // standard library has no random numbers.
