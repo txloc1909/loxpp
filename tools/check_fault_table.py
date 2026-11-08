@@ -166,6 +166,45 @@ CATCHABLE_ROWS = [
         setup='fun needsOne(a) {}\nfun g() { defer needsOne(); throw "boom"; }\n',
         expected_kind="ArityError",
     ),
+    # Every callable whose own arity check raises the catchable ArityError
+    # (spec/04-semantics.md, Runtime Errors; the review of #1147). A Lox
+    # function is row arity_error above; these five are the other sides of the
+    # row, and a native-backed Function or BoundMethod is the halting side.
+    Row(
+        "arity_error_method_call",
+        "caught",
+        "C().m(1);",
+        setup="class C { m() {} }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_super_call",
+        "caught",
+        "B().n();",
+        setup="class A { m() {} }\nclass B < A { n() { super.m(1); } }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_bound_method",
+        "caught",
+        "g(1);",
+        setup="class C { m() {} }\nvar g = C().m;\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_callable_instance",
+        "caught",
+        "K()(1, 2);",
+        setup="class K { __call__(a) {} }\n",
+        expected_kind="ArityError",
+    ),
+    Row(
+        "arity_error_init",
+        "caught",
+        "C(1, 2);",
+        setup="class C { init(a) {} }\n",
+        expected_kind="ArityError",
+    ),
     Row("undefined_variable_error", "caught", "print undeclared;", expected_kind="UndefinedVariableError"),
     # `f` is declared OUTSIDE the try (setup), not inside it: a self-recursive
     # local function declared inside a try block fails JVM bytecode
@@ -383,6 +422,15 @@ CATCHABLE_ROWS = [
         setup='var a = listen("127.0.0.1", 0);\n',
         expected_kind="NetworkError",
     ),
+    # --- mkdir (spec/05-stdlib.md, mkdir) -------------------------------
+    # The missing parent is a deterministic cause: the run's own workdir
+    # exists, and nothing in this row creates its "missing" entry.
+    Row(
+        "directory_error",
+        "caught",
+        'mkdir("__WORKDIR__/missing/child");',
+        expected_kind="DirectoryError",
+    ),
     # --- Int (docs/decisions/integer-kind.md) -----------------------------
     # The mixed-kind operand rows widen three existing spec rows to a Number
     # together with an Int, so they are regression-only rows below.
@@ -468,6 +516,23 @@ FATAL_ROWS = [
         "stdlib_native_arity",
         "fatal",
         "clock(1);",
+    ),
+    # The row above has three dispatch sites, and a fix at one of them leaves
+    # the other two free to become catchable (the review of #1147). A File
+    # method call, and a call of the same method through a bound value, halt
+    # as a wrong count of any other stdlib native does.
+    Row(
+        "bound_native_arity",
+        "fatal",
+        'f.write("a", "b");',
+        setup='var f = open("__WORKDIR__/loxpp_bound_native.txt", "w");\n',
+    ),
+    Row(
+        "bound_native_value_arity",
+        "fatal",
+        'w("a", "b");',
+        setup='var f = open("__WORKDIR__/loxpp_bound_native2.txt", "w");\n'
+        "var w = f.write;\n",
     ),
     Row(
         "stdlib_open_failure",
@@ -959,6 +1024,15 @@ CATCHABLE_REGRESSION_ROWS = {
     # Issue #508: the right operand's reflected comparison method returned a
     # non-Boolean, sharing operator_result_type_error's spec row.
     "reflected_operator_result_type_error",
+    # The five other callables whose own arity check raises the catchable
+    # ArityError (the review of #1147): a method call, a super call, a bound
+    # method value, a callable instance, and a class whose init takes another
+    # count. Each shares arity_error's spec row.
+    "arity_error_method_call",
+    "arity_error_super_call",
+    "arity_error_bound_method",
+    "arity_error_callable_instance",
+    "arity_error_init",
     # The Int kind widens three operand rows to a Number together with an Int.
     "arithmetic_type_error_mixed_int",
     "comparison_type_error_mixed_int",
@@ -998,6 +1072,11 @@ FATAL_REGRESSION_ROWS = {
     # row on a List method, once as a plain read and once as a defer callee.
     "list_method_read",
     "list_method_read_defer",
+    # The other two dispatch sites of the halting native-arity row (the review
+    # of #1147): a File method call and a call of that method through a bound
+    # value. Both share stdlib_native_arity's spec row.
+    "bound_native_arity",
+    "bound_native_value_arity",
     # Issue #748: a class pattern and an object destructuring both read a
     # property through GET_PROPERTY, so they share the spec rows of
     # undefined_property_on_instance and property_get_non_instance. The math

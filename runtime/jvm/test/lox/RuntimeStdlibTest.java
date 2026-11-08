@@ -158,9 +158,72 @@ public final class RuntimeStdlibTest {
             check(dirStat.get("size") == null, "stat(dir) has no size key");
 
             checkThrows(() -> call(globals, "stat", 1.0), LoxError.class, "stat() rejects a non-string");
+
+            check(call(globals, "mkdir", tmpDir.getAbsolutePath() + "/one") == null,
+                    "mkdir() creates one directory and returns nil");
+            check(Boolean.TRUE.equals(call(globals, "is_dir", tmpDir.getAbsolutePath() + "/one")),
+                    "mkdir() created the directory");
+            checkDirectoryError(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "/one"),
+                    "mkdir() of an existing path");
+            checkDirectoryError(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "/absent/child"),
+                    "mkdir() with a missing parent");
+            check(call(globals, "mkdir", tmpDir.getAbsolutePath() + "/a/b/c", "p") == null,
+                    "mkdir(p) creates every missing parent");
+            check(Boolean.TRUE.equals(call(globals, "is_dir", tmpDir.getAbsolutePath() + "/a/b/c")),
+                    "mkdir(p) created the whole path");
+            check(call(globals, "mkdir", tmpDir.getAbsolutePath() + "/a/b/c", "p") == null,
+                    "mkdir(p) is a no-op on an existing directory");
+            checkDirectoryError(() -> call(globals, "mkdir", tmpFile.getAbsolutePath() + "/below", "p"),
+                    "mkdir(p) with a file in the way");
+            checkThrows(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "/x", "q"),
+                    LoxError.class, "mkdir() rejects another mode");
+            checkThrows(() -> call(globals, "mkdir", 1.0), LoxError.class,
+                    "mkdir() rejects a non-string");
+            checkDirectoryError(() -> call(globals, "mkdir", ""), "mkdir() of an empty path");
+            checkDirectoryError(() -> call(globals, "mkdir", "", "p"), "mkdir(p) of an empty path");
+            checkHalting(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "\u0000tail"),
+                    "mkdir() rejects a NUL byte");
+            checkHalting(() -> call(globals, "mkdir", tmpDir.getAbsolutePath() + "\u0000tail", "p"),
+                    "mkdir(p) rejects a NUL byte");
+            checkThrows(() -> call(globals, "mkdir"), LoxError.class, "mkdir() rejects no arguments");
+            checkThrows(() -> call(globals, "mkdir", "a", "p", "x"), LoxError.class,
+                    "mkdir() rejects three arguments");
         } catch (java.io.IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    // A fault the interpreted program's catch would receive: the LoxError
+    // wraps an Error value, and its `kind` is the spec table's row.
+    private static void checkDirectoryError(Runnable body, String label) {
+        try {
+            body.run();
+        } catch (LoxError e) {
+            check(e.isCatchable(), label + ": the fault is catchable");
+            if (e.isCatchable()) {
+                checkEquals("DirectoryError", ((LoxInstance) e.getValue()).fields.get("kind"),
+                        label + ": the kind");
+            }
+            return;
+        }
+        check(false, label + ": no fault was raised");
+    }
+
+    // A malformed argument is a halting fault: the LoxError wraps no Error
+    // value, so no interpreted try can catch it. A raw JDK exception would
+    // escape every try, so it fails too.
+    private static void checkHalting(Runnable body, String label) {
+        try {
+            body.run();
+        } catch (LoxError e) {
+            check(!e.isCatchable(), label + ": the fault halts");
+            return;
+        } catch (RuntimeException e) {
+            check(false, label + ": the fault is a LoxError, not " +
+                             e.getClass().getSimpleName());
+            return;
+        }
+        check(false, label + ": no fault was raised");
     }
 
     private static void checkOpenRoundtrip(LoxGlobals globals) {

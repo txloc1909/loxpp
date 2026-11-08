@@ -520,7 +520,9 @@ callee(arg1, arg2, ...)
 
 1. Evaluate `callee`.
 2. Evaluate arguments left-to-right.
-3. If `callee` is not a Function, Class, or BoundMethod, this is a **runtime error**.
+3. If `callee` is not a Function, a Class, an enum constructor, a
+   BoundMethod, or an Instance whose class defines `__call__`, this is a
+   **runtime error**.
 4. If the number of arguments does not match the function's arity, this is a
    **runtime error**.
 5. A new local scope is created; each parameter is bound to the corresponding
@@ -2235,7 +2237,7 @@ whose text is implementation-defined.
 | A shift count outside `0i` to `63i` | `1i << 64i` | `"ShiftCountError"` |
 | Int `/` or `%` with a zero divisor | `1i / 0i`, `1i % 0i` | `"DivisionByZeroError"` |
 | Call of a non-callable value | `42()` | `"NotCallableError"` |
-| Wrong argument count | `fun f(a) {} f(1, 2)` | `"ArityError"` |
+| Wrong argument count of a call of a user-defined Function, a user-defined BoundMethod, or an Instance with `__call__`, of a class whose `init` gets another count, or of a `resume` after the first that gives more than one argument ([§05-stdlib, `c.resume`](05-stdlib.md#coroutine-methods)). A native-backed Function or BoundMethod is a stdlib call, and its wrong count is a [halting fault](#halting-faults) | `fun f(a) {} f(1, 2)`, `class C { m() {} } C().m(1)` | `"ArityError"` |
 | Undefined global variable | `print undeclared;` | `"UndefinedVariableError"` |
 | Call stack overflow | Unbounded recursion that is not a [self tail call](#self-tail-calls) | `"StackOverflowError"` |
 | Index of non-List/non-Map | `42[0]` | `"NotIndexableError"` |
@@ -2247,7 +2249,7 @@ whose text is implementation-defined.
 | Object without `__hash__`/`__eq__` used as map key | `m[[1,2]] = 1` | `"InvalidMapKeyError"` |
 | Method called on non-instance/non-list/non-map | `42.foo()` | `"InvalidReceiverError"` |
 | No arm matches in a `match` expression | `match 99 { case 1 => "one" }` | `"MatchError"` |
-| Constructor called with wrong arity | `Result.Ok(1, 2)` when `Ok` takes one field | `"ConstructorArityError"` |
+| An enum constructor called with the wrong arity, or a class with no `init` called with any argument | `Result.Ok(1, 2)` when `Ok` takes one field, `class C {} C(1)` | `"ConstructorArityError"` |
 | Undefined property on an `Error` value | `try { try { [][0]; } catch (e) { e.foo; } } catch (_) { }` | `"UndefinedPropertyError"` |
 | Operator method returned a non-Boolean | `class C { __eq__(o) { return 42; } } C() == C()`, or the reflected `class C { __rlt__(o) { return 42; } } 1 < C()` | `"OperatorResultTypeError"` |
 | Operator method returned a non-Number, an Int included | `class C { __len__() { return "x"; } } len(C())`, `class C { __len__() { return 1i; } } len(C())`, or `class C { __hash__() { return "x"; } __eq__(o) { return true; } }` used as a map key | `"OperatorResultTypeError"` |
@@ -2258,6 +2260,7 @@ whose text is implementation-defined.
 | `yield` in a deferred call | `fun note() { var v = yield 1; } fun g() { defer note(); } g();` | `"YieldAcrossNativeError"` |
 | A Socket call on a closed Socket, a write after `close_write()`, or `accept()` on a closed Server | `var l = listen("127.0.0.1", 0); l.close(); l.accept();` | `"SocketClosedError"` |
 | A failure of the network in `connect`, `listen`, `accept`, or a Socket read or write | `var l = listen("127.0.0.1", 0); var p = l.port(); l.close(); connect("127.0.0.1", p);` | `"NetworkError"` |
+| `mkdir` cannot create the directory | `mkdir("/no/such/parent/dir");` | `"DirectoryError"` |
 
 **The two map-key rows above cover an index read or write, a map literal,
 and `in`.** `Map.has(key)` and `Map.del(key)` are stdlib native
@@ -2278,9 +2281,9 @@ run before the program ends is implementation-defined, as for every halt.
 | Cause | Example |
 |---|---|
 | `print` of a value nested deeper than the implementation's canonical-string depth limit | `var a = [1]; var i = 0; while (i < 300) { a = [a]; i = i + 1; } print a;` |
-| A native function is called with an argument count other than its arity | `clock(1);` |
+| A stdlib native function is called with an argument count other than its arity, where no [Runtime Errors](#runtime-errors) row gives that fault | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
-| A stdlib native function reports its own error while running, except the faults of the two Socket rows of the [Runtime Errors](#runtime-errors) table | `open("/no/such/path", "r");` |
+| A stdlib native function reports its own error while running, except a fault that a [Runtime Errors](#runtime-errors) row or a [Worker and Task Faults](#worker-and-task-faults) row gives it | `open("/no/such/path", "r");` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) |
 | Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` |

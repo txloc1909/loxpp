@@ -141,6 +141,12 @@ PROBES = [
     ("accept on a closed server",
      'var l = listen("127.0.0.1", 0); l.close(); try { l.accept(); } catch (e) { print e.kind; }',
      CATCHABLE, "SocketClosedError", "e.message"),
+    # mkdir below /dev/null, which can never be a directory: the call faults
+    # for every user, root included, and nothing can be left behind for a
+    # later run to find in place.
+    ("mkdir below a device that is not a directory",
+     'try { mkdir("/dev/null/loxpp-child"); } catch (e) { print e.kind; }',
+     CATCHABLE, "DirectoryError", "e.message"),
     ("accept on a server whose accept side another task holds",
      'var l = listen("127.0.0.1", 0); fun a() { try { l.accept(); } catch (e) {} } task.spawn(a); yield; '
      'try { l.accept(); } catch (e) { print e.kind; } l.close();',

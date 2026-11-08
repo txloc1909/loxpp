@@ -2815,7 +2815,9 @@ fun reflectCallMethod(interp, args) {
         interp.setError("ReflectionNotCallableError", "callMethod requires a callable value.", 0);
         return nil;
     }
-    if (callee.arity() != len(forwarded)) {
+    // A native of arity -1 is variadic (LoxNative.arity), so any count is
+    // accepted, matching Runtime::callNative's `arity != -1` guard.
+    if (callee.arity() != -1 and callee.arity() != len(forwarded)) {
         interp.setError("ReflectionNativeArityError", "Expected " + str(callee.arity()) + " arguments but got " +
                          str(len(forwarded)) + ".", 0);
         return nil;
@@ -2861,6 +2863,7 @@ class LoxNative {
         if (this.name == "setField" or this.name == "connect_within") return 3;
         if (this.name == "getField" or this.name == "hasField") return 2;
         if (this.name == "callMethod") return -1;
+        if (this.name == "mkdir") return -1;
         if (this.name == "type" or this.name == "fields" or
             this.name == "methods" or this.name == "env" or
             this.name == "exit" or this.name == "sleep" or
@@ -2932,6 +2935,21 @@ class LoxNative {
             var i = 0;
             while (i < len(ks)) { interp.mapSet(result, ks[i], h[ks[i]]); i = i + 1; }
             return result;
+        }
+        if (this.name == "mkdir") {
+            // A variadic arity skips the general count check above, so the
+            // count and the mode argument are checked here, as the host
+            // native does, before the host call.
+            if (len(args) != 1 and len(args) != 2) {
+                interp.fatalError("Expected 1 or 2 arguments.");
+                return nil;
+            }
+            try {
+                if (len(args) == 2) return mkdir(args[0], args[1]);
+                return mkdir(args[0]);
+            } catch (e) {
+                return hostFileFault(interp, e);
+            }
         }
         if (this.name == "type") return reflectTypeName(args[0]);
         // Every non-instance/non-class receiver below halts, matching
@@ -3247,6 +3265,17 @@ fun hostNetFault(interp, e) {
     }
     if (e.kind == "BusyError") {
         interp.setError("BusyError", e.message, 0);
+        return nil;
+    }
+    throw e;
+}
+
+// The host raises a catchable DirectoryError when it cannot create the
+// directory. The interpreter delivers it to the interpreted program's catch
+// with the same kind; any other fault of the host passes through.
+fun hostFileFault(interp, e) {
+    if (e.kind == "DirectoryError") {
+        interp.setError("DirectoryError", e.message, 0);
         return nil;
     }
     throw e;
@@ -3776,6 +3805,7 @@ class Interpreter {
         env.define("is_dir",  LoxNative("is_dir"));
         env.define("is_file", LoxNative("is_file"));
         env.define("stat",    LoxNative("stat"));
+        env.define("mkdir",   LoxNative("mkdir"));
         env.define("connect", LoxNative("connect"));
         env.define("connect_within", LoxNative("connect_within"));
         env.define("listen",  LoxNative("listen"));

@@ -1,0 +1,8 @@
+// A path that holds a NUL byte is a runtime error that halts, in both forms
+// of mkdir (spec/05-stdlib.md, mkdir): the C library would read the path only
+// up to the NUL and name a shorter directory. A consumer that passes the
+// String to its host unchanged creates that shorter directory instead.
+// STATUS: error
+// CHECK: before
+print "before";
+mkdir("/tmp/loxpp_probe_mkdir_nul" + chr(0) + "tail");

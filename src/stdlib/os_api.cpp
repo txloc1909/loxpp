@@ -216,6 +216,57 @@ static Value statNative(int /*argc*/, Value* argv) {
     return Value{static_cast<Obj*>(map)};
 }
 
+static Value mkdirNative(int argc, Value* argv) {
+    // Variadic so one native serves both spec forms; the count check is here
+    // because callNative's arity guard cannot express "1 or 2".
+    if (argc != 1 && argc != 2) {
+        nativeRuntimeError("Expected 1 or 2 arguments.");
+        return from<Nil>(Nil{});
+    }
+    std::string p;
+    if (!asPathString(argv[0], p)) {
+        return from<Nil>(Nil{});
+    }
+    // The C library reads a path up to its first NUL byte, so a NUL here would
+    // silently name a shorter, different path. It cannot name a directory at
+    // all, so it is a fault of the argument, like a non-String.
+    if (p.find('\0') != std::string::npos) {
+        nativeRuntimeError("mkdir() path must not contain a NUL byte.");
+        return from<Nil>(Nil{});
+    }
+    bool parents = false;
+    if (argc == 2) {
+        std::string mode;
+        if (!asPathString(argv[1], mode)) {
+            return from<Nil>(Nil{});
+        }
+        if (mode != "p") {
+            nativeRuntimeError("mkdir() mode must be \"p\".");
+            return from<Nil>(Nil{});
+        }
+        parents = true;
+    }
+
+    std::error_code ec;
+    bool created = false;
+    if (!p.empty()) {
+        created = parents ? std::filesystem::create_directories(p, ec)
+                          : std::filesystem::create_directory(p, ec);
+    }
+    // An existing path in one-directory form is a fault, but the standard
+    // library reports it as "not created, no error" rather than as an error.
+    // An empty path names no directory here, on every platform, so a platform
+    // that resolves it to something else cannot differ.
+    if (p.empty() || ec || (!parents && !created)) {
+        std::string msg = "mkdir(): cannot create '" + p + "'";
+        if (ec) {
+            msg += ": " + ec.message();
+        }
+        getActiveRuntime()->raiseFromNative("DirectoryError", msg.c_str());
+    }
+    return from<Nil>(Nil{});
+}
+
 void registerOSAPI(StdlibRegistrar& reg, ObjClass* mapClass) {
     s_mapClass = mapClass;
     reg.defineGlobal("args", argsNative, 0);
@@ -227,4 +278,5 @@ void registerOSAPI(StdlibRegistrar& reg, ObjClass* mapClass) {
     reg.defineGlobal("is_dir", isDirNative, 1);
     reg.defineGlobal("is_file", isFileNative, 1);
     reg.defineGlobal("stat", statNative, 1);
+    reg.defineGlobal("mkdir", mkdirNative, -1);
 }

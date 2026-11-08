@@ -438,6 +438,42 @@ report whole seconds, milliseconds, or finer.
 
 ---
 
+## `mkdir(path) → Nil`, `mkdir(path, "p") → Nil`
+
+Creates the directory at `path`. Both arguments must be Strings; any other
+type is a runtime error.
+
+With one argument, `mkdir` creates one directory. It does not create a
+missing parent, and it does not succeed when `path` already exists, whether
+as a directory or as any other value.
+
+With the second argument `"p"`, `mkdir` creates `path` and every missing
+parent of it, as `mkdir -p` does. It does nothing when `path` is already a
+directory. Any other second argument is a runtime error.
+
+When the directory cannot be created — because a parent is missing in the
+one-argument form, because `path` exists in the one-argument form, because a
+path component is not a directory, because the program has no permission, or
+for any other reason — the call raises a catchable fault of kind
+`DirectoryError` ([§04-semantics, Runtime
+Errors](04-semantics.md#runtime-errors)). An empty `path` names no
+directory, so it raises the same fault. A `path` that holds a NUL byte is a
+runtime error.
+
+```lox
+mkdir("/tmp/loxpp-cache/objects", "p");   // makes /tmp/loxpp-cache too
+try {
+    mkdir("/no/such/parent/dir");
+} catch (e) {
+    print e.kind;                          // DirectoryError
+}
+```
+
+**Arity:** 1 or 2  
+**Returns:** Nil
+
+---
+
 ## `open(path, mode) → File`
 
 Opens the file at `path` and returns a File value. Both arguments must be
@@ -897,7 +933,9 @@ pending `yield` expression.
 Resuming a dead coroutine is a runtime error (`DeadCoroutineError`);
 resuming a running or normal coroutine is a runtime error
 (`RunningCoroutineError`). A throw from inside the coroutine propagates to
-the resumer, where it is catchable like any other throw.
+the resumer, where it is catchable like any other throw. A resume after the
+first that gives more than one argument raises a catchable `ArityError`
+([§04-semantics, Runtime Errors](04-semantics.md#runtime-errors)).
 
 **Arity:** variadic — the coroutine function's arity on the first call, 0 or
 1 afterward  

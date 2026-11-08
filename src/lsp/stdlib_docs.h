@@ -3,7 +3,7 @@
 // Hover and completion text for the Lox++ standard library.
 //
 // One table, keyed by name, covering every global in
-// src/tooling/stdlib_names.h (31 globals + 25 `math` members + 10 `integer`
+// src/tooling/stdlib_names.h (33 globals + 25 `math` members + 10 `integer`
 // members) plus the built-in Map and File methods. The descriptions are short
 // and follow spec/05-stdlib.md. src/tooling/stdlib_names.h stays the single
 // source of truth for the name set; stdlibDocsMissingNames() proves this table
