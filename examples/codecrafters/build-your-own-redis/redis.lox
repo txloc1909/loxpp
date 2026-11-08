@@ -2239,7 +2239,8 @@ class RdbReader {
     }
 
     // An unsigned integer of n bytes, little-endian. A value above 2^53 is
-    // not exact in a Number; an expiry that large is not a real time.
+    // not exact in a Number; an expiry that large is not a real time, and
+    // the caller reads one of 2^63 or more as a negative time.
     le(n) {
         var v = 0;
         var m = 1;
@@ -2391,7 +2392,9 @@ fun loadRdb(path) {
     if (r.take(5) != "REDIS") {
         throw RdbError("the file does not start with REDIS");
     }
-    r.take(4);
+    if (!isDigits(r.take(4))) {
+        throw RdbError("the version of the file is not a number");
+    }
     var db = 0;
     var expiresAt = nil;
     var now = nowMs();
@@ -2410,7 +2413,18 @@ fun loadRdb(path) {
         } else if (op == 253) {
             expiresAt = r.le(4) * 1000;
         } else if (op == 252) {
+            // Redis reads the 8 bytes as a signed number; a negative time
+            // has passed.
             expiresAt = r.le(8);
+            if (expiresAt >= 9223372036854775808) {
+                expiresAt = 0;
+            }
+        } else if (op == 248) {
+            // The idle time of the next key, for an LRU policy.
+            r.length();
+        } else if (op == 249) {
+            // The access count of the next key, for an LFU policy.
+            r.byte();
         } else if (op == 255) {
             return;
         } else if (op == 0) {
@@ -2424,7 +2438,7 @@ fun loadRdb(path) {
             }
             expiresAt = nil;
         } else {
-            throw RdbError("the file has a value of kind " + str(op) + "; this server loads strings only");
+            throw RdbError("the file has the opcode or value kind " + str(op) + "; this server loads strings only");
         }
     }
 }
@@ -2440,21 +2454,27 @@ fun cmdConfig(ctx, argv) {
     if (len(argv) < 3) {
         return wrongArgs("config|get");
     }
-    var out = [];
+    // Redis 7.0 gives each known name once, as the client first sent it,
+    // in the reverse order of the first time each name comes.
+    var found = [];
     var seen = {};
     for (var p in argv[2:len(argv)]) {
         var name = lower(p);
-        if (!seen.has(name)) {
-            if (name == "dir") {
-                seen[name] = true;
-                out.append("dir");
-                out.append(CONFIG_DIR);
-            } else if (name == "dbfilename") {
-                seen[name] = true;
-                out.append("dbfilename");
-                out.append(CONFIG_DBFILENAME);
-            }
+        if (!seen.has(name) and (name == "dir" or name == "dbfilename")) {
+            seen[name] = true;
+            found.append(p);
         }
+    }
+    var out = [];
+    var i = len(found) - 1;
+    while (i >= 0) {
+        out.append(found[i]);
+        if (lower(found[i]) == "dir") {
+            out.append(CONFIG_DIR);
+        } else {
+            out.append(CONFIG_DBFILENAME);
+        }
+        i = i - 1;
     }
     return bulkArray(out);
 }
@@ -2476,6 +2496,11 @@ fun cmdKeys(ctx, argv) {
     if (len(argv) != 2) {
         return wrongArgs("keys");
     }
+    // In EXEC the reply waits until the step ends, and holds two Lists of
+    // the size of the keyspace.
+    if (!spendElements(2 * len(store))) {
+        return EXEC_TOO_LARGE;
+    }
     return KeysReply(argv[1], store.keys(), store.values(), nowMs());
 }
 
@@ -2491,11 +2516,18 @@ fun globStep() {
     }
 }
 
-// Matches s against a glob pattern as Redis does: * any run, ? one byte,
-// [abc], [a-z] and [^...] a set, and \ to take the next byte as it is. The
-// work is at most len(s) * len(pattern) steps; it runs in the session and
-// yields every GLOB_STEPS_PER_YIELD steps.
+// Matches s against a glob pattern with the rules of Redis 7.0
+// (stringmatchlen): * any run, ? one byte, [abc], [a-z] and [^...] a set,
+// and \ to take the next byte as it is. As in Redis, an empty s matches
+// only an empty pattern (KEYS * takes another path), and a set with no "]"
+// takes the rest of the pattern. Each byte of the pattern that a step reads,
+// in a set too, counts as one step of glob work, so the work is at most
+// len(s) * len(pattern) steps; it runs in the session and yields every
+// GLOB_STEPS_PER_YIELD steps.
 fun globMatch(p, s) {
+    if (len(s) == 0) {
+        return len(p) == 0;
+    }
     var pi = 0;
     var si = 0;
     var starP = -1;
@@ -2503,7 +2535,7 @@ fun globMatch(p, s) {
     while (si < len(s)) {
         globStep();
         var adv = -1;
-        if (pi < len(p)) {
+        if (pi < len(p) and p[pi] != "*") {
             adv = globOne(p, pi, s[si]);
         }
         if (pi < len(p) and p[pi] == "*") {
@@ -2549,12 +2581,15 @@ fun globOne(p, pi, c) {
         }
         var hit = false;
         while (j < len(p) and p[j] != "]") {
+            globStep();
             if (p[j] == "\\" and j + 1 < len(p)) {
                 if (p[j + 1] == c) {
                     hit = true;
                 }
                 j = j + 2;
-            } else if (j + 2 < len(p) and p[j + 1] == "-" and p[j + 2] != "]") {
+            } else if (j + 2 < len(p) and p[j + 1] == "-") {
+                // As in Redis, also when p[j + 2] is "]": "[a-]" is the range
+                // from "]" to "a".
                 var lo = ord(p[j]);
                 var hi = ord(p[j + 2]);
                 if (lo > hi) {
@@ -2574,8 +2609,7 @@ fun globOne(p, pi, c) {
             }
         }
         if (j >= len(p)) {
-            // No "]": Redis matches the "[" as itself, as the rest of the
-            // pattern ends.
+            // No "]": the set takes the rest of the pattern.
             j = len(p) - 1;
         }
         if (hit != negate) {

@@ -1,8 +1,8 @@
 [
  {
   "name": "CONFIG GET dir gives the file name",
-  "old": "                out.append(\"dir\");\n                out.append(CONFIG_DIR);",
-  "new": "                out.append(\"dir\");\n                out.append(CONFIG_DBFILENAME);",
+  "old": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DIR);",
+  "new": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DBFILENAME);",
   "cases": [
    "persistence-rdb-01 CONFIG GET dir"
   ]
@@ -33,8 +33,8 @@
  },
  {
   "name": "the load stops after one key",
-  "old": "            expiresAt = nil;\n        } else {\n            throw RdbError(\"the file has a value",
-  "new": "            expiresAt = nil;\n            return;\n        } else {\n            throw RdbError(\"the file has a value",
+  "old": "            expiresAt = nil;\n        } else {\n            throw RdbError(\"the file has the opcode",
+  "new": "            expiresAt = nil;\n            return;\n        } else {\n            throw RdbError(\"the file has the opcode",
   "cases": [
    "persistence-rdb-04 KEYS * gives every key"
   ]
@@ -45,14 +45,6 @@
   "new": "                store[key] = Entry(\"string\", key, expiresAt);",
   "cases": [
    "persistence-rdb-03 GET gives the value"
-  ]
- },
- {
-  "name": "an expired key is loaded",
-  "old": "            if (expiresAt == nil or expiresAt > now) {",
-  "new": "            if (true) {",
-  "cases": [
-   "persistence-rdb-06 a key that has expired"
   ]
  },
  {
@@ -76,7 +68,7 @@
   "old": "            expiresAt = nil;\n        } else {",
   "new": "        } else {",
   "cases": [
-   "persistence-rdb-06 a key with a future expiry in ms"
+   "local: a key with no expiry after an expired key"
   ]
  },
  {
@@ -136,16 +128,8 @@
   ]
  },
  {
-  "name": "a short file loads what it has",
-  "old": "        if (this.pos + n > len(this.data)) {\n            throw RdbError(\"the file ends early\");",
-  "new": "        if (this.pos >= len(this.data)) {\n            throw RdbError(\"the file ends early\");",
-  "cases": [
-   "local: a file that ends early stops the start"
-  ]
- },
- {
   "name": "another value kind is skipped",
-  "old": "            throw RdbError(\"the file has a value of kind \" + str(op) + \"; this server loads strings only\");",
+  "old": "            throw RdbError(\"the file has the opcode or value kind \" + str(op) + \"; this server loads strings only\");",
   "new": "            r.string();\n            r.string();",
   "cases": [
    "local: a value kind that this server has not stops the start"
@@ -180,7 +164,7 @@
   "old": "            negate = true;\n            j = j + 1;",
   "new": "            j = j + 1;",
   "cases": [
-   "local: KEYS [^fk]*"
+   "local: KEYS [^fkx_]*"
   ]
  },
  {
@@ -212,7 +196,7 @@
   "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    var out = Output(conn);",
   "new": "        i = i + 1;\n    }\n    var out = Output(conn);",
   "cases": [
-   "local: K1 KEYS * of 524288 keys stalls PING at most 0.5 s"
+   "local: K1 KEYS k* of 524288 keys stalls PING at most 0.5 s"
   ]
  },
  {
@@ -221,6 +205,102 @@
   "new": "    if (false) {",
   "cases": [
    "local: K2 KEYS with a slow pattern stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "no version check",
+  "old": "    if (!isDigits(r.take(4))) {",
+  "new": "    if (r.take(4) == \"\") {",
+  "cases": [
+   "local: a version that is not a number stops the start"
+  ]
+ },
+ {
+  "name": "a negative expiry is far away",
+  "old": "            if (expiresAt >= 9223372036854775808) {\n                expiresAt = 0;\n            }",
+  "new": "",
+  "cases": [
+   "local: a negative expiry in ms has passed"
+  ]
+ },
+ {
+  "name": "an LRU idle time is not skipped",
+  "old": "        } else if (op == 248) {\n            // The idle time of the next key, for an LRU policy.\n            r.length();",
+  "new": "        } else if (op == 247) {\n            r.length();",
+  "cases": [
+   "local: an RDB file with an LRU idle time loads"
+  ]
+ },
+ {
+  "name": "an LFU count is not skipped",
+  "old": "        } else if (op == 249) {\n            // The access count of the next key, for an LFU policy.\n            r.byte();",
+  "new": "        } else if (op == 246) {\n            r.byte();",
+  "cases": [
+   "local: an RDB file with an LFU count loads"
+  ]
+ },
+ {
+  "name": "a 64-bit length read as 32 bits",
+  "old": "            if (b == 129) {\n                return this.be(8);",
+  "new": "            if (b == 129) {\n                return this.be(4);",
+  "cases": [
+   "local: an RDB length of 64 bits"
+  ]
+ },
+ {
+  "name": "CONFIG GET gives names in lower case",
+  "old": "        out.append(found[i]);\n        if (lower(found[i]) == \"dir\") {",
+  "new": "        out.append(lower(found[i]));\n        if (lower(found[i]) == \"dir\") {",
+  "cases": [
+   "local: CONFIG GET of two names gives each once, as sent, last first"
+  ]
+ },
+ {
+  "name": "CONFIG GET gives names in the order sent",
+  "old": "    var out = [];\n    var i = len(found) - 1;\n    while (i >= 0) {",
+  "new": "    var out = [];\n    var i = 0;\n    while (i >= 0 and i < len(found)) {",
+  "cases": [
+   "local: CONFIG GET of two names gives each once, as sent, last first"
+  ]
+ },
+ {
+  "name": "KEYS in EXEC spends no budget",
+  "old": "    if (!spendElements(2 * len(store))) {\n        return EXEC_TOO_LARGE;\n    }\n    return KeysReply",
+  "new": "    return KeysReply",
+  "cases": [
+   "local: KEYS in EXEC spends the element budget"
+  ]
+ },
+ {
+  "name": "K3 the bytes of a set are not glob steps",
+  "old": "        while (j < len(p) and p[j] != \"]\") {\n            globStep();",
+  "new": "        while (j < len(p) and p[j] != \"]\") {",
+  "cases": [
+   "local: K3 KEYS with a long set stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "a set with no ] fails",
+  "old": "            // No \"]\": the set takes the rest of the pattern.\n            j = len(p) - 1;",
+  "new": "            return -1;",
+  "cases": [
+   "local: KEYS [fb"
+  ]
+ },
+ {
+  "name": "[a-] has no range to ]",
+  "old": "            } else if (j + 2 < len(p) and p[j + 1] == \"-\") {",
+  "new": "            } else if (j + 2 < len(p) and p[j + 1] == \"-\" and p[j + 2] != \"]\") {",
+  "cases": [
+   "local: KEYS [a-]"
+  ]
+ },
+ {
+  "name": "an escape in a set is ignored",
+  "old": "            if (p[j] == \"\\\\\" and j + 1 < len(p)) {\n                if (p[j + 1] == c) {",
+  "new": "            if (p[j] == \"\\\\\" and j + 1 < len(p)) {\n                if (true) {",
+  "cases": [
+   "local: KEYS x[\\]]"
   ]
  }
 ]

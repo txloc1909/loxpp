@@ -202,16 +202,21 @@ A client may watch at most 1048576 keys at a time (rule 4).
 At start, before it listens, the server loads `<--dir>/<--dbfilename>`
 (`loadRdb`). It reads the string keys of database 0: the length forms of
 6, 14, 32 and 64 bits, integer strings of 1, 2 and 4 bytes, LZF strings,
-and expiries in seconds and in milliseconds. A key that has expired already
-is not loaded, as Redis does when it loads as a master. A missing file is
+expiries in seconds and in milliseconds (a negative one has passed, as
+Redis reads it), and it skips the LRU and LFU fields. A key that has
+expired already is not loaded, as Redis does when it loads as a master. A missing file is
 an empty keyspace. A file that the server cannot load stops the start with
 a message, as in Redis. The load has no yield: no client is connected then.
 
 `KEYS` takes the keys and the entries of the keyspace with two native calls
 in its step, and the time of that step. The session filters them with the
 glob pattern and writes them in steps (`writeKeys`): the reply is the keys
-that were live at that time. The glob match (`globMatch`) takes at most
-len(key) x len(pattern) steps, and yields every 65536 steps.
+that were live at that time. In `EXEC`, each `KEYS` spends twice the size
+of the keyspace from the element budget. The glob match (`globMatch`) has
+the rules of Redis 7.0 (`stringmatchlen`), also `[a-]` and an empty key. It
+counts each byte of the pattern that it reads as a step, in a set too, so
+it takes at most len(key) x len(pattern) steps, and it yields every 65536
+steps.
 
 ### Large replies
 
@@ -254,7 +259,8 @@ printed.
 - The RDB load reads strings only, in database 0. A file with another
   value kind or another database stops the start. The load does not check
   the checksum. `CONFIG GET` knows `dir` and `dbfilename` only, and takes
-  no glob pattern.
+  no glob pattern. A glob pattern with more than 1000 stars matches in
+  Redis only to a depth of 1000; here it has no such limit.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
@@ -378,7 +384,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | W3: a second client that watches the same 1048575 keys | PING within 0.3 s | 0.19 s |
 | W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.016 s |
 | W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
-| K1 (group `persistence-rdb`): `KEYS *` of 524288 keys | every key; PING within 0.5 s | 0.30–0.33 s |
+| K1 (group `persistence-rdb`): `KEYS k*` of 524288 keys | every key; PING within 0.5 s | 0.30–0.32 s |
+| K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
@@ -402,7 +409,10 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/optimistic-locking.json` or
 `tests/mutations/persistence-rdb.json` that removes
 its guard (S4, T1, T7 and W3 hold rule 6 only: no single change removes their
-guard). The `touch` in the lazy expiry of `lookup` has no case: the check
+guard). Two parts of the RDB load have no mutation, because no reply can
+show them: the skip of a key that expired before the load (GET and KEYS
+skip an expired key too), and the check of an early end in `need`
+(the next read fails too). The `touch` in the lazy expiry of `lookup` has no case: the check
 of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
 key that expires, so no reply shows it. It stays for a client that watches
 the key after the read and before the removal.
