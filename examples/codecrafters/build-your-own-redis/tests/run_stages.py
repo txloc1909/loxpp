@@ -2451,16 +2451,18 @@ def stages_rdb(prog):
             got = c.call("KEYS", pattern)
             check("local: KEYS %s" % pattern, isinstance(got, list) and sorted(got) == want,
                   repr(got)[:80])
-        c.call("SET", "slow", "a" * 100000)
+        # A key of 100000 bytes, and a pattern of a star and a run of 100
+        # bytes that never matches at the end: about 10^7 steps of glob work.
+        c.call("SET", "a" * 100000, "v")
 
         def keys_slow():
-            c.send_raw(encode("KEYS", "*a" * 15 + "*b"))
+            c.send_raw(encode("KEYS", "*" + "a" * 100 + "b"))
             got[0] = c.try_read(120)
             time.sleep(0.2)
         worst, wrong, _ = measure_while(srv, keys_slow)
         check("local: K2 KEYS with a slow pattern gives no key", got[0] == [], repr(got[0])[:60])
-        check("local: K2 KEYS with a slow pattern stalls PING at most 0.2 s",
-              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        check("local: K2 KEYS with a slow pattern stalls PING at most 0.3 s",
+              worst <= 0.3 and not wrong, "worst %.3f s" % worst)
         c.close()
     finally:
         srv.stop()

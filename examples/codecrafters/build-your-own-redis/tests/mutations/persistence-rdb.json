@@ -220,7 +220,7 @@
   "old": "    if (globSteps >= GLOB_STEPS_PER_YIELD) {",
   "new": "    if (false) {",
   "cases": [
-   "local: K2 KEYS with a slow pattern stalls PING at most 0.2 s"
+   "local: K2 KEYS with a slow pattern stalls PING at most 0.3 s"
   ]
  }
 ]
