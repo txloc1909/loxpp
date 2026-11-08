@@ -2534,16 +2534,19 @@ def stages_rdb(prog):
         time.sleep(0.3)
         got = c.call("KEYS", "brief*")
         check("local: KEYS skips a key that expired after the load", got == [], repr(got))
-        for k in ("foo", "fob", "bar", "a*b", "axb", "f", "b", "_", "x]", "x\\", ""):
+        for k in ("foo", "fob", "bar", "a*b", "axb", "f", "b", "_", "x]", "x\\", "", "\xff"):
             c.call("SET", k, "1")
         got = c.call("KEYS", "**")
         check("local: KEYS ** does not give the empty key",
               isinstance(got, list) and "" not in got and len(got) > 0, repr(got)[:60])
         check("local: KEYS of an empty pattern gives the empty key", c.call("KEYS", "") == [""])
         patterns = {"fo?": ["fob", "foo"], "[ab]*": ["a*b", "axb", "b", "bar"],
-                    "[^fkx_]*": ["a*b", "axb", "b", "bar"], "a\\*b": ["a*b"],
+                    "[^fkx_]*": ["a*b", "axb", "b", "bar", "\xff"], "a\\*b": ["a*b"],
                     "?o?": ["fob", "foo"], "[a-b]?r": ["bar"], "[fb": ["b", "f"],
-                    "[a-]": ["_"], "x[\\]]": ["x]"], "x[\\\\]": ["x\\"]}
+                    "[a-]": ["_"], "x[\\]]": ["x]"], "x[\\\\]": ["x\\"],
+                    # Redis compares range ends as signed bytes: 0xff is -1,
+                    # so this range is -1 to 97.
+                    "[a-\xff]": ["_", "\xff"]}
         for pattern, want in patterns.items():
             got = c.call("KEYS", pattern)
             check("local: KEYS %s" % pattern, isinstance(got, list) and sorted(got) == want,

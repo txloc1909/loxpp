@@ -171,6 +171,7 @@ SCRIPTS = {
             ["KEYS", ""], ["KEYS", "[z"], ["KEYS", "*[b]"], ["KEYS", "[c-a]*"],
             ["KEYS", "[a-]"], ["KEYS", "**"], ["KEYS", "?**"], ["KEYS", "[fb"],
             ["SET", "_", "1"], ["KEYS", "[a-]"],
+            ["SET", "\xff", "1"], ["KEYS", "[a-\xff]"], ["KEYS", "[\xff-a]"],
             ["KEYS"], ["KEYS", "a", "b"], ["keys", "f*"],
         ]),
         ("config", [

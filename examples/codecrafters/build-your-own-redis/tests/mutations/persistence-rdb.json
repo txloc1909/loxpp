@@ -308,7 +308,7 @@
   "old": "    if (v >= 128) {\n        return v - 256;\n    }\n    return v;",
   "new": "    return v;",
   "cases": [
-   "local: KEYS [a-]"
+   "local: KEYS [a-\u00ff]"
   ]
  },
  {
