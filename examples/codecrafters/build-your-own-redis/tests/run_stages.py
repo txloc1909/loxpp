@@ -2331,13 +2331,27 @@ def stages_rdb(prog):
             write_rdb(path, entries, **kw)
             return Server(prog, ["--dir", d, "--dbfilename", name])
 
+        def started(srv, names):
+            """True when srv is up. Else each named case of the file fails
+            by its name, so a load that fails does not hide them."""
+            if srv.up:
+                return True
+            for name in names:
+                check(name, False, "the server did not start: %s" % srv.log_text()[-200:])
+            return False
+
         key = rand_word()
         srv = with_rdb("one.rdb", [(key, "orange", None, None)])
         try:
+            if not started(srv, ["persistence-rdb-02 KEYS * gives the key",
+                                 "persistence-rdb-03 GET gives the value"]):
+                raise StopIteration
             c = srv.client()
             check("persistence-rdb-02 KEYS * gives the key", c.call("KEYS", "*") == [key])
             check("persistence-rdb-03 GET gives the value", c.call("GET", key) == "orange")
             c.close()
+        except StopIteration:
+            pass
         finally:
             srv.stop()
 
@@ -2345,11 +2359,16 @@ def stages_rdb(prog):
         values = [rand_word() for _ in range(4)]
         srv = with_rdb("many.rdb", [(k, v, None, None) for k, v in zip(keys, values)])
         try:
+            if not started(srv, ["persistence-rdb-04 KEYS * gives every key",
+                                 "persistence-rdb-05 GET gives every value"]):
+                raise StopIteration
             c = srv.client()
             check("persistence-rdb-04 KEYS * gives every key", sorted(c.call("KEYS", "*")) == sorted(keys))
             check("persistence-rdb-05 GET gives every value",
                   [c.call("GET", k) for k in keys] == values)
             c.close()
+        except StopIteration:
+            pass
         finally:
             srv.stop()
 
@@ -2359,6 +2378,13 @@ def stages_rdb(prog):
                                       (plain, "p", None, None), (live_s, "c", now + 600000, "s"),
                                       (neg, "n", 2 ** 64 - 1, "ms")])
         try:
+            if not started(srv, ["persistence-rdb-06 a key with a future expiry in ms",
+                                 "persistence-rdb-06 a key that has expired",
+                                 "local: a key with a future expiry in seconds",
+                                 "local: a key with no expiry after an expired key",
+                                 "local: a negative expiry in ms has passed",
+                                 "local: KEYS skips the expired key"]):
+                raise StopIteration
             c = srv.client()
             check("persistence-rdb-06 a key with a future expiry in ms", c.call("GET", live) == "a")
             check("persistence-rdb-06 a key that has expired", c.call("GET", dead) is None)
@@ -2368,6 +2394,8 @@ def stages_rdb(prog):
             check("local: KEYS skips the expired key",
                   sorted(c.call("KEYS", "*")) == sorted([live, live_s, plain]))
             c.close()
+        except StopIteration:
+            pass
         finally:
             srv.stop()
 
@@ -2473,6 +2501,15 @@ def stages_rdb(prog):
               isinstance(got[0], list) and len(got[0]) == n)
         check("local: K1 KEYS k* of 524288 keys stalls PING at most 0.5 s",
               worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+        # K4: a pattern that fails at the first byte does one step of glob
+        # work for each key, so the filter loop must yield by itself.
+        def keys_none():
+            c.send_raw(encode("KEYS", "nomatch"))
+            got[0] = c.try_read(60)
+            time.sleep(0.2)
+        worst, wrong, _ = measure_while(srv, keys_none)
+        check("local: K4 KEYS nomatch of 524288 keys stalls PING at most 0.1 s",
+              worst <= 0.1 and not wrong and got[0] == [], "worst %.3f s" % worst)
         # In EXEC, each KEYS spends twice the size of the keyspace from the
         # element budget of 8388608: eight run, the ninth is refused.
         c.call("MULTI")

@@ -192,11 +192,11 @@
   ]
  },
  {
-  "name": "K1 no yield while KEYS filters",
+  "name": "K4 no yield while KEYS filters",
   "old": "        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    var out = Output(conn);",
   "new": "        i = i + 1;\n    }\n    var out = Output(conn);",
   "cases": [
-   "local: K1 KEYS k* of 524288 keys stalls PING at most 0.5 s"
+   "local: K4 KEYS nomatch of 524288 keys stalls PING at most 0.1 s"
   ]
  },
  {

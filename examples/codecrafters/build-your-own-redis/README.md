@@ -385,6 +385,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.016 s |
 | W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
 | K1 (group `persistence-rdb`): `KEYS k*` of 524288 keys | every key; PING within 0.5 s | 0.30–0.32 s |
+| K4: `KEYS nomatch` of 524288 keys, one glob step for each key | PING within 0.1 s (without the yield of the filter loop: 0.21 s) | 0.013 s |
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
@@ -408,7 +409,7 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` or
 `tests/mutations/persistence-rdb.json` that removes
-its guard (S4, T1, T7 and W3 hold rule 6 only: no single change removes their
+its guard (S4, T1, T7, W3 and K1 hold rule 6 only: no single change removes their
 guard). Two parts of the RDB load have no mutation, because no reply can
 show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
