@@ -97,8 +97,8 @@
  },
  {
   "name": "LPOP with a count does not mark",
-  "old": "        // as in Redis.\n        touch(argv[1]);\n    }",
-  "new": "        // as in Redis.\n    }",
+  "old": "        // as in Redis.\n        touch(argv[1]);\n        replicate(argv, nil);\n    }",
+  "new": "        // as in Redis.\n        replicate(argv, nil);\n    }",
   "cases": [
    "local: WATCH and LPOP with a count"
   ]
@@ -161,8 +161,8 @@
  },
  {
   "name": "unwatchAll runs in a deferred call",
-  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n}",
-  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n}",
+  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n    if (conn.isReplica) {",
+  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n    if (conn.isReplica) {",
   "cases": [
    "local: the server serves on after a client that watched 5000 keys goes"
   ]

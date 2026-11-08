@@ -1,0 +1,234 @@
+[
+ {
+  "name": "INFO of a replica says master",
+  "old": "        role = \"slave\";",
+  "new": "        role = \"master\";",
+  "cases": [
+   "replication-03 INFO replication of a replica gives role:slave"
+  ]
+ },
+ {
+  "name": "the replication ID has 39 digits",
+  "old": "    while (i < 40) {\n        seed = (seed * 1103515245",
+  "new": "    while (i < 39) {\n        seed = (seed * 1103515245",
+  "cases": [
+   "replication-04 master_replid has 40 letters and digits"
+  ]
+ },
+ {
+  "name": "the master offset starts at 1",
+  "old": "var replOffset = 0;",
+  "new": "var replOffset = 1;",
+  "cases": [
+   "replication-04 master_repl_offset is 0"
+  ]
+ },
+ {
+  "name": "REPLCONF gives NO",
+  "old": "    if (sub == \"getack\") {\n        return \"\";\n    }\n    return simple(\"OK\");",
+  "new": "    if (sub == \"getack\") {\n        return \"\";\n    }\n    return simple(\"NO\");",
+  "cases": [
+   "replication-08 REPLCONF listening-port gives OK"
+  ]
+ },
+ {
+  "name": "FULLRESYNC gives another ID",
+  "old": "    conn.sock.write(\"+FULLRESYNC \" + REPL_ID + \" \"",
+  "new": "    conn.sock.write(\"+FULLRESYNC \" + makeReplId() + \" \"",
+  "cases": [
+   "replication-09 PSYNC gives FULLRESYNC with the ID and offset 0"
+  ]
+ },
+ {
+  "name": "the RDB file ends with CRLF",
+  "old": "    conn.sock.write(\"$\" + str(len(EMPTY_RDB)) + \"\\r\\n\" + EMPTY_RDB);",
+  "new": "    conn.sock.write(\"$\" + str(len(EMPTY_RDB)) + \"\\r\\n\" + EMPTY_RDB + \"\\r\\n\");",
+  "cases": [
+   "replication-10 then an RDB file, with no CRLF after it"
+  ]
+ },
+ {
+  "name": "writes are not propagated",
+  "old": "fun replicate(head, tail) {\n    if (len(replicas) == 0) {",
+  "new": "fun replicate(head, tail) {\n    if (true) {",
+  "cases": [
+   "replication-11 the writes reach the replica, in order"
+  ]
+ },
+ {
+  "name": "only the first replica is woken",
+  "old": "            if (!r.replWoken) {\n                r.replWoken = true;",
+  "new": "            if (!r.replWoken and r == replicas[0]) {\n                r.replWoken = true;",
+  "cases": [
+   "replication-12 the writes reach every replica"
+  ]
+ },
+ {
+  "name": "GET is propagated",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
+  "new": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    replicate(argv, nil);\n    return Bulk(entry.value);",
+  "cases": [
+   "local: a read is not propagated"
+  ]
+ },
+ {
+  "name": "XADD propagates *",
+  "old": "    replicate([\"XADD\", key, idText(id.ms, id.seq)], stream.fields[stream.size() - 1]);",
+  "new": "    replicate(argv, nil);",
+  "cases": [
+   "local: XADD * is propagated with the ID that the master gave"
+  ]
+ },
+ {
+  "name": "the pop of BLPOP is not propagated",
+  "old": "            // Redis propagates the pop of BLPOP as LPOP.\n            replicate([\"LPOP\", key], nil);",
+  "new": "",
+  "cases": [
+   "local: the pop of BLPOP is propagated as LPOP"
+  ]
+ },
+ {
+  "name": "a transaction is not wrapped",
+  "old": "    execElements = EXEC_ELEMENTS;\n    replInExec = true;",
+  "new": "    execElements = EXEC_ELEMENTS;",
+  "cases": [
+   "local: a transaction is propagated in MULTI and EXEC"
+  ]
+ },
+ {
+  "name": "WAIT with no replica counts one",
+  "old": "    if (acked >= want or len(replicas) == 0) {\n        return integerReply(acked);",
+  "new": "    if (acked >= want or len(replicas) == 0) {\n        return integerReply(acked + 1);",
+  "cases": [
+   "replication-16 WAIT with no replica gives 0 at once"
+  ]
+ },
+ {
+  "name": "a new replica has acknowledged nothing",
+  "old": "    conn.ackOffset = replOffset;\n    replicas.append(conn);",
+  "new": "    conn.ackOffset = -1;\n    replicas.append(conn);",
+  "cases": [
+   "replication-17 WAIT with no write since the replicas came gives their number at once"
+  ]
+ },
+ {
+  "name": "an ACK does not wake WAIT",
+  "old": "            conn.ackOffset = off;\n            notifyAckWaiters();",
+  "new": "            conn.ackOffset = off;",
+  "cases": [
+   "replication-18 WAIT gives the replicas that acknowledged"
+  ]
+ },
+ {
+  "name": "an ACK is not kept",
+  "old": "            conn.ackOffset = off;\n            notifyAckWaiters();",
+  "new": "            notifyAckWaiters();",
+  "cases": [
+   "replication-18 WAIT gives the replicas that acknowledged"
+  ]
+ },
+ {
+  "name": "WAIT has no time limit",
+  "old": "                msg = task.receive_where_within(isAckWake, left / 1000);",
+  "new": "                msg = task.receive_where(isAckWake);",
+  "cases": [
+   "replication-18 WAIT ends at its time limit with the count so far"
+  ]
+ },
+ {
+  "name": "a replica that goes stays a replica",
+  "old": "    if (conn.isReplica) {\n        dropReplica(conn);\n    }",
+  "new": "",
+  "cases": [
+   "local: replicas that go leave connected_slaves"
+  ]
+ },
+ {
+  "name": "the replica sends no PING",
+  "old": "    sendCommand(sock, [\"PING\"]);\n    expectLine(sock, \"+PONG\");\n",
+  "new": "",
+  "cases": [
+   "replication-05 the replica sends PING"
+  ]
+ },
+ {
+  "name": "the replica sends another port",
+  "old": "    sendCommand(sock, [\"REPLCONF\", \"listening-port\", str(listenPort)]);",
+  "new": "    sendCommand(sock, [\"REPLCONF\", \"listening-port\", \"6379\"]);",
+  "cases": [
+   "replication-06 the replica sends REPLCONF listening-port and capa"
+  ]
+ },
+ {
+  "name": "the replica sends PSYNC with an offset",
+  "old": "    sendCommand(sock, [\"PSYNC\", \"?\", \"-1\"]);",
+  "new": "    sendCommand(sock, [\"PSYNC\", \"?\", \"0\"]);",
+  "cases": [
+   "replication-07 the replica sends PSYNC ? -1"
+  ]
+ },
+ {
+  "name": "the replica applies nothing",
+  "old": "        } else if (len(argv) > 0) {\n            execute(nil, argv);\n        }\n        replicaOffset",
+  "new": "        } else if (len(argv) > 0) {\n        }\n        replicaOffset",
+  "cases": [
+   "replication-13 the replica applies the commands of the master"
+  ]
+ },
+ {
+  "name": "the replica replies to the master",
+  "old": "        } else if (len(argv) > 0) {\n            execute(nil, argv);\n        }\n        replicaOffset",
+  "new": "        } else if (len(argv) > 0) {\n            sock.write(execute(nil, argv));\n        }\n        replicaOffset",
+  "cases": [
+   "local: the replica sends no reply to the master"
+  ]
+ },
+ {
+  "name": "ACK gives the offset plus one",
+  "old": "            sendCommand(sock, [\"REPLCONF\", \"ACK\", str(replicaOffset)]);",
+  "new": "            sendCommand(sock, [\"REPLCONF\", \"ACK\", str(replicaOffset + 1)]);",
+  "cases": [
+   "replication-14 REPLCONF GETACK with no command first gives ACK 0"
+  ]
+ },
+ {
+  "name": "GETACK is not counted",
+  "old": "        replicaOffset = replicaOffset + got[1];\n        n = n + 1;",
+  "new": "        if (name != \"REPLCONF\") {\n            replicaOffset = replicaOffset + got[1];\n        }\n        n = n + 1;",
+  "cases": [
+   "replication-15 the GETACK and a PING count in the offset"
+  ]
+ },
+ {
+  "name": "a replica takes writes from clients",
+  "old": "        if (REPL_ROLE != \"master\" and conn.tx == nil and WRITES.has(name)) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: a replica refuses a write from a client"
+  ]
+ },
+ {
+  "name": "the replica does not connect again",
+  "old": "            replicaSession();\n        } catch (e) {",
+  "new": "            replicaSession();\n            return;\n        } catch (e) {",
+  "cases": [
+   "local: the replica connects again after the link breaks"
+  ]
+ },
+ {
+  "name": "RP1 a replica that does not read is kept",
+  "old": "        if (replOffset - r.replSentOffset > REPLICA_LAG_MAX) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: RP1 a replica that does not read is dropped after 64 MB"
+  ]
+ },
+ {
+  "name": "WAIT does not see its client go",
+  "old": "        closed = isClosedMsg(msg);",
+  "new": "        closed = false;",
+  "cases": [
+   "local: a client that goes during WAIT ends its tasks"
+  ]
+ }
+]

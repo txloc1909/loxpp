@@ -33,8 +33,8 @@
  },
  {
   "name": "client close does not end a wait",
-  "old": "        case Msg.Closed => true\n",
-  "new": "",
+  "old": "        case Msg.Ready => true\n        case Msg.Closed => true\n        case _ => false\n    };\n}\n\n// Counts",
+  "new": "        case Msg.Ready => true\n        case _ => false\n    };\n}\n\n// Counts",
   "cases": [
    "local: a closed waiter takes no element"
   ]
@@ -129,8 +129,8 @@
  },
  {
   "name": "L18 session does not wake a reader that waits for credit",
-  "old": "        task.send(conn.reader, Msg.Blocked());\n",
-  "new": "",
+  "old": "        // A reader that waits for credit must wake to read on.\n        task.send(conn.reader, Msg.Blocked());\n",
+  "new": "        // A reader that waits for credit must wake to read on.\n",
   "cases": [
    "local: BLPOP on 1100 keys with no limit ends when its client goes after 100 more commands"
   ]
@@ -194,8 +194,8 @@
  },
  {
   "name": "L26 a given-back element does not go to the next waiter",
-  "old": "    touch(key);\n    serveWaiters(key);\n}",
-  "new": "    touch(key);\n}",
+  "old": "    touch(key);\n    replicate([\"LPUSH\", key, value], nil);\n    serveWaiters(key);\n}",
+  "new": "    touch(key);\n    replicate([\"LPUSH\", key, value], nil);\n}",
   "cases": [
    "local: an element pushed as its waiter resets goes to the next waiter (150 rounds)"
   ]
