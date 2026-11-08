@@ -169,6 +169,8 @@ SCRIPTS = {
             ["KEYS", "[a-c]*"], ["KEYS", "[^f]*"], ["KEYS", "a\\*b"], ["KEYS", "a*b"],
             ["KEYS", "x\\?y"], ["KEYS", "\\[z\\]"], ["KEYS", "*o*"], ["KEYS", "nothing"],
             ["KEYS", ""], ["KEYS", "[z"], ["KEYS", "*[b]"], ["KEYS", "[c-a]*"],
+            ["KEYS", "[a-]"], ["KEYS", "**"], ["KEYS", "?**"], ["KEYS", "[fb"],
+            ["SET", "_", "1"], ["KEYS", "[a-]"],
             ["KEYS"], ["KEYS", "a", "b"], ["keys", "f*"],
         ]),
         ("config", [

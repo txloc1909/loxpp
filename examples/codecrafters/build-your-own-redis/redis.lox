@@ -2392,8 +2392,9 @@ fun loadRdb(path) {
     if (r.take(5) != "REDIS") {
         throw RdbError("the file does not start with REDIS");
     }
-    if (!isDigits(r.take(4))) {
-        throw RdbError("the version of the file is not a number");
+    var version = r.take(4);
+    if (!isDigits(version) or version == "0000") {
+        throw RdbError("the version of the file is not a number from 1");
     }
     var db = 0;
     var expiresAt = nil;
@@ -2411,12 +2412,20 @@ fun loadRdb(path) {
             r.length();
             r.length();
         } else if (op == 253) {
-            expiresAt = r.le(4) * 1000;
+            // Redis reads the 4 bytes as a signed number of seconds.
+            expiresAt = r.le(4);
+            if (expiresAt >= 2147483648) {
+                expiresAt = 0;
+            }
+            expiresAt = expiresAt * 1000;
         } else if (op == 252) {
             // Redis reads the 8 bytes as a signed number; a negative time
-            // has passed.
+            // has passed. The sign is the top bit of the last byte: the sum
+            // in a Number rounds near 2^63, so it cannot show the sign.
+            r.need(8);
+            var top = ord(r.data[r.pos + 7]);
             expiresAt = r.le(8);
-            if (expiresAt >= 9223372036854775808) {
+            if (top >= 128) {
                 expiresAt = 0;
             }
         } else if (op == 248) {
@@ -2454,8 +2463,10 @@ fun cmdConfig(ctx, argv) {
     if (len(argv) < 3) {
         return wrongArgs("config|get");
     }
-    // Redis 7.0 gives each known name once, as the client first sent it,
-    // in the reverse order of the first time each name comes.
+    // Redis 7.0 gives each known name once, as the client first sent it. Its
+    // order depends on the hash seed of the process; this server gives the
+    // reverse order of the first time each name comes, one order that
+    // Redis can give.
     var found = [];
     var seen = {};
     for (var p in argv[2:len(argv)]) {
@@ -2554,9 +2565,18 @@ fun globMatch(p, s) {
         }
     }
     while (pi < len(p) and p[pi] == "*") {
+        globStep();
         pi = pi + 1;
     }
     return pi == len(p);
+}
+
+fun signedByte(c) {
+    var v = ord(c);
+    if (v >= 128) {
+        return v - 256;
+    }
+    return v;
 }
 
 // Matches one byte c at p[pi], which is not "*". Returns the length of the
@@ -2590,14 +2610,16 @@ fun globOne(p, pi, c) {
             } else if (j + 2 < len(p) and p[j + 1] == "-") {
                 // As in Redis, also when p[j + 2] is "]": "[a-]" is the range
                 // from "]" to "a".
-                var lo = ord(p[j]);
-                var hi = ord(p[j + 2]);
+                // Redis compares the ends as signed bytes (char).
+                var lo = signedByte(p[j]);
+                var hi = signedByte(p[j + 2]);
                 if (lo > hi) {
                     var t = lo;
                     lo = hi;
                     hi = t;
                 }
-                if (ord(c) >= lo and ord(c) <= hi) {
+                var code = signedByte(c);
+                if (code >= lo and code <= hi) {
                     hit = true;
                 }
                 j = j + 3;

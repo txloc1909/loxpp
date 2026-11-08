@@ -57,8 +57,8 @@
  },
  {
   "name": "the expiry in seconds is read as ms",
-  "old": "            expiresAt = r.le(4) * 1000;",
-  "new": "            expiresAt = r.le(4);",
+  "old": "            expiresAt = expiresAt * 1000;",
+  "new": "",
   "cases": [
    "local: a key with a future expiry in seconds"
   ]
@@ -169,7 +169,7 @@
  },
  {
   "name": "glob ranges are ignored",
-  "old": "                if (ord(c) >= lo and ord(c) <= hi) {",
+  "old": "                if (code >= lo and code <= hi) {",
   "new": "                if (false) {",
   "cases": [
    "local: KEYS [a-b]?r"
@@ -209,15 +209,15 @@
  },
  {
   "name": "no version check",
-  "old": "    if (!isDigits(r.take(4))) {",
-  "new": "    if (r.take(4) == \"\") {",
+  "old": "    if (!isDigits(version) or version == \"0000\") {",
+  "new": "    if (version == \"\") {",
   "cases": [
    "local: a version that is not a number stops the start"
   ]
  },
  {
   "name": "a negative expiry is far away",
-  "old": "            if (expiresAt >= 9223372036854775808) {\n                expiresAt = 0;\n            }",
+  "old": "            if (top >= 128) {\n                expiresAt = 0;\n            }",
   "new": "",
   "cases": [
    "local: a negative expiry in ms has passed"
@@ -252,15 +252,7 @@
   "old": "        out.append(found[i]);\n        if (lower(found[i]) == \"dir\") {",
   "new": "        out.append(lower(found[i]));\n        if (lower(found[i]) == \"dir\") {",
   "cases": [
-   "local: CONFIG GET of two names gives each once, as sent, last first"
-  ]
- },
- {
-  "name": "CONFIG GET gives names in the order sent",
-  "old": "    var out = [];\n    var i = len(found) - 1;\n    while (i >= 0) {",
-  "new": "    var out = [];\n    var i = 0;\n    while (i >= 0 and i < len(found)) {",
-  "cases": [
-   "local: CONFIG GET of two names gives each once, as sent, last first"
+   "local: CONFIG GET of two names gives each once, as sent"
   ]
  },
  {
@@ -301,6 +293,62 @@
   "new": "            if (p[j] == \"\\\\\" and j + 1 < len(p)) {\n                if (true) {",
   "cases": [
    "local: KEYS x[\\]]"
+  ]
+ },
+ {
+  "name": "K5 no step for the stars at the end",
+  "old": "    while (pi < len(p) and p[pi] == \"*\") {\n        globStep();\n        pi = pi + 1;",
+  "new": "    while (pi < len(p) and p[pi] == \"*\") {\n        pi = pi + 1;",
+  "cases": [
+   "local: K5 KEYS ? and 262144 stars stalls PING at most 0.3 s"
+  ]
+ },
+ {
+  "name": "range ends compared as unsigned",
+  "old": "    if (v >= 128) {\n        return v - 256;\n    }\n    return v;",
+  "new": "    return v;",
+  "cases": [
+   "local: KEYS [a-]"
+  ]
+ },
+ {
+  "name": "FD is unsigned",
+  "old": "            if (expiresAt >= 2147483648) {\n                expiresAt = 0;\n            }",
+  "new": "",
+  "cases": [
+   "local: a negative expiry in seconds has passed"
+  ]
+ },
+ {
+  "name": "FC sign from the rounded sum",
+  "old": "            if (top >= 128) {",
+  "new": "            if (expiresAt >= 9223372036854775808) {",
+  "cases": [
+   "local: the greatest expiry in ms has not passed"
+  ]
+ },
+ {
+  "name": "version 0 accepted",
+  "old": "    if (!isDigits(version) or version == \"0000\") {",
+  "new": "    if (!isDigits(version)) {",
+  "cases": [
+   "local: version 0 stops the start"
+  ]
+ },
+ {
+  "name": "an empty key matches any pattern",
+  "old": "    if (len(s) == 0) {\n        return len(p) == 0;\n    }",
+  "new": "",
+  "cases": [
+   "local: KEYS ** does not give the empty key"
+  ]
+ },
+ {
+  "name": "an LRU idle time read as one byte",
+  "old": "            // The idle time of the next key, for an LRU policy.\n            r.length();",
+  "new": "            // The idle time of the next key, for an LRU policy.\n            r.byte();",
+  "cases": [
+   "local: an RDB file with an LRU idle time of 14 bits loads"
   ]
  }
 ]

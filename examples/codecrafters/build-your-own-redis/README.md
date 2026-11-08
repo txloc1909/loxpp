@@ -259,7 +259,8 @@ printed.
 - The RDB load reads strings only, in database 0. A file with another
   value kind or another database stops the start. The load does not check
   the checksum. `CONFIG GET` knows `dir` and `dbfilename` only, and takes
-  no glob pattern. A glob pattern with more than 1000 stars matches in
+  no glob pattern, and its order of names is one order that Redis can
+  give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
@@ -386,6 +387,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
 | K1 (group `persistence-rdb`): `KEYS k*` of 524288 keys | every key; PING within 0.5 s | 0.30–0.32 s |
 | K4: `KEYS nomatch` of 524288 keys, one glob step for each key | PING within 0.1 s (without the yield of the filter loop: 0.21 s) | 0.013 s |
+| K5 (on the K3 server): `KEYS ?` and 262144 stars on 256 keys of one byte; each key ends at once and the rest of the pattern is stars | PING within 0.3 s (when the stars at the end are not steps: 5.13 s) | 0.04–0.06 s |
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
