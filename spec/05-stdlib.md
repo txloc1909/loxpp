@@ -1070,12 +1070,17 @@ Points](04-semantics.md#suspend-points)). The calls have two classes, and the
   [Conformance](README.md#conformance), Parallel workers). The section of the call
   says `**Blocks:** yes`.
 
-A call of class suspends blocks the worker, and does not suspend, in two
+A call of class suspends blocks the worker, and does not suspend, in three
 cases. First, the task cannot suspend where the call is made: see
 [§04-semantics, Suspend Points](04-semantics.md#contexts-where-a-task-cannot-suspend).
 The call then waits as a call of class blocks does, and it raises no fault.
 Second, `connect` and `connect_within` block the worker while they resolve a
-host name.
+host name. Third, the call moves the bytes of a stream and the connection
+keeps up: the call does not wait for as long as the bytes keep arriving, so its
+task keeps the worker as a task that computes does. A program moves such a
+stream in parts and yields between them, or gives the task a worker of its own
+(see [§04-semantics, Suspend Points](04-semantics.md#suspend-points), the
+paragraph that begins "A call that keeps up keeps the worker").
 
 The table lists all the blocking calls.
 

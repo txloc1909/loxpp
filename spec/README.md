@@ -134,7 +134,8 @@ them:
    worker is not implementation-defined: [§04-semantics,
    Scheduling](04-semantics.md#scheduling) binds every implementation. So does
    the rule that a call of class suspends lets the other tasks of its worker
-   run (see [§04-semantics, Suspend Points](04-semantics.md#suspend-points)).
+   run while the call waits (see [§04-semantics, Suspend
+   Points](04-semantics.md#suspend-points)).
 6. **Speed**.
 7. **Connection loss on read**: whether a read on a Socket whose connection
    the peer reset ends with a `NetworkError` or as an end of stream.

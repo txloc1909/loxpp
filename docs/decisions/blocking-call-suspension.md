@@ -193,14 +193,66 @@ A script checks this before any backend node starts.
 ### Suspension
 
 A call in the first class suspends the calling task until its wait completes.
-Every other task on the worker keeps running. The call is a suspend point, as
-the table in `spec/04-semantics.md` says.
+Every other task on the worker keeps running while the call waits. The call is
+a suspend point, as the table in `spec/04-semantics.md` says.
 
 A suspended call suspends the whole task. Every frame of the task stays in
 place, including the frames of a coroutine the task resumed. No deferred call
 runs. A coroutine that holds a suspended call keeps the status `"running"`, so
 a resume of it from another task raises `RunningCoroutineError`, as for a
 suspended `receive`.
+
+### A call that keeps up keeps the worker (2026-11-07)
+
+A call of class suspends on a Socket waits only when its next transfer would
+block. While a stream of a Socket keeps arriving, each transfer moves bytes, so
+a read or a write does not wait for as long as that lasts: the transfer runs as
+one running stretch and its task keeps the worker. The same holds for a task
+that computes. The spec states the rule in `spec/04-semantics.md`, "Suspend
+Points", and `spec/05-stdlib.md`, "Blocking calls".
+
+**The defect this answers.** The referee of PR #1125 measured one
+`read_bytes` call that held its worker for 1.3 s to 1.5 s while a client sent a
+512 MB bulk string, and no other task of that worker ran in that time (#1132,
+gap G2 of #1125). The reproduction is
+`examples/codecrafters/build-your-own-redis/`.
+
+**Why this decision has no bound.** A bound on one running stretch is the reserved
+fair mode: `concurrency-model-decision.md` reserves "a switch at a loop
+back-edge or a call after a budget of work", #942 was closed as not planned,
+and this decision lists fair mode as a non-goal. A bound would also cross the rule
+that invariant I2 states, whenever a result is larger than the bound: such a
+call would wait although its result is already held. The probe
+`388_read_end_held_does_not_suspend` would not see it, because its result is
+smaller than any useful bound, so the choice weakens a rule that no probe then
+covers. So the task's stretch keeps the rule it has. The points at which the
+worker sees a wait that has ended are a separate rule, not a switch point at a
+site that names nothing, and #1131 is where that rule is to be stated.
+
+**The lever is the program.** The runtime cannot know whether the peer will
+keep up: the placement of a task is chosen at spawn and the rate of a peer is
+chosen later by a program outside this one. A program that must keep its other
+tasks alive during a large transfer moves the stream in parts and yields
+between them, which is a switch point it names, or it gives the moving task a
+worker of its own. A yield is bound to give a turn to each task that is ready
+to run; a wait that has ended is seen there only as far as Scheduling says,
+which is #1131. `examples/fair_stream.lox` is the pattern, and the follow-up
+issue makes the Codecrafters example use it.
+
+**What this costs.** Any of the seven Socket calls that move data still holds
+the worker for as long as the peer keeps up when its result is large, and a
+program that needs the other tasks alive must move the data itself.
+
+**No probe binds the case.** Whether a call keeps up depends on the rate of the
+peer, which is a race between two processes, so no probe can force the case and
+none can forbid it. The I2 probes stay as they are and stay green: a call whose
+result is already held returns at once.
+
+**The measurement a later fair-mode decision owes.** One stretch of a bulk read
+of a saturating peer: 1.3 s to 1.5 s at 512 MB in the referee's run of PR #1125,
+and 10.09 s against 5.96 s for the whole `ECHO` in the two runs of #1134. A
+later decision that bounds a stretch must beat those numbers and state the
+throughput it costs when another task of the worker is ready.
 
 ### Contexts where a task cannot suspend
 

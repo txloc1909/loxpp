@@ -1845,7 +1845,7 @@ a call can wait on. The sections after it use these terms.
 | `receive` | a receive that finds no message to take, where the task can suspend | `running` | `receiving` | — |
 | `message` | a message arrives in the mailbox of a `receiving` task | `receiving` | `ready` | joins the back |
 | `limit` | the limit of a receive passes | `receiving` | `ready` | joins the back |
-| `wait` | a call of class suspends whose wait is not over at the call, where the task can suspend | `running` | `waiting` | — |
+| `wait` | a call of class suspends that cannot go on without waiting, where the task can suspend | `running` | `waiting` | — |
 | `wait-end` | the wait of a `waiting` task ends: its event happens, a task closes the value it waits on, or its limit passes | `waiting` | `ready` | joins the back |
 | `end` | the function of the task returns, or the task ends by an uncaught throw or a halting fault | `running` | `ended` | — |
 | `abandon` | the program ends, or, in a session, the line that spawned the task ends (see [A Session](#a-session)) | `ready`, `receiving`, `waiting` | `ended` | leaves |
@@ -1990,10 +1990,12 @@ gives.
   keep running, on an implementation that runs workers at the same time (see
   [Conformance](README.md#conformance), Parallel workers).
 
-A call of class suspends blocks the worker in two cases: where the task cannot
-suspend (see [Contexts where a task cannot
-suspend](#contexts-where-a-task-cannot-suspend)), and during the name
-resolution of `connect`. Then the call waits as a call of class blocks does.
+A call of class suspends blocks the worker in three cases: where the task
+cannot suspend (see [Contexts where a task cannot
+suspend](#contexts-where-a-task-cannot-suspend)), during the name resolution of
+`connect`, and while a connection keeps up with the bytes the call moves (see
+the last paragraph of this section). In the first two cases the call waits as a
+call of class blocks does; in the third it waits for no part of that time.
 
 A call of class suspends waits only when the wait is not over at the call. A
 `read` of a Socket that holds bytes returns at once, and a `sleep` of zero
@@ -2010,6 +2012,16 @@ raised. A fault of the wait is raised in the waiting task when it runs again.
 
 A task that computes without reaching a suspend point keeps every other task
 of its worker from running. A program gives such a task a worker of its own.
+
+A call that keeps up keeps the worker. A call of class suspends on a Socket
+waits only when its next transfer would block: while the connection keeps up,
+each transfer moves bytes, so the call does not wait for as long as the bytes
+keep arriving, and its task keeps the worker as a task that computes does. A
+program that moves a large stream therefore moves it in parts and yields
+between the parts, or it gives the task that moves it a worker of its own. A
+yield gives a turn to each task of the worker that is ready to run. When the
+worker sees a wait that has ended is the rule of [Scheduling](#scheduling). The
+`Fair mode` column above is where a later version can bound such a stretch.
 
 ### Contexts where a task cannot suspend
 
