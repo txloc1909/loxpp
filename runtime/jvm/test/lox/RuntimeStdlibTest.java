@@ -122,78 +122,83 @@ public final class RuntimeStdlibTest {
         checkFsOsAccess(globals);
     }
 
+    // The port-range grid of spec/05-stdlib.md, "Integer arguments": one row
+    // per cell of three functions, two kinds of port, and the accepted and
+    // refused side of each end of the range. One check per row, so a bound
+    // that changes for one kind or one end alone fails.
+    private static final Object[][] PORT_GRID = {
+        // connect takes a port from 1 through 65535.
+        {"connect", 0L, Boolean.FALSE},
+        {"connect", 0.0, Boolean.FALSE},
+        {"connect", 1L, Boolean.TRUE},
+        {"connect", 1.0, Boolean.TRUE},
+        {"connect", 65535L, Boolean.TRUE},
+        {"connect", 65535.0, Boolean.TRUE},
+        {"connect", 65536L, Boolean.FALSE},
+        {"connect", 65536.0, Boolean.FALSE},
+        // connect_within takes the same port.
+        {"connect_within", 0L, Boolean.FALSE},
+        {"connect_within", 0.0, Boolean.FALSE},
+        {"connect_within", 1L, Boolean.TRUE},
+        {"connect_within", 1.0, Boolean.TRUE},
+        {"connect_within", 65535L, Boolean.TRUE},
+        {"connect_within", 65535.0, Boolean.TRUE},
+        {"connect_within", 65536L, Boolean.FALSE},
+        {"connect_within", 65536.0, Boolean.FALSE},
+        // listen takes a port from 0 through 65535.
+        {"listen", -1L, Boolean.FALSE},
+        {"listen", -1.0, Boolean.FALSE},
+        {"listen", 0L, Boolean.TRUE},
+        {"listen", 0.0, Boolean.TRUE},
+        {"listen", 65535L, Boolean.TRUE},
+        {"listen", 65535.0, Boolean.TRUE},
+        {"listen", 65536L, Boolean.FALSE},
+        {"listen", 65536.0, Boolean.FALSE},
+    };
+
     // Mirrors test/test_net_process.cpp's NetProcessTest.InvalidPortFatal for
     // the JVM's own copy of the check. A parameter that spec/05-stdlib.md
     // calls an integer is an Int or an integer-valued Number ("Integer
-    // arguments"), and a port outside its range is a fatal fault. The kind
-    // matters: a caught fault would mean the call reached the connection
-    // attempt, whose NetworkError is catchable, so a `try` in the program
-    // would catch it and the port was not refused at all.
+    // arguments"). A port outside its range is a fatal fault: a catchable one
+    // would mean the call reached the connection attempt, whose NetworkError a
+    // program's `try` can catch, so the port was not refused at all.
     private static void checkIntegerArguments(LoxGlobals globals) {
-        String host = "127.0.0.1";
+        check(PORT_GRID.length == 24, "the port grid has one row per cell");
+        for (Object[] row : PORT_GRID) {
+            checkPort(globals, (String) row[0], row[1], (Boolean) row[2]);
+        }
 
-        // 1 is the lowest port of connect and connect_within, and 0 of listen,
-        // in both kinds: the Int that a computed port is and the Number that a
-        // literal is.
-        checkFatal(() -> call(globals, "connect", host, 0L),
-                   "connect() rejects port 0i");
-        checkFatal(() -> call(globals, "connect", host, 0.0),
-                   "connect() rejects port 0");
-        checkFatal(() -> call(globals, "connect_within", host, 0L, 5.0),
-                   "connect_within() rejects port 0i");
-        checkFatal(() -> call(globals, "connect_within", host, 0.0, 5.0),
-                   "connect_within() rejects port 0");
-        checkFatal(() -> call(globals, "listen", host, -1L),
-                   "listen() rejects port -1i");
-        checkFatal(() -> call(globals, "listen", host, -1.0),
-                   "listen() rejects port -1");
-        checkFatal(() -> call(globals, "connect", host, 1.5),
+        // A port that is not integer-valued is a fatal fault of its own.
+        checkFatal(() -> call(globals, "connect", "127.0.0.1", 1.5),
                    "connect() rejects a fractional port");
-        checkFatal(() -> call(globals, "connect_within", host, 1.5, 5.0),
+        checkFatal(() -> call(globals, "connect_within", "127.0.0.1", 1.5, 5.0),
                    "connect_within() rejects a fractional port");
-        checkFatal(() -> call(globals, "listen", host, 1.5),
+        checkFatal(() -> call(globals, "listen", "127.0.0.1", 1.5),
                    "listen() rejects a fractional port");
-        checkFatal(() -> call(globals, "connect", host, 65536L),
-                   "connect() rejects port 65536i");
-        checkFatal(() -> call(globals, "connect", host, 65536.0),
-                   "connect() rejects port 65536");
-        checkFatal(() -> call(globals, "connect_within", host, 65536L, 5.0),
-                   "connect_within() rejects port 65536i");
-        checkFatal(() -> call(globals, "connect_within", host, 65536.0, 5.0),
-                   "connect_within() rejects port 65536");
-        checkFatal(() -> call(globals, "listen", host, 65536L),
-                   "listen() rejects port 65536i");
-        checkFatal(() -> call(globals, "listen", host, 65536.0),
-                   "listen() rejects port 65536");
 
-        // 1 is the lowest port of connect and connect_within, and 65535 the
-        // highest port of all three. Such a call reaches the network, where a
-        // fault is catchable, so a fatal fault here would mean that a legal
-        // port was wrongly refused.
-        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 1L)),
-                      "connect() accepts port 1i");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 1.0)),
-                      "connect() accepts port 1");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 1L, 5.0)),
-                      "connect_within() accepts port 1i");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 1.0, 5.0)),
-                      "connect_within() accepts port 1");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect", host, 65535.0)),
-                      "connect() accepts port 65535");
-        checkNotFatal(() -> closeQuietly(call(globals, "connect_within", host, 65535.0, 5.0)),
-                      "connect_within() accepts port 65535");
-        checkNotFatal(() -> closeQuietly(call(globals, "listen", host, 65535.0)),
-                      "listen() accepts port 65535");
+        // listen with 0 asks the OS for a free port, in both kinds.
+        for (Object port : new Object[] {0L, 0.0}) {
+            Object server = call(globals, "listen", "127.0.0.1", port);
+            check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
+                  "listen() accepts port " + LoxOps.str(port) + " and binds a free port");
+            closeQuietly(server);
+        }
+    }
 
-        // listen takes 0 in both kinds and asks the OS for a free port.
-        Object server = call(globals, "listen", host, 0L);
-        check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
-              "listen() accepts port 0i and binds a free port");
-        closeQuietly(server);
-        server = call(globals, "listen", host, 0.0);
-        check(server instanceof LoxServer && ((LoxServer) server).port() > 0,
-              "listen() accepts port 0 and binds a free port");
-        closeQuietly(server);
+    // One cell of the grid: an accepted port must reach the network, where a
+    // fault is catchable, and a refused one must be a fatal fault.
+    private static void checkPort(LoxGlobals globals, String function, Object port,
+                                  boolean accepted) {
+        Object[] args = function.equals("connect_within")
+                ? new Object[] {"127.0.0.1", port, 5.0}
+                : new Object[] {"127.0.0.1", port};
+        String shown = function + "() " + (accepted ? "accepts port " : "rejects port ")
+                + LoxOps.str(port) + (port instanceof Long ? "i" : "");
+        if (accepted) {
+            checkNotFatal(() -> closeQuietly(call(globals, function, args)), shown);
+        } else {
+            checkFatal(() -> call(globals, function, args), shown);
+        }
     }
 
     // A Socket or a Server that a call returned, closed, so a check that only

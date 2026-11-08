@@ -553,48 +553,63 @@ TEST(NetProcessTest, ConnectRefusedIsCatchable) {
 
 TEST(NetProcessTest, InvalidPortFatal) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("connect(\"127.0.0.1\", 0);"),
-              InterpretResult::RUNTIME_ERROR);
+
+    // The port-range grid of spec/05-stdlib.md, "Integer arguments": one case
+    // per cell of three functions, two kinds of port, and the accepted and
+    // refused side of each end of the range. An accepted port reaches the
+    // network, where the fault is the catchable NetworkError of a refused
+    // connection, so a `try` catches it and the run ends OK; a refused port is
+    // a fatal fault that no `try` catches.
+    struct PortCase {
+        const char* function;
+        const char* port;
+        bool accepted;
+    };
+    static const PortCase kPortGrid[] = {
+        {"connect", "0", false},
+        {"connect", "0i", false},
+        {"connect", "1", true},
+        {"connect", "1i", true},
+        {"connect", "65535", true},
+        {"connect", "65535i", true},
+        {"connect", "65536", false},
+        {"connect", "65536i", false},
+        {"connect_within", "0", false},
+        {"connect_within", "0i", false},
+        {"connect_within", "1", true},
+        {"connect_within", "1i", true},
+        {"connect_within", "65535", true},
+        {"connect_within", "65535i", true},
+        {"connect_within", "65536", false},
+        {"connect_within", "65536i", false},
+        {"listen", "-1", false},
+        {"listen", "-1i", false},
+        {"listen", "0", true},
+        {"listen", "0i", true},
+        {"listen", "65535", true},
+        {"listen", "65535i", true},
+        {"listen", "65536", false},
+        {"listen", "65536i", false},
+    };
+    ASSERT_EQ(sizeof(kPortGrid) / sizeof(kPortGrid[0]), 24u)
+        << "the port grid has one case per cell";
+    for (const PortCase& c : kPortGrid) {
+        std::string program =
+            std::string("try { ") + c.function + "(\"127.0.0.1\", " + c.port +
+            (std::string(c.function) == "connect_within" ? ", 5" : "") +
+            "); } catch (e) { print e.kind; }";
+        EXPECT_EQ(h.run(program), c.accepted ? InterpretResult::OK
+                                             : InterpretResult::RUNTIME_ERROR)
+            << c.function << " port " << c.port;
+    }
+
+    // A port that is not integer-valued is a fatal fault of its own, and a
+    // Number far above the range is refused as well.
     EXPECT_EQ(h.run("listen(\"127.0.0.1\", 70000);"),
               InterpretResult::RUNTIME_ERROR);
     EXPECT_EQ(h.run("listen(\"127.0.0.1\", 1.5);"),
               InterpretResult::RUNTIME_ERROR);
-    // connect_within's port follows connect's, row by row: 1 is its lowest
-    // port and 65535 its highest (spec/05-stdlib.md, Integer arguments). A
-    // port fault is fatal, not the catchable NetworkError of a refused
-    // connection, so a `try` around it does not catch it; a port that the
-    // function wrongly accepts reaches the connection attempt, which the
-    // `try` does catch, and the run then ends OK.
-    EXPECT_EQ(h.run("try { connect_within(\"127.0.0.1\", 0i, 5); } "
-                    "catch (e) { print e.kind; }"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("try { connect_within(\"127.0.0.1\", 65536i, 5); } "
-                    "catch (e) { print e.kind; }"),
-              InterpretResult::RUNTIME_ERROR);
-    // The lowest port of each range is legal, so the call reaches the network,
-    // where a fault is the catchable NetworkError of a refused connection. A
-    // fatal fault here would mean that a legal port was refused; listen's own
-    // lowest port, 0, is legal because it asks the OS for a free one.
-    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 1); } "
-                    "catch (e) { print e.kind; } "
-                    "try { connect_within(\"127.0.0.1\", 1i, 5); } "
-                    "catch (e) { print e.kind; }"),
-              InterpretResult::OK);
-    EXPECT_EQ(h.run("try { listen(\"127.0.0.1\", -1); } "
-                    "catch (e) { print e.kind; }"),
-              InterpretResult::RUNTIME_ERROR);
-    // Both kinds of a port are refused outside the range, so the Int form of
-    // connect's lowest port and the Number form of the highest port are each
-    // a fatal fault.
-    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 0i); } "
-                    "catch (e) { print e.kind; }"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\", 65536.0); } "
-                    "catch (e) { print e.kind; } "
-                    "try { connect_within(\"127.0.0.1\", 65536.0, 5); } "
-                    "catch (e) { print e.kind; } "
-                    "try { listen(\"127.0.0.1\", 65536.0); } "
-                    "catch (e) { print e.kind; }"),
+    EXPECT_EQ(h.run("connect(\"127.0.0.1\", 1.5);"),
               InterpretResult::RUNTIME_ERROR);
 }
 
