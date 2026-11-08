@@ -10,6 +10,7 @@
 
 import os
 import random
+import shutil
 import socket
 import string
 import struct
@@ -2264,12 +2265,214 @@ def stages_optimistic_locking(prog):
         srv.stop()
 
 
+def rdb_length(n):
+    if n < 64:
+        return bytes([n])
+    if n < 16384:
+        return bytes([0x40 | (n >> 8), n & 0xFF])
+    return b"\x80" + n.to_bytes(4, "big")
+
+
+def rdb_string(b):
+    if isinstance(b, str):
+        b = b.encode("latin-1")
+    return rdb_length(len(b)) + b
+
+
+def write_rdb(path, entries, version=b"0011", extra=b""):
+    """Writes an RDB file as the Codecrafters tester does: the header,
+    auxiliary fields, database 0 with its sizes, then each (key, value,
+    expiry in ms or None, "ms" or "s") as a string with its expiry, and
+    the end byte with a checksum of zeros."""
+    out = [b"REDIS" + version]
+    out.append(b"\xfa" + rdb_string("redis-ver") + rdb_string("7.2.0"))
+    out.append(b"\xfa" + rdb_string("redis-bits") + b"\xc0\x40")
+    out.append(b"\xfe\x00")
+    out.append(b"\xfb" + rdb_length(len(entries))
+               + rdb_length(sum(1 for e in entries if e[2] is not None)))
+    for key, value, expiry, unit in entries:
+        if expiry is not None:
+            if unit == "s":
+                out.append(b"\xfd" + int(expiry // 1000).to_bytes(4, "little"))
+            else:
+                out.append(b"\xfc" + int(expiry).to_bytes(8, "little"))
+        out.append(b"\x00" + (key if isinstance(key, bytes) and key[:1] in (b"\xc0", b"\xc1", b"\xc2")
+                              else rdb_string(key)))
+        out.append(value if isinstance(value, bytes) and value[:1] in (b"\xc0", b"\xc1", b"\xc2", b"\xc3")
+                   else rdb_string(value))
+    out.append(extra)
+    out.append(b"\xff" + b"\x00" * 8)
+    with open(path, "wb") as f:
+        f.write(b"".join(out))
+
+
+def stages_rdb(prog):
+    d = tempfile.mkdtemp(prefix="loxpp-rdb-")
+    try:
+        srv = Server(prog, ["--dir", d, "--dbfilename", "none.rdb"])
+        try:
+            check("persistence-rdb: server starts with no RDB file", srv.up, srv.log_text())
+            if not srv.up:
+                return
+            c = srv.client()
+            check("persistence-rdb-01 CONFIG GET dir", c.call("CONFIG", "GET", "dir") == ["dir", d])
+            check("persistence-rdb-01 CONFIG GET dbfilename",
+                  c.call("CONFIG", "GET", "dbfilename") == ["dbfilename", "none.rdb"])
+            check("local: a missing RDB file is an empty keyspace", c.call("KEYS", "*") == [])
+            c.close()
+        finally:
+            srv.stop()
+
+        def with_rdb(name, entries, **kw):
+            path = os.path.join(d, name)
+            write_rdb(path, entries, **kw)
+            return Server(prog, ["--dir", d, "--dbfilename", name])
+
+        key = rand_word()
+        srv = with_rdb("one.rdb", [(key, "orange", None, None)])
+        try:
+            c = srv.client()
+            check("persistence-rdb-02 KEYS * gives the key", c.call("KEYS", "*") == [key])
+            check("persistence-rdb-03 GET gives the value", c.call("GET", key) == "orange")
+            c.close()
+        finally:
+            srv.stop()
+
+        keys = [rand_word() for _ in range(4)]
+        values = [rand_word() for _ in range(4)]
+        srv = with_rdb("many.rdb", [(k, v, None, None) for k, v in zip(keys, values)])
+        try:
+            c = srv.client()
+            check("persistence-rdb-04 KEYS * gives every key", sorted(c.call("KEYS", "*")) == sorted(keys))
+            check("persistence-rdb-05 GET gives every value",
+                  [c.call("GET", k) for k in keys] == values)
+            c.close()
+        finally:
+            srv.stop()
+
+        now = int(time.time() * 1000)
+        live, dead, live_s = rand_word(), rand_word(), rand_word()
+        srv = with_rdb("expiry.rdb", [(live, "a", now + 600000, "ms"), (dead, "b", now - 600000, "ms"),
+                                      (live_s, "c", now + 600000, "s")])
+        try:
+            c = srv.client()
+            check("persistence-rdb-06 a key with a future expiry in ms", c.call("GET", live) == "a")
+            check("persistence-rdb-06 a key that has expired", c.call("GET", dead) is None)
+            check("local: a key with a future expiry in seconds", c.call("GET", live_s) == "c")
+            check("local: KEYS skips the expired key", sorted(c.call("KEYS", "*")) == sorted([live, live_s]))
+            c.close()
+        finally:
+            srv.stop()
+
+        # Integer strings and the long length forms.
+        long_value = "x" * 20000
+        srv = with_rdb("forms.rdb", [("i8", b"\xc0\xf6", None, None), ("i16", b"\xc1\x30\xf8", None, None),
+                                     ("i32", b"\xc2\x00\x94\x35\x77", None, None),
+                                     (b"\xc0\x07", "int key", None, None),
+                                     ("long", long_value, None, None),
+                                     # LZF: a run of three bytes, then a back
+                                     # reference of 6 bytes at offset 3.
+                                     ("lzf", b"\xc3\x06\x09\x02abc\x80\x02", None, None),
+                                     ("huge", "y" * 70000, None, None)])
+        try:
+            c = srv.client()
+            check("local: RDB integer strings of 1, 2 and 4 bytes",
+                  [c.call("GET", k) for k in ("i8", "i16", "i32")] == ["-10", "-2000", "2000000000"],
+                  repr([c.call("GET", k) for k in ("i8", "i16", "i32")]))
+            check("local: an RDB key stored as an integer", c.call("GET", "7") == "int key")
+            check("local: an RDB string compressed with LZF", c.call("GET", "lzf") == "abcabcabc",
+                  repr(c.call("GET", "lzf")))
+            check("local: RDB lengths of 14 and 32 bits",
+                  c.call("GET", "long") == long_value and c.call("GET", "huge") == "y" * 70000)
+            c.close()
+        finally:
+            srv.stop()
+
+        # A file that this server cannot load stops the start, with a message.
+        def refuses(name, data, text):
+            path = os.path.join(d, name)
+            with open(path, "wb") as f:
+                f.write(data)
+            bad = Server(prog, ["--dir", d, "--dbfilename", name])
+            try:
+                deadline = time.time() + 5
+                while bad.proc.poll() is None and time.time() < deadline:
+                    time.sleep(0.05)
+                code = bad.proc.poll()
+                log = bad.log_text()
+                check("local: %s stops the start" % text,
+                      not bad.up and code == 1 and "cannot load the RDB file" in log,
+                      "up %r, code %r, log %r" % (bad.up, code, log[-200:]))
+            finally:
+                bad.stop()
+        good = os.path.join(d, "good.rdb")
+        write_rdb(good, [("k", "v", None, None)])
+        data = open(good, "rb").read()
+        refuses("magic.rdb", b"XEDIS" + data[5:], "a file with no REDIS header")
+        refuses("short.rdb", data[:-12], "a file that ends early")
+        refuses("list.rdb", data[:data.index(b"\x00\x01k")] + b"\x01\x01k\x01v" + b"\xff" + b"\x00" * 8,
+                "a value kind that this server has not")
+        refuses("db1.rdb", data.replace(b"\xfe\x00", b"\xfe\x01"), "a key in database 1")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    # K1, K2: KEYS on a large keyspace and with a slow pattern.
+    srv = Server(prog, [])
+    try:
+        check("persistence-rdb (large): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        n = 524288
+        for i in range(0, n, 4096):
+            c.send_raw(b"".join(encode("SET", "k%d" % j, "v") for j in range(i, i + 4096)))
+            for _ in range(4096):
+                c.read()
+        got = [None]
+
+        def keys_all():
+            c.send_raw(encode("KEYS", "*"))
+            got[0] = c.try_read(60)
+            time.sleep(0.2)
+        worst, wrong, _ = measure_while(srv, keys_all)
+        check("local: K1 KEYS * of 524288 keys gives each one",
+              isinstance(got[0], list) and len(got[0]) == n)
+        check("local: K1 KEYS * of 524288 keys stalls PING at most 0.5 s",
+              worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+        c.call("SET", "brief", "v", "PX", "100")
+        time.sleep(0.3)
+        got = c.call("KEYS", "brief*")
+        check("local: KEYS skips a key that expired after the load", got == [], repr(got))
+        for k in ("foo", "fob", "bar", "a*b"):
+            c.call("SET", k, "1")
+        patterns = {"fo?": ["fob", "foo"], "[ab]*": ["a*b", "bar"], "[^fk]*": ["a*b", "bar"],
+                    "a\\*b": ["a*b"], "?o?": ["fob", "foo"], "[a-b]?r": ["bar"]}
+        for pattern, want in patterns.items():
+            got = c.call("KEYS", pattern)
+            check("local: KEYS %s" % pattern, isinstance(got, list) and sorted(got) == want,
+                  repr(got)[:80])
+        c.call("SET", "slow", "a" * 100000)
+
+        def keys_slow():
+            c.send_raw(encode("KEYS", "*a" * 15 + "*b"))
+            got[0] = c.try_read(120)
+            time.sleep(0.2)
+        worst, wrong, _ = measure_while(srv, keys_slow)
+        check("local: K2 KEYS with a slow pattern gives no key", got[0] == [], repr(got[0])[:60])
+        check("local: K2 KEYS with a slow pattern stalls PING at most 0.2 s",
+              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
     ("streams", stages_streams),
     ("transactions", stages_transactions),
     ("optimistic-locking", stages_optimistic_locking),
+    ("persistence-rdb", stages_rdb),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
