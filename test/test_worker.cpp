@@ -429,10 +429,10 @@ long msSince(PClock::time_point start) {
 // Runtime::pollWhileBusy() polls between task switches once a millisecond has
 // passed since the last poll, and that poll can report a timer before the
 // program has run its first statement: under a sanitizer on a loaded host the
-// start of interpret() can take longer than a short timer. The two tests below
-// are about the blocking wait a waiting task makes, so they pin the clock that
-// paces that poll: the only poll left is the one the worker makes after its
-// task waited, whatever start-up took.
+// start of interpret() can take longer than a short timer. The three tests
+// below are about the blocking wait a waiting task makes, so they pin the
+// clock that paces that poll: the only poll left is the one the worker makes
+// after its task waited, whatever start-up took.
 PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
 
 } // namespace
@@ -606,6 +606,8 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
     VM vm;
     int fired = 0;
     Runtime& rt = vm.runtime();
+    // The seam keeps the wait's end in waitForWork, the path that reports the
+    // deadlock. Without it, pollWhileBusy can end the wait first.
     rt.setSchedulerClock(&noSwitchPoll);
     int fds[2];
     ASSERT_EQ(pipe(fds), 0);
