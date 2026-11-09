@@ -4791,7 +4791,8 @@ def stages_zset_limits(prog):
                  "local: EXEC refuses sorted set work over 32768",
                  "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s",
                  "local: Z2 ZRANGE of 524288 members stalls PING at most 1 s",
-                 "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s"]
+                 "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
+                 "local: EXEC refuses a ZRANGE over the element budget"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(60)
@@ -4841,6 +4842,18 @@ def stages_zset_limits(prog):
             worst, wrong, _ = measure_while(srv, zrange)
             check(names[4], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s" % worst)
+            # The element budget of EXEC: 8 ZRANGE WITHSCORES of 524288
+            # members fill it, and the ninth is refused.
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") * 9 + encode("EXEC"))
+            for _ in range(10):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: EXEC refuses a ZRANGE over the element budget",
+                  isinstance(reply, list) and len(reply) == 9 and all(len(r) == 1048576 for r in reply[:8])
+                  and isinstance(reply[8], Error), repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
 
             def exec_two():
                 x = Client(srv.port)
@@ -4886,6 +4899,24 @@ def stages_zset_replication(prog):
     finally:
         srv.stop()
         shutil.rmtree(d, ignore_errors=True)
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        names = ["local: a replica refuses ZADD and ZREM from a client",
+                 "local: a replica applies ZADD and ZREM of its master"]
+        if aof_started(rep, names):
+            link = m.accept()
+            fake_handshake(link)
+            c = Asker(rep)
+            got = [c.call("ZADD", "q", "1", "a"), c.call("ZREM", "q", "a")]
+            check(names[0], all(isinstance(g, Error) and g.startswith("READONLY") for g in got), repr(got))
+            link.send_raw(encode("ZADD", "q", "1", "a", "2", "b") + encode("ZREM", "q", "a"))
+            time.sleep(0.3)
+            check(names[1], c.call("ZRANGE", "q", "0", "-1") == ["b"])
+            c.close()
+    finally:
+        rep.stop()
+        m.close()
 
 
 GROUPS = [

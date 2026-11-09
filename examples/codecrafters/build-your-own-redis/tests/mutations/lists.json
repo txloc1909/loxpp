@@ -49,8 +49,8 @@
  },
  {
   "name": "LRANGE negative start not mapped",
-  "old": "    if (start < 0) {\n        start = n + start;\n    }\n",
-  "new": "",
+  "old": "    var n = entry.value.size();\n    if (start < 0) {\n        start = n + start;\n    }\n",
+  "new": "    var n = entry.value.size();\n",
   "cases": [
    "lists-05 LRANGE -2 -1"
   ]
@@ -65,8 +65,8 @@
  },
  {
   "name": "LLEN of a missing list not 0",
-  "old": "    if (entry == nil) {\n        return integerReply(0);",
-  "new": "    if (entry == nil) {\n        return NULL_BULK;",
+  "old": "        return integerReply(0);\n    }\n    return integerReply(entry.value.size());",
+  "new": "        return NULL_BULK;\n    }\n    return integerReply(entry.value.size());",
   "cases": [
    "lists-07 LLEN missing list"
   ]
