@@ -3848,11 +3848,11 @@ fun aofSync(conn, before, target) {
 // ZSET_EXEC_WORK inserts and deletes in one EXEC: an insert costs about
 // 9 microseconds of Lox++ code, and a command runs in one step (README
 // rule 6). Redis has no such limits.
-var ZSET_COMMAND_MEMBERS = 32768;
-var ZSET_EXEC_WORK = 65536;
+var ZSET_COMMAND_MEMBERS = 16384;
+var ZSET_EXEC_WORK = 32768;
 var zsetExecWork = nil;
 var ZSET_MAX_LEVEL = 32;
-var ZSET_TOO_MANY = "-ERR the command names more than 32768 members of a sorted set\r\n";
+var ZSET_TOO_MANY = "-ERR the command names more than 16384 members of a sorted set\r\n";
 var ZSET_EXEC_TOO_MUCH = "-ERR the sorted set work of this transaction is over its limit\r\n";
 var NOT_FLOAT = "-ERR value is not a valid float\r\n";
 
