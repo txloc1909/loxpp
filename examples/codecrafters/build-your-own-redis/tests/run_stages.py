@@ -3761,7 +3761,7 @@ def stages_aof_in(prog, d):
             ("local: a manifest that names a missing file is refused", encode("SET", "r", "1"), {},
              "file nothere.aof seq 1 type i\n"),
             ("local: a manifest line with no seq is refused", encode("SET", "r", "1"), {},
-             "file {R} type i\n"),
+             "file {R} type b\n"),
             ("local: an empty manifest is refused", encode("SET", "r", "1"), {}, ""),
             ("local: a manifest with a blank line is refused", encode("SET", "r", "1"), {},
              "file {R} seq 1 type i\n\n"),
@@ -3770,7 +3770,7 @@ def stages_aof_in(prog, d):
              "file b1.aof seq 1 type b\nfile b2.aof seq 1 type b\nfile {R} seq 1 type i\n"),
             ("local: incremental files out of the order of their seq are refused", encode("SET", "r", "1"),
              {"i2.aof": encode("SET", "q", "1")}, "file i2.aof seq 2 type i\nfile {R} seq 1 type i\n"),
-            ("local: a manifest seq of 0 is refused", encode("SET", "r", "1"), {}, "file {R} seq 0 type i\n")]:
+            ("local: a manifest seq of 0 is refused", encode("SET", "r", "1"), {}, "file {R} seq 0 type b\n")]:
         rname = rand_word(6)
         base = os.path.join(d, "bad" + rand_word(4))
         os.makedirs(os.path.join(base, "ad"))
