@@ -3072,7 +3072,7 @@ fun trimReplLog() {
     // It trims when the entries that every reader has got hold 1024
     // entries or TRIM_COST of cost, and are at least half of the log, so a
     // trim copies at most as many entries as it drops.
-    if (drop > 0 and drop * 2 > len(replLog)
+    if (drop * 2 > len(replLog)
         and (drop > 1024 or replLog[drop - 1].endCost - replLogBaseCost >= TRIM_COST)) {
         replLogBaseCost = replLog[drop - 1].endCost;
         replLog = replLog[drop:len(replLog)];
@@ -3644,12 +3644,18 @@ fun readManifest(path) {
     var f = open(path, "r");
     var lines = f.readlines();
     f.close();
+    if (len(lines) == 0) {
+        throw AofError("the manifest is empty", false);
+    }
     var base = nil;
     var incr = [];
-    var sawHistory = false;
+    var lastSeq = 0;
     for (var line in lines) {
         var words = splitWords(trimCR(line));
-        if (len(words) == 0 or words[0][0] == "#") {
+        if (len(words) == 0) {
+            throw AofError("the manifest has a blank line", false);
+        }
+        if (words[0][0] == "#") {
             continue;
         }
         var name = nil;
@@ -3657,11 +3663,13 @@ fun readManifest(path) {
         var seq = nil;
         var i = 0;
         while (i + 1 < len(words)) {
-            if (words[i] == "file") {
+            // Redis reads the keys with no case.
+            var k = lower(words[i]);
+            if (k == "file") {
                 name = words[i + 1];
-            } else if (words[i] == "type") {
+            } else if (k == "type") {
                 kind = words[i + 1];
-            } else if (words[i] == "seq") {
+            } else if (k == "seq") {
                 seq = parseInteger(words[i + 1]);
             }
             i = i + 2;
@@ -3673,17 +3681,19 @@ fun readManifest(path) {
             throw AofError("the manifest names a file in another directory", false);
         }
         if (kind == "b") {
+            if (base != nil) {
+                throw AofError("the manifest names two base files", false);
+            }
             base = name;
         } else if (kind == "i") {
+            if (seq <= lastSeq) {
+                throw AofError("the incremental files of the manifest are not in the order of their seq", false);
+            }
+            lastSeq = seq;
             incr.append(name);
-        } else if (kind == "h") {
-            sawHistory = true;
-        } else {
+        } else if (kind != "h") {
             throw AofError("the manifest has the unknown file type '" + kind + "'", false);
         }
-    }
-    if (base == nil and len(incr) == 0 and !sawHistory) {
-        throw AofError("the manifest names no file", false);
     }
     return [base, incr];
 }

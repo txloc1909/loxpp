@@ -242,9 +242,11 @@ RDB base keeps a key that has expired for the commands after it. A last file tha
 inside `MULTI`, is cut back to its last whole command (as Redis does with
 `aof-load-truncated yes`) and the server starts. A file that is not RESP,
 an unknown command, `SELECT` of another database, a manifest line that is
-not `file <name> seq <n> type <t>` (with a seq from 1), a manifest that
-names no file, a name with a `/`, and a missing file stop the start with
-a message. The values of `--appendonly` and `--appendfsync` have no case.
+not `file <name> seq <n> type <t>` (with a seq from 1; the keys have no
+case), an empty manifest, a blank line, two base files, incremental files
+out of the order of their seq, a name with a `/`, and a missing file stop
+the start with a message, as in Redis. A manifest with comments only names
+no file: the server makes a first incremental file. The values of `--appendonly` and `--appendfsync` have no case.
 
 The AOF is one more reader of the replication log: each write appends its
 effective form in its own step (`replicate`), and a writer task (`writeAof`)

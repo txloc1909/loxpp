@@ -225,8 +225,8 @@
  },
  {
   "name": "a history file is replayed",
-  "old": "        } else if (kind == \"h\") {\n            sawHistory = true;",
-  "new": "        } else if (kind == \"h\") {\n            incr.append(name);",
+  "old": "        } else if (kind != \"h\") {\n",
+  "new": "        } else if (kind == \"h\") {\n            incr.append(name);\n        } else {\n",
   "cases": [
    "local: the replay loads a base AOF file and skips a history file"
   ]
@@ -473,7 +473,7 @@
  },
  {
   "name": "an empty manifest is accepted",
-  "old": "    if (base == nil and len(incr) == 0 and !sawHistory) {\n        throw AofError(\"the manifest names no file\", false);\n    }",
+  "old": "    if (len(lines) == 0) {\n        throw AofError(\"the manifest is empty\", false);\n    }",
   "new": "",
   "cases": [
    "local: an empty manifest is refused"
@@ -509,6 +509,62 @@
   "new": "            if (pos > len(data)) {\n                truncated = true;\n                break;\n            }",
   "cases": [
    "local: an annotation that ends the file with no newline is kept"
+  ]
+ },
+ {
+  "name": "the trim drops what a lagging replica needs",
+  "old": "    for (var r in replicas) {\n        if (r.logPos < low) {",
+  "new": "    for (var r in []) {\n        if (r.logPos < low) {",
+  "cases": [
+   "local: with the AOF on, a replica that stops reading still gets every write"
+  ]
+ },
+ {
+  "name": "a manifest seq of 0 is accepted",
+  "old": "seq == nil or seq < 1 or i != len(words)",
+  "new": "seq == nil or i != len(words)",
+  "cases": [
+   "local: a manifest seq of 0 is refused"
+  ]
+ },
+ {
+  "name": "a blank manifest line is skipped",
+  "old": "        if (len(words) == 0) {\n            throw AofError(\"the manifest has a blank line\", false);\n        }",
+  "new": "        if (len(words) == 0) {\n            continue;\n        }",
+  "cases": [
+   "local: a manifest with a blank line is refused"
+  ]
+ },
+ {
+  "name": "two base files are accepted",
+  "old": "            if (base != nil) {\n                throw AofError(\"the manifest names two base files\", false);\n            }",
+  "new": "",
+  "cases": [
+   "local: a manifest with two base files is refused"
+  ]
+ },
+ {
+  "name": "incremental files out of order are accepted",
+  "old": "            if (seq <= lastSeq) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: incremental files out of the order of their seq are refused"
+  ]
+ },
+ {
+  "name": "the manifest keys have case",
+  "old": "            var k = lower(words[i]);",
+  "new": "            var k = words[i];",
+  "cases": [
+   "local: the manifest keys have no case, as Redis reads them"
+  ]
+ },
+ {
+  "name": "a manifest with comments only is refused",
+  "old": "        if (words[0][0] == \"#\") {\n            continue;\n        }",
+  "new": "        if (words[0][0] == \"#\") {\n            throw AofError(\"comment\", false);\n        }",
+  "cases": [
+   "local: a manifest with comments only gets a first incremental file"
   ]
  }
 ]

@@ -3635,6 +3635,7 @@ def stages_aof_in(prog, d):
             c.call("SET", "gone", "v", "PX", "100")
             c.call("SET", "far", "v", "EX", "999999999999")
             c.call("SET", "farms", "v", "PX", "999999999999999")
+            c.call("SET", "farat", "v", "EXAT", "9999999999999")
             c.close()
     finally:
         srv.stop()
@@ -3651,7 +3652,7 @@ def stages_aof_in(prog, d):
             check(trip[2], c.call("GET", "e") == "v")
             check(trip[3], c.call("GET", "gone") is None and c.call("KEYS", "gone") == [])
             check("local: a restart keeps an expiry whose absolute time has 16 digits",
-                  [c.call("GET", "far"), c.call("GET", "farms")] == ["v", "v"])
+                  [c.call("GET", "far"), c.call("GET", "farms"), c.call("GET", "farat")] == ["v", "v", "v"])
             c.call("SET", "after", "1")
             got = read_bytes(rpath)
             check(trip[4], got is not None and len(got) > size and got.endswith(encode("SET", "after", "1"))
@@ -3679,6 +3680,9 @@ def stages_aof_in(prog, d):
          encode("SET", "base", "7", "XX"), {"b.rdb": "expired"},
          "file b.rdb seq 1 type b\nfile {R} seq 2 type i\n",
          lambda c: c.call("GET", "base") == "7"),
+        ("local: the manifest keys have no case, as Redis reads them",
+         encode("SET", "r", "1"), {}, "FILE {R} SEQ 1 TYPE i\n",
+         lambda c: c.call("GET", "r") == "1"),
         ("local: the replay goes on after EXEC with no MULTI",
          encode("EXEC") + encode("SET", "r", "1"), {}, None,
          lambda c: c.call("GET", "r") == "1"),
@@ -3758,17 +3762,77 @@ def stages_aof_in(prog, d):
              "file nothere.aof seq 1 type i\n"),
             ("local: a manifest line with no seq is refused", encode("SET", "r", "1"), {},
              "file {R} type i\n"),
-            ("local: an empty manifest is refused", encode("SET", "r", "1"), {}, "\n")]:
+            ("local: an empty manifest is refused", encode("SET", "r", "1"), {}, ""),
+            ("local: a manifest with a blank line is refused", encode("SET", "r", "1"), {},
+             "file {R} seq 1 type i\n\n"),
+            ("local: a manifest with two base files is refused", encode("SET", "r", "1"),
+             {"b1.aof": encode("SET", "q", "1"), "b2.aof": encode("SET", "q", "2")},
+             "file b1.aof seq 1 type b\nfile b2.aof seq 1 type b\nfile {R} seq 1 type i\n"),
+            ("local: incremental files out of the order of their seq are refused", encode("SET", "r", "1"),
+             {"i2.aof": encode("SET", "q", "1")}, "file i2.aof seq 2 type i\nfile {R} seq 1 type i\n"),
+            ("local: a manifest seq of 0 is refused", encode("SET", "r", "1"), {}, "file {R} seq 0 type i\n")]:
         rname = rand_word(6)
         base = os.path.join(d, "bad" + rand_word(4))
         os.makedirs(os.path.join(base, "ad"))
-        man = (manifest or "file {R} seq 1 type i\n").replace("{R}", rname + ".1.incr.aof")
+        man = ("file {R} seq 1 type i\n" if manifest is None else manifest).replace("{R}", rname + ".1.incr.aof")
         write_bytes(os.path.join(base, "ad", "af.aof.manifest"), man.encode())
         write_bytes(os.path.join(base, "ad", rname + ".1.incr.aof"), data)
         for fname, content in extra.items():
             write_bytes(os.path.join(base, "ad", fname), content)
         aof_exits(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", "ad",
                          "--appendfilename", "af.aof"], name)
+
+    # A manifest with comments only names no file: the server starts, as
+    # Redis does, and makes a first incremental file.
+    base = os.path.join(d, "comments")
+    os.makedirs(os.path.join(base, "ad"))
+    write_bytes(os.path.join(base, "ad", "af.aof.manifest"), b"# nothing yet\n")
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", "ad", "--appendfilename", "af.aof"])
+    try:
+        name = "local: a manifest with comments only gets a first incremental file"
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            c.call("SET", "r", "1")
+            got = [read_bytes(os.path.join(base, "ad", "af.aof.manifest")),
+                   read_bytes(os.path.join(base, "ad", "af.aof.1.incr.aof"))]
+            check(name, got == [b"# nothing yet\nfile af.aof.1.incr.aof seq 1 type i\n", encode("SET", "r", "1")],
+                  repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # A replica that stops reading keeps its entries in the log while the
+    # AOF drops the ones that the file has: when it reads again, it gets
+    # every write.
+    base = os.path.join(d, "lag")
+    os.mkdir(base)
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes"])
+    try:
+        name = "local: with the AOF on, a replica that stops reading still gets every write"
+        if aof_started(srv, [name]):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            payload = "v" * (1 << 20)
+            for i in range(40):
+                c.call("SET", "k%d" % i, payload)
+            for i in range(2000):
+                c.c.send_raw(encode("INCR", "n"))
+            for i in range(2000):
+                c.c.try_read(5)
+            want = [["SET", "k%d" % i, payload] for i in range(40)] + [["INCR", "n"]] * 2000
+            got = []
+            for _ in range(len(want)):
+                x = r.try_read(5)
+                if x in (TIMEOUT, CLOSED, BAD_REPLY):
+                    got.append(x)
+                    break
+                got.append(x)
+            check(name, got == want, "%d entries, first bad %r" % (
+                len(got), next((repr(g)[:60] for g, w in zip(got, want) if g != w), None)))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
 
     # A manifest with no incremental file gets one.
     base = os.path.join(d, "noincr")
