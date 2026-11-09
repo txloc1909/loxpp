@@ -4570,9 +4570,6 @@ fun geoDistance(lon1, lat1, lon2, lat2) {
     var lon1r = lon1 * DEG_TO_RAD;
     var lon2r = lon2 * DEG_TO_RAD;
     var v = math.sin((lon2r - lon1r) / 2);
-    if (v == 0) {
-        return EARTH_RADIUS_IN_METERS * math.abs(lat2 * DEG_TO_RAD - lat1 * DEG_TO_RAD);
-    }
     var lat1r = lat1 * DEG_TO_RAD;
     var lat2r = lat2 * DEG_TO_RAD;
     var u = math.sin((lat2r - lat1r) / 2);
@@ -4695,9 +4692,6 @@ fun cmdGeopos(ctx, argv) {
     var entry = zsetEntry(argv[1]);
     if (entry == false) {
         return WRONGTYPE;
-    }
-    if (!spendElements(2 * (len(argv) - 2))) {
-        return EXEC_TOO_LARGE;
     }
     var parts = ["*" + str(len(argv) - 2) + "\r\n"];
     var i = 2;

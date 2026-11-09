@@ -393,8 +393,8 @@
  },
  {
   "name": "DEL is not a write",
-  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true, \"ZADD\": true, \"ZREM\": true};",
-  "new": "\"BLPOP\": true, \"XADD\": true, \"ZADD\": true, \"ZREM\": true};",
+  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "new": "\"BLPOP\": true, \"XADD\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
   "cases": [
    "local: a replica refuses DEL from a client"
   ]

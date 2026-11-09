@@ -5162,6 +5162,21 @@ def stages_geo_on(srv):
     got = c.call("GEOSEARCH", "order", "FROMLONLAT", "2.25", "48.2", "BYRADIUS", "20", "km")
     check("local: GEOSEARCH gives the members of the boxes in their order",
           isinstance(got, list) and len(got) > 3 and got == GEO_ORDER_WANT, repr(got)[:120])
+    # Near the edge of its box the step is one less, as Redis makes it;
+    # the order of the reply shows the boxes (redis-server 7.0 gives it).
+    near = ['-69.28528', '79.45329', 'k0', '-68.51768', '80.68773', 'k1', '-67.85737', '77.09054', 'k2',
+            '-64.85591', '77.85720', 'k3', '-64.10863', '79.47066', 'k4', '-67.33019', '80.95595', 'k5',
+            '-63.91068', '79.88423', 'k6', '-66.93099', '81.94326', 'k7', '-66.75277', '76.74126', 'k8',
+            '-68.05013', '77.16314', 'k9', '-66.73072', '80.30099', 'k10', '-67.38640', '77.63146', 'k11']
+    c.call("GEOADD", "near", *near)
+    got = c.call("GEOSEARCH", "near", "FROMLONLAT", "-63.5937", "81.3621", "BYRADIUS", "200", "km")
+    check("local: GEOSEARCH takes a step less near the edge of the box, as Redis does",
+          got == ["k1", "k10", "k5", "k7", "k6"], repr(got))
+    got = c.call("GEOSEARCH", "g8", "FROMLONLAT", "0", "0", "BYRADIUS", "20000", "km")
+    # redis-server 7.0 gives these three: the place at the top corner has
+    # bit 52 set, past the range of every box.
+    check("local: GEOSEARCH over the whole earth gives each member once",
+          got == ["Paris", "Munich", "London"], repr(got))
     c.close()
 
 
@@ -5176,7 +5191,8 @@ def stages_geo_limits(prog):
     try:
         names = ["local: G1 GEOSEARCH over 524288 members of the boxes stalls PING at most 1 s",
                  "local: G2 GEOADD of 16384 members stalls PING at most 1 s",
-                 "local: GEOADD of more than 16384 members is refused"]
+                 "local: GEOADD of more than 16384 members is refused",
+                 "local: EXEC refuses a GEOSEARCH over the element budget"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(60)
@@ -5201,6 +5217,19 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, search)
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
+            # The element budget of EXEC: 16 GEOSEARCH of 524288 members fill
+            # it, and the 17th is refused.
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 17
+                       + encode("EXEC"))
+            for _ in range(18):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: EXEC refuses a GEOSEARCH over the element budget",
+                  isinstance(reply, list) and len(reply) == 17 and all(len(r) == 524288 for r in reply[:16])
+                  and isinstance(reply[16], Error), repr(reply[16])[:80] if isinstance(reply, list) else repr(reply)[:80])
             more = []
             for i in range(16384):
                 more += ["%.6f" % (10 + i * 0.0001), "%.6f" % (20 + i * 0.0001), "n%d" % i]
@@ -5231,6 +5260,20 @@ def stages_geo_replication(prog):
             c.close()
     finally:
         srv.stop()
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        name = "local: a replica refuses GEOADD from a client"
+        if aof_started(rep, [name]):
+            link = m.accept()
+            fake_handshake(link)
+            c = Asker(rep)
+            got = c.call("GEOADD", "q", "1", "2", "a")
+            check(name, isinstance(got, Error) and got.startswith("READONLY"), repr(got))
+            c.close()
+    finally:
+        rep.stop()
+        m.close()
 
 
 GROUPS = [

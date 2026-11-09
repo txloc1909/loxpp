@@ -226,16 +226,16 @@
  },
  {
   "name": "ZADD does not mark the watchers",
-  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
-  "new": "    if (changed) {\n        replicate(argv, nil);\n    }",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(replArgs, nil);\n    }",
+  "new": "    if (changed) {\n        replicate(replArgs, nil);\n    }",
   "cases": [
    "local: a ZADD that changes a score fails EXEC"
   ]
  },
  {
   "name": "a ZADD that changes nothing marks",
-  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
-  "new": "    touch(key);\n    if (changed) {\n        replicate(argv, nil);\n    }",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(replArgs, nil);\n    }",
+  "new": "    touch(key);\n    if (changed) {\n        replicate(replArgs, nil);\n    }",
   "cases": [
    "local: a ZADD that changes nothing does not fail EXEC"
   ]
@@ -250,8 +250,8 @@
  },
  {
   "name": "a ZADD that changes nothing is propagated",
-  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
-  "new": "    touch(key);\n    replicate(argv, nil);",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(replArgs, nil);\n    }",
+  "new": "    touch(key);\n    replicate(replArgs, nil);",
   "cases": [
    "local: ZADD and ZREM that change the set are propagated, others not"
   ]
@@ -266,8 +266,8 @@
  },
  {
   "name": "a replica takes ZADD from a client",
-  "old": "\"DEL\": true, \"ZADD\": true, \"ZREM\": true};",
-  "new": "\"DEL\": true, \"ZREM\": true};",
+  "old": "\"DEL\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "new": "\"DEL\": true, \"ZREM\": true, \"GEOADD\": true};",
   "cases": [
    "local: a replica refuses ZADD and ZREM from a client"
   ]
