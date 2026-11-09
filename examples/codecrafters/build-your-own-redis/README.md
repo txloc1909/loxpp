@@ -503,7 +503,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
 | Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
 | AOF1 (group `persistence-aof`, on a server of its own): `SET` of 64 MB with the AOF | the file has the command; PING within 1.0 s (rule 6 only) | 0.20 s |
-| AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.24–0.27 s |
+| AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
