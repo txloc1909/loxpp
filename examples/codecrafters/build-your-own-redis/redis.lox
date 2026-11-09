@@ -283,7 +283,7 @@ enum Args { Cons(head, tail) Empty }
 // in WAIT, says that a replica acknowledged.
 // SendAck(offset), from the apply loop of a replica to its ACK writer, asks
 // it to send REPLCONF ACK offset.
-enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready Propagate Ack SendAck(offset) }
+enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, value) Ready Propagate Ack SendAck(offset) Published(channel, message) }
 
 // Both run over up to ARRAY_MAX arguments, so they yield as the reader does
 // (rule 2 of the README). toArgs runs in the reader and fromArgs in the
@@ -1991,7 +1991,7 @@ var ARITY = {
     "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
     "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
     "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1, "DEL": -2,
-    "CONFIG": -2, "KEYS": 2
+    "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1
 };
 
 fun arityOk(name, count) {
@@ -2042,6 +2042,12 @@ fun inTransaction(conn, name, argv, nbytes) {
     }
     if (name == "WATCH") {
         return errorReply("ERR WATCH inside MULTI is not allowed");
+    }
+    if (name == "SUBSCRIBE" or name == "UNSUBSCRIBE") {
+        // Redis queues them; EXEC runs in one step, and these need the
+        // session and may yield.
+        tx.dirty = true;
+        return errorReply("ERR " + name + " inside MULTI is not supported by this server");
     }
     if (name == "DISCARD") {
         conn.tx = nil;
@@ -3772,8 +3778,9 @@ fun writeAof() {
         var out = Output(FileSink(f));
         while (aofPos < replLogBase + len(replLog)) {
             var entry = replLog[aofPos - replLogBase];
-            // GETACK of WAIT is for the replicas only.
-            if (entry.head[0] != "REPLCONF") {
+            // GETACK of WAIT, and PUBLISH, are for the replicas only, as
+            // in Redis.
+            if (entry.head[0] != "REPLCONF" and entry.head[0] != "PUBLISH") {
                 var n = len(entry.head);
                 if (entry.tail != nil) {
                     n = n + len(entry.tail);
@@ -3825,6 +3832,278 @@ fun aofSync(conn, before, target) {
     aofWaiters.del(conn.id);
     return !closed;
 }
+
+// ===========================================================================
+// Pub/Sub
+// ===========================================================================
+
+// channel -> Map of Conn id -> Conn, for each channel with a subscriber.
+var subscribers = {};
+
+// The output buffer limits of Redis for a pubsub client: over the hard
+// limit it is closed at once; over the soft limit for PUBSUB_SOFT_SECONDS
+// it is closed. The pending cost of a subscriber is the bytes of the
+// messages that its session has not written yet, and MESSAGE_COST bytes
+// for each message: the memory of one Published message in a mailbox,
+// measured at about 200 bytes (README rule 4).
+var PUBSUB_HARD_COST = 33554432;
+var PUBSUB_SOFT_COST = 8388608;
+var PUBSUB_SOFT_SECONDS = 60;
+var MESSAGE_COST = 200;
+
+var SUBSCRIBED_ALLOWED = {"SUBSCRIBE": true, "UNSUBSCRIBE": true, "PING": true};
+
+fun messageCost(channel, message) {
+    return len(channel) + len(message) + MESSAGE_COST;
+}
+
+fun subscribeReply(kind, channel, count) {
+    var name = NULL_BULK;
+    if (channel != nil) {
+        name = bulk(channel);
+    }
+    return "*3\r\n" + bulk(kind) + name + integerReply(count);
+}
+
+// SUBSCRIBE channel [channel ...]. One reply for each channel; Output
+// yields every ELEMENTS_PER_YIELD replies, so the loop yields every
+// ELEMENTS_PER_YIELD channels, because one SUBSCRIBE can name 1048575
+// channels. A PUBLISH while it runs is concurrent with it, as a write is
+// with WATCH: a channel that it has joined gets the message, and the
+// session writes the message after the replies of SUBSCRIBE.
+fun cmdSubscribe(conn, argv) {
+    var out = Output(conn);
+    var i = 1;
+    while (i < len(argv)) {
+        var channel = argv[i];
+        if (!conn.channels.has(channel)) {
+            conn.channels[channel] = true;
+            conn.subCount = conn.subCount + 1;
+            var m = subscribers[channel];
+            if (m == nil) {
+                m = {};
+                subscribers[channel] = m;
+            }
+            m[conn.id] = conn;
+        }
+        out.add(subscribeReply("subscribe", channel, conn.subCount));
+        i = i + 1;
+    }
+    out.flush();
+}
+
+fun leaveChannel(conn, channel) {
+    conn.channels.del(channel);
+    conn.subCount = conn.subCount - 1;
+    var m = subscribers[channel];
+    if (m != nil) {
+        m.del(conn.id);
+        if (len(m) == 0) {
+            subscribers.del(channel);
+        }
+    }
+}
+
+// UNSUBSCRIBE [channel ...]. With no channel it leaves each channel of the
+// client, in the order of conn.channels; Redis gives the order of its hash
+// table. As in SUBSCRIBE, Output yields every ELEMENTS_PER_YIELD replies.
+fun cmdUnsubscribe(conn, argv) {
+    var out = Output(conn);
+    var names = argv[1:len(argv)];
+    if (len(names) == 0) {
+        names = conn.channels.keys();
+        if (len(names) == 0) {
+            out.add(subscribeReply("unsubscribe", nil, 0));
+        }
+    }
+    var i = 0;
+    while (i < len(names)) {
+        var channel = names[i];
+        if (conn.channels.has(channel)) {
+            leaveChannel(conn, channel);
+        }
+        // A message to this channel that came before it left goes before
+        // the reply that leaves it. After the leave no new one comes.
+        if (conn.pubQueued > 0) {
+            out.flush();
+            writeQueuedMessages(conn, conn.pubQueued);
+        }
+        out.add(subscribeReply("unsubscribe", channel, conn.subCount));
+        i = i + 1;
+    }
+    out.flush();
+}
+
+// At the end of a session: leaves each channel, with a yield every
+// ELEMENTS_PER_YIELD channels.
+fun unsubscribeAll(conn) {
+    if (conn.subCount == 0) {
+        return;
+    }
+    var names = conn.channels.keys();
+    var i = 0;
+    while (i < len(names)) {
+        leaveChannel(conn, names[i]);
+        i = i + 1;
+        if (i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+}
+
+// PUBLISH channel message. It sends the message to the session of each
+// subscriber in its step, so each subscriber gets the messages in the order
+// of the PUBLISH commands. It costs one step for each subscriber, as in
+// Redis. Returns the number of subscribers.
+fun cmdPublish(ctx, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("publish");
+    }
+    var channel = argv[1];
+    var message = argv[2];
+    var m = subscribers[channel];
+    var n = 0;
+    if (m != nil) {
+        n = len(m);
+    }
+    if (!spendElements(n)) {
+        return EXEC_TOO_LARGE;
+    }
+    replicate(["PUBLISH", channel, message], nil);
+    if (n == 0) {
+        return integerReply(0);
+    }
+    var cost = messageCost(channel, message);
+    var now = nowMs();
+    for (var id in m.keys()) {
+        deliver(m[id], channel, message, cost, now);
+    }
+    return integerReply(n);
+}
+
+fun deliver(conn, channel, message, cost, now) {
+    conn.pubPending = conn.pubPending + cost;
+    if (conn.pubPending <= PUBSUB_SOFT_COST) {
+        conn.pubSoftSince = nil;
+    } else if (conn.pubSoftSince == nil) {
+        conn.pubSoftSince = now;
+    }
+    if (conn.pubPending > PUBSUB_HARD_COST
+        or (conn.pubSoftSince != nil and now - conn.pubSoftSince > PUBSUB_SOFT_SECONDS * 1000)) {
+        // The subscriber does not read fast enough: close it, as Redis
+        // does at its output buffer limit. Its session ends and leaves
+        // its channels. A second close does nothing.
+        try {
+            conn.sock.close();
+        } catch (ignored) {
+        }
+    }
+    try {
+        task.send(conn.session, Msg.Published(channel, message));
+        conn.pubQueued = conn.pubQueued + 1;
+    } catch (ignored) {
+        // The session has ended; it leaves its channels.
+    }
+}
+
+// In the session: writes one message to the subscriber. Returns true.
+fun writeMessage(conn, channel, message) {
+    conn.pubQueued = conn.pubQueued - 1;
+    var out = Output(conn);
+    out.add("*3\r\n$7\r\nmessage\r\n" + bulk(channel));
+    out.addBulk(message);
+    out.flush();
+    conn.pubPending = conn.pubPending - messageCost(channel, message);
+    return true;
+}
+
+fun isPublished(msg) {
+    return match msg {
+        case Msg.Published(channel, message) => true
+        case _ => false
+    };
+}
+
+// Writes the first n messages that wait in the mailbox of the session. The
+// reader sends commands ahead of the session, so a message that a PUBLISH
+// sent before the session ran a command can be behind that command in the
+// mailbox; it came first, so it goes first, as in Redis. Each one is
+// there: a send on the same worker moves the message at the call. Only the
+// messages that are there now: a publisher that keeps sending must not
+// keep the command from running.
+fun writeQueuedMessages(conn, n) {
+    while (n > 0 and conn.pubQueued > 0) {
+        n = n - 1;
+        var msg = task.receive_where(isPublished);
+        var done = match msg {
+            case Msg.Published(channel, message) => writeMessage(conn, channel, message)
+            case _ => true
+        };
+    }
+}
+
+// A command of a client in subscribed mode, which has at least one
+// channel. Returns the reply for a command that Redis refuses or answers
+// here (PING), or nil for SUBSCRIBE and UNSUBSCRIBE, which run as usual.
+// As in Redis, an unknown command and a wrong number of arguments come
+// before the check of the context.
+fun subscribedCheck(name, argv) {
+    if (SUBSCRIBED_ALLOWED.has(name)) {
+        if (name != "PING") {
+            return nil;
+        }
+        if (len(argv) > 2) {
+            return wrongArgs("ping");
+        }
+        var arg = "";
+        if (len(argv) == 2) {
+            arg = argv[1];
+        }
+        return "*2\r\n" + bulk("pong") + bulk(arg);
+    }
+    if (COMMANDS[name] == nil and ARITY[name] == nil and CONN_ARITY[name] == nil) {
+        return unknownCommand(argv);
+    }
+    var arity = ARITY[name];
+    if (arity == nil) {
+        arity = CONN_ARITY[name];
+    }
+    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {
+        if (name == "EXEC") {
+            return EXEC_ARITY;
+        }
+        return wrongArgs(lower(name));
+    }
+    var shown = lower(name);
+    if (name == "CONFIG") {
+        // Redis names a subcommand as config|get, and checks an unknown
+        // one, and the arity of a known one, before the context.
+        var sub = lower(argv[1]);
+        var subArity = CONFIG_SUBCOMMANDS[sub];
+        if (subArity == nil) {
+            return errorReply("ERR unknown subcommand '" + argv[1][0:128] + "'. Try CONFIG HELP.");
+        }
+        shown = "config|" + sub;
+        if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {
+            return wrongArgs(shown);
+        }
+    }
+    // As in Redis, a replica refuses a write before the context.
+    if (REPL_ROLE != "master" and WRITES.has(name)) {
+        return READONLY;
+    }
+    var text = "Can't execute '" + shown + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context";
+    if (name == "EXEC") {
+        return errorReply("EXECABORT Transaction discarded because of: " + text);
+    }
+    return errorReply("ERR " + text);
+}
+
+// The arity of the commands that runCommand runs with the Conn, outside
+// COMMANDS and ARITY, as Redis gives it.
+var CONN_ARITY = {"REPLCONF": -1, "PSYNC": -3, "WAIT": 3};
+// The CONFIG subcommands of Redis 7.0, with their arity.
+var CONFIG_SUBCOMMANDS = {"get": -3, "set": -4, "resetstat": 2, "rewrite": 2, "help": 2};
 
 // ===========================================================================
 // Command table
@@ -3879,7 +4158,8 @@ var COMMANDS = {
     "DEL": cmdDel,
     "UNWATCH": cmdUnwatchQueued,
     "CONFIG": cmdConfig,
-    "KEYS": cmdKeys
+    "KEYS": cmdKeys,
+    "PUBLISH": cmdPublish
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -4049,6 +4329,15 @@ class Conn {
         this.ackOffset = 0;
         this.replSentCost = 0;
         this.softSince = nil;
+        // Pub/Sub: channel -> true for each channel, their number, the
+        // cost of the messages that the session has not written, and the
+        // time it went over the soft limit.
+        this.channels = {};
+        this.subCount = 0;
+        this.pubPending = 0;
+        this.pubSoftSince = nil;
+        // The Published messages in the mailbox of the session.
+        this.pubQueued = 0;
     }
 }
 
@@ -4096,7 +4385,7 @@ fun awaitCredit() {
             // Only the session sends to the reader, and it sends only these
             // three.
             case Msg.Cmd(_, _) or Msg.Fail(_) or Msg.Closed or Msg.Served(_, _) or Msg.Ready
-                or Msg.Propagate or Msg.Ack or Msg.SendAck(_) => -1
+                or Msg.Propagate or Msg.Ack or Msg.SendAck(_) or Msg.Published(_, _) => -1
         };
         if (got < 0) {
             return nil;
@@ -4179,8 +4468,28 @@ fun readLoop(conn) {
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
+    writeQueuedMessages(conn, conn.pubQueued);
     if (len(argv) > 0) {
         var name = upper(argv[0]);
+        if (conn.subCount > 0) {
+            var refused = subscribedCheck(name, argv);
+            if (refused != nil) {
+                conn.sock.write(refused);
+                giveCredit(conn);
+                return true;
+            }
+        }
+        if (conn.tx == nil and (name == "SUBSCRIBE" or name == "UNSUBSCRIBE")) {
+            if (!arityOk(name, len(argv))) {
+                conn.sock.write(wrongArgs(lower(name)));
+            } else if (name == "SUBSCRIBE") {
+                cmdSubscribe(conn, argv);
+            } else {
+                cmdUnsubscribe(conn, argv);
+            }
+            giveCredit(conn);
+            return true;
+        }
         if (conn.tx == nil and (name == "REPLCONF" or name == "PSYNC" or name == "WAIT")) {
             var reply = nil;
             if (name == "REPLCONF") {
@@ -4419,6 +4728,8 @@ fun sessionLoop(conn) {
                 case Msg.Ack => true
                 // Only the ACK writer of a replica gets SendAck.
                 case Msg.SendAck(_) => true
+                // PUBLISH sends Published to the session of a subscriber.
+                case Msg.Published(channel, message) => writeMessage(conn, channel, message)
             };
         }
     } catch (e) {
@@ -4427,9 +4738,10 @@ fun sessionLoop(conn) {
             printFault("connection fault: ", e);
         }
     }
-    // Here and not in endSession: unwatchAll yields, and a deferred call
-    // cannot suspend (YieldAcrossNativeError).
+    // Here and not in endSession: unwatchAll and unsubscribeAll yield, and
+    // a deferred call cannot suspend (YieldAcrossNativeError).
     unwatchAll(conn);
+    unsubscribeAll(conn);
     if (conn.isReplica) {
         dropReplica(conn);
     }
@@ -4527,6 +4839,12 @@ fun main() {
         exit(64);
     }
     REPLICA_SOFT_SECONDS = soft;
+    var pubSoft = parseInteger(flagValue("--pubsub-soft-seconds", str(PUBSUB_SOFT_SECONDS)));
+    if (pubSoft == nil or pubSoft < 0) {
+        print "redis.lox: --pubsub-soft-seconds needs a number of seconds";
+        exit(64);
+    }
+    PUBSUB_SOFT_SECONDS = pubSoft;
     CONFIG_DIR = flagValue("--dir", nil);
     if (CONFIG_DIR == nil) {
         // As Redis gives it: the directory where the server started.

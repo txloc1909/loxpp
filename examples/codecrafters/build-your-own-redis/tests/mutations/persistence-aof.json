@@ -129,8 +129,8 @@
  },
  {
   "name": "the GETACK of WAIT goes to the file",
-  "old": "            if (entry.head[0] != \"REPLCONF\") {",
-  "new": "            if (true) {",
+  "old": "            if (entry.head[0] != \"REPLCONF\" and entry.head[0] != \"PUBLISH\") {",
+  "new": "            if (entry.head[0] != \"PUBLISH\") {",
   "cases": [
    "local: the GETACK of WAIT does not go to the file"
   ]

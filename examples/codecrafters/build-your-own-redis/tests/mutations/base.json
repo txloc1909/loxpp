@@ -171,8 +171,8 @@
  },
  {
   "name": "M5 session does not close the socket",
-  "old": "    conn.sock.close();\n",
-  "new": "",
+  "old": "fun endSession(conn) {\n    conn.sock.close();\n",
+  "new": "fun endSession(conn) {\n",
   "cases": [
    "local: 1000 reset connections leave no open socket"
   ]

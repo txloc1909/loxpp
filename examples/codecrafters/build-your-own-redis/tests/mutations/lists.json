@@ -65,8 +65,8 @@
  },
  {
   "name": "LLEN of a missing list not 0",
-  "old": "        return integerReply(0);",
-  "new": "        return NULL_BULK;",
+  "old": "    if (entry == nil) {\n        return integerReply(0);",
+  "new": "    if (entry == nil) {\n        return NULL_BULK;",
   "cases": [
    "lists-07 LLEN missing list"
   ]

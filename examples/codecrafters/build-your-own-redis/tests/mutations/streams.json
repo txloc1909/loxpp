@@ -153,8 +153,8 @@
  },
  {
   "name": "S2 a stream reply drops its last step",
-  "old": "        i = i + 1;\n    }\n    out.flush();\n}\n\n",
-  "new": "        i = i + 1;\n    }\n}\n\n",
+  "old": "            j = j + 1;\n        }\n        i = i + 1;\n    }\n    out.flush();\n}\n\n",
+  "new": "            j = j + 1;\n        }\n        i = i + 1;\n    }\n}\n\n",
   "cases": [
    "local: S2 XRANGE of that entry gives every field"
   ]

@@ -4057,6 +4057,591 @@ def stages_aof_in(prog, d):
         srv.stop()
 
 
+def can_not_execute(reply, name):
+    return isinstance(reply, Error) and reply.lower().startswith(("err can't execute '%s'" % name).lower())
+
+
+def stages_pubsub(prog):
+    srv = Server(prog, [])
+    try:
+        check("pub-sub: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        stages_pubsub_on(srv)
+    finally:
+        srv.stop()
+    stages_pubsub_limits(prog)
+    stages_pubsub_replication(prog)
+
+
+def stages_pubsub_on(srv):
+    a = Asker(srv)
+    check("pub-sub-01 SUBSCRIBE gives subscribe, the channel and 1",
+          a.call("SUBSCRIBE", "foo") == ["subscribe", "foo", 1])
+    check("pub-sub-02 a second channel counts 2", a.call("SUBSCRIBE", "bar") == ["subscribe", "bar", 2])
+    check("pub-sub-02 the same channel again keeps the count", a.call("SUBSCRIBE", "bar") == ["subscribe", "bar", 2])
+    b = Asker(srv)
+    check("pub-sub-02 the count is for each client", b.call("SUBSCRIBE", "bar") == ["subscribe", "bar", 1])
+    for name, cmd in (("set", ("SET", "k", "v")), ("get", ("GET", "k")), ("echo", ("ECHO", "hey"))):
+        got = a.call(*cmd)
+        check("pub-sub-03 subscribed mode refuses %s" % name.upper(), can_not_execute(got, name), repr(got))
+    check("pub-sub-03 subscribed mode allows SUBSCRIBE", a.call("SUBSCRIBE", "baz") == ["subscribe", "baz", 3])
+    check("pub-sub-04 PING in subscribed mode gives pong and an empty string", a.call("PING") == ["pong", ""])
+    plain = Asker(srv)
+    check("pub-sub-04 PING of a client that is not subscribed gives PONG", plain.call("PING") == "PONG")
+
+    # Stages 5-6: the count and the delivery.
+    c1, c2, c3 = Asker(srv), Asker(srv), Asker(srv)
+    c1.call("SUBSCRIBE", "p-foo")
+    c2.call("SUBSCRIBE", "p-foo")
+    c3.call("SUBSCRIBE", "p-bar")
+    check("pub-sub-05 PUBLISH gives the number of subscribers", plain.call("PUBLISH", "p-foo", "hello") == 2)
+    check("pub-sub-05 PUBLISH to another channel", plain.call("PUBLISH", "p-bar", "world") == 1)
+    check("pub-sub-05 PUBLISH to a channel with no subscriber gives 0", plain.call("PUBLISH", "p-none", "x") == 0)
+    got = [c1.c.try_read(2), c2.c.try_read(2), c3.c.try_read(2)]
+    check("pub-sub-06 each subscriber gets the message of its channel",
+          got == [["message", "p-foo", "hello"], ["message", "p-foo", "hello"], ["message", "p-bar", "world"]], repr(got))
+    got = [c1.c.try_read(0.3), c3.c.try_read(0.3)]
+    check("pub-sub-06 a client gets no message of another channel", got == [TIMEOUT, TIMEOUT], repr(got))
+
+    # Stage 7: UNSUBSCRIBE.
+    u1, u2 = Asker(srv), Asker(srv)
+    u1.call("SUBSCRIBE", "u-foo")
+    u1.call("SUBSCRIBE", "u-baz")
+    u2.call("SUBSCRIBE", "u-foo")
+    u2.call("SUBSCRIBE", "u-bar")
+    plain.call("PUBLISH", "u-foo", "before-unsubscribe")
+    got = [u1.c.try_read(2), u2.c.try_read(2)]
+    check("pub-sub-07 before UNSUBSCRIBE both subscribers get the message",
+          got == [["message", "u-foo", "before-unsubscribe"]] * 2, repr(got))
+    check("pub-sub-07 UNSUBSCRIBE gives unsubscribe, the channel and the count left",
+          u1.call("UNSUBSCRIBE", "u-foo") == ["unsubscribe", "u-foo", 1])
+    check("pub-sub-07 PUBLISH after UNSUBSCRIBE counts the others", plain.call("PUBLISH", "u-foo", "after-unsubscribe") == 1)
+    got = [u1.c.try_read(0.3), u2.c.try_read(2)]
+    check("pub-sub-07 after UNSUBSCRIBE only the other subscriber gets the message",
+          got == [TIMEOUT, ["message", "u-foo", "after-unsubscribe"]], repr(got))
+    check("pub-sub-07 UNSUBSCRIBE of a channel that the client has not gives the same count",
+          u1.call("UNSUBSCRIBE", "u-nope") == ["unsubscribe", "u-nope", 1])
+
+    # Local cases.
+    n = Asker(srv)
+    check("local: UNSUBSCRIBE with no channel and no subscription gives a null channel and 0",
+          n.call("UNSUBSCRIBE") == ["unsubscribe", None, 0])
+    n.c.send_raw(encode("SUBSCRIBE", "x1", "x2", "x1"))
+    got = [n.c.try_read(2) for _ in range(3)]
+    check("local: SUBSCRIBE of three channels gives one reply each",
+          got == [["subscribe", "x1", 1], ["subscribe", "x2", 2], ["subscribe", "x1", 2]], repr(got))
+    check("local: PING with an argument in subscribed mode gives pong and the argument",
+          n.call("PING", "hi") == ["pong", "hi"])
+    got = n.call("PING", "a", "b")
+    check("local: PING with two arguments in subscribed mode is an arity error",
+          isinstance(got, Error) and "wrong number of arguments" in got, repr(got))
+    got = n.call("NOSUCH")
+    check("local: an unknown command in subscribed mode is an unknown command",
+          isinstance(got, Error) and got.startswith("ERR unknown command"), repr(got))
+    got = n.call("GET")
+    check("local: a wrong number of arguments in subscribed mode comes first",
+          isinstance(got, Error) and "wrong number of arguments for 'get'" in got, repr(got))
+    for name, cmd in (("multi", ("MULTI",)), ("wait", ("WAIT", "1", "1")), ("watch", ("WATCH", "k")),
+                      ("publish", ("PUBLISH", "x", "y"))):
+        got = n.call(*cmd)
+        check("local: subscribed mode refuses %s" % name.upper(), can_not_execute(got, name), repr(got))
+    n.c.send_raw(encode("UNSUBSCRIBE"))
+    got = [n.c.try_read(2) for _ in range(2)]
+    check("local: UNSUBSCRIBE with no channel leaves each channel",
+          sorted(g[1] for g in got if isinstance(g, list)) == ["x1", "x2"]
+          and sorted(g[2] for g in got if isinstance(g, list)) == [0, 1], repr(got))
+    check("local: with no channel left the client leaves subscribed mode", n.call("PING") == "PONG")
+    check("local: a client that left subscribed mode runs any command", n.call("ECHO", "back") == "back")
+
+    t = Asker(srv)
+    t.call("MULTI")
+    got = t.call("SUBSCRIBE", "q")
+    check("local: SUBSCRIBE in MULTI is refused", isinstance(got, Error), repr(got))
+    got = t.call("EXEC")
+    check("local: a refused SUBSCRIBE aborts the transaction",
+          isinstance(got, Error) and got.startswith("EXECABORT"), repr(got))
+    s = Asker(srv)
+    s.call("SUBSCRIBE", "tx-ch")
+    t.call("MULTI")
+    t.call("PUBLISH", "tx-ch", "m1")
+    t.call("SET", "tx-k", "v")
+    got = t.call("EXEC")
+    check("local: PUBLISH in EXEC gives the count", got == [1, "OK"], repr(got))
+    check("local: PUBLISH in EXEC delivers", s.c.try_read(2) == ["message", "tx-ch", "m1"])
+    for i in range(100):
+        plain.c.send_raw(encode("PUBLISH", "tx-ch", "n%d" % i))
+    for i in range(100):
+        plain.c.try_read(2)
+    got = [s.c.try_read(2) for _ in range(100)]
+    check("local: the messages come in the order of PUBLISH",
+          got == [["message", "tx-ch", "n%d" % i] for i in range(100)], repr(got[:3]))
+    s.close()
+    deadline = time.time() + 5
+    left = plain.call("PUBLISH", "tx-ch", "gone")
+    while left != 0 and time.time() < deadline:
+        time.sleep(0.05)
+        left = plain.call("PUBLISH", "tx-ch", "gone")
+    check("local: a subscriber that goes leaves its channels", left == 0, repr(left))
+    z = Asker(srv)
+    got = z.call("SUBSCRIBE")
+    check("local: SUBSCRIBE with no channel is an arity error",
+          isinstance(got, Error) and "wrong number of arguments for 'subscribe'" in got, repr(got))
+    z.call("SUBSCRIBE", "zz")
+    for name, cmd, want in (
+            ("WAIT with one argument", ("WAIT", "1"), "ERR wrong number of arguments for 'wait'"),
+            ("PSYNC with one argument", ("PSYNC", "?"), "ERR wrong number of arguments for 'psync'"),
+            ("EXEC", ("EXEC",), "EXECABORT Transaction discarded because of: Can't execute 'exec'"),
+            ("CONFIG GET", ("CONFIG", "GET", "dir"), "ERR Can't execute 'config|get'"),
+            ("CONFIG FOO", ("CONFIG", "FOO"), "ERR unknown subcommand 'FOO'"),
+            ("CONFIG GET with no name", ("CONFIG", "GET"), "ERR wrong number of arguments for 'config|get'"),
+            ("EXEC with an argument", ("EXEC", "x"), "EXECABORT Transaction discarded because of: wrong number"),
+            ("PSYNC with three arguments", ("PSYNC", "a", "b", "c"), "ERR Can't execute 'psync'")):
+        got = z.call(*cmd)
+        check("local: in subscribed mode %s gives the error of Redis" % name,
+              isinstance(got, Error) and got.startswith(want), repr(got))
+    z.close()
+
+    # A message that a PUBLISH sent before the session ran a command goes
+    # before the reply of that command, also when the reader has already
+    # sent the command: the session of a subscriber that does not read is
+    # behind its reader.
+    late = Client(srv.port)
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    late.call("SUBSCRIBE", "late-ch")
+    pub = Asker(srv)
+    big = "b" * (1 << 20)
+    for _ in range(8):
+        pub.call("PUBLISH", "late-ch", big)
+    late.send_raw(encode("UNSUBSCRIBE", "late-ch") + encode("PING"))
+    time.sleep(0.3)
+    counted = pub.call("PUBLISH", "late-ch", "late")
+    # A large buffer again for the read: 8 MB through 4 KB takes minutes.
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+    late.sock.settimeout(10)
+    stream = []
+    try:
+        while True:
+            x = late.read()
+            stream.append(x)
+            if x == "PONG" or (isinstance(x, list) and x and x[0] == "pong"):
+                break
+    except (OSError, EOFError, ValueError) as e:
+        stream.append(repr(e))
+    tail = [x if not (isinstance(x, list) and len(x) == 3 and x[2] == big) else "big" for x in stream]
+    want = ["big"] * 8 + ([["message", "late-ch", "late"]] if counted == 1 else []) + [["unsubscribe", "late-ch", 0], "PONG"]
+    check("local: a message that came before UNSUBSCRIBE ran goes before its reply", tail == want,
+          "counted %r, got %r" % (counted, tail))
+    late.close()
+    pub.close()
+
+    # The same with PING in subscribed mode: the message goes before the
+    # pong.
+    late = Client(srv.port)
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    late.call("SUBSCRIBE", "late-ping")
+    pub = Asker(srv)
+    for _ in range(8):
+        pub.call("PUBLISH", "late-ping", big)
+    late.send_raw(encode("PING"))
+    time.sleep(0.3)
+    counted = pub.call("PUBLISH", "late-ping", "late")
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+    late.sock.settimeout(10)
+    stream = []
+    try:
+        while True:
+            x = late.read()
+            stream.append(x)
+            if isinstance(x, list) and x and x[0] == "pong":
+                break
+    except (OSError, EOFError, ValueError) as e:
+        stream.append(repr(e))
+    tail = [x if not (isinstance(x, list) and len(x) == 3 and x[2] == big) else "big" for x in stream]
+    want = ["big"] * 8 + ([["message", "late-ping", "late"]] if counted == 1 else []) + [["pong", ""]]
+    check("local: a message that came before PING ran goes before the pong", tail == want,
+          "counted %r, got %r" % (counted, tail))
+    late.close()
+    pub.close()
+
+    # UNSUBSCRIBE of 3000 long channels to a client that does not read: its
+    # session is held in the loop, and a message to the last channel, which
+    # it has not left yet, goes before the reply that leaves it.
+    det = Client(srv.port)
+    det.sock.settimeout(30)
+    names = ["%04d" % i + "n" * 3996 for i in range(3000)]
+    det.send_raw(encode("SUBSCRIBE", *names))
+    for _ in range(3000):
+        det.read()
+    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    det.send_raw(encode("UNSUBSCRIBE", *names))
+    time.sleep(0.5)
+    pub = Asker(srv)
+    counted = pub.call("PUBLISH", names[-1], "late")
+    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+    seq = []
+    try:
+        det.sock.settimeout(5)
+        while len(seq) < 3:
+            x = det.read()
+            if isinstance(x, list) and x[0] == "message":
+                seq.append("message")
+            elif isinstance(x, list) and x[1] == names[-1]:
+                seq.append("last reply")
+                break
+    except (OSError, EOFError, ValueError) as e:
+        seq.append(repr(e))
+    want = (["message"] if counted == 1 else []) + ["last reply"]
+    check("local: a message counted before UNSUBSCRIBE left its channel goes before that reply",
+          seq == want, "counted %r, got %r" % (counted, seq))
+    det.close()
+    pub.close()
+
+    # A publisher that keeps a backlog does not keep the command of a
+    # subscriber from running: the session writes only the messages that
+    # were there when the command came.
+    slow = Client(srv.port)
+    slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    slow.sock.settimeout(30)
+    slow.call("SUBSCRIBE", "starve")
+    pub = Client(srv.port)
+    pub.sock.settimeout(30)
+    msg = "m" * 65536
+    state = {"read": 0, "pub": 0, "pong": None, "stop": False}
+    for _ in range(100):
+        pub.call("PUBLISH", "starve", msg)
+        state["pub"] += 1
+    t0 = time.time()
+    slow.send_raw(encode("PING"))
+
+    def slow_reader():
+        try:
+            while not state["stop"]:
+                x = slow.read()
+                if isinstance(x, list) and x[0] == "pong":
+                    state["pong"] = time.time() - t0
+                    return
+                state["read"] += 1
+                time.sleep(0.03)
+        except (OSError, EOFError, ValueError):
+            return
+    th = threading.Thread(target=slow_reader)
+    th.start()
+    while time.time() - t0 < 20 and state["pong"] is None:
+        if state["pub"] - state["read"] < 100:
+            pub.call("PUBLISH", "starve", msg)
+            state["pub"] += 1
+        else:
+            time.sleep(0.002)
+    state["stop"] = True
+    th.join(timeout=40)
+    check("local: a publisher that keeps a backlog does not stop the PING of a subscriber",
+          state["pong"] is not None, "read %d of %d" % (state["read"], state["pub"]))
+    slow.close()
+    pub.close()
+
+    # UNSUBSCRIBE while a publisher keeps a backlog on the channel: it
+    # leaves the channel first, then writes the messages that are there, so
+    # no message of the channel comes after the reply that leaves it.
+    slow = Client(srv.port)
+    slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    slow.sock.settimeout(30)
+    slow.call("SUBSCRIBE", "backlog")
+    pub = Client(srv.port)
+    pub.sock.settimeout(30)
+    st = {"read": 0, "pub": 0, "reply": None, "after": 0, "zero": False}
+    for _ in range(100):
+        pub.call("PUBLISH", "backlog", msg)
+        st["pub"] += 1
+    t0 = time.time()
+    slow.send_raw(encode("UNSUBSCRIBE", "backlog"))
+
+    def unsub_reader():
+        try:
+            while True:
+                x = slow.read()
+                if isinstance(x, list) and x[0] == "unsubscribe":
+                    st["reply"] = st["read"]
+                    slow.sock.settimeout(3)
+                    continue
+                if st["reply"] is not None:
+                    st["after"] += 1
+                else:
+                    st["read"] += 1
+                    time.sleep(0.03)
+        except (OSError, EOFError, ValueError):
+            return
+    th = threading.Thread(target=unsub_reader)
+    th.start()
+    while time.time() - t0 < 25 and st["reply"] is None:
+        if st["zero"] or st["pub"] - st["read"] >= 100:
+            time.sleep(0.002)
+            continue
+        if pub.call("PUBLISH", "backlog", msg) == 0:
+            st["zero"] = True
+        st["pub"] += 1
+    th.join(timeout=40)
+    check("local: no message of a channel comes after the reply of UNSUBSCRIBE under a backlog",
+          st["reply"] is not None and st["after"] == 0,
+          "reply after %r messages, %d messages after it" % (st["reply"], st["after"]))
+    slow.close()
+    pub.close()
+    for x in (a, b, plain, c1, c2, c3, u1, u2, n, t):
+        x.close()
+
+
+def pubsub_count(srv, channel):
+    c = Asker(srv)
+    try:
+        return c.call("PUBLISH", channel, "probe")
+    finally:
+        c.close()
+
+
+def wait_count(srv, channel, want, seconds=5):
+    deadline = time.time() + seconds
+    got = pubsub_count(srv, channel)
+    while got != want and time.time() < deadline:
+        time.sleep(0.1)
+        got = pubsub_count(srv, channel)
+    return got
+
+
+def stages_pubsub_limits(prog):
+    # PS1: a subscriber that never reads is closed over the hard limit.
+    srv = Server(prog, [])
+    try:
+        names = ["local: PS1 a subscriber that never reads is closed over the hard limit of 32 MB",
+                 "local: PS1 the other clients go on"]
+        if aof_started(srv, names):
+            lazy = Client(srv.port)
+            lazy.call("SUBSCRIBE", "big")
+            lazy.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            p = Asker(srv)
+            payload = "z" * (1 << 20)
+            for _ in range(40):
+                p.call("PUBLISH", "big", payload)
+            check(names[0], wait_count(srv, "big", 0) == 0)
+            check(names[1], p.call("PING") == "PONG")
+            lazy.close()
+            p.close()
+    finally:
+        srv.stop()
+
+    # PS5: a subscriber that reads its messages gives back their cost, so
+    # 40 MB over time do not close it.
+    srv = Server(prog, [])
+    try:
+        name = "local: PS5 a subscriber that reads its messages is not closed"
+        if aof_started(srv, [name]):
+            reader = Client(srv.port)
+            reader.call("SUBSCRIBE", "read")
+            p = Asker(srv)
+            payload = "r" * (1 << 20)
+            got = 0
+            for _ in range(40):
+                p.call("PUBLISH", "read", payload)
+                if reader.try_read(5) == ["message", "read", payload]:
+                    got += 1
+            check(name, got == 40 and pubsub_count(srv, "read") == 1, "%d messages" % got)
+            reader.close()
+            p.close()
+    finally:
+        srv.stop()
+
+    # PS6: an empty message costs its memory in the mailbox, so 600000 of
+    # them close a subscriber that does not read (the socket buffers take
+    # the first 100000 or more).
+    srv = Server(prog, [])
+    try:
+        name = "local: PS6 600000 empty messages close a subscriber that does not read"
+        if aof_started(srv, [name]):
+            lazy = Client(srv.port)
+            lazy.call("SUBSCRIBE", "e")
+            lazy.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            p = Client(srv.port)
+            p.sock.settimeout(30)
+            for _ in range(60):
+                p.send_raw(encode("PUBLISH", "e", "") * 10000)
+                for _ in range(10000):
+                    p.read()
+            check(name, wait_count(srv, "e", 0) == 0)
+            lazy.close()
+            p.close()
+    finally:
+        srv.stop()
+
+    # PS7: a subscriber that read its messages starts its soft time again.
+    srv = Server(prog, ["--pubsub-soft-seconds", "2"])
+    try:
+        name = "local: PS7 a subscriber that read its messages starts the soft time again"
+        if aof_started(srv, [name]):
+            sub = Client(srv.port)
+            sub.call("SUBSCRIBE", "again")
+            p = Asker(srv)
+            payload = "a" * (1 << 20)
+            for _ in range(12):
+                p.call("PUBLISH", "again", payload)
+            sub.sock.settimeout(10)
+            for _ in range(12):
+                sub.read()
+            time.sleep(2.5)
+            for _ in range(12):
+                p.call("PUBLISH", "again", payload)
+            check(name, pubsub_count(srv, "again") == 1)
+            sub.close()
+            p.close()
+    finally:
+        srv.stop()
+
+    # PS8: a channel with no subscriber left is dropped: 5 rounds of a
+    # client that joins 200000 new channels and goes keep the memory flat
+    # after the first rounds (without the drop it grows each round).
+    srv = Server(prog, [])
+    try:
+        name = "local: PS8 the channels that no client has are dropped"
+        if aof_started(srv, [name]):
+            rss = []
+            for cyc in range(5):
+                c = Client(srv.port)
+                c.sock.settimeout(60)
+                c.send_raw(encode("SUBSCRIBE", *["c%d-%d" % (cyc, i) for i in range(200000)]))
+                for _ in range(200000):
+                    c.read()
+                c.close()
+                wait_count(srv, "c%d-199999" % cyc, 0, seconds=20)
+                time.sleep(0.5)
+                rss.append(rss_kib(srv.proc.pid) // 1024)
+            print("       measured: RSS in MB after each round %r" % rss)
+            check(name, rss[4] <= rss[2] + 60, repr(rss))
+    finally:
+        srv.stop()
+
+    # PS2: the soft limit, with a soft time of 2 s.
+    srv = Server(prog, ["--pubsub-soft-seconds", "2"])
+    try:
+        names = ["local: PS2 a subscriber over the soft limit stays while the soft time runs",
+                 "local: PS2 a subscriber still over the soft limit after its time is closed"]
+        if aof_started(srv, names):
+            lazy = Client(srv.port)
+            lazy.call("SUBSCRIBE", "soft")
+            p = Asker(srv)
+            payload = "z" * (1 << 20)
+            for _ in range(12):
+                p.call("PUBLISH", "soft", payload)
+            check(names[0], pubsub_count(srv, "soft") == 1)
+            time.sleep(2.5)
+            p.call("PUBLISH", "soft", payload)
+            check(names[1], wait_count(srv, "soft", 0) == 0)
+            lazy.close()
+            p.close()
+    finally:
+        srv.stop()
+
+    # Rule 6: SUBSCRIBE of 1048575 channels, and the end of that client.
+    srv = Server(prog, [])
+    try:
+        names = ["local: PS3 SUBSCRIBE of 1048575 channels stalls PING at most 1 s",
+                 "local: PS3 the last reply counts every channel",
+                 "local: PS3 SUBSCRIBE joins the channels in steps",
+                 "local: PS4 the end of a client with 1048575 channels stalls PING at most 1 s",
+                 "local: PS4 the end of the client leaves the channels in steps"]
+        if aof_started(srv, names):
+            sub = Client(srv.port)
+            n = 1048575
+            last = [None]
+
+            def subscribe():
+                sub.sock.settimeout(60)
+                sub.send_raw(encode("SUBSCRIBE", *["ch%d" % i for i in range(n)]))
+                # The messages of the sampler come between the replies.
+                while True:
+                    x = sub.read()
+                    if isinstance(x, list) and x[0] == "subscribe":
+                        last[0] = x
+                        if x[1] == "ch%d" % (n - 1):
+                            break
+            # A pair of PUBLISH, to the first and the last channel, that
+            # gives (1, 0) or (0, 1) saw the channels half joined or half
+            # left: only a loop that yields between them shows that.
+            pairs = set()
+            stop = threading.Event()
+
+            def sample():
+                q = Client(srv.port)
+                q.sock.settimeout(30)
+                while not stop.is_set():
+                    q.send_raw(encode("PUBLISH", "ch0", "x") + encode("PUBLISH", "ch%d" % (n - 1), "x"))
+                    pairs.add((q.read(), q.read()))
+                q.close()
+            th = threading.Thread(target=sample)
+            th.start()
+            worst, wrong, _ = measure_while(srv, subscribe)
+            stop.set()
+            th.join()
+            check(names[0], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            check(names[1], last[0] == ["subscribe", "ch%d" % (n - 1), n], repr(last[0]))
+            check(names[2], (1, 0) in pairs, repr(sorted(pairs)))
+            pairs.clear()
+            stop.clear()
+            th = threading.Thread(target=sample)
+            th.start()
+
+            def leave():
+                sub.close()
+                wait_count(srv, "ch%d" % (n - 1), 0, seconds=20)
+            worst, wrong, _ = measure_while(srv, leave)
+            stop.set()
+            th.join()
+            check(names[3], worst <= 1.0 and not wrong and pubsub_count(srv, "ch0") == 0, "worst %.3f s" % worst)
+            check(names[4], (0, 1) in pairs, repr(sorted(pairs)))
+    finally:
+        srv.stop()
+
+
+def stages_pubsub_replication(prog):
+    # A master propagates PUBLISH to its replicas, and its AOF does not get
+    # it, as in Redis.
+    d = tempfile.mkdtemp(prefix="loxpp-pubsub-")
+    srv = Server(prog, ["--dir", d, "--appendonly", "yes"])
+    try:
+        names = ["local: PUBLISH is propagated to the replicas",
+                 "local: PUBLISH does not go to the AOF"]
+        if aof_started(srv, names):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            c.call("PUBLISH", "rc", "m")
+            c.call("SET", "after", "1")
+            got = [r.try_read(2), r.try_read(2)]
+            check(names[0], got == [["PUBLISH", "rc", "m"], ["SET", "after", "1"]], repr(got))
+            data = read_bytes(os.path.join(d, "appendonlydir", "appendonly.aof.1.incr.aof"))
+            check(names[1], data == encode("SET", "after", "1"), repr(data))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
+        shutil.rmtree(d, ignore_errors=True)
+    # A replica delivers a PUBLISH of its master to its subscribers.
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        name = "local: a replica delivers a PUBLISH of its master"
+        if aof_started(rep, [name]):
+            link = m.accept()
+            fake_handshake(link)
+            s = Asker(rep)
+            s.call("SUBSCRIBE", "rc")
+            link.send_raw(encode("PUBLISH", "rc", "from-master"))
+            check(name, s.c.try_read(2) == ["message", "rc", "from-master"])
+            got = s.call("SET", "k", "v")
+            check("local: on a replica, READONLY comes before the subscribed mode",
+                  isinstance(got, Error) and got.startswith("READONLY"), repr(got))
+            s.close()
+    finally:
+        rep.stop()
+        m.close()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -4066,6 +4651,7 @@ GROUPS = [
     ("persistence-rdb", stages_rdb),
     ("replication", stages_replication),
     ("persistence-aof", stages_aof),
+    ("pub-sub", stages_pubsub),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
