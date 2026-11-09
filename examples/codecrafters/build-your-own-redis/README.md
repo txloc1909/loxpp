@@ -245,10 +245,11 @@ an unknown command, `SELECT` of another database, a manifest line that is
 not `file <name> seq <n> type <t>` (with a seq from 1; the keys have no
 case), an empty manifest, a blank line, two base files, incremental files
 out of the order of their seq (an equal seq too), a name with a `/`, and a
-missing file stop the start with a message, as in Redis. A manifest with
-comments only names no file: the server makes a first incremental file.
-Some other manifest forms, which Redis does not write, differ from Redis
-(see the known differences). The values of `--appendonly` and `--appendfsync` have no case.
+missing file stop the start with a message. A manifest with comments only
+names no file: the server makes a first incremental file. Redis does the
+same for each of these forms, except some forms that Redis itself does not
+write, which the known differences list (`seq 1x`, a base line with
+`seq -1` and `type incr` among them). The values of `--appendonly` and `--appendfsync` have no case.
 
 The AOF is one more reader of the replication log: each write appends its
 effective form in its own step (`replicate`), and a writer task (`writeAof`)

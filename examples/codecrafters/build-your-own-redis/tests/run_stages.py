@@ -3861,7 +3861,11 @@ def stages_aof_in(prog, d):
             th.start()
             clients = [Client(srv.port) for _ in range(4)]
             for j, cl in enumerate(clients):
-                cl.send_raw(b"".join(encode("SET", "a%d-%d" % (j, i), "v") for i in range(6000)))
+                try:
+                    cl.send_raw(b"".join(encode("SET", "a%d-%d" % (j, i), "v") for i in range(6000)))
+                except OSError:
+                    # The server went down: the check below fails by name.
+                    pass
             for cl in clients:
                 for _ in range(6000):
                     if cl.try_read(10) in (TIMEOUT, CLOSED, BAD_REPLY):
@@ -4002,16 +4006,22 @@ def stages_aof_in(prog, d):
             # that does not wait comes before the file has them, and the
             # file is read at once.
             many = ["m%d" % i for i in range(200000)]
+            def slow_call(*args):
+                # A long limit: a loaded host can take more than the 3 s of
+                # Asker.call, and a call that gives up would read the file
+                # while the writer still writes.
+                c.raw().send_raw(encode(*args))
+                return c.raw().try_read(30)
             mark = len(read_bytes(rpath))
-            c.call("RPUSH", "W", *many)
+            slow_call("RPUSH", "W", *many)
             got = read_bytes(rpath)[mark:]
             check("local: the reply of a write comes after the file has it",
                   got == encode("RPUSH", "W", *many), "%d bytes" % len(got))
             mark = len(read_bytes(rpath))
-            c.call("MULTI")
-            c.call("RPUSH", "W2", *many)
-            c.call("SET", "W3", "1")
-            c.call("EXEC")
+            slow_call("MULTI")
+            slow_call("RPUSH", "W2", *many)
+            slow_call("SET", "W3", "1")
+            slow_call("EXEC")
             got = read_bytes(rpath)[mark:]
             check("local: the reply of EXEC comes after the file has the transaction",
                   got == encode("MULTI") + encode("RPUSH", "W2", *many) + encode("SET", "W3", "1") + encode("EXEC"),
