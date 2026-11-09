@@ -1,14 +1,16 @@
 // A worker whose run queue is never empty still sees a message that a task of
 // another worker sends (spec/04-semantics.md, Scheduling: the worker sees an
 // arrived message no later than the first task switch at which at least a
-// bounded delay has passed since it arrived).
+// bounded delay has passed since it arrived at the worker).
 // `receiver` waits in task.receive(). `busy` yields in a loop, so a task is
 // ready at every instant and the worker never goes idle. A task of another
 // worker sends the message after 50 ms, and the receiver must run and print.
 // A scheduler that looks at its inbox only when the run queue is empty never
 // delivers the message, and this probe times out. That is what the probe
 // proves: it does not pin the size of the delay, which the spec leaves to the
-// implementation. The TIMEOUT below is a limit of the runner, not of the spec.
+// implementation. The TIMEOUT below is a limit of the runner, not of the spec,
+// and it is the only maximum here: in the runner, a message delay of 1 s still
+// passes this probe, and 12 s fails it.
 // STATUS: ok
 // TIMEOUT: 10
 // CHECK: the receiver got the message: ping

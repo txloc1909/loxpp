@@ -530,8 +530,9 @@ the probe then times out with no output at all, because the reader never wakes.
 The probe's `TIMEOUT: 10` is a limit of the runner and not of the spec, and it
 therefore does bind a practical maximum: a poll interval of 20 s conforms and
 fails the probe, and 4 s conforms and passes it in 8 s. So the probe pins the
-deferral, not the size of the delay, and of the spec probes it is the only one
-whose `TIMEOUT` decides the result.
+deferral, not the size of the delay. Of the spec probes, 451 and 452 are the only
+two whose `TIMEOUT` decides a result, since each pins a rule whose value is a
+speed and each runner limit is therefore the only maximum for its rule.
 
 ### Readiness registry
 
