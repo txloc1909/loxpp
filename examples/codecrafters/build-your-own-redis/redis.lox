@@ -1991,7 +1991,8 @@ var ARITY = {
     "RPUSH": -3, "LPUSH": -3, "LLEN": 2, "LRANGE": 4, "LPOP": -2,
     "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
     "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1, "DEL": -2,
-    "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1
+    "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1,
+    "ZADD": -4, "ZREM": -3, "ZCARD": 2, "ZSCORE": 3, "ZRANK": 3, "ZRANGE": -4
 };
 
 fun arityOk(name, count) {
@@ -2095,6 +2096,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 // Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
+    zsetExecWork = ZSET_EXEC_WORK;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2111,6 +2113,7 @@ fun execQueued(tx) {
         replies.append(reply);
     }
     execElements = nil;
+    zsetExecWork = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -3250,7 +3253,7 @@ fun cmdWait(conn, argv) {
 
 // The commands that write, which a replica refuses from its clients.
 var WRITES = {"SET": true, "INCR": true, "RPUSH": true, "LPUSH": true, "LPOP": true,
-              "BLPOP": true, "XADD": true, "DEL": true};
+              "BLPOP": true, "XADD": true, "DEL": true, "ZADD": true, "ZREM": true};
 var READONLY = "-READONLY You can't write against a read only replica.\r\n";
 
 fun replicationInfo() {
@@ -3834,6 +3837,552 @@ fun aofSync(conn, before, target) {
 }
 
 // ===========================================================================
+// Sorted sets
+// ===========================================================================
+
+// A sorted set is a skip list with spans, as in Redis, and a Map of member
+// -> score. Insert, delete and rank take O(log N) steps, and a range takes
+// O(log N + M). The order is by score, then by member.
+
+// At most ZSET_COMMAND_MEMBERS members in one ZADD or ZREM, and at most
+// ZSET_EXEC_WORK inserts and deletes in one EXEC: an insert costs about
+// 9 microseconds of Lox++ code, and a command runs in one step (README
+// rule 6). Redis has no such limits.
+var ZSET_COMMAND_MEMBERS = 32768;
+var ZSET_EXEC_WORK = 65536;
+var zsetExecWork = nil;
+var ZSET_MAX_LEVEL = 32;
+var ZSET_TOO_MANY = "-ERR the command names more than 32768 members of a sorted set\r\n";
+var ZSET_EXEC_TOO_MUCH = "-ERR the sorted set work of this transaction is over its limit\r\n";
+var NOT_FLOAT = "-ERR value is not a valid float\r\n";
+
+fun filled(n, v) {
+    var a = [];
+    var i = 0;
+    while (i < n) {
+        a.append(v);
+        i = i + 1;
+    }
+    return a;
+}
+
+// A pseudo-random level from 1, each level with a chance of 1/4, as in
+// Redis. The standard library has no random numbers; the high bits of a
+// linear congruential generator are used, because its low bits repeat.
+var zsetSeed = 12345;
+fun zsetRandomLevel() {
+    var level = 1;
+    while (level < ZSET_MAX_LEVEL) {
+        zsetSeed = (zsetSeed * 1103515245 + 12345) % 2147483648;
+        if (((zsetSeed - zsetSeed % 65536) / 65536) % 4 != 0) {
+            return level;
+        }
+        level = level + 1;
+    }
+    return level;
+}
+
+class ZNode {
+    init(member, score, level) {
+        this.member = member;
+        this.score = score;
+        this.forward = filled(level, nil);
+        this.span = filled(level, 0);
+    }
+}
+
+var ZSET_UPDATE = filled(ZSET_MAX_LEVEL, nil);
+var ZSET_RANK = filled(ZSET_MAX_LEVEL, 0);
+
+fun zsetBefore(node, score, member) {
+    return node.score < score or (node.score == score and node.member < member);
+}
+
+class ZSet {
+    init() {
+        this.header = ZNode(nil, 0, ZSET_MAX_LEVEL);
+        this.level = 1;
+        this.length = 0;
+        this.dict = {};
+    }
+
+    insert(score, member) {
+        var update = ZSET_UPDATE;
+        var rank = ZSET_RANK;
+        var x = this.header;
+        var i = this.level - 1;
+        var r = 0;
+        while (i >= 0) {
+            var f = x.forward[i];
+            while (f != nil and zsetBefore(f, score, member)) {
+                r = r + x.span[i];
+                x = f;
+                f = x.forward[i];
+            }
+            rank[i] = r;
+            update[i] = x;
+            i = i - 1;
+        }
+        var level = zsetRandomLevel();
+        if (level > this.level) {
+            i = this.level;
+            while (i < level) {
+                rank[i] = 0;
+                update[i] = this.header;
+                this.header.span[i] = this.length;
+                i = i + 1;
+            }
+            this.level = level;
+        }
+        x = ZNode(member, score, level);
+        var r0 = rank[0];
+        i = 0;
+        while (i < level) {
+            var u = update[i];
+            x.forward[i] = u.forward[i];
+            u.forward[i] = x;
+            x.span[i] = u.span[i] - (r0 - rank[i]);
+            u.span[i] = (r0 - rank[i]) + 1;
+            i = i + 1;
+        }
+        while (i < this.level) {
+            update[i].span[i] = update[i].span[i] + 1;
+            i = i + 1;
+        }
+        this.length = this.length + 1;
+        this.dict[member] = score;
+    }
+
+    remove(score, member) {
+        var update = ZSET_UPDATE;
+        var x = this.header;
+        var i = this.level - 1;
+        while (i >= 0) {
+            var f = x.forward[i];
+            while (f != nil and zsetBefore(f, score, member)) {
+                x = f;
+                f = x.forward[i];
+            }
+            update[i] = x;
+            i = i - 1;
+        }
+        x = x.forward[0];
+        i = 0;
+        while (i < this.level) {
+            var u = update[i];
+            if (u.forward[i] == x) {
+                u.span[i] = u.span[i] + x.span[i] - 1;
+                u.forward[i] = x.forward[i];
+            } else {
+                u.span[i] = u.span[i] - 1;
+            }
+            i = i + 1;
+        }
+        while (this.level > 1 and this.header.forward[this.level - 1] == nil) {
+            this.level = this.level - 1;
+        }
+        this.length = this.length - 1;
+        this.dict.del(member);
+    }
+
+    // The 0-based rank of a member that is in the set.
+    rank(score, member) {
+        var x = this.header;
+        var r = 0;
+        var i = this.level - 1;
+        while (i >= 0) {
+            var f = x.forward[i];
+            while (f != nil and (zsetBefore(f, score, member) or (f.score == score and f.member == member))) {
+                r = r + x.span[i];
+                x = f;
+                f = x.forward[i];
+            }
+            i = i - 1;
+        }
+        return r - 1;
+    }
+
+    // The node at the 0-based rank.
+    nodeAt(rank) {
+        var x = this.header;
+        var traversed = 0;
+        var i = this.level - 1;
+        while (i >= 0) {
+            while (x.forward[i] != nil and traversed + x.span[i] <= rank + 1) {
+                traversed = traversed + x.span[i];
+                x = x.forward[i];
+            }
+            i = i - 1;
+        }
+        return x;
+    }
+}
+
+// Takes k units of the sorted set work of EXEC. Returns false, and takes
+// nothing, when too few are left.
+fun spendZsetWork(k) {
+    if (zsetExecWork == nil) {
+        return true;
+    }
+    if (k > zsetExecWork) {
+        return false;
+    }
+    zsetExecWork = zsetExecWork - k;
+    return true;
+}
+
+fun zsetEntry(key) {
+    var entry = lookup(key);
+    if (entry == nil) {
+        return nil;
+    }
+    if (entry.kind != "zset") {
+        return false;
+    }
+    return entry;
+}
+
+// Reads a score as Redis reads it with strtod: an optional sign, then
+// digits with an optional point, and an optional exponent; or inf or
+// infinity, in any case. Nothing may come before or after; nan is refused.
+// Returns the Number, or nil. float() takes only plain decimals, and a
+// String of another form is a fault that catch cannot stop, so the form is
+// checked first and an exponent is moved into the digits.
+var ZSET_INF = float("1" + "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+
+fun parseScore(s) {
+    if (len(s) == 0 or len(s) > 400) {
+        return nil;
+    }
+    var i = 0;
+    var sign = "";
+    if (s[0] == "+" or s[0] == "-") {
+        if (s[0] == "-") {
+            sign = "-";
+        }
+        i = 1;
+    }
+    var rest = lower(s[i:len(s)]);
+    if (rest == "inf" or rest == "infinity") {
+        if (sign == "-") {
+            return -ZSET_INF;
+        }
+        return ZSET_INF;
+    }
+    var digits = "";
+    var point = -1;
+    while (i < len(s) and ((s[i] >= "0" and s[i] <= "9") or (s[i] == "." and point < 0))) {
+        if (s[i] == ".") {
+            point = len(digits);
+        } else {
+            digits = digits + s[i];
+        }
+        i = i + 1;
+    }
+    if (len(digits) == 0) {
+        return nil;
+    }
+    if (point < 0) {
+        point = len(digits);
+    }
+    var exp = 0;
+    if (i < len(s) and (s[i] == "e" or s[i] == "E")) {
+        i = i + 1;
+        var expSign = 1;
+        if (i < len(s) and (s[i] == "+" or s[i] == "-")) {
+            if (s[i] == "-") {
+                expSign = -1;
+            }
+            i = i + 1;
+        }
+        var start = i;
+        while (i < len(s) and s[i] >= "0" and s[i] <= "9" and i - start < 6) {
+            exp = exp * 10 + (ord(s[i]) - 48);
+            i = i + 1;
+        }
+        if (i == start) {
+            return nil;
+        }
+        exp = exp * expSign;
+    }
+    if (i != len(s)) {
+        return nil;
+    }
+    // The value is 0.<digits> times 10^(point + exp). Past the range of a
+    // double it is an infinity or zero, as strtod gives it.
+    var first = 0;
+    while (first < len(digits) and digits[first] == "0") {
+        first = first + 1;
+    }
+    if (first == len(digits)) {
+        return float(sign + "0");
+    }
+    var magnitude = point + exp - first;
+    if (magnitude > 310) {
+        if (sign == "-") {
+            return -ZSET_INF;
+        }
+        return ZSET_INF;
+    }
+    if (magnitude < -330) {
+        return float(sign + "0");
+    }
+    point = point + exp;
+    var text = "";
+    if (point <= 0) {
+        text = "0." + zerosOf(-point) + digits;
+    } else if (point >= len(digits)) {
+        text = digits + zerosOf(point - len(digits));
+    } else {
+        text = digits[0:point] + "." + digits[point:len(digits)];
+    }
+    return float(sign + text);
+}
+
+fun zerosOf(n) {
+    var out = "";
+    while (n >= 64) {
+        out = out + "0000000000000000000000000000000000000000000000000000000000000000";
+        n = n - 64;
+    }
+    while (n > 0) {
+        out = out + "0";
+        n = n - 1;
+    }
+    return out;
+}
+
+// The text of a score. Redis 7.0 gives 17 significant digits ("30.100000000000001");
+// the stages, and later Redis, give the shortest text that reads back as
+// the same double ("30.1"), as str does.
+fun scoreText(score) {
+    return str(score);
+}
+
+// ZADD key score member [score member ...], parsed before the command
+// runs, with a yield every ELEMENTS_PER_YIELD pairs. Returns the List of
+// [score, member] pairs, or an error reply.
+fun parseZadd(argv, mayYield) {
+    if (len(argv) < 4) {
+        return wrongArgs("zadd");
+    }
+    if ((len(argv) - 2) % 2 != 0) {
+        return errorReply("ERR syntax error");
+    }
+    var pairs = [];
+    var i = 2;
+    while (i < len(argv)) {
+        var score = parseScore(argv[i]);
+        if (score == nil) {
+            return NOT_FLOAT;
+        }
+        pairs.append([score, argv[i + 1]]);
+        i = i + 2;
+        if (mayYield and len(pairs) % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    return pairs;
+}
+
+fun cmdZadd(ctx, argv) {
+    var pairs = ctx;
+    if (pairs == nil) {
+        pairs = parseZadd(argv, false);
+    }
+    if (type(pairs) == "String") {
+        return pairs;
+    }
+    if (len(pairs) > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
+    var key = argv[1];
+    var entry = zsetEntry(key);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (!spendZsetWork(len(pairs))) {
+        return ZSET_EXEC_TOO_MUCH;
+    }
+    if (entry == nil) {
+        entry = Entry("zset", ZSet(), nil);
+        store[key] = entry;
+    }
+    var z = entry.value;
+    var added = 0;
+    var changed = false;
+    for (var p in pairs) {
+        var old = z.dict[p[1]];
+        if (old == nil) {
+            z.insert(p[0], p[1]);
+            added = added + 1;
+            changed = true;
+        } else if (old != p[0]) {
+            z.remove(old, p[1]);
+            z.insert(p[0], p[1]);
+            changed = true;
+        }
+    }
+    if (changed) {
+        touch(key);
+        replicate(argv, nil);
+    }
+    return integerReply(added);
+}
+
+fun cmdZrem(ctx, argv) {
+    if (len(argv) < 3) {
+        return wrongArgs("zrem");
+    }
+    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
+    var key = argv[1];
+    var entry = zsetEntry(key);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    if (!spendZsetWork(len(argv) - 2)) {
+        return ZSET_EXEC_TOO_MUCH;
+    }
+    var z = entry.value;
+    var removed = 0;
+    var i = 2;
+    while (i < len(argv)) {
+        var old = z.dict[argv[i]];
+        if (old != nil) {
+            z.remove(old, argv[i]);
+            removed = removed + 1;
+        }
+        i = i + 1;
+    }
+    if (removed > 0) {
+        if (z.length == 0) {
+            store.del(key);
+        }
+        touch(key);
+        replicate(argv, nil);
+    }
+    return integerReply(removed);
+}
+
+fun cmdZcard(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("zcard");
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    return integerReply(entry.value.length);
+}
+
+fun cmdZscore(ctx, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("zscore");
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return NULL_BULK;
+    }
+    var score = entry.value.dict[argv[2]];
+    if (score == nil) {
+        return NULL_BULK;
+    }
+    return bulk(scoreText(score));
+}
+
+fun cmdZrank(ctx, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("zrank");
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return NULL_BULK;
+    }
+    var score = entry.value.dict[argv[2]];
+    if (score == nil) {
+        return NULL_BULK;
+    }
+    return integerReply(entry.value.rank(score, argv[2]));
+}
+
+// ZRANGE key start stop [WITHSCORES], by rank. It takes the members in its
+// step (a walk of M nodes is about 0.2 microseconds each), and the session
+// writes them in steps.
+fun cmdZrange(ctx, argv) {
+    if (len(argv) < 4) {
+        return wrongArgs("zrange");
+    }
+    var withScores = false;
+    if (len(argv) == 5 and upper(argv[4]) == "WITHSCORES") {
+        withScores = true;
+    } else if (len(argv) > 4) {
+        return errorReply("ERR syntax error");
+    }
+    var start = parseInteger(argv[2]);
+    var stop = parseInteger(argv[3]);
+    if (start == nil or stop == nil) {
+        return NOT_INTEGER;
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return arrayReply([]);
+    }
+    var z = entry.value;
+    var n = z.length;
+    if (start < 0) {
+        start = n + start;
+    }
+    if (stop < 0) {
+        stop = n + stop;
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (stop >= n) {
+        stop = n - 1;
+    }
+    if (start > stop) {
+        return arrayReply([]);
+    }
+    var count = stop + 1 - start;
+    var size = count;
+    if (withScores) {
+        size = 2 * count;
+    }
+    if (!spendElements(size)) {
+        return EXEC_TOO_LARGE;
+    }
+    var out = [];
+    var x = z.nodeAt(start);
+    while (count > 0) {
+        out.append(x.member);
+        if (withScores) {
+            out.append(scoreText(x.score));
+        }
+        x = x.forward[0];
+        count = count - 1;
+    }
+    return Bulks([], out);
+}
+
+// ===========================================================================
 // Pub/Sub
 // ===========================================================================
 
@@ -4159,14 +4708,21 @@ var COMMANDS = {
     "UNWATCH": cmdUnwatchQueued,
     "CONFIG": cmdConfig,
     "KEYS": cmdKeys,
-    "PUBLISH": cmdPublish
+    "PUBLISH": cmdPublish,
+    "ZADD": cmdZadd,
+    "ZREM": cmdZrem,
+    "ZCARD": cmdZcard,
+    "ZSCORE": cmdZscore,
+    "ZRANK": cmdZrank,
+    "ZRANGE": cmdZrange
 };
 
 // Commands whose arguments the session parses before the command runs
 // (rule 5 of the README): the parse reads no key and may yield.
 var PARSERS = {
     "XRANGE": parseXrange,
-    "XREAD": parseXread
+    "XREAD": parseXread,
+    "ZADD": parseZadd
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.
