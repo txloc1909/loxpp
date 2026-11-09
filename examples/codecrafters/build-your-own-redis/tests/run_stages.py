@@ -4193,7 +4193,10 @@ def stages_pubsub_on(srv):
             ("PSYNC with one argument", ("PSYNC", "?"), "ERR wrong number of arguments for 'psync'"),
             ("EXEC", ("EXEC",), "EXECABORT Transaction discarded because of: Can't execute 'exec'"),
             ("CONFIG GET", ("CONFIG", "GET", "dir"), "ERR Can't execute 'config|get'"),
-            ("CONFIG FOO", ("CONFIG", "FOO"), "ERR unknown subcommand 'FOO'")):
+            ("CONFIG FOO", ("CONFIG", "FOO"), "ERR unknown subcommand 'FOO'"),
+            ("CONFIG GET with no name", ("CONFIG", "GET"), "ERR wrong number of arguments for 'config|get'"),
+            ("EXEC with an argument", ("EXEC", "x"), "EXECABORT Transaction discarded because of: wrong number"),
+            ("PSYNC with three arguments", ("PSYNC", "a", "b", "c"), "ERR Can't execute 'psync'")):
         got = z.call(*cmd)
         check("local: in subscribed mode %s gives the error of Redis" % name,
               isinstance(got, Error) and got.startswith(want), repr(got))
@@ -4261,51 +4264,81 @@ def stages_pubsub_on(srv):
     late.close()
     pub.close()
 
-    # UNSUBSCRIBE of 3000 channels yields; a message to a channel that it
-    # has not left yet goes before the reply that leaves it.
-    many = Client(srv.port)
-    many.sock.settimeout(30)
-    names = ["mu%d" % i for i in range(3000)]
-    many.send_raw(encode("SUBSCRIBE", *names))
+    # UNSUBSCRIBE of 3000 long channels to a client that does not read: its
+    # session is held in the loop, and a message to the last channel, which
+    # it has not left yet, goes before the reply that leaves it.
+    det = Client(srv.port)
+    det.sock.settimeout(30)
+    names = ["%04d" % i + "n" * 3996 for i in range(3000)]
+    det.send_raw(encode("SUBSCRIBE", *names))
     for _ in range(3000):
-        many.read()
-    stop = threading.Event()
-
-    def spam():
-        q = Client(srv.port)
-        q.sock.settimeout(30)
-        while not stop.is_set():
-            q.send_raw(encode("PUBLISH", "mu2999", "s") * 50)
-            for _ in range(50):
-                q.read()
-        q.close()
-    th = threading.Thread(target=spam)
-    th.start()
-    time.sleep(0.2)
-    many.send_raw(encode("UNSUBSCRIBE", *names))
-    after = 0
-    left = False
-    seen = 0
-    while seen < 3000:
-        x = many.read()
-        if isinstance(x, list) and x[0] == "unsubscribe":
-            seen += 1
-            if x[1] == "mu2999":
-                left = True
-        elif left:
-            after += 1
-    stop.set()
-    th.join()
+        det.read()
+    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    det.send_raw(encode("UNSUBSCRIBE", *names))
+    time.sleep(0.5)
+    pub = Asker(srv)
+    counted = pub.call("PUBLISH", names[-1], "late")
+    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+    seq = []
     try:
-        while True:
-            x = many.try_read(0.3)
-            if x in (TIMEOUT, CLOSED, BAD_REPLY):
+        det.sock.settimeout(5)
+        while len(seq) < 3:
+            x = det.read()
+            if isinstance(x, list) and x[0] == "message":
+                seq.append("message")
+            elif isinstance(x, list) and x[1] == names[-1]:
+                seq.append("last reply")
                 break
-            after += 1
-    finally:
-        many.close()
+    except (OSError, EOFError, ValueError) as e:
+        seq.append(repr(e))
+    want = (["message"] if counted == 1 else []) + ["last reply"]
     check("local: a message counted before UNSUBSCRIBE left its channel goes before that reply",
-          left and after == 0, "%d messages after the reply" % after)
+          seq == want, "counted %r, got %r" % (counted, seq))
+    det.close()
+    pub.close()
+
+    # A publisher that keeps a backlog does not keep the command of a
+    # subscriber from running: the session writes only the messages that
+    # were there when the command came.
+    slow = Client(srv.port)
+    slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    slow.sock.settimeout(30)
+    slow.call("SUBSCRIBE", "starve")
+    pub = Client(srv.port)
+    pub.sock.settimeout(30)
+    msg = "m" * 65536
+    state = {"read": 0, "pub": 0, "pong": None, "stop": False}
+    for _ in range(100):
+        pub.call("PUBLISH", "starve", msg)
+        state["pub"] += 1
+    t0 = time.time()
+    slow.send_raw(encode("PING"))
+
+    def slow_reader():
+        try:
+            while not state["stop"]:
+                x = slow.read()
+                if isinstance(x, list) and x[0] == "pong":
+                    state["pong"] = time.time() - t0
+                    return
+                state["read"] += 1
+                time.sleep(0.03)
+        except (OSError, EOFError, ValueError):
+            return
+    th = threading.Thread(target=slow_reader)
+    th.start()
+    while time.time() - t0 < 20 and state["pong"] is None:
+        if state["pub"] - state["read"] < 100:
+            pub.call("PUBLISH", "starve", msg)
+            state["pub"] += 1
+        else:
+            time.sleep(0.002)
+    state["stop"] = True
+    th.join(timeout=40)
+    check("local: a publisher that keeps a backlog does not stop the PING of a subscriber",
+          state["pong"] is not None, "read %d of %d" % (state["read"], state["pub"]))
+    slow.close()
+    pub.close()
     for x in (a, b, plain, c1, c2, c3, u1, u2, n, t):
         x.close()
 

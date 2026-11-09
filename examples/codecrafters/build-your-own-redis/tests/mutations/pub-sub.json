@@ -129,16 +129,16 @@
  },
  {
   "name": "the arity check in subscribed mode comes after the context",
-  "old": "    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {\n        return wrongArgs(lower(name));\n    }",
-  "new": "",
+  "old": "    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {\n        if (name == \"EXEC\") {",
+  "new": "    if (false) {\n        if (name == \"EXEC\") {",
   "cases": [
    "local: a wrong number of arguments in subscribed mode comes first"
   ]
  },
  {
   "name": "WAIT is unknown in subscribed mode",
-  "old": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": 3, \"WAIT\": 3};",
-  "new": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": 3};",
+  "old": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": -3, \"WAIT\": 3};",
+  "new": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": -3};",
   "cases": [
    "local: subscribed mode refuses WAIT"
   ]
@@ -217,7 +217,7 @@
  },
  {
   "name": "a message in the mailbox goes after the next command",
-  "old": "    writeQueuedMessages(conn);\n    if (len(argv) > 0) {",
+  "old": "    writeQueuedMessages(conn, conn.pubQueued);\n    if (len(argv) > 0) {",
   "new": "    if (len(argv) > 0) {",
   "cases": [
    "local: a message that came before PING ran goes before the pong"
@@ -281,8 +281,8 @@
  },
  {
   "name": "an unknown CONFIG subcommand gets the context error",
-  "old": "        if (!CONFIG_SUBCOMMANDS.has(sub)) {\n            return errorReply(\"ERR unknown subcommand '\" + argv[1][0:128] + \"'. Try CONFIG HELP.\");\n        }",
-  "new": "",
+  "old": "        if (subArity == nil) {\n            return errorReply(\"ERR unknown subcommand '\" + argv[1][0:128] + \"'. Try CONFIG HELP.\");\n        }",
+  "new": "        if (subArity == nil) {\n            subArity = -2;\n        }",
   "cases": [
    "local: in subscribed mode CONFIG FOO gives the error of Redis"
   ]
@@ -297,10 +297,42 @@
  },
  {
   "name": "UNSUBSCRIBE writes waiting messages after its reply",
-  "old": "        // A message to this channel that came while the loop yielded goes\n        // before the reply that leaves it.\n        if (conn.pubQueued > 0) {",
-  "new": "        // A message to this channel that came while the loop yielded goes\n        // before the reply that leaves it.\n        if (false) {",
+  "old": "        // A message to this channel that came before it left goes before\n        // the reply that leaves it. After the leave no new one comes.\n        if (conn.pubQueued > 0) {",
+  "new": "        // A message to this channel that came before it left goes before\n        // the reply that leaves it. After the leave no new one comes.\n        if (false) {",
   "cases": [
    "local: a message counted before UNSUBSCRIBE left its channel goes before that reply"
+  ]
+ },
+ {
+  "name": "the drain waits for every message",
+  "old": "    while (n > 0 and conn.pubQueued > 0) {",
+  "new": "    while (conn.pubQueued > 0) {",
+  "cases": [
+   "local: a publisher that keeps a backlog does not stop the PING of a subscriber"
+  ]
+ },
+ {
+  "name": "a CONFIG subcommand has no arity in subscribed mode",
+  "old": "        if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {\n            return wrongArgs(shown);\n        }",
+  "new": "",
+  "cases": [
+   "local: in subscribed mode CONFIG GET with no name gives the error of Redis"
+  ]
+ },
+ {
+  "name": "EXEC with an argument has no EXECABORT in subscribed mode",
+  "old": "    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {\n        if (name == \"EXEC\") {\n            return EXEC_ARITY;\n        }",
+  "new": "    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {\n",
+  "cases": [
+   "local: in subscribed mode EXEC with an argument gives the error of Redis"
+  ]
+ },
+ {
+  "name": "PSYNC takes exactly 3 in subscribed mode",
+  "old": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": -3, \"WAIT\": 3};",
+  "new": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": 3, \"WAIT\": 3};",
+  "cases": [
+   "local: in subscribed mode PSYNC with three arguments gives the error of Redis"
   ]
  }
 ]

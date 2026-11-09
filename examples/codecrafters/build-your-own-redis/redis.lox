@@ -3919,14 +3919,14 @@ fun cmdUnsubscribe(conn, argv) {
     var i = 0;
     while (i < len(names)) {
         var channel = names[i];
-        // A message to this channel that came while the loop yielded goes
-        // before the reply that leaves it.
-        if (conn.pubQueued > 0) {
-            out.flush();
-            writeQueuedMessages(conn);
-        }
         if (conn.channels.has(channel)) {
             leaveChannel(conn, channel);
+        }
+        // A message to this channel that came before it left goes before
+        // the reply that leaves it. After the leave no new one comes.
+        if (conn.pubQueued > 0) {
+            out.flush();
+            writeQueuedMessages(conn, conn.pubQueued);
         }
         out.add(subscribeReply("unsubscribe", channel, conn.subCount));
         i = i + 1;
@@ -4024,13 +4024,16 @@ fun isPublished(msg) {
     };
 }
 
-// Writes the messages that wait in the mailbox of the session. The reader
-// sends commands ahead of the session, so a message that a PUBLISH sent
-// before the session ran a command can be behind that command in the
+// Writes the first n messages that wait in the mailbox of the session. The
+// reader sends commands ahead of the session, so a message that a PUBLISH
+// sent before the session ran a command can be behind that command in the
 // mailbox; it came first, so it goes first, as in Redis. Each one is
-// there: a send on the same worker moves the message at the call.
-fun writeQueuedMessages(conn) {
-    while (conn.pubQueued > 0) {
+// there: a send on the same worker moves the message at the call. Only the
+// messages that are there now: a publisher that keeps sending must not
+// keep the command from running.
+fun writeQueuedMessages(conn, n) {
+    while (n > 0 and conn.pubQueued > 0) {
+        n = n - 1;
         var msg = task.receive_where(isPublished);
         var done = match msg {
             case Msg.Published(channel, message) => writeMessage(conn, channel, message)
@@ -4066,17 +4069,24 @@ fun subscribedCheck(name, argv) {
         arity = CONN_ARITY[name];
     }
     if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {
+        if (name == "EXEC") {
+            return EXEC_ARITY;
+        }
         return wrongArgs(lower(name));
     }
     var shown = lower(name);
     if (name == "CONFIG") {
-        // Redis names a subcommand as config|get, and refuses an unknown
-        // one before the context.
+        // Redis names a subcommand as config|get, and checks an unknown
+        // one, and the arity of a known one, before the context.
         var sub = lower(argv[1]);
-        if (!CONFIG_SUBCOMMANDS.has(sub)) {
+        var subArity = CONFIG_SUBCOMMANDS[sub];
+        if (subArity == nil) {
             return errorReply("ERR unknown subcommand '" + argv[1][0:128] + "'. Try CONFIG HELP.");
         }
         shown = "config|" + sub;
+        if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {
+            return wrongArgs(shown);
+        }
     }
     // As in Redis, a replica refuses a write before the context.
     if (REPL_ROLE != "master" and WRITES.has(name)) {
@@ -4091,8 +4101,9 @@ fun subscribedCheck(name, argv) {
 
 // The arity of the commands that runCommand runs with the Conn, outside
 // COMMANDS and ARITY, as Redis gives it.
-var CONN_ARITY = {"REPLCONF": -1, "PSYNC": 3, "WAIT": 3};
-var CONFIG_SUBCOMMANDS = {"get": true, "set": true, "resetstat": true, "rewrite": true, "help": true};
+var CONN_ARITY = {"REPLCONF": -1, "PSYNC": -3, "WAIT": 3};
+// The CONFIG subcommands of Redis 7.0, with their arity.
+var CONFIG_SUBCOMMANDS = {"get": -3, "set": -4, "resetstat": 2, "rewrite": 2, "help": 2};
 
 // ===========================================================================
 // Command table
@@ -4457,7 +4468,7 @@ fun readLoop(conn) {
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
-    writeQueuedMessages(conn);
+    writeQueuedMessages(conn, conn.pubQueued);
     if (len(argv) > 0) {
         var name = upper(argv[0]);
         if (conn.subCount > 0) {
