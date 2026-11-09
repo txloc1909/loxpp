@@ -2091,9 +2091,10 @@ worker sees it no later than the first task switch at which at least a bounded
 delay has passed since it arrived at the worker, and it sees it at once when the
 worker has no task that is ready to run. The `message` move of [The Task
 Machine](#the-task-machine) happens when the worker sees it, so the delay above
-is measured from the send and not from the move. The specification does not bind
-the value of that delay (see [Conformance](README.md#conformance), Speed); it
-binds that the delay is finite. A task that never reaches a suspend point keeps the
+is measured from the send and not from the move. The specification does not
+bind the value of that delay (see
+[Conformance](README.md#conformance), Speed); it binds that the delay is
+finite. A task that never reaches a suspend point keeps the
 worker, as [Suspend Points](#suspend-points) says. Where the task of the
 message joins the run queue, relative to the tasks whose wait or limit the
 worker sees at the same point, is not defined. A send on the same worker, and a
@@ -2104,10 +2105,10 @@ The order in which the tasks of one worker run is therefore defined, and it
 binds every implementation, with these limits: an event outside the program
 decides when a wait ends, and so which tasks are in the run queue when a task
 suspends; the point at which the worker sees an ended wait or a message from
-another worker, within the delay above, is not defined; and the place of a
-message from another worker among the tasks that the worker sees at the same
-point is not defined. The order of steps on different workers is not defined
-either, except where messages order them.
+another worker, within what the paragraphs above allow, is not defined; and the
+place of a message from another worker among the tasks that the worker sees at
+the same point is not defined. The order of steps on different workers is not
+defined either, except where messages order them.
 
 ### Ending
 
