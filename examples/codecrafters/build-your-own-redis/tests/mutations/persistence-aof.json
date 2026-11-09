@@ -566,5 +566,21 @@
   "cases": [
    "local: a manifest with comments only gets a first incremental file"
   ]
+ },
+ {
+  "name": "the trim ignores the AOF",
+  "old": "    if (aofOn) {\n        low = aofPos;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: a replica ahead of the AOF does not make the log drop what the file needs"
+  ]
+ },
+ {
+  "name": "an equal seq is accepted",
+  "old": "            if (seq <= lastSeq) {",
+  "new": "            if (seq < lastSeq) {",
+  "cases": [
+   "local: two incremental files with the same seq are refused"
+  ]
  }
 ]

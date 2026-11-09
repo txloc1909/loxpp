@@ -3770,7 +3770,9 @@ def stages_aof_in(prog, d):
              "file b1.aof seq 1 type b\nfile b2.aof seq 1 type b\nfile {R} seq 1 type i\n"),
             ("local: incremental files out of the order of their seq are refused", encode("SET", "r", "1"),
              {"i2.aof": encode("SET", "q", "1")}, "file i2.aof seq 2 type i\nfile {R} seq 1 type i\n"),
-            ("local: a manifest seq of 0 is refused", encode("SET", "r", "1"), {}, "file {R} seq 0 type b\n")]:
+            ("local: a manifest seq of 0 is refused", encode("SET", "r", "1"), {}, "file {R} seq 0 type b\n"),
+            ("local: two incremental files with the same seq are refused", encode("SET", "r", "1"),
+             {"i1.aof": encode("SET", "q", "1")}, "file i1.aof seq 1 type i\nfile {R} seq 1 type i\n")]:
         rname = rand_word(6)
         base = os.path.join(d, "bad" + rand_word(4))
         os.makedirs(os.path.join(base, "ad"))
@@ -3831,6 +3833,46 @@ def stages_aof_in(prog, d):
                 len(got), next((repr(g)[:60] for g, w in zip(got, want) if g != w), None)))
             r.close()
             c.close()
+    finally:
+        srv.stop()
+
+    # A replica that reads at once, and an AOF that is behind it: the log
+    # keeps the entries that the file has not got.
+    base, adir, aname, rpath = prepared("ahead")
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                        "--appendfilename", aname])
+    try:
+        name = "local: a replica ahead of the AOF does not make the log drop what the file needs"
+        if aof_started(srv, [name]):
+            r, _, _ = replica_handshake(srv.port)
+            stop = threading.Event()
+
+            def drain():
+                r.sock.settimeout(0.2)
+                while not stop.is_set():
+                    try:
+                        if not r.sock.recv(1 << 20):
+                            return
+                    except socket.timeout:
+                        pass
+                    except OSError:
+                        return
+            th = threading.Thread(target=drain)
+            th.start()
+            clients = [Client(srv.port) for _ in range(4)]
+            for j, cl in enumerate(clients):
+                cl.send_raw(b"".join(encode("SET", "a%d-%d" % (j, i), "v") for i in range(6000)))
+            for cl in clients:
+                for _ in range(6000):
+                    if cl.try_read(10) in (TIMEOUT, CLOSED, BAD_REPLY):
+                        break
+                cl.close()
+            stop.set()
+            th.join()
+            r.close()
+            got = (read_bytes(rpath) or b"").count(b"*3\r\n$3\r\nSET\r\n")
+            check(name, srv.proc.poll() is None and got == 24000, "up=%s, %d SET in the file" % (
+                srv.proc.poll() is None, got))
     finally:
         srv.stop()
 

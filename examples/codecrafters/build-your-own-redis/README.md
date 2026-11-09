@@ -244,9 +244,11 @@ inside `MULTI`, is cut back to its last whole command (as Redis does with
 an unknown command, `SELECT` of another database, a manifest line that is
 not `file <name> seq <n> type <t>` (with a seq from 1; the keys have no
 case), an empty manifest, a blank line, two base files, incremental files
-out of the order of their seq, a name with a `/`, and a missing file stop
-the start with a message, as in Redis. A manifest with comments only names
-no file: the server makes a first incremental file. The values of `--appendonly` and `--appendfsync` have no case.
+out of the order of their seq (an equal seq too), a name with a `/`, and a
+missing file stop the start with a message, as in Redis. A manifest with
+comments only names no file: the server makes a first incremental file.
+Some other manifest forms, which Redis does not write, differ from Redis
+(see the known differences). The values of `--appendonly` and `--appendfsync` have no case.
 
 The AOF is one more reader of the replication log: each write appends its
 effective form in its own step (`replicate`), and a writer task (`writeAof`)
@@ -372,6 +374,12 @@ printed.
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
   redis-server master makes a new RDB file each time).
+- The manifest forms that Redis does not write: Redis refuses a comment
+  that starts with a space and a last line with no newline, and this
+  server reads both. Redis reads `seq 1x`, a base line with `seq -1` and
+  `type incr`, and this server refuses them. With comments only or
+  history lines only, Redis writes the manifest again without them and
+  deletes the history files; this server keeps them.
 - The AOF: every `appendfsync` policy waits for the file before the reply,
   as `always` does, and no policy forces the bytes to the disk (#1190). A
   new incremental file has no `SELECT 0` at its start, and there is no
