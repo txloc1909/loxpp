@@ -4096,8 +4096,11 @@ fun parseScore(s) {
             i = i + 1;
         }
         var start = i;
-        while (i < len(s) and s[i] >= "0" and s[i] <= "9" and i - start < 6) {
-            exp = exp * 10 + (ord(s[i]) - 48);
+        while (i < len(s) and s[i] >= "0" and s[i] <= "9") {
+            // Any exponent past 100000 is out of range either way.
+            if (exp < 100000) {
+                exp = exp * 10 + (ord(s[i]) - 48);
+            }
             i = i + 1;
         }
         if (i == start) {
@@ -4108,8 +4111,9 @@ fun parseScore(s) {
     if (i != len(s)) {
         return nil;
     }
-    // The value is 0.<digits> times 10^(point + exp). Past the range of a
-    // double it is an infinity or zero, as strtod gives it.
+    // The value is 0.<digits> times 10^(point + exp). As in Redis, a value
+    // past the range of a double, or one that rounds to zero, is refused
+    // (strtod sets ERANGE).
     var first = 0;
     while (first < len(digits) and digits[first] == "0") {
         first = first + 1;
@@ -4118,14 +4122,8 @@ fun parseScore(s) {
         return float(sign + "0");
     }
     var magnitude = point + exp - first;
-    if (magnitude > 310) {
-        if (sign == "-") {
-            return -ZSET_INF;
-        }
-        return ZSET_INF;
-    }
-    if (magnitude < -330) {
-        return float(sign + "0");
+    if (magnitude > 310 or magnitude < -330) {
+        return nil;
     }
     point = point + exp;
     var text = "";
@@ -4136,7 +4134,11 @@ fun parseScore(s) {
     } else {
         text = digits[0:point] + "." + digits[point:len(digits)];
     }
-    return float(sign + text);
+    var value = float(sign + text);
+    if (value == 0 or value == ZSET_INF or value == -ZSET_INF) {
+        return nil;
+    }
+    return value;
 }
 
 fun zerosOf(n) {
