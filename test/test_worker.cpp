@@ -468,14 +468,20 @@ TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
     EXPECT_LT(msSince(start), 4000);
 }
 
-// The main worker holds a timer, so it is busy, and the main task waits in
-// receive. The timer posts the message: no DeadlockError may come first.
+// The main worker holds a registered wait, so it is busy, and the main task
+// waits in receive. The wait ends on a descriptor that is readable before the
+// script runs, not on a wall-clock deadline, and the handler posts the
+// message: no DeadlockError may come first. The scheduler clock seam keeps
+// pollWhileBusy from polling while the script runs (see the poll test above).
 TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     VM vm;
     int fired = 0;
     Runtime& rt = vm.runtime();
     rt.setSchedulerClock(&noSwitchPoll);
-    rt.poller().waitUntil(PClock::now() + std::chrono::milliseconds(300));
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    ASSERT_EQ(write(fds[1], "x", 1), 1);
+    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
         // C7: the worker holds a registered wait, so it stays in the group's
@@ -508,6 +514,10 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     EXPECT_EQ(err.find("Deadlock"), std::string::npos) << err;
     EXPECT_EQ(fired, 1);
     EXPECT_EQ(globalString(vm, "got"), "7");
+    std::vector<Poller::Token> cancelled;
+    rt.poller().cancelFd(fds[0], cancelled);
+    close(fds[0]);
+    close(fds[1]);
 }
 
 // A send must write the wakeup descriptor only while the worker sleeps in its
