@@ -241,6 +241,32 @@ def main() -> None:
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("the .input file reaches the program's stdin", rc == 0, out)
 
+        # 13: a two-byte character that a 64 KiB read boundary splits.
+        long_line = "x" * 65535 + "\u00e9"
+        d = write_dir(tmp, {"split.lox": f'// CHECK: {long_line}\nprint "{long_line}";\n'})
+        rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
+        check("a character split by a read boundary still matches", rc == 0, out[:400])
+
+        # 14: one line longer than the limit, so the limit cannot wait for a
+        # line end.
+        d = write_dir(
+            tmp,
+            {
+                "oneline.lox": '// CHECK: done\n'
+                'var s = "";\n'
+                'while (len(s) < 100000) { s = s + "0123456789abcdef"; }\n'
+                'print s;\n'
+            },
+        )
+        rc, out, _ = run(
+            [sys.executable, str(TOOL), native, str(d), "--max-output-bytes", "1000"]
+        )
+        check(
+            "a single line past the limit fails by the limit",
+            rc == 1 and "output over 1000 bytes" in out,
+            out[:400],
+        )
+
         # 10: a directory with no .lox file is an error.
         empty = tmp / "empty"
         empty.mkdir()
@@ -252,6 +278,15 @@ def main() -> None:
         for option in ("--timeout", "--max-output-bytes"):
             rc, out, _ = run([sys.executable, str(TOOL), native, str(d), option])
             check(f"{option} with no value is exit 2", rc == 2, f"rc={rc} out={out!r}")
+
+        rc, out, _ = run(
+            [sys.executable, str(TOOL), native, str(d), "--max-output-bytes", "0"]
+        )
+        check("--max-output-bytes 0 is exit 2, not 'no limit'", rc == 2, f"rc={rc} out={out!r}")
+
+        d = write_dir(tmp, {"zero.lox": "// TIMEOUT: 0\n// CHECK: never\nprint \"x\";\n"})
+        rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
+        check("// TIMEOUT: 0 is exit 2", rc == 2 and "greater than zero" in out, f"rc={rc} out={out!r}")
 
     if failures:
         print(f"\n{len(failures)} case(s) failed")

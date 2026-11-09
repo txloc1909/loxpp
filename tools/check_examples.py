@@ -55,6 +55,7 @@ A <loxpp-binary> that does not exist or cannot run is also an error (exit 2): it
 is a mistake in the setup, not a failed example.
 """
 
+import codecs
 import os
 import re
 import select
@@ -141,11 +142,9 @@ class Capture:
         self.head: list[str] = []
         self.tail: list[str] = []
         self.lines = 0
-        self.bytes = 0
 
     def feed(self, line: str) -> None:
         self.lines += 1
-        self.bytes += len(line) + 1
         if len(self.head) < REPORT_HEAD_LINES:
             self.head.append(line)
         else:
@@ -162,6 +161,26 @@ class Capture:
         if self.lines <= len(self.head) + len(self.tail):
             return list(self.head) + list(self.tail)
         return list(self.head) + ["..."] + list(self.tail)
+
+
+def stop(proc: subprocess.Popen) -> None:
+    """Stops the child and everything it started.
+
+    The whole group, not only the shell: a runner that is a wrapper has started
+    an interpreter of its own. SIGTERM first, so a wrapper's own trap runs and
+    removes what it made, then SIGKILL for whatever is left.
+    """
+    for sig, wait in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 5.0)):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=wait)
+            if sig == signal.SIGTERM:
+                return
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def run_example(
@@ -201,6 +220,11 @@ def run_example(
     deadline = time.monotonic() + timeout
     pending = ""
     status = "done"
+    received = 0
+    # The output is decoded as it arrives, so a character that a chunk boundary
+    # splits is still one character: decoding each chunk on its own would
+    # replace it and lose a CHECK line that holds it.
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
     try:
         fd = proc.stdout.fileno()  # type: ignore[union-attr]
         while True:
@@ -215,27 +239,31 @@ def run_example(
             chunk = os.read(fd, 65536)
             if not chunk:
                 break
-            pending += chunk.decode("utf-8", "replace")
+            # The bytes the descriptor gives, not the lines kept: a stream with
+            # no line break must still meet the limit (#1176 review R10).
+            received += len(chunk)
+            if max_bytes and received > max_bytes:
+                status = "output"
+                break
+            pending += decoder.decode(chunk)
             lines, pending = take_lines(pending)
             for line in lines:
                 capture.feed(line)
-            if max_bytes and capture.bytes > max_bytes:
-                status = "output"
-                break
-        if status == "done" and pending:
-            capture.feed(pending)
+        if status == "done":
+            pending += decoder.decode(b"", final=True)
+            if pending:
+                capture.feed(pending)
+    except BaseException:
+        # An interrupted run must not leave the interpreter behind either.
+        stop(proc)
+        raise
     finally:
         if status in ("timeout", "output"):
-            # The whole group, not only the shell: a runner that is a wrapper
-            # has started an interpreter of its own.
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            stop(proc)
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            stop(proc)
             proc.wait()
     return status, capture, proc.returncode
 
@@ -274,11 +302,13 @@ def main() -> None:
     output_arg = take_option(args, "--max-output-bytes")
     try:
         timeout = float(timeout_arg) if timeout_arg is not None else 60.0
+        # Not given means no limit; given means a positive limit. Zero is a
+        # mistake either way, not a way to spell "off".
         max_bytes = int(output_arg) if output_arg is not None else 0
     except ValueError:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
-    if timeout <= 0 or max_bytes < 0:
+    if timeout <= 0 or (output_arg is not None and max_bytes <= 0):
         print(USAGE, file=sys.stderr)
         sys.exit(2)
 
@@ -320,6 +350,12 @@ def main() -> None:
 
         input_file = lox_file.with_suffix(".input")
         own = extract_timeout(lox_file)
+        if own is not None and own <= 0:
+            print(
+                f"error: {lox_file.name}: // TIMEOUT: must be greater than zero",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         limit = own if own is not None else timeout
         status, capture, rc = run_example(loxpp, lox_file, input_file, limit, max_bytes)
 

@@ -536,7 +536,9 @@ jobs:
       # json.lox emits 6.8 GB of trace in 2m19s, and the whole corpus took
       # 6m28s and one timeout at 300 s. A trace-free build of the same preset
       # keeps the sanitizers and runs the corpus in 10 s, so the debug job
-      # builds one for this step (issue #1176).
+      # builds one for this step (issue #1176). The preset, not a copy of its
+      # flags: the image's default C++ compiler is gcc, which cannot build the
+      # parser, and the preset names clang.
       - name: Build loxpp for the example checks, without the instruction trace
         if: matrix.preset == 'debug'
         run: |
@@ -544,12 +546,8 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             loxpp-dev:latest \
-            bash -c "cmake -B build-examples -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-              -DLOXPP_DEBUG_LOG_GC=OFF -DLOXPP_DEBUG_TRACE_EXECUTION=OFF \
-              -DLOXPP_DEBUG_PRINT_CODE=OFF \
-              -DCMAKE_C_FLAGS='-fsanitize=address,undefined' \
-              -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
-              -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined -fuse-ld=lld' \
+            bash -c "cmake --preset debug -B build-examples \
+              -DLOXPP_DEBUG_TRACE_EXECUTION=OFF -DLOXPP_DEBUG_PRINT_CODE=OFF \
               && cmake --build build-examples --target loxpp"
 
       - name: Run example checks
