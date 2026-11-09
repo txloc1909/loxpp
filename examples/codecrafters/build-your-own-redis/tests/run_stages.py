@@ -2841,11 +2841,19 @@ def stages_replication(prog):
         time.sleep(0.2)
         c.call("MULTI")
         c.call("RPUSH", "wl", "w")
+        c.call("SET", "wx", "1")
         c.call("EXEC")
         waiter.try_read(1)
-        got = [r.try_read(1) for _ in range(4)]
+        got = [r.try_read(1) for _ in range(5)]
         check("local: the pop of a waiter that EXEC served comes after its EXEC",
-              got == [["MULTI"], ["RPUSH", "wl", "w"], ["EXEC"], ["LPOP", "wl"]], repr(got))
+              got == [["MULTI"], ["RPUSH", "wl", "w"], ["SET", "wx", "1"], ["EXEC"], ["LPOP", "wl"]], repr(got))
+        c.call("MULTI")
+        c.call("SET", "wy", "1")
+        c.call("GET", "wy")
+        c.call("EXEC")
+        got = r.try_read(1)
+        check("local: a transaction with one write is propagated alone, as Redis 7.0 does",
+              got == ["SET", "wy", "1"], repr(got))
         waiter.close()
         c.call("SET", "dk", "1")
         r.try_read(1)
@@ -2879,8 +2887,10 @@ def stages_replication(prog):
               isinstance(again, str) and again.startswith("FULLRESYNC") and "connected_slaves:3" in info,
               "%r %r" % (again, info[:80]))
         for x in (r2, r3):
-            for _ in range(20):
-                x.try_read(1)
+            # Drains what the replica has got so far.
+            for _ in range(1000):
+                if x.try_read(0.5) in (TIMEOUT, CLOSED, BAD_REPLY):
+                    break
 
         # WAIT.
         alone = Server(prog, [])
@@ -3513,6 +3523,14 @@ def stages_aof_in(prog, d):
             check(forms[5], got == encode("MULTI") + encode("SET", "t", "1") + encode("INCR", "t") + encode("EXEC"),
                   repr(got))
             mark = len(read_bytes(rpath))
+            c.call("MULTI")
+            c.call("GET", "t")
+            c.call("SET", "t1", "1")
+            c.call("EXEC")
+            got = read_bytes(rpath)[mark:]
+            check("local: a transaction with one write goes to the file alone, as Redis 7.0 writes it",
+                  got == encode("SET", "t1", "1"), repr(got))
+            mark = len(read_bytes(rpath))
             c.call("INCR", "l")
             c.call("SET", "t", "2", "NX")
             c.call("SET", "x", "1", "BAD")
@@ -3598,7 +3616,8 @@ def stages_aof_in(prog, d):
             "local: a restart gives back a transaction",
             "local: a restart keeps an absolute expiry",
             "local: a key that expired before the restart stays gone",
-            "local: the next run appends to the same file"]
+            "local: the next run appends to the same file",
+            "local: a restart keeps an expiry whose absolute time has 16 digits"]
     try:
         if aof_started(srv, trip):
             c = Asker(srv)
@@ -3614,6 +3633,8 @@ def stages_aof_in(prog, d):
             c.call("EXEC")
             c.call("SET", "e", "v", "PX", "100000")
             c.call("SET", "gone", "v", "PX", "100")
+            c.call("SET", "far", "v", "EX", "999999999999")
+            c.call("SET", "farms", "v", "PX", "999999999999999")
             c.close()
     finally:
         srv.stop()
@@ -3629,6 +3650,8 @@ def stages_aof_in(prog, d):
             check(trip[1], [c.call("GET", "m1"), c.call("GET", "m2")] == ["1", "2"])
             check(trip[2], c.call("GET", "e") == "v")
             check(trip[3], c.call("GET", "gone") is None and c.call("KEYS", "gone") == [])
+            check("local: a restart keeps an expiry whose absolute time has 16 digits",
+                  [c.call("GET", "far"), c.call("GET", "farms")] == ["v", "v"])
             c.call("SET", "after", "1")
             got = read_bytes(rpath)
             check(trip[4], got is not None and len(got) > size and got.endswith(encode("SET", "after", "1"))
@@ -3652,6 +3675,13 @@ def stages_aof_in(prog, d):
          encode("SET", "r", "2"), {"b.rdb": None, "i0.aof": encode("SET", "r", "1") + encode("SET", "q", "1")},
          "file b.rdb seq 1 type b\nfile i0.aof seq 1 type i\nfile {R} seq 2 type i\n",
          lambda c: [c.call("GET", "base"), c.call("GET", "r"), c.call("GET", "q")] == ["b", "2", "1"]),
+        ("local: an RDB base keeps an expired key for the commands after it",
+         encode("SET", "base", "7", "XX"), {"b.rdb": "expired"},
+         "file b.rdb seq 1 type b\nfile {R} seq 2 type i\n",
+         lambda c: c.call("GET", "base") == "7"),
+        ("local: the replay goes on after EXEC with no MULTI",
+         encode("EXEC") + encode("SET", "r", "1"), {}, None,
+         lambda c: c.call("GET", "r") == "1"),
         ("local: the replay loads a base AOF file and skips a history file",
          encode("INCR", "r"), {"b.aof": encode("SET", "r", "10"), "h.aof": encode("SET", "r", "99")},
          "file h.aof seq 1 type h\nfile b.aof seq 2 type b\nfile {R} seq 3 type i\n",
@@ -3660,9 +3690,9 @@ def stages_aof_in(prog, d):
     for name, data, extra, manifest, test in replay:
         files = {}
         for fname, content in extra.items():
-            if content is None:
+            if content is None or content == "expired":
                 p = os.path.join(d, "tmp.rdb")
-                write_rdb(p, [("base", "b", None, None)])
+                write_rdb(p, [("base", "b", 1000 if content else None, "ms" if content else None)])
                 content = read_bytes(p)
             files[fname] = content
         rname = rand_word(6)
@@ -3694,7 +3724,9 @@ def stages_aof_in(prog, d):
             ("local: a last file that ends inside MULTI is cut back to before MULTI",
              encode("SET", "r", "1") + encode("MULTI") + encode("SET", "r", "2"), encode("SET", "r", "1")),
             ("local: a last file that ends inside a header line is cut back",
-             encode("SET", "r", "1") + b"*3\r\n$3", encode("SET", "r", "1"))]:
+             encode("SET", "r", "1") + b"*3\r\n$3", encode("SET", "r", "1")),
+            ("local: an annotation that ends the file with no newline is kept",
+             encode("SET", "r", "1") + b"#TS:1700000000", encode("SET", "r", "1") + b"#TS:1700000000")]:
         flags, path, rfile = with_aof("cut" + rand_word(4), data)
         srv = Server(prog, flags)
         try:
@@ -3723,7 +3755,10 @@ def stages_aof_in(prog, d):
             ("local: a manifest line with a word that has no value is refused", encode("SET", "r", "1"), {},
              "file {R} seq 1 type i x\n"),
             ("local: a manifest that names a missing file is refused", encode("SET", "r", "1"), {},
-             "file nothere.aof seq 1 type i\n")]:
+             "file nothere.aof seq 1 type i\n"),
+            ("local: a manifest line with no seq is refused", encode("SET", "r", "1"), {},
+             "file {R} type i\n"),
+            ("local: an empty manifest is refused", encode("SET", "r", "1"), {}, "\n")]:
         rname = rand_word(6)
         base = os.path.join(d, "bad" + rand_word(4))
         os.makedirs(os.path.join(base, "ad"))
@@ -3751,6 +3786,40 @@ def stages_aof_in(prog, d):
                    read_bytes(os.path.join(base, "ad", "af.aof.1.incr.aof"))]
             check(name, got == ["1", b"file b.aof seq 1 type b\nfile af.aof.1.incr.aof seq 1 type i\n",
                                 encode("SET", "r", "2")], repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # The values of the flags are read with no case, as Redis reads them.
+    base = os.path.join(d, "upper")
+    os.mkdir(base)
+    srv = Server(prog, ["--dir", base, "--appendonly", "YES", "--appendfsync", "Always"])
+    try:
+        name = "local: the values of --appendonly and --appendfsync have no case"
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            got = [c.call("CONFIG", "GET", "appendonly"), c.call("CONFIG", "GET", "appendfsync"),
+                   os.path.isdir(os.path.join(base, "appendonlydir"))]
+            check(name, got == [["appendonly", "yes"], ["appendfsync", "always"], True], repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # The log drops the entries that the file has: 40 writes of 16 MB to
+    # one key leave one value live.
+    base = os.path.join(d, "trim")
+    os.mkdir(base)
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes"])
+    try:
+        name = "local: AOF3 the log does not keep the entries that the file has"
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            for i in range(40):
+                c.c.sock.settimeout(30)
+                c.call("SET", "r", ("%02d" % i) * (8 << 20))
+            rss = rss_kib(srv.proc.pid)
+            print("       measured: RSS %d KiB after 40 writes of 16 MB" % rss)
+            check(name, rss < 300 * 1024, "RSS %d KiB" % rss)
             c.close()
     finally:
         srv.stop()
@@ -3835,10 +3904,12 @@ def stages_aof_in(prog, d):
             mark = len(read_bytes(rpath))
             c.call("MULTI")
             c.call("RPUSH", "W2", *many)
+            c.call("SET", "W3", "1")
             c.call("EXEC")
             got = read_bytes(rpath)[mark:]
             check("local: the reply of EXEC comes after the file has the transaction",
-                  got == encode("MULTI") + encode("RPUSH", "W2", *many) + encode("EXEC"), "%d bytes" % len(got))
+                  got == encode("MULTI") + encode("RPUSH", "W2", *many) + encode("SET", "W3", "1") + encode("EXEC"),
+                  "%d bytes" % len(got))
             b = Asker(srv)
             b.c.send_raw(encode("BLPOP", "Q", "0"))
             time.sleep(0.2)
@@ -3851,7 +3922,7 @@ def stages_aof_in(prog, d):
                   served == ["Q", "m0"] and got == encode("RPUSH", "Q", *many) + encode("LPOP", "Q"),
                   "%r, %d bytes" % (served, len(got)))
             b.close()
-            c.call("DEL", "W", "W2", "Q")
+            c.call("DEL", "W", "W2", "W3", "Q")
             mark = len(read_bytes(rpath))
             n = 1048573
             elems = ["e%d" % i for i in range(n)]

@@ -249,8 +249,8 @@
  },
  {
   "name": "a full resync loads in one step",
-  "old": "    loadRdbData(data, fresh, true);",
-  "new": "    loadRdbData(data, fresh, false);",
+  "old": "    loadRdbData(data, fresh, true, true);",
+  "new": "    loadRdbData(data, fresh, false, true);",
   "cases": [
    "local: a full resync of 524288 keys stalls PING at most 1 s"
   ]
@@ -409,7 +409,7 @@
  },
  {
   "name": "a replica skips an expired key of the RDB",
-  "old": "expiresAt == nil or expiresAt > now or forReplica)",
+  "old": "expiresAt == nil or expiresAt > now or keepExpired)",
   "new": "expiresAt == nil or expiresAt > now)",
   "cases": [
    "local: a replica keeps an expired key of the RDB for its master"

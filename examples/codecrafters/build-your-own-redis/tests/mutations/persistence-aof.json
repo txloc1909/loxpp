@@ -25,7 +25,7 @@
  },
  {
   "name": "--appendonly is not read",
-  "old": "    CONFIG_APPENDONLY = flagValue(\"--appendonly\", CONFIG_APPENDONLY);",
+  "old": "    CONFIG_APPENDONLY = lower(flagValue(\"--appendonly\", CONFIG_APPENDONLY));",
   "new": "",
   "cases": [
    "persistence-aof-02 CONFIG GET gives each flag"
@@ -137,7 +137,7 @@
  },
  {
   "name": "SET PX goes to the file as it came",
-  "old": "    if (expiryUnit != nil and expiryUnit != \"PXAT\") {",
+  "old": "    if (expiryUnit != nil and expiryUnit != \"PXAT\" and expiresAt <= MAX_EXACT) {",
   "new": "    if (false) {",
   "cases": [
    "local: SET with PX goes to the file with an absolute PXAT"
@@ -193,8 +193,8 @@
  },
  {
   "name": "the replay runs a transaction at MULTI",
-  "old": "        } else if (queued != nil) {\n            queued.append(argv);\n        } else {\n            replayAofCommand(argv);",
-  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            replayAofCommand(argv);\n        } else {\n            replayAofCommand(argv);",
+  "old": "        } else if (queued != nil) {\n            queued.append(argv);\n        } else if (name == \"EXEC\") {",
+  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            replayAofCommand(argv);\n        } else if (name == \"EXEC\") {",
   "cases": [
    "local: a last file that ends inside MULTI is cut back to before MULTI"
   ]
@@ -225,8 +225,8 @@
  },
  {
   "name": "a history file is replayed",
-  "old": "        } else if (kind != \"h\") {\n",
-  "new": "        } else if (kind == \"h\") {\n            incr.append(name);\n        } else {\n",
+  "old": "        } else if (kind == \"h\") {\n            sawHistory = true;",
+  "new": "        } else if (kind == \"h\") {\n            incr.append(name);",
   "cases": [
    "local: the replay loads a base AOF file and skips a history file"
   ]
@@ -337,8 +337,8 @@
  },
  {
   "name": "a manifest word with no value is accepted",
-  "old": "        if (name == nil or kind == nil or i != len(words)) {",
-  "new": "        if (name == nil or kind == nil) {",
+  "old": "        if (name == nil or kind == nil or seq == nil or seq < 1 or i != len(words)) {",
+  "new": "        if (name == nil or kind == nil or seq == nil or seq < 1) {",
   "cases": [
    "local: a manifest line with a word that has no value is refused"
   ]
@@ -429,6 +429,86 @@
   "new": "",
   "cases": [
    "local: a served BLPOP replies after the file has its pop"
+  ]
+ },
+ {
+  "name": "the writer does not trim the log",
+  "old": "    aofDoneOffset = done;\n    trimReplLog();",
+  "new": "    aofDoneOffset = done;",
+  "cases": [
+   "local: AOF3 the log does not keep the entries that the file has"
+  ]
+ },
+ {
+  "name": "the log trims by count only",
+  "old": "        and (drop > 1024 or replLog[drop - 1].endCost - replLogBaseCost >= TRIM_COST)) {",
+  "new": "        and drop > 1024) {",
+  "cases": [
+   "local: AOF3 the log does not keep the entries that the file has"
+  ]
+ },
+ {
+  "name": "a 16-digit expiry goes as PXAT",
+  "old": "    if (expiryUnit != nil and expiryUnit != \"PXAT\" and expiresAt <= MAX_EXACT) {",
+  "new": "    if (expiryUnit != nil and expiryUnit != \"PXAT\") {",
+  "cases": [
+   "local: a restart keeps an expiry whose absolute time has 16 digits"
+  ]
+ },
+ {
+  "name": "an RDB base drops an expired key",
+  "old": "        loadRdbData(data, store, false, true);\n        return;",
+  "new": "        loadRdbData(data, store, false, false);\n        return;",
+  "cases": [
+   "local: an RDB base keeps an expired key for the commands after it"
+  ]
+ },
+ {
+  "name": "a manifest line with no seq is accepted",
+  "old": "        if (name == nil or kind == nil or seq == nil or seq < 1 or i != len(words)) {",
+  "new": "        if (name == nil or kind == nil or i != len(words)) {",
+  "cases": [
+   "local: a manifest line with no seq is refused"
+  ]
+ },
+ {
+  "name": "an empty manifest is accepted",
+  "old": "    if (base == nil and len(incr) == 0 and !sawHistory) {\n        throw AofError(\"the manifest names no file\", false);\n    }",
+  "new": "",
+  "cases": [
+   "local: an empty manifest is refused"
+  ]
+ },
+ {
+  "name": "EXEC with no MULTI stops the replay",
+  "old": "        } else if (name == \"EXEC\") {\n            // EXEC with no MULTI: Redis gets an error reply and goes on.\n        } else {",
+  "new": "        } else {",
+  "cases": [
+   "local: the replay goes on after EXEC with no MULTI"
+  ]
+ },
+ {
+  "name": "a transaction with one write goes in MULTI",
+  "old": "        if (replExecWrites == 1) {\n            replExecFirst = [head, tail];\n            return;\n        }\n        if (replExecWrites == 2) {",
+  "new": "        if (replExecWrites == 1) {",
+  "cases": [
+   "local: a transaction with one write goes to the file alone, as Redis 7.0 writes it"
+  ]
+ },
+ {
+  "name": "--appendonly is read with case",
+  "old": "    CONFIG_APPENDONLY = lower(flagValue(\"--appendonly\", CONFIG_APPENDONLY));",
+  "new": "    CONFIG_APPENDONLY = flagValue(\"--appendonly\", CONFIG_APPENDONLY);",
+  "cases": [
+   "local: the values of --appendonly and --appendfsync have no case"
+  ]
+ },
+ {
+  "name": "an annotation at the end with no newline is cut",
+  "old": "            if (pos > len(data)) {\n                pos = len(data);\n            }",
+  "new": "            if (pos > len(data)) {\n                truncated = true;\n                break;\n            }",
+  "cases": [
+   "local: an annotation that ends the file with no newline is kept"
   ]
  }
 ]

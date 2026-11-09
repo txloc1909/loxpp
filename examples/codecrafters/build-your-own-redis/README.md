@@ -235,22 +235,28 @@ directory where the server started when `--dir` is not given.
 
 The replay parses the RESP commands of each file and runs each as a client
 that gets no replies. It runs a `MULTI` ... `EXEC` as one step. It accepts
-`SELECT 0` and the annotation lines (`#...`) of Redis. As in Redis, no key
-expires while the files load. A last file that ends inside a command, or
+`SELECT 0` and the annotation lines (`#...`) of Redis, also one that ends
+the file with no newline, and it goes on after an `EXEC` with no `MULTI`,
+as Redis does. As in Redis, no key expires while the files load, and an
+RDB base keeps a key that has expired for the commands after it. A last file that ends inside a command, or
 inside `MULTI`, is cut back to its last whole command (as Redis does with
 `aof-load-truncated yes`) and the server starts. A file that is not RESP,
 an unknown command, `SELECT` of another database, a manifest line that is
-not `file <name> seq <n> type <t>`, and a name with a `/` stop the start
-with a message.
+not `file <name> seq <n> type <t>` (with a seq from 1), a manifest that
+names no file, a name with a `/`, and a missing file stop the start with
+a message. The values of `--appendonly` and `--appendfsync` have no case.
 
 The AOF is one more reader of the replication log: each write appends its
 effective form in its own step (`replicate`), and a writer task (`writeAof`)
 appends the entries to the file in steps, as a replica session writes them
 to its socket. A served `BLPOP` goes as `LPOP`, `XADD *` with its ID,
-`EXEC` in `MULTI` and `EXEC`, and a lazy expiry as `DEL`. `SET` with
-`EX`, `PX` or `EXAT` goes with `PXAT` and the absolute time, as Redis 7.0
-writes it, so a replay later does not give the key a new life; the
-replicas get the same form. The `GETACK` of `WAIT` does not go to the file.
+an `EXEC` with more than one write in `MULTI` and `EXEC` (with one write,
+the write alone, as Redis 7.0 writes it), and a lazy expiry as `DEL`.
+`SET` with `EX`, `PX` or `EXAT` goes with `PXAT` and the absolute time, as
+Redis 7.0 writes it, so a replay later does not give the key a new life;
+the replicas get the same form. A time of 16 digits or more goes as it
+came, because `parseInteger` reads 15 digits; such a key lives for tens of
+thousands of years either way. The `GETACK` of `WAIT` does not go to the file.
 The writer closes the file after each batch: the standard library has no
 flush and no fsync, and `close()` is what makes the bytes visible to other
 processes (#1190).
@@ -258,7 +264,12 @@ processes (#1190).
 A command that wrote replies only when the file has its entries
 (`aofSync`), whatever `appendfsync` says. So an acknowledged write is in
 the file, and each client has at most one command in the log that the
-file has not got (rule 4). A command that wrote nothing does not wait. A
+file has not got (rule 4). A command that wrote nothing does not wait,
+except a `BLPOP` that times out and an `XREAD BLOCK` that is served: they
+wait for the writes that other clients made while they were blocked. The
+log drops the entries that every reader has got when they hold 1024
+entries or 1 MB of cost (`trimReplLog`), so a long run of large writes
+does not keep them (AOF3). A
 write to the file that fails stops the server with a message, as Redis
 does with `appendfsync always`.
 
@@ -269,7 +280,8 @@ its effective form to the log in its own step (`replicate`), at the point
 where it writes: a push comes before the pop of the client that it serves,
 `XADD *` goes with the ID that the master gave, the pop of `BLPOP` goes as
 `LPOP`, a lazy expiry goes as `DEL`, and `EXEC` wraps its writes in `MULTI`
-and `EXEC`; the pops of the waiters that `EXEC` serves come after it. So the order of
+and `EXEC` when it has more than one (one write goes alone, as in Redis
+7.0); the pops of the waiters that `EXEC` serves come after it. So the order of
 the log is the order of the writes, and the offset (`replOffset`) counts the
 RESP bytes of each entry when it is appended. Each replica session writes
 the log from its own position, in steps (`writeReplLog`). A replica that is
@@ -503,6 +515,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
 | Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
 | AOF1 (group `persistence-aof`, on a server of its own): `SET` of 64 MB with the AOF | the file has the command; PING within 1.0 s (rule 6 only) | 0.20 s |
+| AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
@@ -544,9 +557,7 @@ of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
 key that expires, so no reply shows it. It stays for a client that watches
 the key after the read and before the removal.
 
-Three guards of the AOF have no case. The writer trims the log when no
-replica reads it (`trimReplLog` in `writeAof`); without the trim only the
-memory grows, and a probe that shows it needs gigabytes of entries. The
+Two guards of the AOF have no case. The
 wait of `WATCH` for the file (`aofSync`) holds the `DEL` of a lazy expiry,
 which the writer writes in one step before the next client reads, so no
 timing shows a reply before it. A client that goes while it waits for the

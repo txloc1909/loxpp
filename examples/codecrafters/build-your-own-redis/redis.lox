@@ -345,6 +345,9 @@ class Entry {
 
 var store = {};
 
+// The greatest integer of 15 digits, the most that parseInteger reads.
+var MAX_EXACT = 999999999999999;
+
 // Whole milliseconds, as mstime() of Redis: an absolute expiry goes to
 // the replicas and the AOF as an integer.
 fun nowMs() {
@@ -460,12 +463,15 @@ fun cmdSet(argv) {
     }
     store[key] = Entry("string", argv[2], expiresAt);
     touch(key);
-    if (expiryUnit != nil and expiryUnit != "PXAT") {
+    if (expiryUnit != nil and expiryUnit != "PXAT" and expiresAt <= MAX_EXACT) {
         // As Redis 7.0 does, a relative or second expiry goes to the
         // replicas and the AOF as an absolute time in milliseconds, so a
         // replay later does not give the key a new life.
         replicate(["SET", key, argv[2], "PXAT", str(expiresAt)], nil);
     } else {
+        // A time of 16 digits or more is not read back (parseInteger takes
+        // 15), so such an expiry goes as it came; it is tens of thousands
+        // of years away either way.
         replicate(argv, nil);
     }
     return reply;
@@ -2528,15 +2534,16 @@ fun loadRdb(path) {
     var f = open(path, "r");
     var data = f.read();
     f.close();
-    loadRdbData(data, store, false);
+    loadRdbData(data, store, false, false);
 }
 
 // Loads the string keys of database 0 from the bytes of an RDB file into the
 // Map target: the file at start, or the file that a master sends with
-// FULLRESYNC. On a live replica (forReplica), it yields every
+// FULLRESYNC, or the base of an AOF. A replica, and an AOF base, keep an
+// expired key (keepExpired), as in Redis. On a live replica (forReplica), it yields every
 // ELEMENTS_PER_YIELD keys and every LZF_BYTES_PER_YIELD bytes of an LZF
 // string, so the clients go on; they see the old keyspace until it ends.
-fun loadRdbData(data, target, forReplica) {
+fun loadRdbData(data, target, forReplica, keepExpired) {
     rdbMayYield = forReplica;
     var loaded = 0;
     var r = RdbReader(data);
@@ -2594,8 +2601,9 @@ fun loadRdbData(data, target, forReplica) {
                 throw RdbError("the file has keys in database " + str(db) + "; this server has database 0 only");
             }
             // As in Redis 7.0, only a master skips an expired key: a
-            // replica keeps it until the DEL of its master comes.
-            if (expiresAt == nil or expiresAt > now or forReplica) {
+            // replica keeps it until the DEL of its master comes, and an
+            // AOF base keeps it for the commands after it.
+            if (expiresAt == nil or expiresAt > now or keepExpired) {
                 target[key] = Entry("string", value, expiresAt);
             }
             expiresAt = nil;
@@ -2876,10 +2884,14 @@ class ReplEntry {
 }
 var replLog = [];
 var replLogBase = 0;
+// The cost (see replCost) of the entries before replLogBase.
+var replLogBaseCost = 0;
+var TRIM_COST = 1048576;
 // True while EXEC runs, and true after its first write: EXEC wraps its
 // writes in MULTI and EXEC, as Redis propagates a transaction.
 var replInExec = false;
-var replExecWrote = false;
+var replExecWrites = 0;
+var replExecFirst = nil;
 // A replica that has not got this many bytes of the stream is dropped
 // (README rule 4), as Redis drops it at its output buffer limit.
 // The limits of a replica that falls behind, as the output buffer limits of
@@ -2939,9 +2951,20 @@ fun replicate(head, tail) {
     if (len(replicas) == 0 and !aofOn) {
         return;
     }
-    if (replInExec and !replExecWrote) {
-        replExecWrote = true;
-        appendRepl(["MULTI"], nil);
+    if (replInExec) {
+        // As Redis 7.0 does, a transaction with one write goes alone, and
+        // one with more goes in MULTI and EXEC. EXEC runs in one step, so
+        // the first write can wait here until the second comes.
+        replExecWrites = replExecWrites + 1;
+        if (replExecWrites == 1) {
+            replExecFirst = [head, tail];
+            return;
+        }
+        if (replExecWrites == 2) {
+            appendRepl(["MULTI"], nil);
+            appendRepl(replExecFirst[0], replExecFirst[1]);
+            replExecFirst = nil;
+        }
     }
     appendRepl(head, tail);
 }
@@ -2992,13 +3015,17 @@ fun appendRepl(head, tail) {
     }
 }
 
-// Called by EXEC after its step: closes the MULTI of its writes.
+// Called by EXEC at the end of its step: appends its one write, or closes
+// the MULTI of its writes.
 fun endExecReplication() {
-    if (replExecWrote) {
+    if (replExecWrites == 1) {
+        appendRepl(replExecFirst[0], replExecFirst[1]);
+    } else if (replExecWrites > 1) {
         appendRepl(["EXEC"], nil);
     }
     replInExec = false;
-    replExecWrote = false;
+    replExecWrites = 0;
+    replExecFirst = nil;
 }
 
 // Writes the log entries that the replica has not got, in steps.
@@ -3042,7 +3069,12 @@ fun trimReplLog() {
         }
     }
     var drop = low - replLogBase;
-    if (drop > 1024 and drop * 2 > len(replLog)) {
+    // It trims when the entries that every reader has got hold 1024
+    // entries or TRIM_COST of cost, and are at least half of the log, so a
+    // trim copies at most as many entries as it drops.
+    if (drop > 0 and drop * 2 > len(replLog)
+        and (drop > 1024 or replLog[drop - 1].endCost - replLogBaseCost >= TRIM_COST)) {
+        replLogBaseCost = replLog[drop - 1].endCost;
         replLog = replLog[drop:len(replLog)];
         replLogBase = low;
     }
@@ -3060,6 +3092,7 @@ fun dropReplica(conn) {
     if (len(replicas) == 0 and !aofOn) {
         // No reader is left: the positions of the log go on from the end.
         replLogBase = replLogBase + len(replLog);
+        replLogBaseCost = replCost;
         replLog = [];
     }
 }
@@ -3336,7 +3369,7 @@ fun replicaSession() {
         throw ProtocolError("the master closed the link during the RDB file");
     }
     var fresh = {};
-    loadRdbData(data, fresh, true);
+    loadRdbData(data, fresh, true, true);
     // One step: the clients see the old keyspace or the new one, and each
     // client that watches a key is marked, as the keys change: one step for
     // each such client, not for each watched key.
@@ -3529,7 +3562,7 @@ fun replayAofFile(path, isLast) {
     var data = f.read();
     f.close();
     if (len(data) >= 5 and data[0:5] == "REDIS") {
-        loadRdbData(data, store, false);
+        loadRdbData(data, store, false, true);
         return;
     }
     var pos = 0;
@@ -3544,11 +3577,12 @@ fun replayAofFile(path, isLast) {
             while (e < len(data) and data[e] != "\n") {
                 e = e + 1;
             }
-            if (e >= len(data)) {
-                truncated = true;
-                break;
-            }
+            // As Redis, it keeps an annotation that ends the file with no
+            // newline.
             pos = e + 1;
+            if (pos > len(data)) {
+                pos = len(data);
+            }
             if (queued == nil) {
                 valid = pos;
             }
@@ -3580,6 +3614,8 @@ fun replayAofFile(path, isLast) {
             queued = nil;
         } else if (queued != nil) {
             queued.append(argv);
+        } else if (name == "EXEC") {
+            // EXEC with no MULTI: Redis gets an error reply and goes on.
         } else {
             replayAofCommand(argv);
         }
@@ -3610,6 +3646,7 @@ fun readManifest(path) {
     f.close();
     var base = nil;
     var incr = [];
+    var sawHistory = false;
     for (var line in lines) {
         var words = splitWords(trimCR(line));
         if (len(words) == 0 or words[0][0] == "#") {
@@ -3617,16 +3654,19 @@ fun readManifest(path) {
         }
         var name = nil;
         var kind = nil;
+        var seq = nil;
         var i = 0;
         while (i + 1 < len(words)) {
             if (words[i] == "file") {
                 name = words[i + 1];
             } else if (words[i] == "type") {
                 kind = words[i + 1];
+            } else if (words[i] == "seq") {
+                seq = parseInteger(words[i + 1]);
             }
             i = i + 2;
         }
-        if (name == nil or kind == nil or i != len(words)) {
+        if (name == nil or kind == nil or seq == nil or seq < 1 or i != len(words)) {
             throw AofError("the manifest has a line that is not 'file <name> seq <n> type <t>'", false);
         }
         if (!plainFileName(name)) {
@@ -3636,9 +3676,14 @@ fun readManifest(path) {
             base = name;
         } else if (kind == "i") {
             incr.append(name);
-        } else if (kind != "h") {
+        } else if (kind == "h") {
+            sawHistory = true;
+        } else {
             throw AofError("the manifest has the unknown file type '" + kind + "'", false);
         }
+    }
+    if (base == nil and len(incr) == 0 and !sawHistory) {
+        throw AofError("the manifest names no file", false);
     }
     return [base, incr];
 }
@@ -4485,10 +4530,11 @@ fun main() {
         }
     }
     CONFIG_DBFILENAME = flagValue("--dbfilename", CONFIG_DBFILENAME);
-    CONFIG_APPENDONLY = flagValue("--appendonly", CONFIG_APPENDONLY);
+    // Redis reads these values with no case.
+    CONFIG_APPENDONLY = lower(flagValue("--appendonly", CONFIG_APPENDONLY));
     CONFIG_APPENDDIRNAME = flagValue("--appenddirname", CONFIG_APPENDDIRNAME);
     CONFIG_APPENDFILENAME = flagValue("--appendfilename", CONFIG_APPENDFILENAME);
-    CONFIG_APPENDFSYNC = flagValue("--appendfsync", CONFIG_APPENDFSYNC);
+    CONFIG_APPENDFSYNC = lower(flagValue("--appendfsync", CONFIG_APPENDFSYNC));
     if (CONFIG_APPENDONLY != "yes" and CONFIG_APPENDONLY != "no") {
         print "redis.lox: --appendonly needs yes or no";
         exit(64);
