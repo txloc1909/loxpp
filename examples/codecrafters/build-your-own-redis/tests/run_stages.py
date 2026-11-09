@@ -56,13 +56,13 @@ def rand_word(n=8):
 
 
 class Server:
-    def __init__(self, prog, args):
+    def __init__(self, prog, args, cwd=None):
         self.port = free_port()
         self.log = tempfile.NamedTemporaryFile(
             prefix="loxpp-redis-", suffix=".log", delete=False)
         self.proc = subprocess.Popen(
             [prog, "--port", str(self.port)] + args,
-            stdout=self.log, stderr=subprocess.STDOUT)
+            stdout=self.log, stderr=subprocess.STDOUT, cwd=cwd)
         self.up = self._wait_up()
 
     def _wait_up(self):
@@ -3283,6 +3283,523 @@ def stages_replication(prog):
         shutil.rmtree(d, ignore_errors=True)
 
 
+def read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def write_bytes(path, data):
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def stages_aof(prog):
+    """The persistence-aof group, and the local cases of the AOF."""
+    d = tempfile.mkdtemp(prefix="loxpp-aof-")
+    try:
+        stages_aof_in(prog, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def aof_started(srv, names):
+    """True when srv is up. Else each named case fails by its name."""
+    if srv.up:
+        return True
+    for name in names:
+        check(name, False, "the server did not start: %s" % srv.log_text()[-300:])
+    return False
+
+
+def aof_exits(prog, args, name, cwd=None):
+    """Checks that the server refuses to start: it exits with no listener
+    and a message."""
+    srv = Server(prog, args, cwd=cwd)
+    try:
+        code = srv.proc.wait(timeout=10) if not srv.up else None
+        check(name, not srv.up and code not in (None, 0) and "redis.lox:" in srv.log_text(),
+              "up=%s code=%r log=%r" % (srv.up, code, srv.log_text()[-200:]))
+    except subprocess.TimeoutExpired:
+        check(name, False, "the server did not exit")
+    finally:
+        srv.stop()
+
+
+def stages_aof_in(prog, d):
+    # Stage 1: the defaults, with the start directory as dir.
+    home = os.path.join(d, "home")
+    os.mkdir(home)
+    names01 = ["persistence-aof-01 CONFIG GET dir gives the start directory",
+               "persistence-aof-01 CONFIG GET appendonly gives no",
+               "persistence-aof-01 CONFIG GET appenddirname gives appendonlydir",
+               "persistence-aof-01 CONFIG GET appendfilename gives appendonly.aof",
+               "persistence-aof-01 CONFIG GET appendfsync gives everysec",
+               "local: with appendonly no, no AOF directory is made"]
+    srv = Server(prog, [], cwd=home)
+    try:
+        if aof_started(srv, names01):
+            c = Asker(srv)
+            check(names01[0], c.call("CONFIG", "GET", "dir") == ["dir", os.path.realpath(home)],
+                  repr(c.call("CONFIG", "GET", "dir")))
+            check(names01[1], c.call("CONFIG", "GET", "appendonly") == ["appendonly", "no"])
+            check(names01[2], c.call("CONFIG", "GET", "appenddirname") == ["appenddirname", "appendonlydir"])
+            check(names01[3], c.call("CONFIG", "GET", "appendfilename") == ["appendfilename", "appendonly.aof"])
+            check(names01[4], c.call("CONFIG", "GET", "appendfsync") == ["appendfsync", "everysec"])
+            c.call("SET", "k", "v")
+            check(names01[5], os.listdir(home) == [], repr(os.listdir(home)))
+            c.close()
+    finally:
+        srv.stop()
+
+    # Stage 2: the flags. Stages 3-5: the directory, the empty file and the
+    # manifest, made at start.
+    base = os.path.join(d, "s2")
+    os.mkdir(base)
+    adir, aname = "ad" + rand_word(4), "af" + rand_word(4) + ".aof"
+    names = ["persistence-aof-02 CONFIG GET gives each flag",
+             "persistence-aof-03 the AOF directory is made at start",
+             "persistence-aof-04 an empty incremental file is made at start",
+             "persistence-aof-05 the manifest names the incremental file"]
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                        "--appendfilename", aname, "--appendfsync", "everysec"])
+    try:
+        if aof_started(srv, names):
+            path = os.path.join(base, adir)
+            # Read before any command: the server makes them at start.
+            isdir = os.path.isdir(path)
+            incr = read_bytes(os.path.join(path, aname + ".1.incr.aof"))
+            manifest = read_bytes(os.path.join(path, aname + ".manifest"))
+            c = Asker(srv)
+            got = [c.call("CONFIG", "GET", n) for n in
+                   ("dir", "appendonly", "appenddirname", "appendfilename", "appendfsync")]
+            check(names[0], got == [["dir", base], ["appendonly", "yes"], ["appenddirname", adir],
+                                    ["appendfilename", aname], ["appendfsync", "everysec"]], repr(got))
+            check(names[1], isdir)
+            check(names[2], incr == b"", repr(incr))
+            check(names[3], manifest == ("file %s.1.incr.aof seq 1 type i\n" % aname).encode(), repr(manifest))
+            c.close()
+    finally:
+        srv.stop()
+    srv = Server(prog, ["--appendfsync", "always"], cwd=home)
+    try:
+        if aof_started(srv, ["persistence-aof-02 a flag that is not given keeps its default"]):
+            c = Asker(srv)
+            got = [c.call("CONFIG", "GET", n) for n in ("appendonly", "appendfsync")]
+            check("persistence-aof-02 a flag that is not given keeps its default",
+                  got == [["appendonly", "no"], ["appendfsync", "always"]], repr(got))
+            c.close()
+    finally:
+        srv.stop()
+    # A directory that is there already is not an error.
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                        "--appendfilename", aname])
+    check("persistence-aof-03 an AOF directory that is there already is not an error", srv.up,
+          srv.log_text()[-200:])
+    srv.stop()
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes"])
+    try:
+        check("local: the default AOF names are used",
+              srv.up and read_bytes(os.path.join(base, "appendonlydir", "appendonly.aof.manifest"))
+              == b"file appendonly.aof.1.incr.aof seq 1 type i\n")
+    finally:
+        srv.stop()
+
+    # Stages 6-8: the writes go to the file that the manifest names, before
+    # the reply.
+    def prepared(tag):
+        base = os.path.join(d, tag)
+        adir, aname, rname = "ad" + rand_word(4), "af" + rand_word(4) + ".aof", rand_word(6)
+        os.makedirs(os.path.join(base, adir))
+        write_bytes(os.path.join(base, adir, aname + ".manifest"),
+                    ("file %s.1.incr.aof seq 1 type i\n" % rname).encode())
+        write_bytes(os.path.join(base, adir, rname + ".1.incr.aof"), b"")
+        return base, adir, aname, os.path.join(base, adir, rname + ".1.incr.aof")
+
+    base, adir, aname, rpath = prepared("s6")
+    flags = ["--dir", base, "--appendonly", "yes", "--appenddirname", adir, "--appendfilename", aname,
+             "--appendfsync", "always"]
+    names = ["persistence-aof-06 SET goes to the file that the manifest names before the reply",
+             "persistence-aof-06 the default file is not used",
+             "persistence-aof-07 two writes go to the file in order",
+             "persistence-aof-08 only the writes go to the file"]
+    srv = Server(prog, flags)
+    try:
+        if aof_started(srv, names):
+            c = Asker(srv)
+            k1, v1, k2, v2 = rand_word(), rand_word(), rand_word(), rand_word()
+            c.call("SET", k1, v1)
+            got = read_bytes(rpath)
+            check(names[0], got == encode("SET", k1, v1), repr(got))
+            check(names[1], not os.path.exists(os.path.join(base, adir, aname + ".1.incr.aof")))
+            c.call("SET", k2, v2)
+            got = read_bytes(rpath)
+            check(names[2], got == encode("SET", k1, v1) + encode("SET", k2, v2), repr(got))
+            c.call("GET", k1)
+            c.call("PING")
+            c.call("ECHO", "hello")
+            c.call("CONFIG", "GET", "appendfsync")
+            k3 = rand_word()
+            c.call("SET", k3, "3")
+            got = read_bytes(rpath)
+            check(names[3], got == encode("SET", k1, v1) + encode("SET", k2, v2) + encode("SET", k3, "3"),
+                  repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # Each kind of write goes to the file in the form that it took effect in.
+    base, adir, aname, rpath = prepared("forms")
+    flags = ["--dir", base, "--appendonly", "yes", "--appenddirname", adir, "--appendfilename", aname,
+             "--appendfsync", "everysec"]
+    srv = Server(prog, flags)
+    forms = ["local: with everysec too, a write is in the file before its reply",
+             "local: SET with PX goes to the file with an absolute PXAT",
+             "local: INCR, RPUSH, LPUSH, LPOP and DEL go to the file",
+             "local: XADD * goes to the file with its ID",
+             "local: a served BLPOP goes to the file as LPOP",
+             "local: a transaction goes to the file in MULTI and EXEC",
+             "local: a command that fails or writes nothing does not go to the file",
+             "local: a lazy expiry goes to the file as DEL"]
+    try:
+        if aof_started(srv, forms):
+            c = Asker(srv)
+            c.call("SET", "a", "1")
+            check(forms[0], read_bytes(rpath) == encode("SET", "a", "1"), repr(read_bytes(rpath)))
+            mark = len(read_bytes(rpath))
+            before = int(time.time() * 1000)
+            c.call("SET", "p", "v", "PX", "100000")
+            after = int(time.time() * 1000)
+            tail = read_bytes(rpath)[mark:]
+            ok = False
+            m = re.match(rb"\*5\r\n\$3\r\nSET\r\n\$1\r\np\r\n\$1\r\nv\r\n\$4\r\nPXAT\r\n\$13\r\n(\d{13})\r\n$", tail)
+            if m:
+                at = int(m.group(1))
+                ok = before + 100000 - 1 <= at <= after + 100000
+            check(forms[1], ok, repr(tail))
+            mark = len(read_bytes(rpath))
+            c.call("INCR", "n")
+            c.call("RPUSH", "l", "x", "y")
+            c.call("LPUSH", "l", "w")
+            c.call("LPOP", "l")
+            c.call("DEL", "a", "missing")
+            want = (encode("INCR", "n") + encode("RPUSH", "l", "x", "y") + encode("LPUSH", "l", "w")
+                    + encode("LPOP", "l") + encode("DEL", "a", "missing"))
+            got = read_bytes(rpath)[mark:]
+            check(forms[2], got == want, repr(got))
+            mark = len(read_bytes(rpath))
+            xid = c.call("XADD", "s", "*", "f", "v")
+            got = read_bytes(rpath)[mark:]
+            check(forms[3], isinstance(xid, str) and got == encode("XADD", "s", xid, "f", "v"), repr(got))
+            mark = len(read_bytes(rpath))
+            b = Asker(srv)
+            b.c.send_raw(encode("BLPOP", "q", "0"))
+            time.sleep(0.2)
+            c.call("RPUSH", "q", "e")
+            served = b.c.try_read(2)
+            got = read_bytes(rpath)[mark:]
+            check(forms[4], served == ["q", "e"] and got == encode("RPUSH", "q", "e") + encode("LPOP", "q"),
+                  repr((served, got)))
+            b.close()
+            mark = len(read_bytes(rpath))
+            c.call("MULTI")
+            c.call("SET", "t", "1")
+            c.call("GET", "t")
+            c.call("INCR", "t")
+            c.call("EXEC")
+            got = read_bytes(rpath)[mark:]
+            check(forms[5], got == encode("MULTI") + encode("SET", "t", "1") + encode("INCR", "t") + encode("EXEC"),
+                  repr(got))
+            mark = len(read_bytes(rpath))
+            c.call("INCR", "l")
+            c.call("SET", "t", "2", "NX")
+            c.call("SET", "x", "1", "BAD")
+            c.call("LPOP", "missing")
+            c.call("DEL", "missing")
+            c.call("MULTI")
+            c.call("GET", "t")
+            c.call("EXEC")
+            got = read_bytes(rpath)[mark:]
+            check(forms[6], got == b"", repr(got))
+            c.call("SET", "soon", "v", "PX", "50")
+            time.sleep(0.15)
+            mark = len(read_bytes(rpath))
+            c.call("GET", "soon")
+            got = read_bytes(rpath)[mark:]
+            check(forms[7], got == encode("DEL", "soon"), repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # WAIT sends GETACK to the replicas; it does not go to the file.
+    base, adir, aname, rpath = prepared("wait")
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir, "--appendfilename", aname])
+    try:
+        if aof_started(srv, ["local: the GETACK of WAIT does not go to the file"]):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            c.call("SET", "w", "1")
+            c.call("WAIT", "1", "100")
+            c.call("SET", "w", "2")
+            got = read_bytes(rpath)
+            check("local: the GETACK of WAIT does not go to the file",
+                  got == encode("SET", "w", "1") + encode("SET", "w", "2"), repr(got))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
+
+    # Stages 9-10: the replay at start, from the file that the manifest names.
+    def with_aof(tag, data, extra_files=None, manifest=None):
+        base = os.path.join(d, tag)
+        adir, aname, rname = "ad" + rand_word(4), "af" + rand_word(4) + ".aof", rand_word(6)
+        os.makedirs(os.path.join(base, adir))
+        if manifest is None:
+            manifest = "file %s.1.incr.aof seq 1 type i\n" % rname
+        write_bytes(os.path.join(base, adir, aname + ".manifest"), manifest.encode())
+        if data is not None:
+            write_bytes(os.path.join(base, adir, rname + ".1.incr.aof"), data)
+        for name, content in (extra_files or {}).items():
+            write_bytes(os.path.join(base, adir, name), content)
+        flags = ["--dir", base, "--appendonly", "yes", "--appenddirname", adir, "--appendfilename", aname]
+        return flags, os.path.join(base, adir), rname + ".1.incr.aof"
+
+    k, v = rand_word(), rand_word()
+    flags, _, _ = with_aof("s9", encode("SET", k, v))
+    srv = Server(prog, flags)
+    try:
+        if aof_started(srv, ["persistence-aof-09 GET gives the value of the replayed SET"]):
+            c = Asker(srv)
+            check("persistence-aof-09 GET gives the value of the replayed SET", c.call("GET", k) == v)
+            c.close()
+    finally:
+        srv.stop()
+    keys = [rand_word() for _ in range(5)]
+    vals = [rand_word() for _ in range(5)]
+    flags, _, _ = with_aof("s10", b"".join(encode("SET", a, b) for a, b in zip(keys, vals)))
+    srv = Server(prog, flags)
+    try:
+        if aof_started(srv, ["persistence-aof-10 GET gives the value of each replayed SET"]):
+            c = Asker(srv)
+            got = [c.call("GET", a) for a in keys]
+            check("persistence-aof-10 GET gives the value of each replayed SET", got == vals, repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # A round trip: the writes of one run come back in the next, and the
+    # next run appends to the same file.
+    base, adir, aname, rpath = prepared("trip")
+    flags = ["--dir", base, "--appendonly", "yes", "--appenddirname", adir, "--appendfilename", aname]
+    srv = Server(prog, flags)
+    trip = ["local: a restart gives back strings, lists, streams and counters",
+            "local: a restart gives back a transaction",
+            "local: a restart keeps an absolute expiry",
+            "local: a key that expired before the restart stays gone",
+            "local: the next run appends to the same file"]
+    try:
+        if aof_started(srv, trip):
+            c = Asker(srv)
+            c.call("SET", "s", "v")
+            c.call("RPUSH", "l", "a", "b", "c")
+            c.call("LPOP", "l")
+            c.call("XADD", "x", "1-1", "f", "v")
+            c.call("INCR", "n")
+            c.call("INCR", "n")
+            c.call("MULTI")
+            c.call("SET", "m1", "1")
+            c.call("SET", "m2", "2")
+            c.call("EXEC")
+            c.call("SET", "e", "v", "PX", "100000")
+            c.call("SET", "gone", "v", "PX", "100")
+            c.close()
+    finally:
+        srv.stop()
+    time.sleep(0.2)
+    size = len(read_bytes(rpath) or b"")
+    srv = Server(prog, flags)
+    try:
+        if aof_started(srv, trip):
+            c = Asker(srv)
+            got = [c.call("GET", "s"), c.call("LRANGE", "l", "0", "-1"), c.call("XRANGE", "x", "-", "+"),
+                   c.call("GET", "n")]
+            check(trip[0], got == ["v", ["b", "c"], [["1-1", ["f", "v"]]], "2"], repr(got))
+            check(trip[1], [c.call("GET", "m1"), c.call("GET", "m2")] == ["1", "2"])
+            check(trip[2], c.call("GET", "e") == "v")
+            check(trip[3], c.call("GET", "gone") is None and c.call("KEYS", "gone") == [])
+            c.call("SET", "after", "1")
+            got = read_bytes(rpath)
+            check(trip[4], got is not None and len(got) > size and got.endswith(encode("SET", "after", "1"))
+                  and got.startswith(encode("SET", "s", "v")), repr(got[-60:] if got else got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # The replay: the forms that Redis writes, and files that end early.
+    replay = [
+        ("local: the replay accepts SELECT 0 and annotation lines",
+         encode("SELECT", "0") + b"#TS:1700000000\r\n" + encode("SET", "r", "1"), {}, None,
+         lambda c: c.call("GET", "r") == "1"),
+        ("local: during the replay an expired key is still there for the next command",
+         encode("SET", "r", "5", "PXAT", "1000") + encode("SET", "r", "7", "XX"), {}, None,
+         lambda c: c.call("GET", "r") == "7"),
+        ("local: the replay applies a transaction",
+         encode("MULTI") + encode("SET", "r", "1") + encode("INCR", "r") + encode("EXEC"), {}, None,
+         lambda c: c.call("GET", "r") == "2"),
+        ("local: the replay loads a base RDB file and then the incremental files in order",
+         encode("SET", "r", "2"), {"b.rdb": None, "i0.aof": encode("SET", "r", "1") + encode("SET", "q", "1")},
+         "file b.rdb seq 1 type b\nfile i0.aof seq 1 type i\nfile {R} seq 2 type i\n",
+         lambda c: [c.call("GET", "base"), c.call("GET", "r"), c.call("GET", "q")] == ["b", "2", "1"]),
+        ("local: the replay loads a base AOF file and skips a history file",
+         encode("INCR", "r"), {"b.aof": encode("SET", "r", "10"), "h.aof": encode("SET", "r", "99")},
+         "file h.aof seq 1 type h\nfile b.aof seq 2 type b\nfile {R} seq 3 type i\n",
+         lambda c: c.call("GET", "r") == "11"),
+    ]
+    for name, data, extra, manifest, test in replay:
+        files = {}
+        for fname, content in extra.items():
+            if content is None:
+                p = os.path.join(d, "tmp.rdb")
+                write_rdb(p, [("base", "b", None, None)])
+                content = read_bytes(p)
+            files[fname] = content
+        rname = rand_word(6)
+        man = manifest.replace("{R}", rname + ".1.incr.aof") if manifest else None
+        tag = "rp" + rand_word(4)
+        base = os.path.join(d, tag)
+        adir, aname = "ad", "af.aof"
+        os.makedirs(os.path.join(base, adir))
+        write_bytes(os.path.join(base, adir, aname + ".manifest"),
+                    (man or "file %s.1.incr.aof seq 1 type i\n" % rname).encode())
+        write_bytes(os.path.join(base, adir, rname + ".1.incr.aof"), data)
+        for fname, content in files.items():
+            write_bytes(os.path.join(base, adir, fname), content)
+        srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                            "--appendfilename", aname])
+        try:
+            if aof_started(srv, [name]):
+                c = Asker(srv)
+                check(name, test(c))
+                c.close()
+        finally:
+            srv.stop()
+
+    # A last file that ends inside a command, or inside MULTI, is cut back
+    # to its last whole command, and the server starts.
+    for name, data, keep in [
+            ("local: a last file that ends inside a command is cut back",
+             encode("SET", "r", "1") + encode("SET", "r", "2")[:-3], encode("SET", "r", "1")),
+            ("local: a last file that ends inside MULTI is cut back to before MULTI",
+             encode("SET", "r", "1") + encode("MULTI") + encode("SET", "r", "2"), encode("SET", "r", "1")),
+            ("local: a last file that ends inside a header line is cut back",
+             encode("SET", "r", "1") + b"*3\r\n$3", encode("SET", "r", "1"))]:
+        flags, path, rfile = with_aof("cut" + rand_word(4), data)
+        srv = Server(prog, flags)
+        try:
+            if aof_started(srv, [name]):
+                c = Asker(srv)
+                got = [c.call("GET", "r"), read_bytes(os.path.join(path, rfile))]
+                c.call("SET", "z", "1")
+                got.append(read_bytes(os.path.join(path, rfile)))
+                check(name, got == ["1", keep, keep + encode("SET", "z", "1")], repr(got))
+                c.close()
+        finally:
+            srv.stop()
+
+    # The files that the server refuses at start.
+    for name, data, extra, manifest in [
+            ("local: the replay refuses a file that is not RESP", encode("SET", "r", "1") + b"SET r 2\r\n", {}, None),
+            ("local: the replay refuses an unknown command", encode("FOO", "r"), {}, None),
+            ("local: the replay refuses SELECT of another database", encode("SELECT", "1"), {}, None),
+            ("local: a file that ends inside a command and is not the last is refused",
+             encode("SET", "r", "1"), {"i0.aof": encode("SET", "q", "1")[:-2]},
+             "file i0.aof seq 1 type i\nfile {R} seq 2 type i\n"),
+            ("local: a manifest that names a file in another directory is refused",
+             encode("SET", "r", "1"), {}, "file ../x.aof seq 1 type i\n"),
+            ("local: a manifest line with an unknown type is refused", encode("SET", "r", "1"), {},
+             "file {R} seq 1 type z\n"),
+            ("local: a manifest line with a missing value is refused", encode("SET", "r", "1"), {},
+             "file {R} seq 1 type\n")]:
+        rname = rand_word(6)
+        base = os.path.join(d, "bad" + rand_word(4))
+        os.makedirs(os.path.join(base, "ad"))
+        man = (manifest or "file {R} seq 1 type i\n").replace("{R}", rname + ".1.incr.aof")
+        write_bytes(os.path.join(base, "ad", "af.aof.manifest"), man.encode())
+        write_bytes(os.path.join(base, "ad", rname + ".1.incr.aof"), data)
+        for fname, content in extra.items():
+            write_bytes(os.path.join(base, "ad", fname), content)
+        aof_exits(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", "ad",
+                         "--appendfilename", "af.aof"], name)
+
+    # A manifest with no incremental file gets one.
+    base = os.path.join(d, "noincr")
+    os.makedirs(os.path.join(base, "ad"))
+    write_bytes(os.path.join(base, "ad", "af.aof.manifest"), b"file b.aof seq 1 type b\n")
+    write_bytes(os.path.join(base, "ad", "b.aof"), encode("SET", "r", "1"))
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", "ad", "--appendfilename", "af.aof"])
+    try:
+        name = "local: a manifest with no incremental file gets one, and the writes go to it"
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            first = c.call("GET", "r")
+            c.call("SET", "r", "2")
+            got = [first, read_bytes(os.path.join(base, "ad", "af.aof.manifest")),
+                   read_bytes(os.path.join(base, "ad", "af.aof.1.incr.aof"))]
+            check(name, got == ["1", b"file b.aof seq 1 type b\nfile af.aof.1.incr.aof seq 1 type i\n",
+                                encode("SET", "r", "2")], repr(got))
+            c.close()
+    finally:
+        srv.stop()
+
+    # Flags that the server refuses.
+    for name, args in [
+            ("local: --appendonly needs yes or no", ["--appendonly", "maybe"]),
+            ("local: --appendfsync needs always, everysec or no", ["--appendfsync", "sometimes"]),
+            ("local: --appendfilename needs a name with no '/'", ["--appendfilename", "a/b"]),
+            ("local: --appenddirname needs a name with no '/'", ["--appenddirname", ".."]),
+            ("local: appendonly yes on a replica is refused",
+             ["--appendonly", "yes", "--replicaof", "localhost 1"])]:
+        aof_exits(prog, args, name, cwd=home)
+
+    # Rule 6: the writer writes a long value alone, and a long command in
+    # steps, so the other clients go on.
+    base, adir, aname, rpath = prepared("big")
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                        "--appendfilename", aname])
+    try:
+        names = ["local: AOF1 SET of 64 MB with the AOF stalls PING at most 1 s",
+                 "local: AOF2 RPUSH of 1048573 elements with the AOF stalls PING at most 1 s",
+                 "local: AOF2 the file has every element"]
+        if aof_started(srv, names):
+            c = Asker(srv)
+            big = "y" * (64 << 20)
+
+            def set_big():
+                c.call("SET", "big", big)
+            worst, wrong, _ = measure_while(srv, set_big)
+            check(names[0], worst <= 1.0 and not wrong and read_bytes(rpath) == encode("SET", "big", big),
+                  "worst %.3f s" % worst)
+            c.call("DEL", "big")
+            mark = len(read_bytes(rpath))
+            n = 1048573
+            elems = ["e%d" % i for i in range(n)]
+
+            def push():
+                c.c.sock.settimeout(60)
+                c.c.send_raw(encode("RPUSH", "L", *elems))
+                c.c.read()
+                c.c.sock.settimeout(5)
+            worst, wrong, _ = measure_while(srv, push)
+            check(names[1], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            got = read_bytes(rpath)[mark:]
+            check(names[2], got == encode("RPUSH", "L", *elems), "%d bytes" % len(got))
+            c.close()
+    finally:
+        srv.stop()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -3291,6 +3808,7 @@ GROUPS = [
     ("optimistic-locking", stages_optimistic_locking),
     ("persistence-rdb", stages_rdb),
     ("replication", stages_replication),
+    ("persistence-aof", stages_aof),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
