@@ -3717,11 +3717,11 @@ def stages_aof_in(prog, d):
              encode("SET", "r", "1"), {"i0.aof": encode("SET", "q", "1")[:-2]},
              "file i0.aof seq 1 type i\nfile {R} seq 2 type i\n"),
             ("local: a manifest that names a file in another directory is refused",
-             encode("SET", "r", "1"), {}, "file ../x.aof seq 1 type i\n"),
+             encode("SET", "r", "1"), {"../x.aof": encode("SET", "r", "2")}, "file ../x.aof seq 1 type i\n"),
             ("local: a manifest line with an unknown type is refused", encode("SET", "r", "1"), {},
              "file {R} seq 1 type z\n"),
-            ("local: a manifest line with a missing value is refused", encode("SET", "r", "1"), {},
-             "file {R} seq 1 type\n"),
+            ("local: a manifest line with a word that has no value is refused", encode("SET", "r", "1"), {},
+             "file {R} seq 1 type i x\n"),
             ("local: a manifest that names a missing file is refused", encode("SET", "r", "1"), {},
              "file nothere.aof seq 1 type i\n")]:
         rname = rand_word(6)
@@ -3807,7 +3807,9 @@ def stages_aof_in(prog, d):
                         "--appendfilename", aname])
     try:
         names = ["local: AOF1 SET of 64 MB with the AOF stalls PING at most 1 s",
+                 "local: the reply of a write comes after the file has it",
                  "local: the reply of EXEC comes after the file has the transaction",
+                 "local: a served BLPOP replies after the file has its pop",
                  "local: AOF2 RPUSH of 1048573 elements with the AOF stalls PING at most 1 s",
                  "local: AOF2 the file has every element"]
         if aof_started(srv, names):
@@ -3819,16 +3821,37 @@ def stages_aof_in(prog, d):
             worst, wrong, _ = measure_while(srv, set_big)
             check(names[0], worst <= 1.0 and not wrong and read_bytes(rpath) == encode("SET", "big", big),
                   "worst %.3f s" % worst)
-            # The reply of EXEC comes after the file has the transaction:
-            # the 64 MB take the writer long enough to show a reply that
-            # does not wait.
+            c.call("DEL", "big")
+            # A reply comes after the file has the entries of its command.
+            # 200000 elements take the writer about 200 steps, so a reply
+            # that does not wait comes before the file has them, and the
+            # file is read at once.
+            many = ["m%d" % i for i in range(200000)]
+            mark = len(read_bytes(rpath))
+            c.call("RPUSH", "W", *many)
+            got = read_bytes(rpath)[mark:]
+            check("local: the reply of a write comes after the file has it",
+                  got == encode("RPUSH", "W", *many), "%d bytes" % len(got))
             mark = len(read_bytes(rpath))
             c.call("MULTI")
-            c.call("SET", "big2", big)
+            c.call("RPUSH", "W2", *many)
             c.call("EXEC")
+            got = read_bytes(rpath)[mark:]
             check("local: the reply of EXEC comes after the file has the transaction",
-                  read_bytes(rpath)[mark:] == encode("MULTI") + encode("SET", "big2", big) + encode("EXEC"))
-            c.call("DEL", "big", "big2")
+                  got == encode("MULTI") + encode("RPUSH", "W2", *many) + encode("EXEC"), "%d bytes" % len(got))
+            b = Asker(srv)
+            b.c.send_raw(encode("BLPOP", "Q", "0"))
+            time.sleep(0.2)
+            mark = len(read_bytes(rpath))
+            c.c.send_raw(encode("RPUSH", "Q", *many))
+            served = b.c.try_read(10)
+            got = read_bytes(rpath)[mark:]
+            c.c.try_read(10)
+            check("local: a served BLPOP replies after the file has its pop",
+                  served == ["Q", "m0"] and got == encode("RPUSH", "Q", *many) + encode("LPOP", "Q"),
+                  "%r, %d bytes" % (served, len(got)))
+            b.close()
+            c.call("DEL", "W", "W2", "Q")
             mark = len(read_bytes(rpath))
             n = 1048573
             elems = ["e%d" % i for i in range(n)]
@@ -3839,9 +3862,9 @@ def stages_aof_in(prog, d):
                 c.c.read()
                 c.c.sock.settimeout(5)
             worst, wrong, _ = measure_while(srv, push)
-            check(names[2], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            check(names[4], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
             got = read_bytes(rpath)[mark:]
-            check(names[3], got == encode("RPUSH", "L", *elems), "%d bytes" % len(got))
+            check(names[5], got == encode("RPUSH", "L", *elems), "%d bytes" % len(got))
             c.close()
     finally:
         srv.stop()

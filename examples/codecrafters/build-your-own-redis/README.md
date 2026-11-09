@@ -528,8 +528,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` or
 `tests/mutations/persistence-rdb.json` or
-`tests/mutations/replication.json` that removes
-its guard (S4, T1, T7, W3, K1 and RP2 hold rule 6 only: no single change removes their
+`tests/mutations/replication.json` or
+`tests/mutations/persistence-aof.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2 and AOF1 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -542,6 +543,15 @@ skip an expired key too), and the check of an early end in `need`
 of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
 key that expires, so no reply shows it. It stays for a client that watches
 the key after the read and before the removal.
+
+Three guards of the AOF have no case. The writer trims the log when no
+replica reads it (`trimReplLog` in `writeAof`); without the trim only the
+memory grows, and a probe that shows it needs gigabytes of entries. The
+wait of `WATCH` for the file (`aofSync`) holds the `DEL` of a lazy expiry,
+which the writer writes in one step before the next client reads, so no
+timing shows a reply before it. A client that goes while it waits for the
+file ends its session at the wake (`isClosedMsg` in `aofSync`); no client
+timing makes it go inside that short wait.
 
 A large heap brings a second kind of stall: the native VM stops the worker
 for each full collection, and the pause grows with the live heap. With
@@ -592,8 +602,14 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
-# and optimistic-locking.json, persistence-rdb.json, replication.json
+# and optimistic-locking.json, persistence-rdb.json, replication.json,
+# persistence-aof.json
+REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
+
+`REDIS_STAGE_GROUPS` (names split by commas) runs only those groups, also
+under `mutate.py`. A mutation is killed only when its named cases fail, so
+it needs only the group of those cases.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.

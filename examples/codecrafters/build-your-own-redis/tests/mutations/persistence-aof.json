@@ -108,7 +108,7 @@
   "old": "    if (!aofOn or target == before or aofDoneOffset >= target) {",
   "new": "    if (true) {",
   "cases": [
-   "local: AOF1 SET of 64 MB with the AOF stalls PING at most 1 s"
+   "local: the reply of a write comes after the file has it"
   ]
  },
  {
@@ -165,14 +165,6 @@
   "new": "            }\n            aofPos",
   "cases": [
    "local: XADD * goes to the file with its ID"
-  ]
- },
- {
-  "name": "the writer does not trim the log",
-  "old": "    aofDoneOffset = done;\n    trimReplLog();",
-  "new": "    aofDoneOffset = done;",
-  "cases": [
-   "local: AOF2 the file has every element"
   ]
  },
  {
@@ -344,11 +336,11 @@
   ]
  },
  {
-  "name": "a manifest line with a missing value is accepted",
+  "name": "a manifest word with no value is accepted",
   "old": "        if (name == nil or kind == nil or i != len(words)) {",
   "new": "        if (name == nil or kind == nil) {",
   "cases": [
-   "local: a manifest line with a missing value is refused"
+   "local: a manifest line with a word that has no value is refused"
   ]
  },
  {
@@ -433,10 +425,10 @@
  },
  {
   "name": "a served BLPOP does not wait for its pop",
-  "old": "        // A served pop goes to the log in the step of the push that served\n        // it, before this wake.\n        after = replOffset;",
+  "old": "    if (!aofSync(conn, -1, replOffset)) {\n        giveBack(key, value);\n        return nil;\n    }",
   "new": "",
   "cases": [
-   "local: a served BLPOP goes to the file as LPOP"
+   "local: a served BLPOP replies after the file has its pop"
   ]
  }
 ]

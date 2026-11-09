@@ -1220,6 +1220,12 @@ fun replyServed(conn, key, value, closed) {
         giveBack(key, value);
         return nil;
     }
+    // The pop went to the log in the step of the push that served it; the
+    // reply waits until the AOF has it.
+    if (!aofSync(conn, -1, replOffset)) {
+        giveBack(key, value);
+        return nil;
+    }
     try {
         conn.sock.write(bulkArray([key, value]));
     } catch (e) {
@@ -4194,17 +4200,13 @@ fun runCommand(conn, argv, nbytes) {
     }
     var before = replOffset;
     var reply = execute(ctx, argv);
-    var after = replOffset;
     if (type(reply) == "Instance" and hasField(reply, "timeout")) {
         reply = waitForElement(conn, reply);
         if (reply == nil) {
             return false;
         }
-        // A served pop goes to the log in the step of the push that served
-        // it, before this wake.
-        after = replOffset;
     }
-    if (!aofSync(conn, before, after)) {
+    if (!aofSync(conn, before, replOffset)) {
         return false;
     }
     writeReply(conn, reply);
