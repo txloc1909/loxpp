@@ -314,8 +314,8 @@
  },
  {
   "name": "a new score costs one unit of work",
-  "old": "            if (had != nil and had != p[0]) {\n                work = work + 1;\n            }",
-  "new": "",
+  "old": "        } else if (had != p[0]) {\n            work = work + 2;\n        }",
+  "new": "        } else if (had != p[0]) {\n            work = work + 1;\n        }",
   "cases": [
    "local: a new score costs two units of the sorted set work of EXEC"
   ]
@@ -326,6 +326,22 @@
   "new": "        if (upper(argv[k]) != \"WITHSCORES\" or k > 4) {",
   "cases": [
    "local: ZRANGE takes WITHSCORES twice, as Redis does"
+  ]
+ },
+ {
+  "name": "a member that comes again is counted against the old set",
+  "old": "        if (now.has(p[1])) {\n            had = now[p[1]];\n        } else if (entry != nil) {",
+  "new": "        if (entry != nil) {",
+  "cases": [
+   "local: a member twice in one ZADD costs a delete and an insert"
+  ]
+ },
+ {
+  "name": "ZRANGE parses its options with no yield",
+  "old": "        if (mayYield and k % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    return withScores;",
+  "new": "    }\n    return withScores;",
+  "cases": [
+   "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s"
   ]
  }
 ]

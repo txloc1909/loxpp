@@ -4232,15 +4232,23 @@ fun cmdZadd(ctx, argv) {
     if (entry == false) {
         return WRONGTYPE;
     }
-    // A new member is one insert; a new score is a delete and an insert.
-    var work = len(pairs);
-    if (entry != nil) {
-        for (var p in pairs) {
-            var had = entry.value.dict[p[1]];
-            if (had != nil and had != p[0]) {
-                work = work + 1;
-            }
+    // A new member is one insert; a new score is a delete and an insert,
+    // also for a member that comes again in this ZADD.
+    var work = 0;
+    var now = {};
+    for (var p in pairs) {
+        var had = nil;
+        if (now.has(p[1])) {
+            had = now[p[1]];
+        } else if (entry != nil) {
+            had = entry.value.dict[p[1]];
         }
+        if (had == nil) {
+            work = work + 1;
+        } else if (had != p[0]) {
+            work = work + 2;
+        }
+        now[p[1]] = p[0];
     }
     if (!spendZsetWork(work)) {
         return ZSET_EXEC_TOO_MUCH;
@@ -4360,10 +4368,10 @@ fun cmdZrank(ctx, argv) {
     return integerReply(entry.value.rank(score, argv[2]));
 }
 
-// ZRANGE key start stop [WITHSCORES], by rank. It takes the members in its
-// step (a walk of M nodes is about 0.2 microseconds each), and the session
-// writes them in steps.
-fun cmdZrange(ctx, argv) {
+// The options of ZRANGE, parsed before the command runs, with a yield
+// every ELEMENTS_PER_YIELD options: a client can send 1048572 of them.
+// Returns true for WITHSCORES, false for none, or an error reply.
+fun parseZrange(argv, mayYield) {
     if (len(argv) < 4) {
         return wrongArgs("zrange");
     }
@@ -4375,6 +4383,23 @@ fun cmdZrange(ctx, argv) {
         }
         withScores = true;
         k = k + 1;
+        if (mayYield and k % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    return withScores;
+}
+
+// ZRANGE key start stop [WITHSCORES], by rank. It takes the members in its
+// step (a walk of M nodes is about 0.2 microseconds each), and the session
+// writes them in steps.
+fun cmdZrange(ctx, argv) {
+    var withScores = ctx;
+    if (withScores == nil) {
+        withScores = parseZrange(argv, false);
+    }
+    if (type(withScores) == "String") {
+        return withScores;
     }
     var start = parseInteger(argv[2]);
     var stop = parseInteger(argv[3]);
@@ -4766,7 +4791,8 @@ var COMMANDS = {
 var PARSERS = {
     "XRANGE": parseXrange,
     "XREAD": parseXread,
-    "ZADD": parseZadd
+    "ZADD": parseZadd,
+    "ZRANGE": parseZrange
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.

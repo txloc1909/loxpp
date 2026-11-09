@@ -4812,6 +4812,8 @@ def stages_zset_limits(prog):
                  "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
                  "local: EXEC refuses a ZRANGE over the element budget",
                  "local: a new score costs two units of the sorted set work of EXEC",
+                 "local: a member twice in one ZADD costs a delete and an insert",
+                 "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s",
                  "local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
         if aof_started(srv, names):
             c = Asker(srv)
@@ -4915,10 +4917,39 @@ def stages_zset_limits(prog):
             x.close()
             check("local: a new score costs two units of the sorted set work of EXEC",
                   isinstance(reply, list) and reply[0] == 16384 and isinstance(reply[1], Error), repr(reply)[:100])
+            # A member that comes again in one ZADD with a new score is a
+            # delete and an insert too: 8192 members twice are 24576 units,
+            # and 8193 new members more pass 32768.
+            twice = []
+            for i in range(8192):
+                twice += ["1", "d%d" % i]
+            for i in range(8192):
+                twice += ["2", "d%d" % i]
+            extra = []
+            for i in range(8193):
+                extra += ["1", "f%d" % i]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("ZADD", "D", *twice) + encode("ZADD", "F", *extra) + encode("EXEC"))
+            for _ in range(3):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a member twice in one ZADD costs a delete and an insert",
+                  isinstance(reply, list) and reply[0] == 8192 and isinstance(reply[1], Error), repr(reply)[:100])
+            # Z6: ZRANGE with 1048572 options parses them in steps.
+            def zrange_options():
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.call("ZRANGE", "D", "0", "1", *(["WITHSCORES"] * 1048572))
+                x.close()
+            worst, wrong, _ = measure_while(srv, zrange_options)
+            check("local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s",
+                  worst <= 0.5 and not wrong, "worst %.3f s" % worst)
             # Z4: 16384 scores of 64 bytes, the longest, on this master.
             long_args = []
             for i in range(16384):
-                long_args += ["0." + "0" * 40 + "%021d" % (i + 1), "v%d" % i]
+                long_args += ["0." + "0" * 52 + "%04d" % (i % 10000) + "e-256", "v%d" % i]
 
             def zadd_long():
                 x = Client(srv.port)
@@ -4981,7 +5012,7 @@ def stages_zset_replication(prog):
             check(names[1], c.call("ZRANGE", "q", "0", "-1") == ["b"])
             long_args = []
             for i in range(16384):
-                long_args += ["0." + "0" * 40 + "%021d" % (i + 1), "v%d" % i]
+                long_args += ["0." + "0" * 52 + "%04d" % (i % 10000) + "e-256", "v%d" % i]
 
             def apply_long():
                 link.send_raw(encode("ZADD", "V", *long_args))
@@ -4994,8 +5025,16 @@ def stages_zset_replication(prog):
 
             # The same ZADD again changes nothing, so only its parse is work:
             # with a yield every 1024 pairs it stalls little (rule 2).
+            cheap = []
+            for i in range(16384):
+                cheap += ["0." + "0" * 40 + "%021d" % (i + 1), "c%d" % i]
+            link.send_raw(encode("ZADD", "V3", *cheap))
+            deadline = time.time() + 30
+            while time.time() < deadline and c.call("ZCARD", "V3") != 16384:
+                time.sleep(0.05)
+
             def apply_again():
-                link.send_raw(encode("ZADD", "V", *long_args) + encode("ZADD", "V2", "1", "done"))
+                link.send_raw(encode("ZADD", "V3", *cheap) + encode("ZADD", "V2", "1", "done"))
                 deadline = time.time() + 30
                 while time.time() < deadline and c.call("ZCARD", "V2") != 1:
                     time.sleep(0.05)

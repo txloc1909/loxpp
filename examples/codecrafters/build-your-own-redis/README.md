@@ -299,8 +299,10 @@ not, as in Redis.
 An insert costs about 9 microseconds of Lox++ code, and a command runs in
 one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
 at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
-sorted sets, where a new score of a member is a delete and an insert
-(rule 6); `ZRANGE` in `EXEC` spends the element budget.
+sorted sets, where a new score of a member is a delete and an insert, also
+for a member that comes again in the same `ZADD` (rule 6); `ZRANGE` in
+`EXEC` spends the element budget, and parses its options before it runs,
+with yields.
 
 ### Pub/Sub
 
@@ -611,9 +613,10 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
 | Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
 | Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
-| Z4: `ZADD` of 16384 scores of 64 bytes, on a master | PING within 1.0 s (rule 6 only) | 0.33 s |
-| Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.11 s |
-| Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.25 s) | 0.06 s |
+| Z4: `ZADD` of 16384 scores of 64 bytes in the costliest form (`0.` and 52 zeros, 4 digits, `e-256`), on a master | PING within 1.0 s (rule 6 only) | 0.13 s |
+| Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.18 s |
+| Z6: `ZRANGE` with 1048572 `WITHSCORES` | PING within 0.5 s (when the options are parsed in one step: 1.75 s) | 0.04 s |
+| Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.24–0.25 s). Its margin is small: on a host with every CPU busy it can fail. | 0.06–0.07 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
