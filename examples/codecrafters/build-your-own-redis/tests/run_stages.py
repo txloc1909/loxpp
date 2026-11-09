@@ -4706,6 +4706,9 @@ def stages_zset_on(srv):
                       (("ZADD", "zl", "abc", "a"), "value is not a valid float"),
                       (("ZADD", "zl", "nan", "a"), "value is not a valid float"),
                       (("ZADD", "zl", "1e400", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "1.8e308", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "2e-324", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "1x", "a"), "value is not a valid float"),
                       (("ZRANGE", "zl", "a", "b"), "value is not an integer"),
                       (("ZRANGE", "zl", "0", "1", "FOO"), "syntax error"),
                       (("ZRANGE", "zl", "0"), "wrong number of arguments for 'zrange'"),
@@ -4815,8 +4818,13 @@ def stages_zset_limits(prog):
             got = c.raw().try_read(60)
             check(names[2], isinstance(got, list) and got[:2] == [15000, 15000] and isinstance(got[2], Error)
                   and "transaction" in got[2] and c.call("ZCARD", "e3") == 0, repr(got)[:120])
-            # A set of 524288 members, from 32 ZADD of 16384.
+            # A set of 524288 members, from 32 ZADD of 16384. A build that
+            # takes over 60 s (a skip list of one level is a linked list)
+            # fails Z1 by name, before the suite runs out of time.
+            built = time.time()
             for b in range(32):
+                if time.time() - built > 60:
+                    break
                 part = []
                 for i in range(16384):
                     part += ["%d" % ((b * 16384 + i) % 1000), "s%07d" % (b * 16384 + i)]
@@ -4825,6 +4833,12 @@ def stages_zset_limits(prog):
             more = []
             for i in range(16384):
                 more += ["%d" % (i % 997), "t%07d" % i]
+
+            if time.time() - built > 60:
+                for nm in names[3:]:
+                    check(nm, False, "the set of 524288 members took over 60 s to build")
+                c.close()
+                return
 
             def zadd():
                 c.raw().send_raw(encode("ZADD", "Z", *more))
@@ -4846,14 +4860,18 @@ def stages_zset_limits(prog):
             # members fill it, and the ninth is refused.
             x = Client(srv.port)
             x.sock.settimeout(120)
-            x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") * 9 + encode("EXEC"))
-            for _ in range(10):
+            # An empty range first: it must spend nothing, and give back
+            # nothing either.
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "524287", "0") * 3
+                       + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") * 9 + encode("EXEC"))
+            for _ in range(13):
                 x.read()
             reply = x.read()
             x.close()
             check("local: EXEC refuses a ZRANGE over the element budget",
-                  isinstance(reply, list) and len(reply) == 9 and all(len(r) == 1048576 for r in reply[:8])
-                  and isinstance(reply[8], Error), repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
+                  isinstance(reply, list) and len(reply) == 12 and reply[:3] == [[], [], []]
+                  and all(len(r) == 1048576 for r in reply[3:11])
+                  and isinstance(reply[11], Error), repr(reply[11])[:80] if isinstance(reply, list) else repr(reply)[:80])
 
             def exec_two():
                 x = Client(srv.port)

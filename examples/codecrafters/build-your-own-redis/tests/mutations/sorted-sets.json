@@ -76,7 +76,7 @@
   "old": "    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
   "new": "    var count = stop + 1 - start;",
   "cases": [
-   "sorted-sets-04 ZRANGE with start after stop is empty"
+   "local: EXEC refuses a ZRANGE over the element budget"
   ]
  },
  {
@@ -152,19 +152,12 @@
   ]
  },
  {
-  "name": "ZADD takes a score out of range",
-  "old": "    if (magnitude > 310 or magnitude < -330) {\n        return nil;\n    }",
-  "new": "",
-  "cases": [
-   "local: ZADD zl 1e400 a gives the error of Redis"
-  ]
- },
- {
   "name": "ZADD takes a score that overflows",
   "old": "    if (value == 0 or value == ZSET_INF or value == -ZSET_INF) {\n        return nil;\n    }",
   "new": "",
   "cases": [
-   "local: ZADD zl 1e400 a gives the error of Redis"
+   "local: ZADD zl 1.8e308 a gives the error of Redis",
+   "local: ZADD zl 2e-324 a gives the error of Redis"
   ]
  },
  {
@@ -180,7 +173,7 @@
   "old": "    if (i != len(s)) {\n        return nil;\n    }",
   "new": "",
   "cases": [
-   "local: ZADD zl abc a gives the error of Redis"
+   "local: ZADD zl 1x a gives the error of Redis"
   ]
  },
  {

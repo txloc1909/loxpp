@@ -4113,17 +4113,14 @@ fun parseScore(s) {
     }
     // The value is 0.<digits> times 10^(point + exp). As in Redis, a value
     // past the range of a double, or one that rounds to zero, is refused
-    // (strtod sets ERANGE).
+    // (strtod sets ERANGE). The exponent is at most 100000, so the decimal
+    // text stays small.
     var first = 0;
     while (first < len(digits) and digits[first] == "0") {
         first = first + 1;
     }
     if (first == len(digits)) {
         return float(sign + "0");
-    }
-    var magnitude = point + exp - first;
-    if (magnitude > 310 or magnitude < -330) {
-        return nil;
     }
     point = point + exp;
     var text = "";
