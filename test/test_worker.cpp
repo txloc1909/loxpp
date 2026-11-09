@@ -607,7 +607,8 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
     int fired = 0;
     Runtime& rt = vm.runtime();
     // The seam keeps the wait's end in waitForWork, the path that reports the
-    // deadlock. Without it, pollWhileBusy can end the wait first.
+    // deadlock. Without it, pollWhileBusy can end the wait first. No assertion
+    // below checks which path ends the wait.
     rt.setSchedulerClock(&noSwitchPoll);
     int fds[2];
     ASSERT_EQ(pipe(fds), 0);
