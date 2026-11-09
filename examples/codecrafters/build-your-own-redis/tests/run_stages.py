@@ -4968,7 +4968,8 @@ def stages_zset_replication(prog):
     try:
         names = ["local: a replica refuses ZADD and ZREM from a client",
                  "local: a replica applies ZADD and ZREM of its master",
-                 "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
+                 "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                 "local: Z5 a replica parses a ZADD of its master in steps"]
         if aof_started(rep, names):
             link = m.accept()
             fake_handshake(link)
@@ -4990,6 +4991,17 @@ def stages_zset_replication(prog):
             worst, wrong, _ = measure_while(rep, apply_long)
             check("local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
                   worst <= 1.0 and not wrong and c.call("ZCARD", "V") == 16384, "worst %.3f s" % worst)
+
+            # The same ZADD again changes nothing, so only its parse is work:
+            # with a yield every 1024 pairs it stalls little (rule 2).
+            def apply_again():
+                link.send_raw(encode("ZADD", "V", *long_args) + encode("ZADD", "V2", "1", "done"))
+                deadline = time.time() + 30
+                while time.time() < deadline and c.call("ZCARD", "V2") != 1:
+                    time.sleep(0.05)
+            worst, wrong, _ = measure_while(rep, apply_again)
+            check("local: Z5 a replica parses a ZADD of its master in steps",
+                  worst <= 0.15 and not wrong and c.call("ZCARD", "V2") == 1, "worst %.3f s" % worst)
             c.close()
     finally:
         rep.stop()

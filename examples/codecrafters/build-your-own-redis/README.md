@@ -287,16 +287,20 @@ its members in its step (about 0.2 microseconds for each), and the session
 writes them in steps. The level of a node comes from the high bits of a
 linear congruential generator, with a chance of 1/4 for each level, because
 the standard library has no random numbers. `ZADD` reads its scores before
-it runs (`parseZadd`, with yields), so a bad score changes nothing. A score
-has the forms of `strtod` that Redis takes, and a value out of range or one
-that rounds to zero is refused, as in Redis. A `ZADD` or `ZREM` that changes
+it runs (`parseZadd`, with yields), so a bad score changes nothing; a
+replica parses a `ZADD` of its master with yields too. A score has the
+forms of `strtod` that Redis takes, and a value out of range or one that
+rounds to zero is refused, as in Redis. The parse is linear, and it checks
+the range from the first digit that is not zero and the exponent before it
+makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM` that changes
 the set marks the watchers and is propagated; one that changes nothing is
 not, as in Redis.
 
 An insert costs about 9 microseconds of Lox++ code, and a command runs in
-one step. So one `ZADD` or `ZREM` names at most 16384 members, and one
-`EXEC` does at most 32768 inserts and deletes of sorted sets (rule 6);
-`ZRANGE` in `EXEC` spends the element budget.
+one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
+at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
+sorted sets, where a new score of a member is a delete and an insert
+(rule 6); `ZRANGE` in `EXEC` spends the element budget.
 
 ### Pub/Sub
 
@@ -433,8 +437,10 @@ printed.
   is refused; Redis reads it. `ZADD` takes no options (`NX`, `XX`, `GT`,
   `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
   `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
-  members, and one `EXEC` does at most 32768 inserts and deletes of sorted
-  sets; Redis has no such limits. The RDB load does not read a sorted set.
+  members, a score has at most 64 bytes, and one `EXEC` does at most 32768
+  inserts and deletes of sorted sets; Redis has no such limits. A `ZRANGE`
+  index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
+  gives an empty range. The RDB load does not read a sorted set.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -605,6 +611,9 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
 | Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
 | Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
+| Z4: `ZADD` of 16384 scores of 64 bytes, on a master | PING within 1.0 s (rule 6 only) | 0.33 s |
+| Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.11 s |
+| Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.25 s) | 0.06 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |

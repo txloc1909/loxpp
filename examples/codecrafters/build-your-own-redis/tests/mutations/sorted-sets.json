@@ -309,7 +309,7 @@
   "old": "            if (parse != nil) {\n                ctx = parse(argv, true);\n            }\n            if (queued != nil) {",
   "new": "            if (parse != nil) {\n                ctx = parse(argv, false);\n            }\n            if (queued != nil) {",
   "cases": [
-   "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"
+   "local: Z5 a replica parses a ZADD of its master in steps"
   ]
  },
  {
