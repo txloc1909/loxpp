@@ -3843,12 +3843,13 @@ var subscribers = {};
 // The output buffer limits of Redis for a pubsub client: over the hard
 // limit it is closed at once; over the soft limit for PUBSUB_SOFT_SECONDS
 // it is closed. The pending cost of a subscriber is the bytes of the
-// messages that its session has not written yet, and 64 bytes for each
-// message (README rule 4).
+// messages that its session has not written yet, and MESSAGE_COST bytes
+// for each message: the memory of one Published message in a mailbox,
+// measured at about 200 bytes (README rule 4).
 var PUBSUB_HARD_COST = 33554432;
 var PUBSUB_SOFT_COST = 8388608;
 var PUBSUB_SOFT_SECONDS = 60;
-var MESSAGE_COST = 64;
+var MESSAGE_COST = 200;
 
 var SUBSCRIBED_ALLOWED = {"SUBSCRIBE": true, "UNSUBSCRIBE": true, "PING": true};
 
@@ -3918,6 +3919,12 @@ fun cmdUnsubscribe(conn, argv) {
     var i = 0;
     while (i < len(names)) {
         var channel = names[i];
+        // A message to this channel that came while the loop yielded goes
+        // before the reply that leaves it.
+        if (conn.pubQueued > 0) {
+            out.flush();
+            writeQueuedMessages(conn);
+        }
         if (conn.channels.has(channel)) {
             leaveChannel(conn, channel);
         }
@@ -3990,10 +3997,10 @@ fun deliver(conn, channel, message, cost, now) {
             conn.sock.close();
         } catch (ignored) {
         }
-        return;
     }
     try {
         task.send(conn.session, Msg.Published(channel, message));
+        conn.pubQueued = conn.pubQueued + 1;
     } catch (ignored) {
         // The session has ended; it leaves its channels.
     }
@@ -4001,12 +4008,35 @@ fun deliver(conn, channel, message, cost, now) {
 
 // In the session: writes one message to the subscriber. Returns true.
 fun writeMessage(conn, channel, message) {
+    conn.pubQueued = conn.pubQueued - 1;
     var out = Output(conn);
     out.add("*3\r\n$7\r\nmessage\r\n" + bulk(channel));
     out.addBulk(message);
     out.flush();
     conn.pubPending = conn.pubPending - messageCost(channel, message);
     return true;
+}
+
+fun isPublished(msg) {
+    return match msg {
+        case Msg.Published(channel, message) => true
+        case _ => false
+    };
+}
+
+// Writes the messages that wait in the mailbox of the session. The reader
+// sends commands ahead of the session, so a message that a PUBLISH sent
+// before the session ran a command can be behind that command in the
+// mailbox; it came first, so it goes first, as in Redis. Each one is
+// there: a send on the same worker moves the message at the call.
+fun writeQueuedMessages(conn) {
+    while (conn.pubQueued > 0) {
+        var msg = task.receive_where(isPublished);
+        var done = match msg {
+            case Msg.Published(channel, message) => writeMessage(conn, channel, message)
+            case _ => true
+        };
+    }
 }
 
 // A command of a client in subscribed mode, which has at least one
@@ -4028,17 +4058,41 @@ fun subscribedCheck(name, argv) {
         }
         return "*2\r\n" + bulk("pong") + bulk(arg);
     }
-    if (COMMANDS[name] == nil and ARITY[name] == nil and !CONN_COMMANDS.has(name)) {
+    if (COMMANDS[name] == nil and ARITY[name] == nil and CONN_ARITY[name] == nil) {
         return unknownCommand(argv);
     }
-    if (ARITY[name] != nil and !arityOk(name, len(argv))) {
+    var arity = ARITY[name];
+    if (arity == nil) {
+        arity = CONN_ARITY[name];
+    }
+    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {
         return wrongArgs(lower(name));
     }
-    return errorReply("ERR Can't execute '" + lower(name) + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context");
+    var shown = lower(name);
+    if (name == "CONFIG") {
+        // Redis names a subcommand as config|get, and refuses an unknown
+        // one before the context.
+        var sub = lower(argv[1]);
+        if (!CONFIG_SUBCOMMANDS.has(sub)) {
+            return errorReply("ERR unknown subcommand '" + argv[1][0:128] + "'. Try CONFIG HELP.");
+        }
+        shown = "config|" + sub;
+    }
+    // As in Redis, a replica refuses a write before the context.
+    if (REPL_ROLE != "master" and WRITES.has(name)) {
+        return READONLY;
+    }
+    var text = "Can't execute '" + shown + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context";
+    if (name == "EXEC") {
+        return errorReply("EXECABORT Transaction discarded because of: " + text);
+    }
+    return errorReply("ERR " + text);
 }
 
-// The commands that runCommand runs with the Conn, outside COMMANDS.
-var CONN_COMMANDS = {"REPLCONF": true, "PSYNC": true, "WAIT": true};
+// The arity of the commands that runCommand runs with the Conn, outside
+// COMMANDS and ARITY, as Redis gives it.
+var CONN_ARITY = {"REPLCONF": -1, "PSYNC": 3, "WAIT": 3};
+var CONFIG_SUBCOMMANDS = {"get": true, "set": true, "resetstat": true, "rewrite": true, "help": true};
 
 // ===========================================================================
 // Command table
@@ -4271,6 +4325,8 @@ class Conn {
         this.subCount = 0;
         this.pubPending = 0;
         this.pubSoftSince = nil;
+        // The Published messages in the mailbox of the session.
+        this.pubQueued = 0;
     }
 }
 
@@ -4401,6 +4457,7 @@ fun readLoop(conn) {
 // session; the client's next commands stay in the mailbox until it ends.
 fun runCommand(conn, argv, nbytes) {
     var ctx = nil;
+    writeQueuedMessages(conn);
     if (len(argv) > 0) {
         var name = upper(argv[0]);
         if (conn.subCount > 0) {

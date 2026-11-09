@@ -121,7 +121,7 @@
  },
  {
   "name": "an unknown command in subscribed mode is refused as a context",
-  "old": "    if (COMMANDS[name] == nil and ARITY[name] == nil and !CONN_COMMANDS.has(name)) {\n        return unknownCommand(argv);\n    }",
+  "old": "    if (COMMANDS[name] == nil and ARITY[name] == nil and CONN_ARITY[name] == nil) {\n        return unknownCommand(argv);\n    }",
   "new": "",
   "cases": [
    "local: an unknown command in subscribed mode is an unknown command"
@@ -129,16 +129,16 @@
  },
  {
   "name": "the arity check in subscribed mode comes after the context",
-  "old": "    if (ARITY[name] != nil and !arityOk(name, len(argv))) {\n        return wrongArgs(lower(name));\n    }\n    return errorReply(\"ERR Can't execute",
-  "new": "    return errorReply(\"ERR Can't execute",
+  "old": "    if ((arity < 0 and len(argv) < -arity) or (arity > 0 and len(argv) != arity)) {\n        return wrongArgs(lower(name));\n    }",
+  "new": "",
   "cases": [
    "local: a wrong number of arguments in subscribed mode comes first"
   ]
  },
  {
   "name": "WAIT is unknown in subscribed mode",
-  "old": "var CONN_COMMANDS = {\"REPLCONF\": true, \"PSYNC\": true, \"WAIT\": true};",
-  "new": "var CONN_COMMANDS = {\"REPLCONF\": true, \"PSYNC\": true};",
+  "old": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": 3, \"WAIT\": 3};",
+  "new": "var CONN_ARITY = {\"REPLCONF\": -1, \"PSYNC\": 3};",
   "cases": [
    "local: subscribed mode refuses WAIT"
   ]
@@ -213,6 +213,94 @@
   "new": "        leaveChannel(conn, names[i]);\n        i = i + 1;",
   "cases": [
    "local: PS4 the end of the client leaves the channels in steps"
+  ]
+ },
+ {
+  "name": "a message in the mailbox goes after the next command",
+  "old": "    writeQueuedMessages(conn);\n    if (len(argv) > 0) {",
+  "new": "    if (len(argv) > 0) {",
+  "cases": [
+   "local: a message that came before UNSUBSCRIBE ran goes before its reply"
+  ]
+ },
+ {
+  "name": "an empty channel is kept",
+  "old": "        m.del(conn.id);\n        if (len(m) == 0) {\n            subscribers.del(channel);\n        }",
+  "new": "        m.del(conn.id);",
+  "cases": [
+   "local: PS8 the channels that no client has are dropped"
+  ]
+ },
+ {
+  "name": "the soft time does not start again",
+  "old": "    if (conn.pubPending <= PUBSUB_SOFT_COST) {\n        conn.pubSoftSince = nil;\n    } else if",
+  "new": "    if (false) {\n        conn.pubSoftSince = nil;\n    } else if",
+  "cases": [
+   "local: PS7 a subscriber that read its messages starts the soft time again"
+  ]
+ },
+ {
+  "name": "a message costs only its bytes",
+  "old": "var MESSAGE_COST = 200;",
+  "new": "var MESSAGE_COST = 0;",
+  "cases": [
+   "local: PS6 600000 empty messages close a subscriber that does not read"
+  ]
+ },
+ {
+  "name": "a message costs 64 bytes",
+  "old": "var MESSAGE_COST = 200;",
+  "new": "var MESSAGE_COST = 64;",
+  "cases": [
+   "local: PS6 600000 empty messages close a subscriber that does not read"
+  ]
+ },
+ {
+  "name": "SUBSCRIBE takes no channel",
+  "old": "            if (!arityOk(name, len(argv))) {\n                conn.sock.write(wrongArgs(lower(name)));\n            } else if (name == \"SUBSCRIBE\") {",
+  "new": "            if (false) {\n                conn.sock.write(wrongArgs(lower(name)));\n            } else if (name == \"SUBSCRIBE\") {",
+  "cases": [
+   "local: SUBSCRIBE with no channel is an arity error"
+  ]
+ },
+ {
+  "name": "EXEC in subscribed mode has no EXECABORT",
+  "old": "    if (name == \"EXEC\") {\n        return errorReply(\"EXECABORT Transaction discarded because of: \" + text);\n    }",
+  "new": "",
+  "cases": [
+   "local: in subscribed mode EXEC gives the error of Redis"
+  ]
+ },
+ {
+  "name": "CONFIG in subscribed mode is named config",
+  "old": "        shown = \"config|\" + sub;",
+  "new": "",
+  "cases": [
+   "local: in subscribed mode CONFIG GET gives the error of Redis"
+  ]
+ },
+ {
+  "name": "an unknown CONFIG subcommand gets the context error",
+  "old": "        if (!CONFIG_SUBCOMMANDS.has(sub)) {\n            return errorReply(\"ERR unknown subcommand '\" + argv[1][0:128] + \"'. Try CONFIG HELP.\");\n        }",
+  "new": "",
+  "cases": [
+   "local: in subscribed mode CONFIG FOO gives the error of Redis"
+  ]
+ },
+ {
+  "name": "a replica gives the context error before READONLY",
+  "old": "    // As in Redis, a replica refuses a write before the context.\n    if (REPL_ROLE != \"master\" and WRITES.has(name)) {",
+  "new": "    // As in Redis, a replica refuses a write before the context.\n    if (false) {",
+  "cases": [
+   "local: on a replica, READONLY comes before the subscribed mode"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE writes waiting messages after its reply",
+  "old": "        // A message to this channel that came while the loop yielded goes\n        // before the reply that leaves it.\n        if (conn.pubQueued > 0) {",
+  "new": "        // A message to this channel that came while the loop yielded goes\n        // before the reply that leaves it.\n        if (false) {",
+  "cases": [
+   "local: a message counted before UNSUBSCRIBE left its channel goes before that reply"
   ]
  }
 ]
