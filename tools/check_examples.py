@@ -19,16 +19,23 @@ as the probes of test/translation-probes/ can for tools/check_spec_probes.py.
 
 The capture is bounded on purpose. A build with LOXPP_DEBUG_TRACE_EXECUTION
 prints one line for every instruction, so a single example can emit hundreds of
-megabytes: `sieve.lox` emits 370 MB in 15 s on a release host and more on a
-debug one. Reading that into a Python string and splitting it into lines is
-what took a 7 GB python3 down with the kernel OOM killer (issue #1176). So the
-run keeps only the lines it needs for the failure report, and an example whose
-output passes --max-output-bytes fails by its own limit, named, instead of
-exhausting the host.
+megabytes: `sieve.lox` emits 370 MB in 15 s. Reading that into a Python string
+and splitting it into lines is what took a 7 GB python3 down with the kernel
+OOM killer (issue #1176). So the output is matched as it arrives and only a
+head and a tail are kept, and the memory of a run no longer grows with what the
+program prints: 50 MB of output costs 14 MB where it cost 209 MB.
+
+--max-output-bytes is off by default, because a traced build legitimately
+prints gigabytes: `json.lox` emits 6.8 GB in 2m19s on a debug build, and the
+memory of the reader does not grow with it. Give it a small value to make a
+program that prints for ever fail loudly, with the example named and the limit
+it passed; the test in tools/check_examples_limits.py does exactly that.
 
 Usage:
     python3 tools/check_examples.py <loxpp-binary> <examples-dir>
         [--exclude <file>]... [--timeout <seconds>] [--max-output-bytes <n>]
+
+--max-output-bytes is off unless given; see "Output" below.
 
 --exclude <file> names a file with one excluded example per line: the file
 name, then a reason. Repeatable: pass --exclude more than once to skip names
@@ -51,6 +58,7 @@ is a mistake in the setup, not a failed example.
 import os
 import re
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -79,6 +87,28 @@ def extract_checks(lox_file: Path) -> list[str]:
         if m:
             checks.append(m.group(1).rstrip())
     return checks
+
+
+LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+
+
+def take_lines(buf: str) -> tuple[list[str], str]:
+    """Splits what has arrived into complete lines, keeping a partial one.
+
+    str.splitlines() is what the tool used to call on the whole output, so the
+    incremental reader has to agree with it: \r, \v, \f and the unicode line
+    separators end a line too. A trailing \r is held back because the next
+    chunk may begin with \n.
+    """
+    hold = ""
+    if buf.endswith("\r"):
+        buf, hold = buf[:-1], "\r"
+    parts = buf.splitlines()
+    if parts and not buf.endswith(tuple(LINE_BREAKS)):
+        hold = parts.pop() + hold
+    else:
+        hold += ""
+    return parts, hold
 
 
 TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
@@ -155,6 +185,11 @@ def run_example(
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            # A runner can be a wrapper: the bootstrap and the JVM scripts are
+            # shell scripts, and killing the shell leaves the interpreter it
+            # started, reparented and still running. The child leads its own
+            # group so the kill reaches everything it started.
+            start_new_session=True,
         )
     except OSError as exc:
         refuse_unrunnable(loxpp, exc)
@@ -164,7 +199,7 @@ def run_example(
             stdin.close()  # type: ignore[union-attr]
 
     deadline = time.monotonic() + timeout
-    pending = b""
+    pending = ""
     status = "done"
     try:
         fd = proc.stdout.fileno()  # type: ignore[union-attr]
@@ -180,26 +215,23 @@ def run_example(
             chunk = os.read(fd, 65536)
             if not chunk:
                 break
-            capture.bytes += len(chunk) - chunk.count(b"\n")
-            if capture.bytes > max_bytes:
+            pending += chunk.decode("utf-8", "replace")
+            lines, pending = take_lines(pending)
+            for line in lines:
+                capture.feed(line)
+            if max_bytes and capture.bytes > max_bytes:
                 status = "output"
                 break
-            pending += chunk
-            # One split per chunk, not one per line: splitting the remainder at
-            # each newline copies what is left, so a 64 KiB chunk of short lines
-            # would copy megabytes of it.
-            lines = pending.split(b"\n")
-            pending = lines.pop()
-            for raw in lines:
-                capture.feed(raw.decode("utf-8", "replace"))
         if status == "done" and pending:
-            capture.feed(pending.decode("utf-8", "replace"))
+            capture.feed(pending)
     finally:
-        if status != "done" or proc.poll() is None:
-            # A timed-out or over-size run is stopped, not left to finish in the
-            # background; a finished one is reaped here either way.
-            if status == "timeout" or status == "output":
-                proc.kill()
+        if status in ("timeout", "output"):
+            # The whole group, not only the shell: a runner that is a wrapper
+            # has started an interpreter of its own.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -242,11 +274,11 @@ def main() -> None:
     output_arg = take_option(args, "--max-output-bytes")
     try:
         timeout = float(timeout_arg) if timeout_arg is not None else 60.0
-        max_bytes = int(output_arg) if output_arg is not None else 8 * 1024 * 1024
+        max_bytes = int(output_arg) if output_arg is not None else 0
     except ValueError:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
-    if timeout <= 0 or max_bytes <= 0:
+    if timeout <= 0 or max_bytes < 0:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
 

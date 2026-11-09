@@ -531,6 +531,27 @@ jobs:
       # -DLOXPP_STRESS_GC on by default. That macro is now a runtime switch,
       # so the env variable carries the same coverage. The release leg never
       # had this and keeps its normal GC schedule.
+      # The debug preset traces every instruction, so checking an example
+      # against that build reads gigabytes to match a handful of CHECK lines:
+      # json.lox emits 6.8 GB of trace in 2m19s, and the whole corpus took
+      # 6m28s and one timeout at 300 s. A trace-free build of the same preset
+      # keeps the sanitizers and runs the corpus in 10 s, so the debug job
+      # builds one for this step (issue #1176).
+      - name: Build loxpp for the example checks, without the instruction trace
+        if: matrix.preset == 'debug'
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "cmake -B build-examples -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+              -DLOXPP_DEBUG_LOG_GC=OFF -DLOXPP_DEBUG_TRACE_EXECUTION=OFF \
+              -DLOXPP_DEBUG_PRINT_CODE=OFF \
+              -DCMAKE_C_FLAGS='-fsanitize=address,undefined' \
+              -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined -fuse-ld=lld' \
+              && cmake --build build-examples --target loxpp"
+
       - name: Run example checks
         run: |
           docker run --rm \
@@ -538,7 +559,7 @@ jobs:
             -w /workspace \
             ${{ matrix.preset == 'debug' && '-e LOXPP_STRESS_GC=1 ' || '' }}\
             loxpp-dev:latest \
-            bash -c "python3 tools/check_examples.py build/loxpp examples/"
+            bash -c "python3 tools/check_examples.py ${{ matrix.preset == 'debug' && 'build-examples/loxpp' || 'build/loxpp' }} examples/"
 
       # The zlib example is pure Lox++, so the corpus above only checks its
       # self-assertions. This drives its file probes against Python's zlib in

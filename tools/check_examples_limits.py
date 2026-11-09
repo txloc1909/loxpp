@@ -8,26 +8,28 @@ until the workflow's own limit and named no example, and one example on a
 traced build — `sieve.lox` emits 370 MB in 15 s — was enough to take a 7 GB
 python3 down with the kernel OOM killer.
 
-Twelve cases, each on a directory the test writes itself, so no corpus is
-walked and the whole run costs a few seconds:
+Seventeen checks in twelve groups, each on a directory the test writes
+itself, so no corpus is walked and the whole run costs a few seconds:
 
-  1. an example that never ends fails the run in bounded time, and the report
-     names it and the limit;
-  2. its own `// TIMEOUT: <seconds>` takes the place of --timeout, so a short
+  1. a runner that runs one passing example passes;
+  2. an example that never ends fails the run in bounded time, and the report
+     names it and the limit it used;
+  3. its own `// TIMEOUT: <seconds>` takes the place of --timeout, so a short
      directive binds a long flag;
-  3. an example whose output passes --max-output-bytes fails by that limit and
-     names it, which is what a traced build meets;
-  4. an example that prints more than the report keeps is still matched, and
-     the failure report elides the middle instead of printing every line;
-  5. an unmatched CHECK fails the run and prints the head and the tail;
-  6. a passing example passes, and its CHECK lines are matched in order;
-  7. an example that halts fails by its exit code;
-  8. `// CHECK:` matching ignores leading white space of the output line, as
-     it always did;
-  9. the `<name>.input` file still reaches the program's stdin;
- 10. a directory with no .lox file is an error (exit 2), not a pass;
- 11. --timeout with no value is a usage error (exit 2);
- 12. --max-output-bytes with no value is a usage error (exit 2).
+  4. an example whose output passes --max-output-bytes fails by that limit and
+     names it;
+  5. an example that prints more than the report keeps is still matched, and a
+     passing run prints no elision;
+  6. a failing run with a long output elides the middle of the report;
+  7. an unmatched CHECK fails the run and shows the output;
+  8. a passing example passes and reports its check count, and a CHECK pair
+     that arrives out of order fails;
+  9. an example that halts fails by its exit code;
+ 10. `// CHECK:` matching ignores leading white space of the output line, as it
+     always did;
+ 11. the `<name>.input` file still reaches the program's stdin;
+ 12. a directory with no .lox file is an error (exit 2), and --timeout or
+     --max-output-bytes with no value is a usage error (exit 2).
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
