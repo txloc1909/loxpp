@@ -1,0 +1,355 @@
+[
+ {
+  "name": "ZADD counts no new member",
+  "old": "            z.insert(p[0], p[1]);\n            added = added + 1;",
+  "new": "            z.insert(p[0], p[1]);",
+  "cases": [
+   "sorted-sets-01 ZADD of a new member gives 1"
+  ]
+ },
+ {
+  "name": "ZADD counts an existing member",
+  "old": "        } else if (old != p[0]) {\n            z.remove(old, p[1]);\n            z.insert(p[0], p[1]);\n            changed = true;",
+  "new": "        } else if (old != p[0]) {\n            z.remove(old, p[1]);\n            z.insert(p[0], p[1]);\n            added = added + 1;\n            changed = true;",
+  "cases": [
+   "sorted-sets-02 ZADD of an existing member gives 0"
+  ]
+ },
+ {
+  "name": "a new score does not move the member",
+  "old": "            z.remove(old, p[1]);\n            z.insert(p[0], p[1]);\n            changed = true;",
+  "new": "            z.dict[p[1]] = p[0];\n            changed = true;",
+  "cases": [
+   "local: a new score moves the member"
+  ]
+ },
+ {
+  "name": "the order ignores the member",
+  "old": "    return node.score < score or (node.score == score and node.member < member);",
+  "new": "    return node.score < score;",
+  "cases": [
+   "sorted-sets-03 ZRANK gives the rank by score, then member"
+  ]
+ },
+ {
+  "name": "the order is by score down",
+  "old": "    return node.score < score or (node.score == score and node.member < member);",
+  "new": "    return node.score > score or (node.score == score and node.member < member);",
+  "cases": [
+   "sorted-sets-04 ZRANGE 2 4 gives the members"
+  ]
+ },
+ {
+  "name": "ZRANK is 1-based",
+  "old": "        return r - 1;\n    }",
+  "new": "        return r;\n    }",
+  "cases": [
+   "sorted-sets-03 ZRANK gives the rank by score, then member"
+  ]
+ },
+ {
+  "name": "nodeAt is one off",
+  "old": "            while (x.forward[i] != nil and traversed + x.span[i] <= rank + 1) {",
+  "new": "            while (x.forward[i] != nil and traversed + x.span[i] <= rank) {",
+  "cases": [
+   "sorted-sets-04 ZRANGE 2 4 gives the members"
+  ]
+ },
+ {
+  "name": "ZRANGE takes no negative start",
+  "old": "    var z = entry.value;\n    var n = z.length;\n    if (start < 0) {\n        start = n + start;\n    }",
+  "new": "    var z = entry.value;\n    var n = z.length;",
+  "cases": [
+   "sorted-sets-05 ZRANGE -2 -1"
+  ]
+ },
+ {
+  "name": "ZRANGE does not stop at the end",
+  "old": "    if (stop >= n) {\n        stop = n - 1;\n    }\n    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
+  "new": "    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
+  "cases": [
+   "sorted-sets-04 ZRANGE past the end stops at the end"
+  ]
+ },
+ {
+  "name": "ZRANGE with start after stop is not empty",
+  "old": "    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
+  "new": "    var count = stop + 1 - start;",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the element budget"
+  ]
+ },
+ {
+  "name": "ZRANGE does not clamp a start before the first",
+  "old": "    if (start < 0) {\n        start = 0;\n    }\n    if (stop >= n) {\n        stop = n - 1;\n    }\n    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
+  "new": "    if (stop >= n) {\n        stop = n - 1;\n    }\n    if (start > stop) {\n        return arrayReply([]);\n    }\n    var count = stop + 1 - start;",
+  "cases": [
+   "sorted-sets-05 ZRANGE with a start before the first is from the first"
+  ]
+ },
+ {
+  "name": "ZCARD gives 0",
+  "old": "    return integerReply(entry.value.length);",
+  "new": "    return integerReply(0);",
+  "cases": [
+   "sorted-sets-06 ZCARD gives the number of members"
+  ]
+ },
+ {
+  "name": "ZSCORE gives the score with a long text",
+  "old": "fun scoreText(score) {\n    return str(score);",
+  "new": "fun scoreText(score) {\n    return str(score) + \"0\";",
+  "cases": [
+   "sorted-sets-07 ZSCORE gives the score"
+  ]
+ },
+ {
+  "name": "ZREM counts nothing",
+  "old": "            z.remove(old, argv[i]);\n            removed = removed + 1;",
+  "new": "            z.remove(old, argv[i]);",
+  "cases": [
+   "sorted-sets-08 ZREM of a member gives 1"
+  ]
+ },
+ {
+  "name": "remove keeps the spans",
+  "old": "            } else {\n                u.span[i] = u.span[i] - 1;\n            }",
+  "new": "            }",
+  "cases": [
+   "local: ranks and ranges stay right after ZREM"
+  ]
+ },
+ {
+  "name": "ZREM keeps an empty key",
+  "old": "        if (z.length == 0) {\n            store.del(key);\n        }\n        touch(key);\n        replicate(argv, nil);\n    }\n    return integerReply(removed);",
+  "new": "        touch(key);\n        replicate(argv, nil);\n    }\n    return integerReply(removed);",
+  "cases": [
+   "local: ZREM of the last member removes the key"
+  ]
+ },
+ {
+  "name": "every node has level 1",
+  "old": "        if (((zsetSeed - zsetSeed % 65536i) / 65536i) % 4i != 0i) {",
+  "new": "        if (true) {",
+  "cases": [
+   "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "ZADD reads no inf",
+  "old": "    if (rest == \"inf\" or rest == \"infinity\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: ZADD reads the score forms of strtod"
+  ]
+ },
+ {
+  "name": "ZADD reads no exponent",
+  "old": "    if (i < len(s) and (s[i] == \"e\" or s[i] == \"E\")) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: ZADD reads the score forms of strtod"
+  ]
+ },
+ {
+  "name": "ZADD takes a score that overflows",
+  "old": "    if (value == 0 or value == ZSET_INF or value == -ZSET_INF) {\n        return nil;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD zl 1.8e308 a gives the error of Redis",
+   "local: ZADD zl 2e-324 a gives the error of Redis"
+  ]
+ },
+ {
+  "name": "ZADD takes nan",
+  "old": "    var digits = intPart + fracPart;\n    if (len(digits) == 0) {\n        return nil;\n    }",
+  "new": "    var digits = intPart + fracPart;\n    if (len(digits) == 0) {\n        return 0;\n    }",
+  "cases": [
+   "local: ZADD zl nan a gives the error of Redis"
+  ]
+ },
+ {
+  "name": "ZADD takes trailing text",
+  "old": "    if (i != len(s)) {\n        return nil;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD zl 1x a gives the error of Redis"
+  ]
+ },
+ {
+  "name": "ZADD takes an odd number of arguments",
+  "old": "    if ((len(argv) - 2) % 2 != 0) {\n        return errorReply(\"ERR syntax error\");\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD zl 1 a 2 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "no limit on the members of ZADD",
+  "old": "    if ((len(argv) - 2) / 2 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD of more than 16384 members is refused"
+  ]
+ },
+ {
+  "name": "no limit on the members of ZREM",
+  "old": "    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZREM of more than 16384 members is refused"
+  ]
+ },
+ {
+  "name": "no sorted set work limit in EXEC",
+  "old": "    if (!spendZsetWork(work)) {\n        return ZSET_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses sorted set work over 32768"
+  ]
+ },
+ {
+  "name": "EXEC does not set the work limit",
+  "old": "    zsetExecWork = ZSET_EXEC_WORK;\n",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses sorted set work over 32768"
+  ]
+ },
+ {
+  "name": "ZRANGE spends no elements",
+  "old": "    if (!spendElements(size)) {\n        return EXEC_TOO_LARGE;\n    }\n    var out = [];",
+  "new": "    var out = [];",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the element budget"
+  ]
+ },
+ {
+  "name": "ZADD does not mark the watchers",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
+  "new": "    if (changed) {\n        replicate(argv, nil);\n    }",
+  "cases": [
+   "local: a ZADD that changes a score fails EXEC"
+  ]
+ },
+ {
+  "name": "a ZADD that changes nothing marks",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
+  "new": "    touch(key);\n    if (changed) {\n        replicate(argv, nil);\n    }",
+  "cases": [
+   "local: a ZADD that changes nothing does not fail EXEC"
+  ]
+ },
+ {
+  "name": "ZREM does not mark the watchers",
+  "old": "            store.del(key);\n        }\n        touch(key);\n        replicate(argv, nil);",
+  "new": "            store.del(key);\n        }\n        replicate(argv, nil);",
+  "cases": [
+   "local: ZREM fails EXEC"
+  ]
+ },
+ {
+  "name": "a ZADD that changes nothing is propagated",
+  "old": "    if (changed) {\n        touch(key);\n        replicate(argv, nil);\n    }",
+  "new": "    touch(key);\n    replicate(argv, nil);",
+  "cases": [
+   "local: ZADD and ZREM that change the set are propagated, others not"
+  ]
+ },
+ {
+  "name": "ZREM is not propagated",
+  "old": "            store.del(key);\n        }\n        touch(key);\n        replicate(argv, nil);",
+  "new": "            store.del(key);\n        }\n        touch(key);",
+  "cases": [
+   "local: ZADD and ZREM that change the set are propagated, others not"
+  ]
+ },
+ {
+  "name": "a replica takes ZADD from a client",
+  "old": "\"DEL\": true, \"ZADD\": true, \"ZREM\": true};",
+  "new": "\"DEL\": true, \"ZREM\": true};",
+  "cases": [
+   "local: a replica refuses ZADD and ZREM from a client"
+  ]
+ },
+ {
+  "name": "ZRANGE gives no scores",
+  "old": "        if (withScores) {\n            out.append(scoreText(x.score));\n        }",
+  "new": "",
+  "cases": [
+   "local: ZRANGE WITHSCORES gives each member and its score"
+  ]
+ },
+ {
+  "name": "a string is read as a sorted set",
+  "old": "    if (entry.kind != \"zset\") {\n        return false;\n    }\n    return entry;\n}\n\n// Reads a score",
+  "new": "    return entry;\n}\n\n// Reads a score",
+  "cases": [
+   "local: ZCARD of a string gives WRONGTYPE"
+  ]
+ },
+ {
+  "name": "the range of a score is checked after the text",
+  "old": "    if (magnitude > 310 or magnitude < -330) {\n        return nil;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD of 64 scores 1e-99999 replies within 1 s"
+  ]
+ },
+ {
+  "name": "no limit on the bytes of a score",
+  "old": "    if (len(s) == 0 or len(s) > SCORE_MAX_BYTES) {",
+  "new": "    if (len(s) == 0) {",
+  "cases": [
+   "local: a score of 65 bytes is refused"
+  ]
+ },
+ {
+  "name": "a replica parses ZADD with no yield",
+  "old": "            if (parse != nil) {\n                ctx = parse(argv, true);\n            }\n            if (queued != nil) {",
+  "new": "            if (parse != nil) {\n                ctx = parse(argv, false);\n            }\n            if (queued != nil) {",
+  "cases": [
+   "local: Z5 a replica parses a ZADD of its master in steps"
+  ]
+ },
+ {
+  "name": "a new score costs one unit of work",
+  "old": "        if (had != nil and had != p[0]) {\n            work = work + 2;",
+  "new": "        if (had != nil and had != p[0]) {\n            work = work + 1;",
+  "cases": [
+   "local: a new score costs two units of the sorted set work of EXEC"
+  ]
+ },
+ {
+  "name": "ZRANGE takes WITHSCORES once",
+  "old": "        if (upper(argv[k]) != \"WITHSCORES\") {",
+  "new": "        if (upper(argv[k]) != \"WITHSCORES\" or k > 4) {",
+  "cases": [
+   "local: ZRANGE takes WITHSCORES twice, as Redis does"
+  ]
+ },
+ {
+  "name": "a member that comes again is counted against the old set",
+  "old": "        if (now.has(p[1])) {\n            had = now[p[1]];\n        } else if (entry != nil) {",
+  "new": "        if (entry != nil) {",
+  "cases": [
+   "local: a member twice in one ZADD costs a delete and an insert"
+  ]
+ },
+ {
+  "name": "ZRANGE parses its options with no yield",
+  "old": "        if (mayYield and k % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    return withScores;",
+  "new": "    }\n    return withScores;",
+  "cases": [
+   "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a pair that changes nothing costs no work",
+  "old": "        } else {\n            work = work + 1;\n        }\n        now[p[1]] = p[0];",
+  "new": "        } else if (had == nil) {\n            work = work + 1;\n        }\n        now[p[1]] = p[0];",
+  "cases": [
+   "local: a pair that changes nothing costs one unit of the sorted set work of EXEC"
+  ]
+ }
+]

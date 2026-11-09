@@ -32,7 +32,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | replication | 18 | pass |
 | persistence-aof | 10 | pass |
 | pub-sub | 7 | pass |
-| sorted-sets | 8 | not started |
+| sorted-sets | 8 | pass |
 | geospatial | 8 | not started |
 | bitmaps | 9 | not started |
 | authentication | 8 | not started |
@@ -278,6 +278,33 @@ does not keep them (AOF3). A
 write to the file that fails stops the server with a message, as Redis
 does with `appendfsync always`.
 
+### Sorted sets
+
+A sorted set is a skip list with spans, as in Redis, and a Map of member
+to score (`ZSet`). The order is by score, then by member. `ZADD`, `ZREM`
+and `ZRANK` take O(log N) steps, and `ZRANGE` O(log N + M); `ZRANGE` takes
+its members in its step (about 0.2 microseconds for each), and the session
+writes them in steps. The level of a node comes from the high bits of a
+linear congruential generator, with a chance of 1/4 for each level, because
+the standard library has no random numbers. `ZADD` reads its scores before
+it runs (`parseZadd`, with yields), so a bad score changes nothing; a
+replica parses a `ZADD` of its master with yields too. A score has the
+forms of `strtod` that Redis takes, and a value out of range or one that
+rounds to zero is refused, as in Redis. The parse is linear, and it checks
+the range from the first digit that is not zero and the exponent before it
+makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM` that changes
+the set marks the watchers and is propagated; one that changes nothing is
+not, as in Redis.
+
+An insert costs about 9 microseconds of Lox++ code, and a command runs in
+one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
+at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
+sorted sets, where a new score of a member is a delete and an insert, also
+for a member that comes again in the same `ZADD`, and a pair that changes
+nothing is one unit (rule 6); `ZRANGE` in
+`EXEC` spends the element budget, and parses its options before it runs,
+with yields.
+
 ### Pub/Sub
 
 `subscribers` maps each channel to the Conns that subscribe to it, and each
@@ -407,6 +434,16 @@ printed.
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
   redis-server master makes a new RDB file each time).
+- Sorted sets: a score is written as the shortest text that reads back as
+  the same double (`30.1`), as the stages ask; Redis 7.0 gives 17
+  significant digits (`30.100000000000001`). A hexadecimal score (`0x10`)
+  is refused; Redis reads it. `ZADD` takes no options (`NX`, `XX`, `GT`,
+  `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
+  `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
+  members, a score has at most 64 bytes, and one `EXEC` does at most 32768
+  inserts and deletes of sorted sets; Redis has no such limits. A `ZRANGE`
+  index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
+  gives an empty range. The RDB load does not read a sorted set.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -574,6 +611,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | PS6: 600000 empty messages to a subscriber that does not read | closed (when a message costs only its bytes, or 64 more: not closed; 500000 such messages took 104 MB of RSS) | as required |
 | PS7 (with `--pubsub-soft-seconds 2`): 12 MB, read, 2.5 s, 12 MB more | not closed: the soft time starts again | as required |
 | PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 60 MB from round 3 to 5 (without the drop of empty channels: 447 to 763 MB) | 221, 299, 447, 447, 447 MB |
+| Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
+| Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
+| Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
+| Z4: `ZADD` of 16384 scores of 64 bytes in the costliest form (`0.` and 52 zeros, 4 digits, `e-256`), on a master | PING within 1.0 s (rule 6 only) | 0.13 s |
+| Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.18 s |
+| Z6: `ZRANGE` with 1048572 `WITHSCORES` | PING within 0.5 s (when the options are parsed in one step: 1.75 s) | 0.04 s |
+| Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.24–0.25 s). Its margin is small: on a host with every CPU busy it can fail. | 0.06–0.07 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
@@ -601,9 +645,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/optimistic-locking.json` or
 `tests/mutations/persistence-rdb.json` or
 `tests/mutations/replication.json` or
-`tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json`
-that removes
-its guard (S4, T1, T7, W3, K1, RP2, AOF1 and PS3 hold rule 6 only: no single change removes their
+`tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
+`tests/mutations/sorted-sets.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2 and Z3 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -676,7 +720,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
 # and optimistic-locking.json, persistence-rdb.json, replication.json,
-# persistence-aof.json, pub-sub.json
+# persistence-aof.json, pub-sub.json, sorted-sets.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
 

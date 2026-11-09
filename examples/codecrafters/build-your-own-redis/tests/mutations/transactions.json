@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "    execElements = nil;\n    endExecReplication();\n    serveReady();",
-  "new": "    execElements = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "old": "    zsetExecWork = nil;\n    endExecReplication();\n    serveReady();",
+  "new": "    zsetExecWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]

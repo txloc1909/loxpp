@@ -296,6 +296,35 @@ SCRIPTS = {
             ["LLEN"], ["LRANGE", "l", "0"],
         ]),
     ],
+    "sorted-sets": [
+        ("zset-basics", [
+            ["ZADD", "z", "100", "foo"], ["ZADD", "z", "100", "bar"], ["ZADD", "z", "20", "baz"],
+            ["ZADD", "z", "30.5", "caz"], ["ZADD", "z", "40.25", "paz"], ["ZADD", "z", "100", "foo"],
+            ["ZRANK", "z", "caz"], ["ZRANK", "z", "foo"], ["ZRANK", "z", "bar"], ["ZRANK", "z", "nosuch"],
+            ["ZRANK", "nokey", "m"], ["ZRANGE", "z", "0", "-1"], ["ZRANGE", "z", "2", "4"], ["ZRANGE", "z", "-2", "-1"],
+            ["ZRANGE", "z", "-10", "1"], ["ZRANGE", "z", "3", "1"], ["ZRANGE", "z", "5", "9"], ["ZRANGE", "nokey", "0", "1"],
+            ["ZRANGE", "z", "0", "-1", "WITHSCORES"], ["ZRANGE", "z", "0", "-1", "withscores"],
+            ["ZCARD", "z"], ["ZCARD", "nokey"], ["ZSCORE", "z", "caz"], ["ZSCORE", "z", "nosuch"], ["ZSCORE", "nokey", "m"],
+            ["ZADD", "z", "1", "a", "2", "b", "1", "a"], ["ZADD", "z2", "3", "x", "2", "x"], ["ZSCORE", "z2", "x"],
+            ["ZADD", "z", "5", "a"], ["ZRANK", "z", "a"], ["ZREM", "z", "a", "a", "nosuch"], ["ZREM", "z", "nosuch"],
+            ["ZREM", "nokey", "m"], ["TYPE", "z"], ["ZREM", "z2", "x"], ["TYPE", "z2"], ["ZCARD", "z2"],
+        ]),
+        ("zset-scores", [
+            ["ZADD", "s", "1e3", "a"], ["ZADD", "s", "-inf", "b"], ["ZADD", "s", "+inf", "c"], ["ZADD", "s", "Infinity", "d"],
+            ["ZADD", "s", ".5", "e"], ["ZADD", "s", "1.", "f"], ["ZADD", "s", "-0.0", "g"], ["ZADD", "s", "00012.50", "h"],
+            ["ZADD", "s", "1e400", "i"], ["ZADD", "s", "1e-400", "i"], ["ZADD", "s", "nan", "i"], ["ZADD", "s", "abc", "i"],
+            ["ZADD", "s", " 1", "i"], ["ZADD", "s", "1 ", "i"], ["ZADD", "s", "1e", "i"], ["ZADD", "s", ".", "i"],
+            ["ZADD", "s", "9", "new", "abc", "x"], ["ZSCORE", "s", "new"],
+            ["ZRANGE", "s", "0", "-1", "WITHSCORES"], ["ZSCORE", "s", "a"], ["ZSCORE", "s", "b"], ["ZSCORE", "s", "c"],
+        ]),
+        ("zset-errors", [
+            ["ZADD", "z", "1"], ["ZADD", "z", "1", "a", "2"], ["ZADD"], ["ZRANGE", "z", "a", "b"], ["ZRANGE", "z", "0"],
+            ["ZRANGE", "z", "0", "1", "FOO"], ["ZREM", "z"], ["ZRANK", "z"], ["ZSCORE", "z"], ["ZCARD"], ["ZCARD", "a", "b"],
+            ["SET", "str", "v"], ["ZADD", "str", "1", "a"], ["ZREM", "str", "a"], ["ZCARD", "str"], ["ZSCORE", "str", "a"],
+            ["ZRANK", "str", "a"], ["ZRANGE", "str", "0", "1"], ["ZADD", "zz", "1", "a"], ["LPUSH", "zz", "x"],
+            ["GET", "zz"], ["XADD", "zz", "*", "f", "v"],
+        ]),
+    ],
     "pub-sub": [
         ("subscribed-mode", [
             ["UNSUBSCRIBE"], ["UNSUBSCRIBE", "x"], ["PUBLISH", "ch", "m"], ["PUBLISH", "a"], ["SUBSCRIBE"],

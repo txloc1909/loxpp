@@ -89,8 +89,8 @@
  },
  {
   "name": "a transaction is not wrapped",
-  "old": "    execElements = EXEC_ELEMENTS;\n    replInExec = true;",
-  "new": "    execElements = EXEC_ELEMENTS;",
+  "old": "    zsetExecWork = ZSET_EXEC_WORK;\n    replInExec = true;",
+  "new": "    zsetExecWork = ZSET_EXEC_WORK;",
   "cases": [
    "local: a transaction is propagated in MULTI and EXEC"
   ]
@@ -169,16 +169,16 @@
  },
  {
   "name": "the replica applies nothing",
-  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
-  "new": "        } else if (len(argv) > 0) {\n        }",
+  "old": "                applyingFromMaster = true;\n                execute(ctx, argv);\n                applyingFromMaster = false;",
+  "new": "",
   "cases": [
    "replication-13 the replica applies the commands of the master"
   ]
  },
  {
   "name": "the replica replies to the master",
-  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
-  "new": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            sock.write(execute(nil, argv));\n            applyingFromMaster = false;\n        }",
+  "old": "                applyingFromMaster = true;\n                execute(ctx, argv);\n                applyingFromMaster = false;",
+  "new": "                applyingFromMaster = true;\n                sock.write(execute(ctx, argv));\n                applyingFromMaster = false;",
   "cases": [
    "local: the replica sends no reply to the master"
   ]
@@ -361,8 +361,8 @@
  },
  {
   "name": "the replica applies a write of a transaction at once",
-  "old": "            queued.append(argv);\n        } else if (len(argv) > 0) {",
-  "new": "            queued.append(argv);\n            execute(nil, argv);\n        } else if (len(argv) > 0) {",
+  "old": "                queued.append(argv);\n                queuedCtx.append(ctx);",
+  "new": "                queued.append(argv);\n                queuedCtx.append(ctx);\n                execute(ctx, argv);",
   "cases": [
    "local: a client of the replica sees no write of a transaction before its EXEC"
   ]
@@ -393,8 +393,8 @@
  },
  {
   "name": "DEL is not a write",
-  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true};",
-  "new": "\"BLPOP\": true, \"XADD\": true};",
+  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true, \"ZADD\": true, \"ZREM\": true};",
+  "new": "\"BLPOP\": true, \"XADD\": true, \"ZADD\": true, \"ZREM\": true};",
   "cases": [
    "local: a replica refuses DEL from a client"
   ]

@@ -4642,6 +4642,424 @@ def stages_pubsub_replication(prog):
         m.close()
 
 
+def stages_zset(prog):
+    srv = Server(prog, [])
+    try:
+        check("sorted-sets: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        stages_zset_on(srv)
+    finally:
+        srv.stop()
+    stages_zset_limits(prog)
+    stages_zset_replication(prog)
+
+
+def stages_zset_on(srv):
+    c = Asker(srv)
+    check("sorted-sets-01 ZADD of a new member gives 1", c.call("ZADD", "z1", "10.0", "zset_member") == 1)
+    got = [c.call("ZADD", "z2", "20.0", "m1"), c.call("ZADD", "z2", "30.1", "m2"), c.call("ZADD", "z2", "40.2", "m3"),
+           c.call("ZADD", "z2", "50.3", "m4")]
+    check("sorted-sets-02 ZADD of each new member gives 1", got == [1, 1, 1, 1], repr(got))
+    check("sorted-sets-02 ZADD of an existing member gives 0", c.call("ZADD", "z2", "100.0", "m1") == 0)
+    for score, m in (("100.0", "foo"), ("100.0", "bar"), ("20.0", "baz"), ("30.1", "caz"), ("40.2", "paz")):
+        c.call("ZADD", "z3", score, m)
+    got = [c.call("ZRANK", "z3", m) for m in ("caz", "baz", "foo", "bar")]
+    check("sorted-sets-03 ZRANK gives the rank by score, then member", got == [1, 0, 4, 3], repr(got))
+    check("sorted-sets-03 ZRANK of a missing member gives a null bulk", c.call("ZRANK", "z3", "missing_member") is None)
+    check("sorted-sets-03 ZRANK of a missing key gives a null bulk", c.call("ZRANK", "missing_key", "member") is None)
+    check("sorted-sets-04 ZRANGE 2 4 gives the members", c.call("ZRANGE", "z3", "2", "4") == ["paz", "bar", "foo"])
+    check("sorted-sets-04 ZRANGE past the end stops at the end", c.call("ZRANGE", "z3", "3", "10") == ["bar", "foo"])
+    check("sorted-sets-04 ZRANGE with start after stop is empty", c.call("ZRANGE", "z3", "3", "1") == [])
+    check("sorted-sets-04 ZRANGE with start past the end is empty", c.call("ZRANGE", "z3", "5", "9") == [])
+    check("sorted-sets-04 ZRANGE of a missing key is empty", c.call("ZRANGE", "missing_key", "0", "1") == [])
+    for score, m in (("20.0", "foo"), ("30.1", "bar"), ("40.2", "baz"), ("25.0", "paz"), ("25.0", "caz")):
+        c.call("ZADD", "z5", score, m)
+    check("sorted-sets-05 ZRANGE 2 -1", c.call("ZRANGE", "z5", "2", "-1") == ["paz", "bar", "baz"])
+    check("sorted-sets-05 ZRANGE -2 -1", c.call("ZRANGE", "z5", "-2", "-1") == ["bar", "baz"])
+    check("sorted-sets-05 ZRANGE with a start before the first is from the first",
+          c.call("ZRANGE", "z5", "-10", "1") == ["foo", "caz"])
+    check("sorted-sets-06 ZCARD gives the number of members", c.call("ZCARD", "z2") == 4)
+    check("sorted-sets-06 ZCARD of a missing key gives 0", c.call("ZCARD", "missing_key") == 0)
+    check("sorted-sets-07 ZSCORE gives the score", c.call("ZSCORE", "z2", "m2") == "30.1")
+    c.call("ZADD", "z2", "100.99", "m2")
+    check("sorted-sets-07 ZSCORE gives the new score", c.call("ZSCORE", "z2", "m2") == "100.99")
+    check("sorted-sets-07 ZSCORE of a missing member gives a null bulk", c.call("ZSCORE", "z2", "m100") is None)
+    check("sorted-sets-07 ZSCORE of a missing key gives a null bulk", c.call("ZSCORE", "missing_key", "m") is None)
+    for score, m in (("80.5", "foo"), ("50.3", "baz"), ("80.5", "bar")):
+        c.call("ZADD", "z8", score, m)
+    check("sorted-sets-08 ZREM of a member gives 1", c.call("ZREM", "z8", "baz") == 1)
+    check("sorted-sets-08 ZRANGE after ZREM", c.call("ZRANGE", "z8", "0", "-1") == ["bar", "foo"])
+    check("sorted-sets-08 ZREM of a missing member gives 0", c.call("ZREM", "z8", "missing_member") == 0)
+
+    # Local cases.
+    check("local: ZADD of several pairs counts the new members", c.call("ZADD", "zl", "1", "a", "2", "b", "1", "a") == 2)
+    check("local: the last score of a member in one ZADD wins", c.call("ZADD", "zl2", "3", "x", "2", "x") == 1
+          and c.call("ZSCORE", "zl2", "x") == "2")
+    c.call("ZADD", "zl", "5", "a")
+    check("local: a new score moves the member", c.call("ZRANGE", "zl", "0", "-1") == ["b", "a"]
+          and c.call("ZRANK", "zl", "a") == 1)
+    check("local: ZRANGE WITHSCORES gives each member and its score",
+          c.call("ZRANGE", "zl", "0", "-1", "WITHSCORES") == ["b", "2", "a", "5"])
+    check("local: ZRANGE takes WITHSCORES twice, as Redis does",
+          c.call("ZRANGE", "zl", "0", "-1", "WITHSCORES", "withscores") == ["b", "2", "a", "5"])
+    got = c.call("ZADD", "zl", "1" + "0" * 64, "long")
+    check("local: a score of 65 bytes is refused", got == NOT_FLOAT_REPLY, repr(got))
+    t0 = time.time()
+    got = [c.call("ZADD", "zl", "1e-999999", "x"), c.call("ZADD", "zl", "1e999999", "x")]
+    check("local: ZADD of an exponent of 6 digits replies within 1 s",
+          got == [NOT_FLOAT_REPLY] * 2 and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
+    args = []
+    for i in range(64):
+        args += ["1e-99999", "y%d" % i]
+    t0 = time.time()
+    got = c.call("ZADD", "zl", *args)
+    check("local: ZADD of 64 scores 1e-99999 replies within 1 s",
+          got == NOT_FLOAT_REPLY and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
+    for cmd, want in ((("ZADD", "zl", "1"), "wrong number of arguments for 'zadd'"),
+                      (("ZADD", "zl", "1", "a", "2"), "syntax error"),
+                      (("ZADD", "zl", "abc", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "nan", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "1e400", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "1.8e308", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "2e-324", "a"), "value is not a valid float"),
+                      (("ZADD", "zl", "1x", "a"), "value is not a valid float"),
+                      (("ZRANGE", "zl", "a", "b"), "value is not an integer"),
+                      (("ZRANGE", "zl", "0", "1", "FOO"), "syntax error"),
+                      (("ZRANGE", "zl", "0"), "wrong number of arguments for 'zrange'"),
+                      (("ZREM", "zl"), "wrong number of arguments for 'zrem'"),
+                      (("ZRANK", "zl"), "wrong number of arguments for 'zrank'"),
+                      (("ZSCORE", "zl"), "wrong number of arguments for 'zscore'"),
+                      (("ZCARD",), "wrong number of arguments for 'zcard'")):
+        got = c.call(*cmd)
+        check("local: %s gives the error of Redis" % " ".join(cmd), isinstance(got, Error) and want in got, repr(got))
+    check("local: a bad score changes nothing", c.call("ZADD", "zl", "9", "new", "abc", "x") == NOT_FLOAT_REPLY
+          and c.call("ZSCORE", "zl", "new") is None)
+    scores = [("1e3", "1000"), ("-inf", "-inf"), ("+inf", "inf"), ("Infinity", "inf"), (".5", "0.5"), ("1.", "1"),
+              ("-0.0", "0"), ("1.5e300", "1.5e+300"), ("00012.50", "12.5")]
+    got = []
+    for i, (text, _) in enumerate(scores):
+        c.call("ZADD", "zf", text, "f%d" % i)
+        got.append(c.call("ZSCORE", "zf", "f%d" % i))
+    check("local: ZADD reads the score forms of strtod", got == [w for _, w in scores], repr(got))
+    c.call("SET", "str", "v")
+    for cmd in (("ZADD", "str", "1", "a"), ("ZREM", "str", "a"), ("ZCARD", "str"), ("ZSCORE", "str", "a"),
+                ("ZRANK", "str", "a"), ("ZRANGE", "str", "0", "1")):
+        got = c.call(*cmd)
+        check("local: %s of a string gives WRONGTYPE" % cmd[0], isinstance(got, Error) and got.startswith("WRONGTYPE"),
+              repr(got))
+    check("local: TYPE of a sorted set gives zset", c.call("TYPE", "zl") == "zset")
+    got = c.call("LPUSH", "zl", "x")
+    check("local: LPUSH of a sorted set gives WRONGTYPE", isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+    check("local: ZREM counts each member once", c.call("ZREM", "zl", "a", "a", "nosuch") == 1)
+    check("local: ZREM of the last member removes the key", c.call("ZREM", "zl", "b") == 1
+          and c.call("TYPE", "zl") == "none" and c.call("ZCARD", "zl") == 0)
+    # Ranks on a set of 2000 members, with ties: each rank and each range
+    # agrees with a sort in Python.
+    members = [("%d" % (i % 37), "m%04d" % i) for i in range(2000)]
+    for i in range(0, 2000, 500):
+        args = []
+        for score, m in members[i:i + 500]:
+            args += [score, m]
+        c.call("ZADD", "big", *args)
+    order = [m for s, m in sorted(members, key=lambda p: (int(p[0]), p[1]))]
+    got = [c.call("ZRANK", "big", order[k]) for k in range(0, 2000, 97)]
+    check("local: ZRANK on 2000 members agrees with a sort", got == list(range(0, 2000, 97)), repr(got[:5]))
+    check("local: ZRANGE on 2000 members agrees with a sort", c.call("ZRANGE", "big", "0", "-1") == order
+          and c.call("ZRANGE", "big", "1500", "1510") == order[1500:1511])
+    for m in order[::3]:
+        c.c.send_raw(encode("ZREM", "big", m))
+    for _ in order[::3]:
+        c.c.try_read(5)
+    rest = [m for k, m in enumerate(order) if k % 3 != 0]
+    check("local: ranks and ranges stay right after ZREM",
+          c.call("ZRANGE", "big", "0", "-1") == rest and c.call("ZRANK", "big", rest[777]) == 777
+          and c.call("ZCARD", "big") == len(rest))
+    # WATCH: a ZADD that changes the set marks the client; one that changes
+    # nothing does not.
+    w = Asker(srv)
+    c.call("ZADD", "wz", "1", "a")
+    w.call("WATCH", "wz")
+    c.call("ZADD", "wz", "1", "a")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: a ZADD that changes nothing does not fail EXEC", w.call("EXEC") == ["PONG"])
+    w.call("WATCH", "wz")
+    c.call("ZADD", "wz", "2", "a")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: a ZADD that changes a score fails EXEC", w.call("EXEC") is None)
+    w.call("WATCH", "wz")
+    c.call("ZREM", "wz", "a")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: ZREM fails EXEC", w.call("EXEC") is None)
+    w.close()
+    c.close()
+
+
+NOT_FLOAT_REPLY = Error("ERR value is not a valid float")
+
+
+def stages_zset_limits(prog):
+    srv = Server(prog, [])
+    try:
+        names = ["local: ZADD of more than 16384 members is refused",
+                 "local: ZREM of more than 16384 members is refused",
+                 "local: EXEC refuses sorted set work over 32768",
+                 "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s",
+                 "local: Z2 ZRANGE of 524288 members stalls PING at most 1 s",
+                 "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
+                 "local: EXEC refuses a ZRANGE over the element budget",
+                 "local: a new score costs two units of the sorted set work of EXEC",
+                 "local: a member twice in one ZADD costs a delete and an insert",
+                 "local: a pair that changes nothing costs one unit of the sorted set work of EXEC",
+                 "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s",
+                 "local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
+        if aof_started(srv, names):
+            c = Asker(srv)
+            c.c.sock.settimeout(60)
+            args = []
+            for i in range(16385):
+                args += ["1", "x%d" % i]
+            got = c.call("ZADD", "lim", *args)
+            check(names[0], isinstance(got, Error) and "16384" in got and c.call("ZCARD", "lim") == 0, repr(got))
+            got = c.call("ZREM", "lim", *["x%d" % i for i in range(16385)])
+            check(names[1], isinstance(got, Error) and "16384" in got, repr(got))
+            third = []
+            for i in range(15000):
+                third += ["1", "e%d" % i]
+            c.call("MULTI")
+            c.call("ZADD", "e1", *third)
+            c.call("ZADD", "e2", *third)
+            c.call("ZADD", "e3", *third)
+            c.raw().sock.settimeout(60)
+            c.raw().send_raw(encode("EXEC"))
+            got = c.raw().try_read(60)
+            check(names[2], isinstance(got, list) and got[:2] == [15000, 15000] and isinstance(got[2], Error)
+                  and "transaction" in got[2] and c.call("ZCARD", "e3") == 0, repr(got)[:120])
+            # A set of 524288 members, from 32 ZADD of 16384. A build that
+            # takes over 60 s (a skip list of one level is a linked list)
+            # fails Z1 by name, before the suite runs out of time.
+            built = time.time()
+            for b in range(32):
+                if time.time() - built > 60:
+                    break
+                part = []
+                for i in range(16384):
+                    part += ["%d" % ((b * 16384 + i) % 1000), "s%07d" % (b * 16384 + i)]
+                c.raw().send_raw(encode("ZADD", "Z", *part))
+                c.raw().try_read(60)
+            more = []
+            for i in range(16384):
+                more += ["%d" % (i % 997), "t%07d" % i]
+
+            if time.time() - built > 60:
+                for nm in names[3:]:
+                    check(nm, False, "the set of 524288 members took over 60 s to build")
+                c.close()
+                return
+
+            def zadd():
+                c.raw().send_raw(encode("ZADD", "Z", *more))
+                c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, zadd)
+            check(names[3], worst <= 1.0 and not wrong and c.call("ZCARD", "Z") == 524288 + 16384,
+                  "worst %.3f s" % worst)
+            c.call("DEL", "e1", "e2")
+            c.call("ZREM", "Z", *["t%07d" % i for i in range(16384)])
+            got = [None]
+
+            def zrange():
+                c.raw().send_raw(encode("ZRANGE", "Z", "0", "-1"))
+                got[0] = c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, zrange)
+            check(names[4], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
+                  "worst %.3f s" % worst)
+            # The element budget of EXEC: 8 ZRANGE WITHSCORES of 524288
+            # members fill it, and the ninth is refused.
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            # An empty range first: it must spend nothing, and give back
+            # nothing either.
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "524287", "0") * 3
+                       + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") * 9 + encode("EXEC"))
+            for _ in range(13):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: EXEC refuses a ZRANGE over the element budget",
+                  isinstance(reply, list) and len(reply) == 12 and reply[:3] == [[], [], []]
+                  and all(len(r) == 1048576 for r in reply[3:11])
+                  and isinstance(reply[11], Error), repr(reply[11])[:80] if isinstance(reply, list) else repr(reply)[:80])
+
+            def exec_two():
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.send_raw(encode("MULTI") + encode("ZADD", "Y1", *more) + encode("ZADD", "Y2", *more) + encode("EXEC"))
+                for _ in range(4):
+                    x.read()
+                x.close()
+            worst, wrong, _ = measure_while(srv, exec_two)
+            check(names[5], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            # A new score is a delete and an insert: 16384 new members, then
+            # new scores for them, are 49152 units, over 32768.
+            fresh = []
+            moved = []
+            for i in range(16384):
+                fresh += ["1", "w%d" % i]
+                moved += ["2", "w%d" % i]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("ZADD", "W", *fresh) + encode("ZADD", "W", *moved) + encode("EXEC"))
+            for _ in range(3):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a new score costs two units of the sorted set work of EXEC",
+                  isinstance(reply, list) and reply[0] == 16384 and isinstance(reply[1], Error), repr(reply)[:100])
+            # A member that comes again in one ZADD with a new score is a
+            # delete and an insert too: 8192 members twice are 24576 units,
+            # and 8193 new members more pass 32768.
+            twice = []
+            for i in range(8192):
+                twice += ["1", "d%d" % i]
+            for i in range(8192):
+                twice += ["2", "d%d" % i]
+            extra = []
+            for i in range(8193):
+                extra += ["1", "f%d" % i]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("ZADD", "D", *twice) + encode("ZADD", "F", *extra) + encode("EXEC"))
+            for _ in range(3):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a member twice in one ZADD costs a delete and an insert",
+                  isinstance(reply, list) and reply[0] == 8192 and isinstance(reply[1], Error), repr(reply)[:100])
+            # A pair that changes nothing is one unit too: 3 ZADD of the
+            # same 16384 pairs pass 32768.
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.call("ZADD", "U", *fresh)
+            x.send_raw(encode("MULTI") + encode("ZADD", "U", *fresh) * 3 + encode("EXEC"))
+            for _ in range(4):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a pair that changes nothing costs one unit of the sorted set work of EXEC",
+                  isinstance(reply, list) and reply[:2] == [0, 0] and isinstance(reply[2], Error), repr(reply)[:100])
+            # Z6: ZRANGE with 1048572 options parses them in steps.
+            def zrange_options():
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.call("ZRANGE", "D", "0", "1", *(["WITHSCORES"] * 1048572))
+                x.close()
+            worst, wrong, _ = measure_while(srv, zrange_options)
+            check("local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s",
+                  worst <= 0.5 and not wrong, "worst %.3f s" % worst)
+            # Z4: 16384 scores of 64 bytes, the longest, on this master.
+            long_args = []
+            for i in range(16384):
+                long_args += ["0." + "0" * 52 + "%04d" % (i % 10000) + "e-256", "v%d" % i]
+
+            def zadd_long():
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.call("ZADD", "V", *long_args)
+                x.close()
+            worst, wrong, _ = measure_while(srv, zadd_long)
+            check("local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and c.call("ZCARD", "V") == 16384, "worst %.3f s" % worst)
+            c.close()
+    finally:
+        srv.stop()
+
+
+def stages_zset_replication(prog):
+    d = tempfile.mkdtemp(prefix="loxpp-zset-")
+    srv = Server(prog, ["--dir", d, "--appendonly", "yes"])
+    try:
+        names = ["local: ZADD and ZREM that change the set are propagated, others not",
+                 "local: a restart from the AOF gives back the sorted set"]
+        if aof_started(srv, names):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            c.call("ZADD", "rz", "1", "a", "2", "b")
+            c.call("ZADD", "rz", "1", "a")
+            c.call("ZREM", "rz", "nosuch")
+            c.call("ZREM", "rz", "b")
+            c.call("SET", "end", "1")
+            got = [r.try_read(2) for _ in range(3)]
+            check(names[0], got == [["ZADD", "rz", "1", "a", "2", "b"], ["ZREM", "rz", "b"], ["SET", "end", "1"]],
+                  repr(got))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
+    srv = Server(prog, ["--dir", d, "--appendonly", "yes"])
+    try:
+        if aof_started(srv, [names[1]]):
+            c = Asker(srv)
+            check(names[1], c.call("ZRANGE", "rz", "0", "-1", "WITHSCORES") == ["a", "1"])
+            c.close()
+    finally:
+        srv.stop()
+        shutil.rmtree(d, ignore_errors=True)
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        names = ["local: a replica refuses ZADD and ZREM from a client",
+                 "local: a replica applies ZADD and ZREM of its master",
+                 "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                 "local: Z5 a replica parses a ZADD of its master in steps"]
+        if aof_started(rep, names):
+            link = m.accept()
+            fake_handshake(link)
+            c = Asker(rep)
+            got = [c.call("ZADD", "q", "1", "a"), c.call("ZREM", "q", "a")]
+            check(names[0], all(isinstance(g, Error) and g.startswith("READONLY") for g in got), repr(got))
+            link.send_raw(encode("ZADD", "q", "1", "a", "2", "b") + encode("ZREM", "q", "a"))
+            time.sleep(0.3)
+            check(names[1], c.call("ZRANGE", "q", "0", "-1") == ["b"])
+            long_args = []
+            for i in range(16384):
+                long_args += ["0." + "0" * 52 + "%04d" % (i % 10000) + "e-256", "v%d" % i]
+
+            def apply_long():
+                link.send_raw(encode("ZADD", "V", *long_args))
+                deadline = time.time() + 30
+                while time.time() < deadline and c.call("ZCARD", "V") != 16384:
+                    time.sleep(0.05)
+            worst, wrong, _ = measure_while(rep, apply_long)
+            check("local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and c.call("ZCARD", "V") == 16384, "worst %.3f s" % worst)
+
+            # The same ZADD again changes nothing, so only its parse is work:
+            # with a yield every 1024 pairs it stalls little (rule 2).
+            cheap = []
+            for i in range(16384):
+                cheap += ["0." + "0" * 40 + "%021d" % (i + 1), "c%d" % i]
+            link.send_raw(encode("ZADD", "V3", *cheap))
+            deadline = time.time() + 30
+            while time.time() < deadline and c.call("ZCARD", "V3") != 16384:
+                time.sleep(0.05)
+
+            def apply_again():
+                link.send_raw(encode("ZADD", "V3", *cheap) + encode("ZADD", "V2", "1", "done"))
+                deadline = time.time() + 30
+                while time.time() < deadline and c.call("ZCARD", "V2") != 1:
+                    time.sleep(0.05)
+            worst, wrong, _ = measure_while(rep, apply_again)
+            check("local: Z5 a replica parses a ZADD of its master in steps",
+                  worst <= 0.15 and not wrong and c.call("ZCARD", "V2") == 1, "worst %.3f s" % worst)
+            c.close()
+    finally:
+        rep.stop()
+        m.close()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -4652,6 +5070,7 @@ GROUPS = [
     ("replication", stages_replication),
     ("persistence-aof", stages_aof),
     ("pub-sub", stages_pubsub),
+    ("sorted-sets", stages_zset),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
