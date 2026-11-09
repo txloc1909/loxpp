@@ -33,16 +33,16 @@
  },
  {
   "name": "the load stops after one key",
-  "old": "            expiresAt = nil;\n        } else {\n            throw RdbError(\"the file has the opcode",
-  "new": "            expiresAt = nil;\n            return;\n        } else {\n            throw RdbError(\"the file has the opcode",
+  "old": "            loaded = loaded + 1;\n            if (forReplica and loaded % ELEMENTS_PER_YIELD == 0) {\n                yield nil;\n            }",
+  "new": "            return;",
   "cases": [
    "persistence-rdb-04 KEYS * gives every key"
   ]
  },
  {
   "name": "an RDB value is the key",
-  "old": "                store[key] = Entry(\"string\", value, expiresAt);",
-  "new": "                store[key] = Entry(\"string\", key, expiresAt);",
+  "old": "                target[key] = Entry(\"string\", value, expiresAt);",
+  "new": "                target[key] = Entry(\"string\", key, expiresAt);",
   "cases": [
    "persistence-rdb-03 GET gives the value"
   ]
@@ -65,8 +65,8 @@
  },
  {
   "name": "the expiry passes to the next key",
-  "old": "            expiresAt = nil;\n        } else {",
-  "new": "        } else {",
+  "old": "            expiresAt = nil;\n            loaded = loaded + 1;",
+  "new": "            loaded = loaded + 1;",
   "cases": [
    "local: a key with no expiry after an expired key"
   ]

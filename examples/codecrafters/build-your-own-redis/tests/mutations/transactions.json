@@ -9,8 +9,8 @@
  },
  {
   "name": "INCR of a missing key gives 0",
-  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        touch(argv[1]);\n        return integerReply(1);",
-  "new": "        store[argv[1]] = Entry(\"string\", \"0\", nil);\n        touch(argv[1]);\n        return integerReply(0);",
+  "old": "        store[argv[1]] = Entry(\"string\", \"1\", nil);\n        touch(argv[1]);\n        replicate(argv, nil);\n        return integerReply(1);",
+  "new": "        store[argv[1]] = Entry(\"string\", \"0\", nil);\n        touch(argv[1]);\n        replicate(argv, nil);\n        return integerReply(0);",
   "cases": [
    "transactions-02 INCR of a missing key"
   ]
@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "    execElements = nil;\n    serveReady();",
-  "new": "    execElements = nil;\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "old": "    execElements = nil;\n    endExecReplication();\n    serveReady();",
+  "new": "    execElements = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]

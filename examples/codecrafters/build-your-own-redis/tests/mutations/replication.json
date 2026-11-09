@@ -1,0 +1,458 @@
+[
+ {
+  "name": "INFO of a replica says master",
+  "old": "        role = \"slave\";",
+  "new": "        role = \"master\";",
+  "cases": [
+   "replication-03 INFO replication of a replica gives role:slave"
+  ]
+ },
+ {
+  "name": "the replication ID has 39 digits",
+  "old": "    while (i < 40) {\n        seed = (seed * 1103515245",
+  "new": "    while (i < 39) {\n        seed = (seed * 1103515245",
+  "cases": [
+   "replication-04 master_replid has 40 letters and digits"
+  ]
+ },
+ {
+  "name": "the master offset starts at 1",
+  "old": "var replOffset = 0;",
+  "new": "var replOffset = 1;",
+  "cases": [
+   "replication-04 master_repl_offset is 0"
+  ]
+ },
+ {
+  "name": "REPLCONF gives NO",
+  "old": "    if (sub == \"getack\") {\n        return \"\";\n    }\n    return simple(\"OK\");",
+  "new": "    if (sub == \"getack\") {\n        return \"\";\n    }\n    return simple(\"NO\");",
+  "cases": [
+   "replication-08 REPLCONF listening-port gives OK"
+  ]
+ },
+ {
+  "name": "FULLRESYNC gives another ID",
+  "old": "    conn.sock.write(\"+FULLRESYNC \" + REPL_ID + \" \"",
+  "new": "    conn.sock.write(\"+FULLRESYNC \" + makeReplId() + \" \"",
+  "cases": [
+   "replication-09 PSYNC gives FULLRESYNC with the ID and offset 0"
+  ]
+ },
+ {
+  "name": "the RDB file ends with CRLF",
+  "old": "    conn.sock.write(\"$\" + str(len(EMPTY_RDB)) + \"\\r\\n\" + EMPTY_RDB);",
+  "new": "    conn.sock.write(\"$\" + str(len(EMPTY_RDB)) + \"\\r\\n\" + EMPTY_RDB + \"\\r\\n\");",
+  "cases": [
+   "replication-10 then an RDB file, with no CRLF after it"
+  ]
+ },
+ {
+  "name": "writes are not propagated",
+  "old": "fun replicate(head, tail) {\n    if (len(replicas) == 0) {",
+  "new": "fun replicate(head, tail) {\n    if (true) {",
+  "cases": [
+   "replication-11 the writes reach the replica, in order"
+  ]
+ },
+ {
+  "name": "only the first replica is woken",
+  "old": "            if (!r.replWoken) {\n                r.replWoken = true;",
+  "new": "            if (!r.replWoken and r == replicas[0]) {\n                r.replWoken = true;",
+  "cases": [
+   "replication-12 the writes reach every replica"
+  ]
+ },
+ {
+  "name": "GET is propagated",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
+  "new": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    replicate(argv, nil);\n    return Bulk(entry.value);",
+  "cases": [
+   "local: a read is not propagated"
+  ]
+ },
+ {
+  "name": "XADD propagates *",
+  "old": "    replicate([\"XADD\", key, idText(id.ms, id.seq)], stream.fields[stream.size() - 1]);",
+  "new": "    replicate(argv, nil);",
+  "cases": [
+   "local: XADD * is propagated with the ID that the master gave"
+  ]
+ },
+ {
+  "name": "the pop of BLPOP is not propagated",
+  "old": "            // Redis propagates the pop of BLPOP as LPOP.\n            replicate([\"LPOP\", key], nil);",
+  "new": "",
+  "cases": [
+   "local: the pop of BLPOP is propagated as LPOP"
+  ]
+ },
+ {
+  "name": "a transaction is not wrapped",
+  "old": "    execElements = EXEC_ELEMENTS;\n    replInExec = true;",
+  "new": "    execElements = EXEC_ELEMENTS;",
+  "cases": [
+   "local: a transaction is propagated in MULTI and EXEC"
+  ]
+ },
+ {
+  "name": "WAIT with no replica counts one",
+  "old": "    if (acked >= want or len(replicas) == 0) {\n        return integerReply(acked);",
+  "new": "    if (acked >= want or len(replicas) == 0) {\n        return integerReply(acked + 1);",
+  "cases": [
+   "replication-16 WAIT with no replica gives 0 at once"
+  ]
+ },
+ {
+  "name": "a new replica has acknowledged nothing",
+  "old": "    conn.ackOffset = replOffset;\n    if (!conn.isReplica) {",
+  "new": "    conn.ackOffset = -1;\n    if (!conn.isReplica) {",
+  "cases": [
+   "replication-17 WAIT with no write since the replicas came gives their number at once"
+  ]
+ },
+ {
+  "name": "an ACK does not wake WAIT",
+  "old": "            conn.ackOffset = off;\n            notifyAckWaiters();",
+  "new": "            conn.ackOffset = off;",
+  "cases": [
+   "replication-18 WAIT gives the replicas that acknowledged"
+  ]
+ },
+ {
+  "name": "an ACK is not kept",
+  "old": "            conn.ackOffset = off;\n            notifyAckWaiters();",
+  "new": "            notifyAckWaiters();",
+  "cases": [
+   "replication-18 WAIT gives the replicas that acknowledged"
+  ]
+ },
+ {
+  "name": "WAIT has no time limit",
+  "old": "                msg = task.receive_where_within(isAckWake, left / 1000);",
+  "new": "                msg = task.receive_where(isAckWake);",
+  "cases": [
+   "replication-18 WAIT ends at its time limit with the count so far"
+  ]
+ },
+ {
+  "name": "a replica that goes stays a replica",
+  "old": "    if (conn.isReplica) {\n        dropReplica(conn);\n    }",
+  "new": "",
+  "cases": [
+   "local: replicas that go leave connected_slaves"
+  ]
+ },
+ {
+  "name": "the replica sends no PING",
+  "old": "    sendCommand(sock, [\"PING\"]);\n    expectLine(sock, \"+PONG\");\n",
+  "new": "",
+  "cases": [
+   "replication-05 the replica sends PING"
+  ]
+ },
+ {
+  "name": "the replica sends another port",
+  "old": "    sendCommand(sock, [\"REPLCONF\", \"listening-port\", str(listenPort)]);",
+  "new": "    sendCommand(sock, [\"REPLCONF\", \"listening-port\", \"6379\"]);",
+  "cases": [
+   "replication-06 the replica sends REPLCONF listening-port and capa"
+  ]
+ },
+ {
+  "name": "the replica sends PSYNC with an offset",
+  "old": "    sendCommand(sock, [\"PSYNC\", \"?\", \"-1\"]);",
+  "new": "    sendCommand(sock, [\"PSYNC\", \"?\", \"0\"]);",
+  "cases": [
+   "replication-07 the replica sends PSYNC ? -1"
+  ]
+ },
+ {
+  "name": "the replica applies nothing",
+  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
+  "new": "        } else if (len(argv) > 0) {\n        }",
+  "cases": [
+   "replication-13 the replica applies the commands of the master"
+  ]
+ },
+ {
+  "name": "the replica replies to the master",
+  "old": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            execute(nil, argv);\n            applyingFromMaster = false;\n        }",
+  "new": "        } else if (len(argv) > 0) {\n            applyingFromMaster = true;\n            sock.write(execute(nil, argv));\n            applyingFromMaster = false;\n        }",
+  "cases": [
+   "local: the replica sends no reply to the master"
+  ]
+ },
+ {
+  "name": "ACK gives the offset plus one",
+  "old": "                task.send(writer, Msg.SendAck(replicaOffset));",
+  "new": "                task.send(writer, Msg.SendAck(replicaOffset + 1));",
+  "cases": [
+   "replication-14 REPLCONF GETACK with no command first gives ACK 0"
+  ]
+ },
+ {
+  "name": "GETACK is not counted",
+  "old": "        replicaOffset = replicaOffset + got[1];\n        n = n + 1;",
+  "new": "        if (name != \"REPLCONF\") {\n            replicaOffset = replicaOffset + got[1];\n        }\n        n = n + 1;",
+  "cases": [
+   "replication-15 the GETACK and a PING count in the offset"
+  ]
+ },
+ {
+  "name": "a replica takes writes from clients",
+  "old": "        if (REPL_ROLE != \"master\" and conn.tx == nil and WRITES.has(name)) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: a replica refuses a write from a client"
+  ]
+ },
+ {
+  "name": "the replica does not connect again",
+  "old": "            replicaSession();\n        } catch (e) {",
+  "new": "            replicaSession();\n            return;\n        } catch (e) {",
+  "cases": [
+   "local: the replica connects again after the link breaks"
+  ]
+ },
+ {
+  "name": "WAIT does not see its client go",
+  "old": "        closed = isClosedMsg(msg);",
+  "new": "        closed = false;",
+  "cases": [
+   "local: a client that goes during WAIT ends its tasks"
+  ]
+ },
+ {
+  "name": "a lazy expiry is not propagated",
+  "old": "        // As Redis does, the master tells its replicas, so that a write\n        // after the expiry finds the same keyspace there.\n        replicate([\"DEL\", key], nil);",
+  "new": "",
+  "cases": [
+   "local: a lazy expiry on the master is propagated as DEL"
+  ]
+ },
+ {
+  "name": "the replica offset starts at 0",
+  "old": "    replicaOffset = startOffset;",
+  "new": "    replicaOffset = 0;",
+  "cases": [
+   "local: the offset of a replica starts at the offset of FULLRESYNC"
+  ]
+ },
+ {
+  "name": "the replica sends no ACK of its own",
+  "old": "        return task.receive_where_within(isSendAck, 1);",
+  "new": "        return task.receive_where(isSendAck);",
+  "cases": [
+   "local: the replica sends REPLCONF ACK every second"
+  ]
+ },
+ {
+  "name": "a full resync loads in one step",
+  "old": "    loadRdbData(data, fresh, true);",
+  "new": "    loadRdbData(data, fresh, false);",
+  "cases": [
+   "local: a full resync of 524288 keys stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "a full resync marks no watcher",
+  "old": "    for (var id in watchingConns.keys()) {\n        watchingConns[id].watchDirty = true;\n    }",
+  "new": "",
+  "cases": [
+   "local: a full resync makes EXEC of a client that watches a key fail"
+  ]
+ },
+ {
+  "name": "a full resync keeps the old keyspace",
+  "old": "    store = fresh;\n",
+  "new": "",
+  "cases": [
+   "local: a full resync replaces the keyspace"
+  ]
+ },
+ {
+  "name": "a replica queues a write in MULTI",
+  "old": "    if (REPL_ROLE != \"master\" and WRITES.has(name)) {\n        tx.dirty = true;\n        return READONLY;\n    }",
+  "new": "",
+  "cases": [
+   "local: a replica refuses a write in MULTI"
+  ]
+ },
+ {
+  "name": "LPUSH is not propagated",
+  "old": "    touch(argv[1]);\n    replicate(argv, nil);\n    listReady(argv[1]);",
+  "new": "    touch(argv[1]);\n    listReady(argv[1]);",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "LPOP is not propagated",
+  "old": "        replicate([\"LPOP\", argv[1]], nil);\n        return Bulk(popLeft(argv[1], entry));",
+  "new": "        return Bulk(popLeft(argv[1], entry));",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "INCR of a key is not propagated",
+  "old": "    entry.value = str(n);\n    touch(argv[1]);\n    replicate(argv, nil);",
+  "new": "    entry.value = str(n);\n    touch(argv[1]);",
+  "cases": [
+   "local: LPUSH, LPOP, LPOP with a count and INCR are propagated as they came"
+  ]
+ },
+ {
+  "name": "the pop of a served waiter is not propagated",
+  "old": "        var value = popLeft(key, entry);\n        replicate([\"LPOP\", key], nil);",
+  "new": "        var value = popLeft(key, entry);",
+  "cases": [
+   "local: a push that serves a waiting BLPOP is propagated before its LPOP"
+  ]
+ },
+ {
+  "name": "the waiters of EXEC are served inside its MULTI",
+  "old": "    endExecReplication();\n    serveReady();",
+  "new": "    serveReady();\n    endExecReplication();",
+  "cases": [
+   "local: the pop of a waiter that EXEC served comes after its EXEC"
+  ]
+ },
+ {
+  "name": "RP1 no hard limit",
+  "old": "        if (lag > REPLICA_HARD_COST\n",
+  "new": "        if (false\n",
+  "cases": [
+   "local: RP1 a replica that does not read is dropped over the hard limit"
+  ]
+ },
+ {
+  "name": "RP3 the soft limit drops at once",
+  "old": "            or (r.softSince != nil and now - r.softSince > REPLICA_SOFT_SECONDS * 1000)) {",
+  "new": "            or r.softSince != nil) {",
+  "cases": [
+   "local: RP3 a replica over the soft limit stays while the soft time runs"
+  ]
+ },
+ {
+  "name": "RP3 no soft limit",
+  "old": "            or (r.softSince != nil and now - r.softSince > REPLICA_SOFT_SECONDS * 1000)) {",
+  "new": "            or false) {",
+  "cases": [
+   "local: RP3 a replica that is still over the soft limit after its time is dropped"
+  ]
+ },
+ {
+  "name": "a replica removes an expired key for its master",
+  "old": "            if (applyingFromMaster) {\n                return entry;\n            }\n            return nil;",
+  "new": "            return nil;",
+  "cases": [
+   "local: a command of the master sees an expired key on the replica"
+  ]
+ },
+ {
+  "name": "a client of the replica reads an expired key",
+  "old": "            if (applyingFromMaster) {\n                return entry;\n            }\n            return nil;",
+  "new": "            return entry;",
+  "cases": [
+   "local: a client of the replica reads an expired key as missing"
+  ]
+ },
+ {
+  "name": "the replica applies a write of a transaction at once",
+  "old": "        } else if (queued != nil) {\n            queued.append(argv);",
+  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            execute(nil, argv);",
+  "cases": [
+   "local: a client of the replica sees no write of a transaction before its EXEC"
+  ]
+ },
+ {
+  "name": "DEL is not propagated",
+  "old": "    if (removed) {\n        replicate(argv, nil);\n    }",
+  "new": "",
+  "cases": [
+   "local: DEL is propagated"
+  ]
+ },
+ {
+  "name": "DEL marks no watcher",
+  "old": "                store.del(key);\n                touch(key);\n                removed = true;",
+  "new": "                store.del(key);\n                removed = true;",
+  "cases": [
+   "local: DEL marks a client that watches the key"
+  ]
+ },
+ {
+  "name": "DEL counts an expired key",
+  "old": "                if (live or applyingFromMaster) {\n                    n = n + 1;\n                }",
+  "new": "                n = n + 1;",
+  "cases": [
+   "local: DEL of an expired key gives 0"
+  ]
+ },
+ {
+  "name": "DEL is not a write",
+  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true};",
+  "new": "\"BLPOP\": true, \"XADD\": true};",
+  "cases": [
+   "local: a replica refuses DEL from a client"
+  ]
+ },
+ {
+  "name": "a second PSYNC adds the replica again",
+  "old": "    if (!conn.isReplica) {\n        // A second PSYNC on the link starts again; it is still one replica.\n        conn.isReplica = true;\n        replicas.append(conn);\n    }",
+  "new": "    conn.isReplica = true;\n    replicas.append(conn);",
+  "cases": [
+   "local: a second PSYNC on one link is still one replica"
+  ]
+ },
+ {
+  "name": "a replica skips an expired key of the RDB",
+  "old": "expiresAt == nil or expiresAt > now or forReplica)",
+  "new": "expiresAt == nil or expiresAt > now)",
+  "cases": [
+   "local: a replica keeps an expired key of the RDB for its master"
+  ]
+ },
+ {
+  "name": "WATCH does not note a key that has expired",
+  "old": "                    flag = \"expired\";",
+  "new": "                    flag = true;",
+  "cases": [
+   "local: the DEL of a key that had expired at WATCH does not fail EXEC"
+  ]
+ },
+ {
+  "name": "the DEL of a key that had expired at WATCH marks",
+  "old": "    if (flag == \"expired\" and store[key] == nil) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: the DEL of a key that had expired at WATCH does not fail EXEC"
+  ]
+ },
+ {
+  "name": "a write of a key that had expired at WATCH does not mark",
+  "old": "    if (flag == \"expired\" and store[key] == nil) {",
+  "new": "    if (flag == \"expired\") {",
+  "cases": [
+   "local: a write of a key that had expired at WATCH fails EXEC"
+  ]
+ },
+ {
+  "name": "touch drops one kept watcher",
+  "old": "        if (markWatcher(w, key)) {\n            watchers[key] = w;\n        }",
+  "new": "        markWatcher(w, key);",
+  "cases": [
+   "local: after the DEL of a key that had expired at WATCH, one watcher still sees a write"
+  ]
+ },
+ {
+  "name": "touch drops kept watchers",
+  "old": "    if (keep) {\n        watchers[key] = kept;\n    }",
+  "new": "",
+  "cases": [
+   "local: after the DEL of a key that had expired at WATCH, two watchers still see a write"
+  ]
+ }
+]

@@ -388,6 +388,7 @@ def main():
                 oracle.stop()
                 ours.stop()
     rdb_checks(prog)
+    replication_checks(prog)
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
 
@@ -486,6 +487,118 @@ def rdb_checks(prog):
                 ours.stop()
             shutil.rmtree(d, ignore_errors=True)
 
+
+
+REPL_WRITES = [
+    ["SET", "a", "1"], ["SET", "b", "2", "PX", "600000"], ["INCR", "c"], ["INCR", "c"],
+    ["RPUSH", "l", "x", "y", "z"], ["LPUSH", "l", "w"], ["LPOP", "l"], ["LPOP", "l", "2"],
+    ["RPUSH", "q", "1"], ["BLPOP", "q", "0"], ["XADD", "s", "*", "f", "v"],
+    ["XADD", "t", "1-1", "a", "b"], ["XADD", "t", "2-*", "c", "d"],
+    ["MULTI"], ["SET", "m", "1"], ["INCR", "m"], ["EXEC"], ["SET", "big", "v" * 100000],
+]
+REPL_READS = [
+    ["GET", "a"], ["GET", "b"], ["GET", "c"], ["LRANGE", "l", "0", "-1"], ["TYPE", "q"],
+    ["XRANGE", "s", "-", "+"], ["XRANGE", "t", "-", "+"], ["GET", "m"], ["GET", "big"],
+    ["KEYS", "*"],
+]
+
+
+def wait_port(port, seconds=5):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            return True
+        except OSError:
+            time.sleep(0.05)
+    return False
+
+
+class Port:
+    def __init__(self, port):
+        self.port = port
+
+    def client(self):
+        return Client(self.port)
+
+
+def wait_synced(master_port, seconds=10):
+    """Waits until the master has a replica, then until WAIT counts it."""
+    c = Client(master_port)
+    try:
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            info = c.call("INFO", "replication")
+            if "connected_slaves:1" in info:
+                return True
+            time.sleep(0.1)
+        return False
+    finally:
+        c.close()
+
+
+def replication_checks(prog):
+    """A Lox++ master with a redis-server replica, and a redis-server master
+    with a Lox++ replica: the same writes on the master, then the same reads
+    on both servers must agree."""
+    global PASS, FAIL
+    print("== replication (one master, one replica, Lox++ and redis-server)")
+    for name in ("lox master, redis replica", "redis master, lox replica"):
+        d = tempfile.mkdtemp(prefix="loxpp-repl-")
+        procs, servers = [], []
+        try:
+            if name.startswith("lox master"):
+                master = Server(prog, [])
+                servers.append(master)
+                mport = master.port
+                rport = free_port()
+                procs.append(subprocess.Popen(
+                    ["redis-server", "--port", str(rport), "--bind", "127.0.0.1", "--save", "",
+                     "--dir", d, "--replicaof", "127.0.0.1", str(mport)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                wait_port(rport)
+            else:
+                mport = free_port()
+                procs.append(subprocess.Popen(
+                    ["redis-server", "--port", str(mport), "--bind", "127.0.0.1", "--save", "", "--dir", d],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                wait_port(mport)
+                replica = Server(prog, ["--replicaof", "127.0.0.1 %d" % mport])
+                servers.append(replica)
+                rport = replica.port
+            if not wait_synced(mport):
+                FAIL += 1
+                print("  FAIL %s  the replica did not connect" % name)
+                continue
+            c = Client(mport)
+            for cmd in REPL_WRITES:
+                c.call(*cmd)
+            acked = c.call("WAIT", "1", "5000")
+            c.close()
+            want = run_script(Port(mport), REPL_READS)
+            got = run_script(Port(rport), REPL_READS)
+            if acked == 1 and want == got:
+                PASS += 1
+                print("  ok   %s" % name)
+            else:
+                FAIL += 1
+                print("  FAIL %s  WAIT gave %r" % (name, acked))
+                for cmd, w, g in zip(REPL_READS, want, got):
+                    if w != g:
+                        print("       %r: master %r, replica %r" % (cmd, str(w)[:80], str(g)[:80]))
+        except (OSError, EOFError, ValueError) as e:
+            FAIL += 1
+            print("  FAIL %s  %r" % (name, e))
+        finally:
+            for p in procs:
+                if p.poll() is None:
+                    # SIGKILL: a redis-server master with a replica waits up
+                    # to 10 s for it on SIGTERM.
+                    p.kill()
+                    p.wait(timeout=5)
+            for sv in servers:
+                sv.stop()
+            shutil.rmtree(d, ignore_errors=True)
 
 if __name__ == "__main__":
     sys.exit(main())

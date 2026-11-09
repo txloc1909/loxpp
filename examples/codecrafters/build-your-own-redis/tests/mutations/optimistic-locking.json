@@ -1,7 +1,7 @@
 [
  {
   "name": "WATCH does not record the key",
-  "old": "            watched[key] = true;\n            conn.watchCount",
+  "old": "            watched[key] = flag;\n            conn.watchCount",
   "new": "            conn.watchCount",
   "cases": [
    "optimistic-locking-03 a write by another client makes EXEC fail"
@@ -97,8 +97,8 @@
  },
  {
   "name": "LPOP with a count does not mark",
-  "old": "        // as in Redis.\n        touch(argv[1]);\n    }",
-  "new": "        // as in Redis.\n    }",
+  "old": "        // as in Redis.\n        touch(argv[1]);\n        replicate(argv, nil);\n    }",
+  "new": "        // as in Redis.\n        replicate(argv, nil);\n    }",
   "cases": [
    "local: WATCH and LPOP with a count"
   ]
@@ -137,8 +137,8 @@
  },
  {
   "name": "a write marks only one watcher",
-  "old": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n    }",
-  "new": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (conn.watched.has(key)) {\n            conn.watchDirty = true;\n        }\n        return;\n    }",
+  "old": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (markWatcher(conn, key)) {\n            kept[id] = conn;\n            keep = true;\n        }\n    }",
+  "new": "    for (var id in w.keys()) {\n        var conn = w[id];\n        if (markWatcher(conn, key)) {\n            kept[id] = conn;\n            keep = true;\n        }\n        return;\n    }",
   "cases": [
    "local: a write marks every client that watches the key"
   ]
@@ -161,8 +161,8 @@
  },
  {
   "name": "unwatchAll runs in a deferred call",
-  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n}",
-  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n}",
+  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n    if (conn.isReplica) {",
+  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n    if (conn.isReplica) {",
   "cases": [
    "local: the server serves on after a client that watched 5000 keys goes"
   ]

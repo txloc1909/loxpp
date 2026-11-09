@@ -29,7 +29,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | transactions | 11 | pass |
 | optimistic-locking | 8 | pass |
 | persistence-rdb | 6 | pass |
-| replication | 18 | not started |
+| replication | 18 | pass |
 | persistence-aof | 10 | not started |
 | pub-sub | 7 | not started |
 | sorted-sets | 8 | not started |
@@ -185,9 +185,11 @@ keys: a write while it runs is concurrent with it, so a write of a key that
 it has not joined yet comes before it, and no write after its reply is
 missed. Each command that writes the keyspace calls `touch(key)`, also a
 write that keeps the value, and a lazy expiry. `touch` marks each client
-that watches the key (`watchDirty`), and drops the key from `watchers`: a
-marked client stays marked until its next `EXEC`, so each later write of
-the key costs one Map read. `EXEC` gives a null array when the mark is set, or when a
+that watches the key (`watchDirty`), and drops the marked clients from
+`watchers`: a marked client stays marked until its next `EXEC`, so each
+later write of the key costs one Map read. On a replica, the `DEL` from the
+master of a key that had expired at `WATCH` marks no client, and `touch`
+keeps that client in `watchers`. `EXEC` gives a null array when the mark is set, or when a
 watched key that had an expiry at `WATCH` has expired since, also with no
 read, as Redis 7.0 does. `EXECABORT` comes first.
 
@@ -217,6 +219,50 @@ the rules of Redis 7.0 (`stringmatchlen`), also `[a-]` and an empty key. It
 counts each byte of the pattern that it reads as a step, in a set too, so
 it takes at most len(key) x len(pattern) steps, and it yields every 65536
 steps.
+
+### Replication
+
+A master keeps a replication log (`replLog`). Each write command appends
+its effective form to the log in its own step (`replicate`), at the point
+where it writes: a push comes before the pop of the client that it serves,
+`XADD *` goes with the ID that the master gave, the pop of `BLPOP` goes as
+`LPOP`, a lazy expiry goes as `DEL`, and `EXEC` wraps its writes in `MULTI`
+and `EXEC`; the pops of the waiters that `EXEC` serves come after it. So the order of
+the log is the order of the writes, and the offset (`replOffset`) counts the
+RESP bytes of each entry when it is appended. Each replica session writes
+the log from its own position, in steps (`writeReplLog`). A replica that is
+falls behind is dropped as Redis drops it at its output buffer limits: at
+once over 256 MB, or after 60 s over 64 MB (`--replica-soft-seconds`). The
+lag counts the RESP bytes of each entry and 64 bytes for each argument,
+because the log holds Lox++ objects, which are larger than their bytes. The
+entries that every replica has got are dropped (rule 4). A master keeps no
+log while it has no replica, so its offset does not grow then; Redis keeps
+its backlog and its offset goes on.
+
+`PSYNC` gives `FULLRESYNC` and an empty RDB file of version 10, the version
+of Redis 7.0, so a Redis 7.0 replica loads it. `REPLCONF ACK` keeps the
+offset that a replica acknowledged and wakes the clients in `WAIT`. `WAIT`
+sends `REPLCONF GETACK *` and waits, as `BLPOP` does, until enough replicas
+have acknowledged the offset at its start, or until its time limit.
+
+A replica (`--replicaof "host port"`) runs one task (`masterLink`): it
+connects, does the handshake, and loads the RDB file of `FULLRESYNC` into a
+new Map, with yields; then, in one step, it puts the new keyspace in place
+and marks each client that watches a key. It applies each command of the
+stream with no reply, and counts the bytes from the offset of `FULLRESYNC`.
+A second task writes to the master: the answer to `REPLCONF GETACK`, with
+the offset before the GETACK, and an ACK of its own every second, as Redis
+replicas send. As in Redis, a replica does not remove an expired key: its
+clients read it as missing, and the commands of its master see it until the
+`DEL` of the master comes. This also holds for an expired key in the RDB
+of a full resync. A client that watches a key that has expired sees no
+change when the `DEL` of the master comes, as in Redis 7.0. A full resync marks each client that watches a
+key, one step for each such client. It applies a
+`MULTI` ... `EXEC` of the master in one step, yields every 64 commands, and
+connects again one second after the link breaks. It refuses a write from a
+client with `READONLY`. The cross checks of `diff_redis.py` run a Lox++
+master with a redis-server replica, and a redis-server master with a Lox++
+replica.
 
 ### Large replies
 
@@ -262,6 +308,19 @@ printed.
   no glob pattern, and its order of names is one order that Redis can
   give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
+- A full resync sends an empty RDB file, so a replica gets only the writes
+  after it connects. A master has no backlog while it has no replica, so
+  its offset does not grow then. `SET` with a relative `EX` or `PX` goes to a replica
+  as it came, not as `PXAT`. `WAIT`, `REPLCONF` and `PSYNC` cannot be
+  queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
+  or a stream key cannot load it, so it connects again every second (and a
+  redis-server master makes a new RDB file each time).
+- On a replica, a write from the master of a key that had expired at
+  `WATCH` marks the client, and a full resync marks every client that
+  watches a key. Redis 7.0 marks neither: it does not mark a client when the
+  master overwrites such a key (nor the later clients of that key), and a
+  full resync does not mark a client whose watched key is missing before and
+  after it.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
@@ -374,7 +433,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | S3: `XREAD` of 524286 missing streams | PING within 0.5 s (when the IDs are parsed in the step of the command: 0.93 s) | 0.23–0.27 s |
 | S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
 | S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.010 s / 0.04–0.09 s |
-| S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.2 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
+| S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.5 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
@@ -390,6 +449,13 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | K5 (on the K3 server): `KEYS ?` and 262144 stars on 256 keys of one byte; each key ends at once and the rest of the pattern is stars | PING within 0.3 s (when the stars at the end are not steps: 5.13 s) | 0.04–0.06 s |
 | K3 (on a server of its own): `KEYS *[` and 500 bytes `]z` on a key of 20000 bytes, which reads the set again at each byte (about 10^7 steps) | PING within 0.3 s (when the bytes of a set are not steps: 2.04 s) | 0.09 s |
 | K2: `KEYS` with a star and 100 bytes that never match at the end, on a key of 100000 bytes (about 10^7 steps) | PING within 0.3 s (without the yield of the glob work: 4.18 s) | 0.10 s |
+| RP1 (group `replication`): a replica that never reads, then 300 writes of 1 MB | the replica is dropped over the hard limit of 256 MB | as required |
+| RP3 (with `--replica-soft-seconds 3`): a replica that never reads, then 80 writes of 1 MB, then one more write after 3.5 s | the replica stays while the soft time runs, then goes | as required |
+| Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
+| Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
+| RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
+| Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
+| Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
@@ -410,9 +476,15 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/lists.json`, `tests/mutations/streams.json` or
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` or
-`tests/mutations/persistence-rdb.json` that removes
-its guard (S4, T1, T7, W3 and K1 hold rule 6 only: no single change removes their
-guard). Two parts of the RDB load have no mutation, because no reply can
+`tests/mutations/persistence-rdb.json` or
+`tests/mutations/replication.json` that removes
+its guard (S4, T1, T7, W3, K1 and RP2 hold rule 6 only: no single change removes their
+guard). Three guards of replication have no case, because no client timing
+forces the order of events that they handle: the `LPUSH` that a give-back
+propagates (the same race as the give-back itself), the step in which a
+replica applies a `MULTI` ... `EXEC` of the master, and the wake of a
+replica session for an entry that comes while its last write of a call
+suspends (an entry that comes before that is written by the same call). Two parts of the RDB load have no mutation, because no reply can
 show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
 (the next read fails too). The `touch` in the lazy expiry of `lookup` has no case: the check
@@ -469,7 +541,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
-# and optimistic-locking.json, persistence-rdb.json
+# and optimistic-locking.json, persistence-rdb.json, replication.json
 ```
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
