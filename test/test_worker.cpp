@@ -515,9 +515,10 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
 // leave a pending wake for the next wait() to read.
 //
 // The wait ends on a descriptor that is readable before the script runs, not
-// on a wall-clock deadline. The first wait of the main task is the receive, so
-// the handler runs after the script has set `me`, and no deadline ends that
-// wait early.
+// on a wall-clock deadline. The scheduler clock seam (noSwitchPoll) keeps
+// pollWhileBusy from polling while the script runs. Without it, the poll would
+// run at the first switch point, and the handler could run before the script
+// has set `me`.
 TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     VM vm;
     int fired = 0;
