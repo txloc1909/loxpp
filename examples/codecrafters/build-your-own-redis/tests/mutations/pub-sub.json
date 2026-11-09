@@ -220,7 +220,7 @@
   "old": "    writeQueuedMessages(conn);\n    if (len(argv) > 0) {",
   "new": "    if (len(argv) > 0) {",
   "cases": [
-   "local: a message that came before UNSUBSCRIBE ran goes before its reply"
+   "local: a message that came before PING ran goes before the pong"
   ]
  },
  {

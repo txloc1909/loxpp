@@ -4213,6 +4213,8 @@ def stages_pubsub_on(srv):
     late.send_raw(encode("UNSUBSCRIBE", "late-ch") + encode("PING"))
     time.sleep(0.3)
     counted = pub.call("PUBLISH", "late-ch", "late")
+    # A large buffer again for the read: 8 MB through 4 KB takes minutes.
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
     late.sock.settimeout(10)
     stream = []
     try:
@@ -4226,6 +4228,35 @@ def stages_pubsub_on(srv):
     tail = [x if not (isinstance(x, list) and len(x) == 3 and x[2] == big) else "big" for x in stream]
     want = ["big"] * 8 + ([["message", "late-ch", "late"]] if counted == 1 else []) + [["unsubscribe", "late-ch", 0], "PONG"]
     check("local: a message that came before UNSUBSCRIBE ran goes before its reply", tail == want,
+          "counted %r, got %r" % (counted, tail))
+    late.close()
+    pub.close()
+
+    # The same with PING in subscribed mode: the message goes before the
+    # pong.
+    late = Client(srv.port)
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    late.call("SUBSCRIBE", "late-ping")
+    pub = Asker(srv)
+    for _ in range(8):
+        pub.call("PUBLISH", "late-ping", big)
+    late.send_raw(encode("PING"))
+    time.sleep(0.3)
+    counted = pub.call("PUBLISH", "late-ping", "late")
+    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+    late.sock.settimeout(10)
+    stream = []
+    try:
+        while True:
+            x = late.read()
+            stream.append(x)
+            if isinstance(x, list) and x and x[0] == "pong":
+                break
+    except (OSError, EOFError, ValueError) as e:
+        stream.append(repr(e))
+    tail = [x if not (isinstance(x, list) and len(x) == 3 and x[2] == big) else "big" for x in stream]
+    want = ["big"] * 8 + ([["message", "late-ping", "late"]] if counted == 1 else []) + [["pong", ""]]
+    check("local: a message that came before PING ran goes before the pong", tail == want,
           "counted %r, got %r" % (counted, tail))
     late.close()
     pub.close()

@@ -287,19 +287,27 @@ give one reply for each channel, and yield every 1024 channels (in
 `PUBLISH` while they run is concurrent with them, as a write is with
 `WATCH`. A client with a channel is in subscribed mode: it may send only
 `SUBSCRIBE`, `UNSUBSCRIBE` and `PING` (which replies `["pong", <arg>]`).
-As in Redis, an unknown command and a wrong number of arguments come
-before the check of the context. A session that ends leaves its channels,
+As in Redis, an unknown command, a wrong number of arguments, an unknown
+`CONFIG` subcommand and, on a replica, `READONLY` come before the check of
+the context; the error names a subcommand as `config|get`, and gives `EXEC`
+the `EXECABORT` prefix. A session that ends leaves its channels,
 with yields (`unsubscribeAll`).
 
 `PUBLISH` sends a `Published` message to the session of each subscriber
 in its own step, so each subscriber gets the messages in the order of the
-`PUBLISH` commands; the session writes the message when it takes it. It
+`PUBLISH` commands; the session writes the message when it takes it. The
+reader sends commands ahead of the session, so a message can be behind a
+command in the mailbox although it came before that command ran. So the
+session counts its messages (`pubQueued`) and writes them before it runs
+a command, and `UNSUBSCRIBE` writes them before each reply: a message
+that counted a client comes before the reply that leaves its channel. It
 costs one step for each subscriber, as in Redis, and spends one element of
 the budget of `EXEC` for each. A subscriber that does not read is closed
 at the pubsub output buffer limits of Redis (rule 4): over 32 MB of
 pending messages at once, or over 8 MB for 60 s (the test flag
 `--pubsub-soft-seconds` sets the time). The cost of a message is its
-bytes and 64 more. A master propagates `PUBLISH` to its replicas, which
+bytes and 200 more, the memory of one message in a mailbox (measured).
+A channel with no subscriber left is dropped. A master propagates `PUBLISH` to its replicas, which
 deliver it to their subscribers; the AOF does not get it, as in Redis.
 
 ### Replication
@@ -401,9 +409,11 @@ printed.
   redis-server master makes a new RDB file each time).
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
-  client's Map; Redis gives the order of its hash table. A message that
-  a `PUBLISH` in `EXEC` sends to the same client comes after the reply of
-  `EXEC`; Redis writes it inside that reply. There is no `PSUBSCRIBE`,
+  client's Map; Redis gives the order of its hash table. A `PUBLISH` that
+  runs after a subscriber sent `UNSUBSCRIBE`, but before its session ran
+  it (the session is behind when the client does not read), counts that
+  subscriber, and the message comes before the reply; Redis has already
+  run the `UNSUBSCRIBE` then. There is no `PSUBSCRIBE`,
   `PUNSUBSCRIBE`, `SSUBSCRIBE`, `QUIT`, `RESET` or `PUBSUB`.
 - The manifest forms that Redis does not write: Redis refuses a comment
   that starts with a space and a last line with no newline, and this
@@ -560,6 +570,10 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | PS2 (with `--pubsub-soft-seconds 2`): a subscriber that never reads, then 12 messages of 1 MB, then one more after 2.5 s | the subscriber stays while the soft time runs, then goes | as required |
 | PS3 (on a server of its own): `SUBSCRIBE` of 1048575 channels | the last reply counts every channel; PING within 1.0 s | 0.40–0.50 s |
 | PS4: the end of that client | it leaves every channel; PING within 1.0 s | 0.014–0.028 s |
+| PS5: a subscriber that reads 40 messages of 1 MB | not closed (when the session does not give back the cost: closed) | as required |
+| PS6: 600000 empty messages to a subscriber that does not read | closed (when a message costs only its bytes, or 64 more: not closed; 500000 such messages took 104 MB of RSS) | as required |
+| PS7 (with `--pubsub-soft-seconds 2`): 12 MB, read, 2.5 s, 12 MB more | not closed: the soft time starts again | as required |
+| PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 60 MB from round 3 to 5 (without the drop of empty channels: 447 to 763 MB) | 221, 299, 447, 447, 447 MB |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
