@@ -300,7 +300,8 @@ An insert costs about 9 microseconds of Lox++ code, and a command runs in
 one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
 at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
 sorted sets, where a new score of a member is a delete and an insert, also
-for a member that comes again in the same `ZADD` (rule 6); `ZRANGE` in
+for a member that comes again in the same `ZADD`, and a pair that changes
+nothing is one unit (rule 6); `ZRANGE` in
 `EXEC` spends the element budget, and parses its options before it runs,
 with yields.
 

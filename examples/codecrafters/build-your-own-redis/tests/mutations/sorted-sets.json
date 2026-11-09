@@ -314,8 +314,8 @@
  },
  {
   "name": "a new score costs one unit of work",
-  "old": "        } else if (had != p[0]) {\n            work = work + 2;\n        }",
-  "new": "        } else if (had != p[0]) {\n            work = work + 1;\n        }",
+  "old": "        if (had != nil and had != p[0]) {\n            work = work + 2;",
+  "new": "        if (had != nil and had != p[0]) {\n            work = work + 1;",
   "cases": [
    "local: a new score costs two units of the sorted set work of EXEC"
   ]
@@ -342,6 +342,14 @@
   "new": "    }\n    return withScores;",
   "cases": [
    "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a pair that changes nothing costs no work",
+  "old": "        } else {\n            work = work + 1;\n        }\n        now[p[1]] = p[0];",
+  "new": "        } else if (had == nil) {\n            work = work + 1;\n        }\n        now[p[1]] = p[0];",
+  "cases": [
+   "local: a pair that changes nothing costs one unit of the sorted set work of EXEC"
   ]
  }
 ]

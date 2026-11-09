@@ -4813,6 +4813,7 @@ def stages_zset_limits(prog):
                  "local: EXEC refuses a ZRANGE over the element budget",
                  "local: a new score costs two units of the sorted set work of EXEC",
                  "local: a member twice in one ZADD costs a delete and an insert",
+                 "local: a pair that changes nothing costs one unit of the sorted set work of EXEC",
                  "local: Z6 ZRANGE with 1048572 options stalls PING at most 0.5 s",
                  "local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
         if aof_started(srv, names):
@@ -4937,6 +4938,18 @@ def stages_zset_limits(prog):
             x.close()
             check("local: a member twice in one ZADD costs a delete and an insert",
                   isinstance(reply, list) and reply[0] == 8192 and isinstance(reply[1], Error), repr(reply)[:100])
+            # A pair that changes nothing is one unit too: 3 ZADD of the
+            # same 16384 pairs pass 32768.
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.call("ZADD", "U", *fresh)
+            x.send_raw(encode("MULTI") + encode("ZADD", "U", *fresh) * 3 + encode("EXEC"))
+            for _ in range(4):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a pair that changes nothing costs one unit of the sorted set work of EXEC",
+                  isinstance(reply, list) and reply[:2] == [0, 0] and isinstance(reply[2], Error), repr(reply)[:100])
             # Z6: ZRANGE with 1048572 options parses them in steps.
             def zrange_options():
                 x = Client(srv.port)

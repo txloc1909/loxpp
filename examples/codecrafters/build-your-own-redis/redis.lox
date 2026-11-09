@@ -4233,7 +4233,8 @@ fun cmdZadd(ctx, argv) {
         return WRONGTYPE;
     }
     // A new member is one insert; a new score is a delete and an insert,
-    // also for a member that comes again in this ZADD.
+    // also for a member that comes again in this ZADD. A pair that changes
+    // nothing is one unit too: EXEC still walks it.
     var work = 0;
     var now = {};
     for (var p in pairs) {
@@ -4243,10 +4244,10 @@ fun cmdZadd(ctx, argv) {
         } else if (entry != nil) {
             had = entry.value.dict[p[1]];
         }
-        if (had == nil) {
-            work = work + 1;
-        } else if (had != p[0]) {
+        if (had != nil and had != p[0]) {
             work = work + 2;
+        } else {
+            work = work + 1;
         }
         now[p[1]] = p[0];
     }
