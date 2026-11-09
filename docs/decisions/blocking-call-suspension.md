@@ -498,8 +498,18 @@ that it is finite. Native's 1 ms is the interval of that delay, and the JVM's
 poll at every switch makes the interval zero. In both, the delay to the seeing
 also includes the running stretch that ends at the switch, so no implementation
 constant bounds it. Two things stay outside the rule on purpose: a task that
-never reaches a suspend point keeps the worker (#1132), and the messages of a
-task of another worker keep their own paragraph, which binds no delay (#1187).
+never reaches a suspend point keeps the worker (#1132), and a message from a
+task of another worker has a delay of its own, below.
+
+A message from a task of another worker has the same shape, and it is stated
+separately because it is not a wait: `spec/04-semantics.md`, Scheduling, says
+the worker sees it "no later than the first task switch at which at least a
+bounded delay has passed since the message arrived", and at once when the worker
+has no ready task. Native drains its inbox at the top of every pass of the
+scheduler, so it sees the message at the next switch; the JVM makes the task
+ready on the sender's thread, so it sees it before any switch. Both are inside
+the rule, and the value of the delay is a speed, as it is for waits. #1187 is
+the issue that added it.
 
 **What the rule buys, and what it does not.** It removes starvation: a wait on a
 connection, or a limit, is seen at a switch, so it is no longer deferred until

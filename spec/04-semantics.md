@@ -2087,12 +2087,16 @@ of a receive that has passed, and a limit of a `connect_within` that has
 passed.
 
 A message from a task of another worker is an event outside the worker. The
-worker sees it at points that the implementation chooses, and at the latest
-when the worker has no task that is ready to run. Where its task joins the run
-queue, relative to the tasks whose wait or limit the worker sees at the same
-point, is not defined. A send on the same worker, and a close by a task of the
-same worker, are not such events: their moves happen at the call (see [The
-Task Machine](#the-task-machine)).
+worker sees it no later than the first task switch at which at least a bounded
+delay has passed since the message arrived, and it sees it at once when the
+worker has no task that is ready to run. The specification does not bind the
+value of that delay (see [Conformance](README.md#conformance), Speed); it binds
+that the delay is finite. A task that never reaches a suspend point keeps the
+worker, as [Suspend Points](#suspend-points) says. Where the task of the
+message joins the run queue, relative to the tasks whose wait or limit the
+worker sees at the same point, is not defined. A send on the same worker, and a
+close by a task of the same worker, are not such events: their moves happen at
+the call (see [The Task Machine](#the-task-machine)).
 
 The order in which the tasks of one worker run is therefore defined, and it
 binds every implementation, with two limits: an event outside the program
