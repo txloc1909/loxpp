@@ -4339,6 +4339,53 @@ def stages_pubsub_on(srv):
           state["pong"] is not None, "read %d of %d" % (state["read"], state["pub"]))
     slow.close()
     pub.close()
+
+    # UNSUBSCRIBE while a publisher keeps a backlog on the channel: it
+    # leaves the channel first, then writes the messages that are there, so
+    # no message of the channel comes after the reply that leaves it.
+    slow = Client(srv.port)
+    slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+    slow.sock.settimeout(30)
+    slow.call("SUBSCRIBE", "backlog")
+    pub = Client(srv.port)
+    pub.sock.settimeout(30)
+    st = {"read": 0, "pub": 0, "reply": None, "after": 0, "zero": False}
+    for _ in range(100):
+        pub.call("PUBLISH", "backlog", msg)
+        st["pub"] += 1
+    t0 = time.time()
+    slow.send_raw(encode("UNSUBSCRIBE", "backlog"))
+
+    def unsub_reader():
+        try:
+            while True:
+                x = slow.read()
+                if isinstance(x, list) and x[0] == "unsubscribe":
+                    st["reply"] = st["read"]
+                    slow.sock.settimeout(3)
+                    continue
+                if st["reply"] is not None:
+                    st["after"] += 1
+                else:
+                    st["read"] += 1
+                    time.sleep(0.03)
+        except (OSError, EOFError, ValueError):
+            return
+    th = threading.Thread(target=unsub_reader)
+    th.start()
+    while time.time() - t0 < 25 and st["reply"] is None:
+        if st["zero"] or st["pub"] - st["read"] >= 100:
+            time.sleep(0.002)
+            continue
+        if pub.call("PUBLISH", "backlog", msg) == 0:
+            st["zero"] = True
+        st["pub"] += 1
+    th.join(timeout=40)
+    check("local: no message of a channel comes after the reply of UNSUBSCRIBE under a backlog",
+          st["reply"] is not None and st["after"] == 0,
+          "reply after %r messages, %d messages after it" % (st["reply"], st["after"]))
+    slow.close()
+    pub.close()
     for x in (a, b, plain, c1, c2, c3, u1, u2, n, t):
         x.close()
 

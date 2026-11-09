@@ -334,5 +334,21 @@
   "cases": [
    "local: in subscribed mode PSYNC with three arguments gives the error of Redis"
   ]
+ },
+ {
+  "name": "UNSUBSCRIBE writes the messages before it leaves",
+  "old": "        if (conn.channels.has(channel)) {\n            leaveChannel(conn, channel);\n        }\n        // A message to this channel that came before it left goes before\n        // the reply that leaves it. After the leave no new one comes.\n        if (conn.pubQueued > 0) {\n            out.flush();\n            writeQueuedMessages(conn, conn.pubQueued);\n        }\n",
+  "new": "        if (conn.pubQueued > 0) {\n            out.flush();\n            writeQueuedMessages(conn, conn.pubQueued);\n        }\n        if (conn.channels.has(channel)) {\n            leaveChannel(conn, channel);\n        }\n",
+  "cases": [
+   "local: no message of a channel comes after the reply of UNSUBSCRIBE under a backlog"
+  ]
+ },
+ {
+  "name": "the drain writes one message less",
+  "old": "    while (n > 0 and conn.pubQueued > 0) {\n        n = n - 1;",
+  "new": "    while (n > 1 and conn.pubQueued > 0) {\n        n = n - 1;",
+  "cases": [
+   "local: a message that came before PING ran goes before the pong"
+  ]
  }
 ]
