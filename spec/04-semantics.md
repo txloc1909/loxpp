@@ -2067,14 +2067,24 @@ follows the same moves. When the running task suspends or ends, the task at
 the head of the run queue runs next.
 
 A worker sees the end of a wait, and a limit that has passed, at points that
-the implementation chooses, and at the latest when the worker has no task
-that is ready to run. When it sees several at one point, the tasks join the
-run queue in this order: first the tasks
-whose wait is for a connection, a Socket, or a Server and has ended, in the
-order in which their calls began to wait, then the tasks whose time has run
-out, in the order of their deadlines. One group holds all of them: a sleep
-that has expired, a limit of a receive that has passed, and a limit of a
-`connect_within` that has passed.
+the implementation chooses, and at the latest when the worker has no task that
+is ready to run. While tasks are ready to run, it looks for them at a task
+switch, and no later than the first switch at which at least a bounded delay
+has passed since its previous look. So a wait on a connection, a Socket, or a
+Server, and a limit that has passed, are seen at the first look after the end or
+the passing, which is within that delay plus the length of the running stretch
+that ends at the switch. The specification does not bind the value of that delay
+(see [Conformance](README.md#conformance), Speed); it binds that the delay is
+finite.
+A message from a task of another worker keeps the paragraph below, and a task
+that never reaches a suspend point keeps the worker, as [Suspend
+Points](#suspend-points) says. When it sees several at one point, the tasks
+join the run queue in this order: first the tasks whose wait is for a
+connection, a Socket, or a Server and has ended, in the order in which their
+calls began to wait, then the tasks whose time has run out, in the order of
+their deadlines. One group holds all of them: a sleep that has expired, a limit
+of a receive that has passed, and a limit of a `connect_within` that has
+passed.
 
 A message from a task of another worker is an event outside the worker. The
 worker sees it at points that the implementation chooses, and at the latest

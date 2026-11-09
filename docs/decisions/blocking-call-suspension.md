@@ -227,7 +227,8 @@ call would wait although its result is already held. The probe
 smaller than any useful bound, so the choice weakens a rule that no probe then
 covers. So the task's stretch keeps the rule it has. The points at which the
 worker sees a wait that has ended are a separate rule, not a switch point at a
-site that names nothing, and #1131 is where that rule is to be stated.
+site that names nothing. `spec/04-semantics.md`, Scheduling, states that rule,
+and #1131 is the issue that added it.
 
 **The lever is the program.** The runtime cannot know whether the peer will
 keep up: the placement of a task is chosen at spawn and the rate of a peer is
@@ -235,9 +236,9 @@ chosen later by a program outside this one. A program that must keep its other
 tasks alive during a large transfer moves the stream in parts and yields
 between them, which is a switch point it names, or it gives the moving task a
 worker of its own. A yield is bound to give a turn to each task that is ready
-to run; a wait that has ended is seen there only as far as Scheduling says,
-which is #1131. `examples/fair_stream.lox` is the pattern, and the follow-up
-issue makes the Codecrafters example use it.
+to run; a wait that has ended is seen there only as far as Scheduling says
+(`spec/04-semantics.md`, Scheduling; #1131). `examples/fair_stream.lox` is the
+pattern, and the follow-up issue makes the Codecrafters example use it.
 
 **What this costs.** Any of the seven Socket calls that move data still holds
 the worker for as long as the peer keeps up when its result is large, and a
@@ -488,6 +489,39 @@ The QBE backend links the native runtime, so it has the native bound.
 
 The JVM backend calls `selectNow` at every task switch while a wait is
 registered, so it sees an ended wait at the first switch after the wait ends.
+
+The spec binds this rule: `spec/04-semantics.md`, Scheduling, says the worker
+"looks for them at a task switch, and no later than the first switch at which at
+least a bounded delay has passed since its previous look", so a wait is seen at
+the first look after it ends, and the value of that delay is not bound, only
+that it is finite. Native's 1 ms is the interval of that delay, and the JVM's
+poll at every switch makes the interval zero. In both, the delay to the seeing
+also includes the running stretch that ends at the switch, so no implementation
+constant bounds it. Two things stay outside the rule on purpose: a task that
+never reaches a suspend point keeps the worker (#1132), and the messages of a
+task of another worker keep their own paragraph, which binds no delay (#1187).
+
+**What the rule buys, and what it does not.** It removes starvation: a wait on a
+connection, or a limit, is seen at a switch, so it is no longer deferred until
+the run queue is empty. It does not promise a latency. The value is a speed, and
+an implementation with a 4 s interval conforms: probe 451 then passes in 8 s,
+which the reviewer of PR #1185 measured. A server that needs an answer in
+milliseconds states the number it needs in its own README, as the mission rules
+of #1123 require. A rule that binds a maximum here would be a decision about
+speed on every backend, and that is a separate decision.
+
+Probe `451_ended_wait_is_seen_while_tasks_are_ready` pins the reachable case:
+one task ready at every instant, a second parked in `readline`, and a third that
+writes the line after 50 ms. No current backend can fail it, so it was shown to
+fail against the scheduler the old text allowed, with `pollWhileBusy()`
+disabled:
+the probe then times out with no output at all, because the reader never wakes.
+
+The probe's `TIMEOUT: 10` is a limit of the runner and not of the spec, and it
+therefore does bind a practical maximum: a poll interval of 20 s conforms and
+fails the probe, and 4 s conforms and passes it in 8 s. So the probe pins the
+deferral, not the size of the delay, and of the spec probes it is the only one
+whose `TIMEOUT` decides the result.
 
 ### Readiness registry
 
