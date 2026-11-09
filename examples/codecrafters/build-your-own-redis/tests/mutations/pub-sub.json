@@ -188,7 +188,7 @@
   "old": "    conn.pubPending = conn.pubPending - messageCost(channel, message);",
   "new": "",
   "cases": [
-   "local: PS2 a subscriber over the soft limit stays while the soft time runs"
+   "local: PS5 a subscriber that reads its messages is not closed"
   ]
  },
  {
@@ -208,19 +208,11 @@
   ]
  },
  {
-  "name": "SUBSCRIBE does not yield",
-  "old": "        out.add(subscribeReply(\"subscribe\", channel, conn.subCount));\n        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }",
-  "new": "        out.add(subscribeReply(\"subscribe\", channel, conn.subCount));\n        i = i + 1;",
-  "cases": [
-   "local: PS3 SUBSCRIBE of 1048575 channels stalls PING at most 1 s"
-  ]
- },
- {
   "name": "the end of a subscriber does not yield",
   "old": "        leaveChannel(conn, names[i]);\n        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }",
   "new": "        leaveChannel(conn, names[i]);\n        i = i + 1;",
   "cases": [
-   "local: PS4 the end of a client with 1048575 channels stalls PING at most 1 s"
+   "local: PS4 the end of the client leaves the channels in steps"
   ]
  }
 ]

@@ -3864,8 +3864,9 @@ fun subscribeReply(kind, channel, count) {
     return "*3\r\n" + bulk(kind) + name + integerReply(count);
 }
 
-// SUBSCRIBE channel [channel ...]. One reply for each channel. It yields
-// every ELEMENTS_PER_YIELD channels, because one SUBSCRIBE can name 1048575
+// SUBSCRIBE channel [channel ...]. One reply for each channel; Output
+// yields every ELEMENTS_PER_YIELD replies, so the loop yields every
+// ELEMENTS_PER_YIELD channels, because one SUBSCRIBE can name 1048575
 // channels. A PUBLISH while it runs is concurrent with it, as a write is
 // with WATCH: a channel that it has joined gets the message, and the
 // session writes the message after the replies of SUBSCRIBE.
@@ -3886,9 +3887,6 @@ fun cmdSubscribe(conn, argv) {
         }
         out.add(subscribeReply("subscribe", channel, conn.subCount));
         i = i + 1;
-        if (i % ELEMENTS_PER_YIELD == 0) {
-            yield nil;
-        }
     }
     out.flush();
 }
@@ -3907,7 +3905,7 @@ fun leaveChannel(conn, channel) {
 
 // UNSUBSCRIBE [channel ...]. With no channel it leaves each channel of the
 // client, in the order of conn.channels; Redis gives the order of its hash
-// table.
+// table. As in SUBSCRIBE, Output yields every ELEMENTS_PER_YIELD replies.
 fun cmdUnsubscribe(conn, argv) {
     var out = Output(conn);
     var names = argv[1:len(argv)];
@@ -3925,9 +3923,6 @@ fun cmdUnsubscribe(conn, argv) {
         }
         out.add(subscribeReply("unsubscribe", channel, conn.subCount));
         i = i + 1;
-        if (i % ELEMENTS_PER_YIELD == 0) {
-            yield nil;
-        }
     }
     out.flush();
 }

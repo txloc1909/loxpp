@@ -4225,6 +4225,27 @@ def stages_pubsub_limits(prog):
     finally:
         srv.stop()
 
+    # PS5: a subscriber that reads its messages gives back their cost, so
+    # 40 MB over time do not close it.
+    srv = Server(prog, [])
+    try:
+        name = "local: PS5 a subscriber that reads its messages is not closed"
+        if aof_started(srv, [name]):
+            reader = Client(srv.port)
+            reader.call("SUBSCRIBE", "read")
+            p = Asker(srv)
+            payload = "r" * (1 << 20)
+            got = 0
+            for _ in range(40):
+                p.call("PUBLISH", "read", payload)
+                if reader.try_read(5) == ["message", "read", payload]:
+                    got += 1
+            check(name, got == 40 and pubsub_count(srv, "read") == 1, "%d messages" % got)
+            reader.close()
+            p.close()
+    finally:
+        srv.stop()
+
     # PS2: the soft limit, with a soft time of 2 s.
     srv = Server(prog, ["--pubsub-soft-seconds", "2"])
     try:
@@ -4251,7 +4272,9 @@ def stages_pubsub_limits(prog):
     try:
         names = ["local: PS3 SUBSCRIBE of 1048575 channels stalls PING at most 1 s",
                  "local: PS3 the last reply counts every channel",
-                 "local: PS4 the end of a client with 1048575 channels stalls PING at most 1 s"]
+                 "local: PS3 SUBSCRIBE joins the channels in steps",
+                 "local: PS4 the end of a client with 1048575 channels stalls PING at most 1 s",
+                 "local: PS4 the end of the client leaves the channels in steps"]
         if aof_started(srv, names):
             sub = Client(srv.port)
             n = 1048575
@@ -4262,15 +4285,40 @@ def stages_pubsub_limits(prog):
                 sub.send_raw(encode("SUBSCRIBE", *["ch%d" % i for i in range(n)]))
                 for _ in range(n):
                     last[0] = sub.read()
+            # A pair of PUBLISH, to the first and the last channel, that
+            # gives (1, 0) or (0, 1) saw the channels half joined or half
+            # left: only a loop that yields between them shows that.
+            pairs = set()
+            stop = threading.Event()
+
+            def sample():
+                q = Client(srv.port)
+                q.sock.settimeout(30)
+                while not stop.is_set():
+                    q.send_raw(encode("PUBLISH", "ch0", "x") + encode("PUBLISH", "ch%d" % (n - 1), "x"))
+                    pairs.add((q.read(), q.read()))
+                q.close()
+            th = threading.Thread(target=sample)
+            th.start()
             worst, wrong, _ = measure_while(srv, subscribe)
+            stop.set()
+            th.join()
             check(names[0], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
             check(names[1], last[0] == ["subscribe", "ch%d" % (n - 1), n], repr(last[0]))
+            check(names[2], (1, 0) in pairs, repr(sorted(pairs)))
+            pairs.clear()
+            stop.clear()
+            th = threading.Thread(target=sample)
+            th.start()
 
             def leave():
                 sub.close()
                 wait_count(srv, "ch%d" % (n - 1), 0, seconds=20)
             worst, wrong, _ = measure_while(srv, leave)
-            check(names[2], worst <= 1.0 and not wrong and pubsub_count(srv, "ch0") == 0, "worst %.3f s" % worst)
+            stop.set()
+            th.join()
+            check(names[3], worst <= 1.0 and not wrong and pubsub_count(srv, "ch0") == 0, "worst %.3f s" % worst)
+            check(names[4], (0, 1) in pairs, repr(sorted(pairs)))
     finally:
         srv.stop()
 
