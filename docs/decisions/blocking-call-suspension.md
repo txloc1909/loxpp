@@ -498,8 +498,21 @@ that it is finite. Native's 1 ms is the interval of that delay, and the JVM's
 poll at every switch makes the interval zero. In both, the delay to the seeing
 also includes the running stretch that ends at the switch, so no implementation
 constant bounds it. Two things stay outside the rule on purpose: a task that
-never reaches a suspend point keeps the worker (#1132), and the messages of a
-task of another worker keep their own paragraph, which binds no delay (#1187).
+never reaches a suspend point keeps the worker (#1132), and a message from a
+task of another worker has a delay of its own, below.
+
+A message from a task of another worker has the same shape, and it is stated
+separately because it is not a wait: `spec/04-semantics.md`, Scheduling, says
+the worker sees it "no later than the first task switch at which at least a
+bounded delay has passed since it arrived at the worker", and at once when the
+worker has no ready task. The delay is measured from the send: the `message`
+move of The Task Machine happens when the worker sees the message, so the move
+is the effect of the seeing and not the instant the delay counts from. Native
+drains its inbox at the top of every pass of the scheduler, so it sees the
+message at the next switch; the JVM makes the task ready on the sender's thread,
+so it sees it before any switch. Both are inside
+the rule, and the value of the delay is a speed, as it is for waits. #1187 is
+the issue that added it.
 
 **What the rule buys, and what it does not.** It removes starvation: a wait on a
 connection, or a limit, is seen at a switch, so it is no longer deferred until
@@ -520,8 +533,9 @@ the probe then times out with no output at all, because the reader never wakes.
 The probe's `TIMEOUT: 10` is a limit of the runner and not of the spec, and it
 therefore does bind a practical maximum: a poll interval of 20 s conforms and
 fails the probe, and 4 s conforms and passes it in 8 s. So the probe pins the
-deferral, not the size of the delay, and of the spec probes it is the only one
-whose `TIMEOUT` decides the result.
+deferral, not the size of the delay. Of the spec probes, 451 and 452 are the
+only two whose `TIMEOUT` decides a result, since each pins a rule whose value is
+a speed and each runner limit is therefore the only maximum for its rule.
 
 ### Readiness registry
 
