@@ -3415,6 +3415,7 @@ fun replicaSession() {
     // A transaction of the master comes as MULTI, its writes, and EXEC: the
     // replica applies the writes in one step, after EXEC.
     var queued = nil;
+    var queuedCtx = nil;
     while (true) {
         var got = readCommand(sock);
         if (got == nil) {
@@ -3433,19 +3434,32 @@ fun replicaSession() {
             }
         } else if (name == "MULTI") {
             queued = [];
+            queuedCtx = [];
         } else if (name == "EXEC" and queued != nil) {
             applyingFromMaster = true;
-            for (var q in queued) {
-                execute(nil, q);
+            var qi = 0;
+            while (qi < len(queued)) {
+                execute(queuedCtx[qi], queued[qi]);
+                qi = qi + 1;
             }
             applyingFromMaster = false;
             queued = nil;
-        } else if (queued != nil) {
-            queued.append(argv);
         } else if (len(argv) > 0) {
-            applyingFromMaster = true;
-            execute(nil, argv);
-            applyingFromMaster = false;
+            // As a session does: the parse reads no key, so it runs first,
+            // with yields, and the command gets it.
+            var ctx = nil;
+            var parse = PARSERS[name];
+            if (parse != nil) {
+                ctx = parse(argv, true);
+            }
+            if (queued != nil) {
+                queued.append(argv);
+                queuedCtx.append(ctx);
+            } else {
+                applyingFromMaster = true;
+                execute(ctx, argv);
+                applyingFromMaster = false;
+            }
         }
         replicaOffset = replicaOffset + got[1];
         n = n + 1;
@@ -3855,6 +3869,9 @@ var ZSET_MAX_LEVEL = 32;
 var ZSET_TOO_MANY = "-ERR the command names more than 16384 members of a sorted set\r\n";
 var ZSET_EXEC_TOO_MUCH = "-ERR the sorted set work of this transaction is over its limit\r\n";
 var NOT_FLOAT = "-ERR value is not a valid float\r\n";
+// The longest score text: Redis reads longer ones, but each byte of a
+// score is a step of Lox++ code, and one ZADD has up to 16384 of them.
+var SCORE_MAX_BYTES = 64;
 
 fun filled(n, v) {
     var a = [];
@@ -3869,12 +3886,13 @@ fun filled(n, v) {
 // A pseudo-random level from 1, each level with a chance of 1/4, as in
 // Redis. The standard library has no random numbers; the high bits of a
 // linear congruential generator are used, because its low bits repeat.
-var zsetSeed = 12345;
+var zsetSeed = 12345i;
 fun zsetRandomLevel() {
     var level = 1;
     while (level < ZSET_MAX_LEVEL) {
-        zsetSeed = (zsetSeed * 1103515245 + 12345) % 2147483648;
-        if (((zsetSeed - zsetSeed % 65536) / 65536) % 4 != 0) {
+        // In Int: the product passes 2^53, where a Number loses bits.
+        zsetSeed = (zsetSeed * 1103515245i + 12345i) % 2147483648i;
+        if (((zsetSeed - zsetSeed % 65536i) / 65536i) % 4i != 0i) {
             return level;
         }
         level = level + 1;
@@ -4050,8 +4068,12 @@ fun zsetEntry(key) {
 // checked first and an exponent is moved into the digits.
 var ZSET_INF = float("1" + "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
 
+fun isDigitChar(c) {
+    return c >= "0" and c <= "9";
+}
+
 fun parseScore(s) {
-    if (len(s) == 0 or len(s) > 400) {
+    if (len(s) == 0 or len(s) > SCORE_MAX_BYTES) {
         return nil;
     }
     var i = 0;
@@ -4069,22 +4091,27 @@ fun parseScore(s) {
         }
         return ZSET_INF;
     }
-    var digits = "";
-    var point = -1;
-    while (i < len(s) and ((s[i] >= "0" and s[i] <= "9") or (s[i] == "." and point < 0))) {
-        if (s[i] == ".") {
-            point = len(digits);
-        } else {
-            digits = digits + s[i];
-        }
+    // The digits before and after the point, found by index and taken by
+    // slices, so the parse is linear.
+    var intStart = i;
+    while (i < len(s) and isDigitChar(s[i])) {
         i = i + 1;
     }
+    var intPart = s[intStart:i];
+    var fracPart = "";
+    if (i < len(s) and s[i] == ".") {
+        i = i + 1;
+        var fracStart = i;
+        while (i < len(s) and isDigitChar(s[i])) {
+            i = i + 1;
+        }
+        fracPart = s[fracStart:i];
+    }
+    var digits = intPart + fracPart;
     if (len(digits) == 0) {
         return nil;
     }
-    if (point < 0) {
-        point = len(digits);
-    }
+    var point = len(intPart);
     var exp = 0;
     if (i < len(s) and (s[i] == "e" or s[i] == "E")) {
         i = i + 1;
@@ -4096,8 +4123,9 @@ fun parseScore(s) {
             i = i + 1;
         }
         var start = i;
-        while (i < len(s) and s[i] >= "0" and s[i] <= "9") {
-            // Any exponent past 100000 is out of range either way.
+        while (i < len(s) and isDigitChar(s[i])) {
+            // The exponent stops growing past 100000: the range check
+            // below refuses any such value.
             if (exp < 100000) {
                 exp = exp * 10 + (ord(s[i]) - 48);
             }
@@ -4113,14 +4141,18 @@ fun parseScore(s) {
     }
     // The value is 0.<digits> times 10^(point + exp). As in Redis, a value
     // past the range of a double, or one that rounds to zero, is refused
-    // (strtod sets ERANGE). The exponent is at most 100000, so the decimal
-    // text stays small.
+    // (strtod sets ERANGE). The range is checked from the first digit that
+    // is not zero, before any text is made, so the text stays short.
     var first = 0;
     while (first < len(digits) and digits[first] == "0") {
         first = first + 1;
     }
     if (first == len(digits)) {
         return float(sign + "0");
+    }
+    var magnitude = point + exp - first;
+    if (magnitude > 310 or magnitude < -330) {
+        return nil;
     }
     point = point + exp;
     var text = "";
@@ -4168,6 +4200,9 @@ fun parseZadd(argv, mayYield) {
     if ((len(argv) - 2) % 2 != 0) {
         return errorReply("ERR syntax error");
     }
+    if ((len(argv) - 2) / 2 > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
     var pairs = [];
     var i = 2;
     while (i < len(argv)) {
@@ -4192,15 +4227,22 @@ fun cmdZadd(ctx, argv) {
     if (type(pairs) == "String") {
         return pairs;
     }
-    if (len(pairs) > ZSET_COMMAND_MEMBERS) {
-        return ZSET_TOO_MANY;
-    }
     var key = argv[1];
     var entry = zsetEntry(key);
     if (entry == false) {
         return WRONGTYPE;
     }
-    if (!spendZsetWork(len(pairs))) {
+    // A new member is one insert; a new score is a delete and an insert.
+    var work = len(pairs);
+    if (entry != nil) {
+        for (var p in pairs) {
+            var had = entry.value.dict[p[1]];
+            if (had != nil and had != p[0]) {
+                work = work + 1;
+            }
+        }
+    }
+    if (!spendZsetWork(work)) {
         return ZSET_EXEC_TOO_MUCH;
     }
     if (entry == nil) {
@@ -4326,10 +4368,13 @@ fun cmdZrange(ctx, argv) {
         return wrongArgs("zrange");
     }
     var withScores = false;
-    if (len(argv) == 5 and upper(argv[4]) == "WITHSCORES") {
+    var k = 4;
+    while (k < len(argv)) {
+        if (upper(argv[k]) != "WITHSCORES") {
+            return errorReply("ERR syntax error");
+        }
         withScores = true;
-    } else if (len(argv) > 4) {
-        return errorReply("ERR syntax error");
+        k = k + 1;
     }
     var start = parseInteger(argv[2]);
     var stop = parseInteger(argv[3]);

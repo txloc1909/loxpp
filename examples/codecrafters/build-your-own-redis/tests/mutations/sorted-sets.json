@@ -129,7 +129,7 @@
  },
  {
   "name": "every node has level 1",
-  "old": "        if (((zsetSeed - zsetSeed % 65536) / 65536) % 4 != 0) {",
+  "old": "        if (((zsetSeed - zsetSeed % 65536i) / 65536i) % 4i != 0i) {",
   "new": "        if (true) {",
   "cases": [
    "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s"
@@ -162,8 +162,8 @@
  },
  {
   "name": "ZADD takes nan",
-  "old": "    if (len(digits) == 0) {\n        return nil;\n    }\n    if (point < 0) {",
-  "new": "    if (len(digits) == 0) {\n        return 0;\n    }\n    if (point < 0) {",
+  "old": "    var digits = intPart + fracPart;\n    if (len(digits) == 0) {\n        return nil;\n    }",
+  "new": "    var digits = intPart + fracPart;\n    if (len(digits) == 0) {\n        return 0;\n    }",
   "cases": [
    "local: ZADD zl nan a gives the error of Redis"
   ]
@@ -186,7 +186,7 @@
  },
  {
   "name": "no limit on the members of ZADD",
-  "old": "    if (len(pairs) > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }",
+  "old": "    if ((len(argv) - 2) / 2 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }",
   "new": "",
   "cases": [
    "local: ZADD of more than 16384 members is refused"
@@ -202,7 +202,7 @@
  },
  {
   "name": "no sorted set work limit in EXEC",
-  "old": "    if (!spendZsetWork(len(pairs))) {\n        return ZSET_EXEC_TOO_MUCH;\n    }",
+  "old": "    if (!spendZsetWork(work)) {\n        return ZSET_EXEC_TOO_MUCH;\n    }",
   "new": "",
   "cases": [
    "local: EXEC refuses sorted set work over 32768"
@@ -286,6 +286,46 @@
   "new": "    return entry;\n}\n\n// Reads a score",
   "cases": [
    "local: ZCARD of a string gives WRONGTYPE"
+  ]
+ },
+ {
+  "name": "the range of a score is checked after the text",
+  "old": "    if (magnitude > 310 or magnitude < -330) {\n        return nil;\n    }",
+  "new": "",
+  "cases": [
+   "local: ZADD of 64 scores 1e-99999 replies within 1 s"
+  ]
+ },
+ {
+  "name": "no limit on the bytes of a score",
+  "old": "    if (len(s) == 0 or len(s) > SCORE_MAX_BYTES) {",
+  "new": "    if (len(s) == 0) {",
+  "cases": [
+   "local: a score of 65 bytes is refused"
+  ]
+ },
+ {
+  "name": "a replica parses ZADD with no yield",
+  "old": "            if (parse != nil) {\n                ctx = parse(argv, true);\n            }\n            if (queued != nil) {",
+  "new": "            if (parse != nil) {\n                ctx = parse(argv, false);\n            }\n            if (queued != nil) {",
+  "cases": [
+   "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "a new score costs one unit of work",
+  "old": "            if (had != nil and had != p[0]) {\n                work = work + 1;\n            }",
+  "new": "",
+  "cases": [
+   "local: a new score costs two units of the sorted set work of EXEC"
+  ]
+ },
+ {
+  "name": "ZRANGE takes WITHSCORES once",
+  "old": "        if (upper(argv[k]) != \"WITHSCORES\") {",
+  "new": "        if (upper(argv[k]) != \"WITHSCORES\" or k > 4) {",
+  "cases": [
+   "local: ZRANGE takes WITHSCORES twice, as Redis does"
   ]
  }
 ]

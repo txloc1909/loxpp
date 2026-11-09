@@ -265,8 +265,8 @@
  },
  {
   "name": "S3 XREAD parses its IDs in its one step",
-  "old": "            ctx = parse(argv, true);",
-  "new": "            ctx = parse(argv, false);",
+  "old": "        var parse = PARSERS[name];\n        if (parse != nil) {\n            ctx = parse(argv, true);",
+  "new": "        var parse = PARSERS[name];\n        if (parse != nil) {\n            ctx = parse(argv, false);",
   "cases": [
    "local: S3 XREAD of 524286 streams stalls PING at most 0.5 s"
   ]

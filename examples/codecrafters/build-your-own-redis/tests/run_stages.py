@@ -4701,6 +4701,21 @@ def stages_zset_on(srv):
           and c.call("ZRANK", "zl", "a") == 1)
     check("local: ZRANGE WITHSCORES gives each member and its score",
           c.call("ZRANGE", "zl", "0", "-1", "WITHSCORES") == ["b", "2", "a", "5"])
+    check("local: ZRANGE takes WITHSCORES twice, as Redis does",
+          c.call("ZRANGE", "zl", "0", "-1", "WITHSCORES", "withscores") == ["b", "2", "a", "5"])
+    got = c.call("ZADD", "zl", "1" + "0" * 64, "long")
+    check("local: a score of 65 bytes is refused", got == NOT_FLOAT_REPLY, repr(got))
+    t0 = time.time()
+    got = [c.call("ZADD", "zl", "1e-999999", "x"), c.call("ZADD", "zl", "1e999999", "x")]
+    check("local: ZADD of an exponent of 6 digits replies within 1 s",
+          got == [NOT_FLOAT_REPLY] * 2 and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
+    args = []
+    for i in range(64):
+        args += ["1e-99999", "y%d" % i]
+    t0 = time.time()
+    got = c.call("ZADD", "zl", *args)
+    check("local: ZADD of 64 scores 1e-99999 replies within 1 s",
+          got == NOT_FLOAT_REPLY and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
     for cmd, want in ((("ZADD", "zl", "1"), "wrong number of arguments for 'zadd'"),
                       (("ZADD", "zl", "1", "a", "2"), "syntax error"),
                       (("ZADD", "zl", "abc", "a"), "value is not a valid float"),
@@ -4795,7 +4810,9 @@ def stages_zset_limits(prog):
                  "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s",
                  "local: Z2 ZRANGE of 524288 members stalls PING at most 1 s",
                  "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
-                 "local: EXEC refuses a ZRANGE over the element budget"]
+                 "local: EXEC refuses a ZRANGE over the element budget",
+                 "local: a new score costs two units of the sorted set work of EXEC",
+                 "local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(60)
@@ -4882,6 +4899,35 @@ def stages_zset_limits(prog):
                 x.close()
             worst, wrong, _ = measure_while(srv, exec_two)
             check(names[5], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            # A new score is a delete and an insert: 16384 new members, then
+            # new scores for them, are 49152 units, over 32768.
+            fresh = []
+            moved = []
+            for i in range(16384):
+                fresh += ["1", "w%d" % i]
+                moved += ["2", "w%d" % i]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("ZADD", "W", *fresh) + encode("ZADD", "W", *moved) + encode("EXEC"))
+            for _ in range(3):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: a new score costs two units of the sorted set work of EXEC",
+                  isinstance(reply, list) and reply[0] == 16384 and isinstance(reply[1], Error), repr(reply)[:100])
+            # Z4: 16384 scores of 64 bytes, the longest, on this master.
+            long_args = []
+            for i in range(16384):
+                long_args += ["0." + "0" * 40 + "%021d" % (i + 1), "v%d" % i]
+
+            def zadd_long():
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.call("ZADD", "V", *long_args)
+                x.close()
+            worst, wrong, _ = measure_while(srv, zadd_long)
+            check("local: Z4 ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and c.call("ZCARD", "V") == 16384, "worst %.3f s" % worst)
             c.close()
     finally:
         srv.stop()
@@ -4921,7 +4967,8 @@ def stages_zset_replication(prog):
     rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
     try:
         names = ["local: a replica refuses ZADD and ZREM from a client",
-                 "local: a replica applies ZADD and ZREM of its master"]
+                 "local: a replica applies ZADD and ZREM of its master",
+                 "local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s"]
         if aof_started(rep, names):
             link = m.accept()
             fake_handshake(link)
@@ -4931,6 +4978,18 @@ def stages_zset_replication(prog):
             link.send_raw(encode("ZADD", "q", "1", "a", "2", "b") + encode("ZREM", "q", "a"))
             time.sleep(0.3)
             check(names[1], c.call("ZRANGE", "q", "0", "-1") == ["b"])
+            long_args = []
+            for i in range(16384):
+                long_args += ["0." + "0" * 40 + "%021d" % (i + 1), "v%d" % i]
+
+            def apply_long():
+                link.send_raw(encode("ZADD", "V", *long_args))
+                deadline = time.time() + 30
+                while time.time() < deadline and c.call("ZCARD", "V") != 16384:
+                    time.sleep(0.05)
+            worst, wrong, _ = measure_while(rep, apply_long)
+            check("local: Z4 a replica that applies ZADD of 16384 scores of 64 bytes stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and c.call("ZCARD", "V") == 16384, "worst %.3f s" % worst)
             c.close()
     finally:
         rep.stop()
