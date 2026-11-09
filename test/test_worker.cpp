@@ -472,7 +472,8 @@ TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
 // waits in receive. The wait ends on a descriptor that is readable before the
 // script runs, not on a wall-clock deadline, and the handler posts the
 // message: no DeadlockError may come first. The scheduler clock seam keeps
-// pollWhileBusy from polling while the script runs (see the poll test above).
+// pollWhileBusy from polling while the script runs (see the polling test
+// below).
 TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     VM vm;
     int fired = 0;
