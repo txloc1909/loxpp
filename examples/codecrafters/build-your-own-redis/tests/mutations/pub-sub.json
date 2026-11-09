@@ -1,0 +1,226 @@
+[
+ {
+  "name": "a new channel does not count",
+  "old": "            conn.channels[channel] = true;\n            conn.subCount = conn.subCount + 1;",
+  "new": "            conn.channels[channel] = true;",
+  "cases": [
+   "pub-sub-02 a second channel counts 2"
+  ]
+ },
+ {
+  "name": "the same channel counts again",
+  "old": "        if (!conn.channels.has(channel)) {\n            conn.channels[channel] = true;",
+  "new": "        if (true) {\n            conn.channels[channel] = true;",
+  "cases": [
+   "pub-sub-02 the same channel again keeps the count"
+  ]
+ },
+ {
+  "name": "subscribed mode refuses nothing",
+  "old": "        if (conn.subCount > 0) {\n            var refused = subscribedCheck(name, argv);",
+  "new": "        if (false) {\n            var refused = subscribedCheck(name, argv);",
+  "cases": [
+   "pub-sub-03 subscribed mode refuses SET"
+  ]
+ },
+ {
+  "name": "subscribed mode refuses SUBSCRIBE",
+  "old": "var SUBSCRIBED_ALLOWED = {\"SUBSCRIBE\": true, \"UNSUBSCRIBE\": true, \"PING\": true};",
+  "new": "var SUBSCRIBED_ALLOWED = {\"UNSUBSCRIBE\": true, \"PING\": true};",
+  "cases": [
+   "pub-sub-03 subscribed mode allows SUBSCRIBE"
+  ]
+ },
+ {
+  "name": "PING in subscribed mode gives PONG",
+  "old": "        if (name != \"PING\") {\n            return nil;\n        }",
+  "new": "        return nil;",
+  "cases": [
+   "pub-sub-04 PING in subscribed mode gives pong and an empty string"
+  ]
+ },
+ {
+  "name": "PING in subscribed mode drops its argument",
+  "old": "        if (len(argv) == 2) {\n            arg = argv[1];\n        }",
+  "new": "",
+  "cases": [
+   "local: PING with an argument in subscribed mode gives pong and the argument"
+  ]
+ },
+ {
+  "name": "PING arity in subscribed mode is not checked",
+  "old": "        if (len(argv) > 2) {\n            return wrongArgs(\"ping\");\n        }",
+  "new": "",
+  "cases": [
+   "local: PING with two arguments in subscribed mode is an arity error"
+  ]
+ },
+ {
+  "name": "PUBLISH counts no subscriber",
+  "old": "    if (m != nil) {\n        n = len(m);\n    }\n    if (!spendElements(n)) {",
+  "new": "    if (!spendElements(n)) {",
+  "cases": [
+   "pub-sub-05 PUBLISH gives the number of subscribers"
+  ]
+ },
+ {
+  "name": "PUBLISH delivers nothing",
+  "old": "    for (var id in m.keys()) {\n        deliver(m[id], channel, message, cost, now);\n    }",
+  "new": "",
+  "cases": [
+   "pub-sub-06 each subscriber gets the message of its channel"
+  ]
+ },
+ {
+  "name": "a message lacks its channel",
+  "old": "    out.add(\"*3\\r\\n$7\\r\\nmessage\\r\\n\" + bulk(channel));",
+  "new": "    out.add(\"*2\\r\\n$7\\r\\nmessage\\r\\n\");",
+  "cases": [
+   "pub-sub-06 each subscriber gets the message of its channel"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE keeps the subscriber",
+  "old": "    if (m != nil) {\n        m.del(conn.id);",
+  "new": "    if (false) {\n        m.del(conn.id);",
+  "cases": [
+   "pub-sub-07 PUBLISH after UNSUBSCRIBE counts the others"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE keeps the count",
+  "old": "    conn.channels.del(channel);\n    conn.subCount = conn.subCount - 1;",
+  "new": "    conn.channels.del(channel);",
+  "cases": [
+   "pub-sub-07 UNSUBSCRIBE gives unsubscribe, the channel and the count left"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE of a missing channel leaves",
+  "old": "        if (conn.channels.has(channel)) {\n            leaveChannel(conn, channel);",
+  "new": "        if (true) {\n            leaveChannel(conn, channel);",
+  "cases": [
+   "pub-sub-07 UNSUBSCRIBE of a channel that the client has not gives the same count"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE with nothing gives no reply",
+  "old": "        if (len(names) == 0) {\n            out.add(subscribeReply(\"unsubscribe\", nil, 0));\n        }",
+  "new": "",
+  "cases": [
+   "local: UNSUBSCRIBE with no channel and no subscription gives a null channel and 0"
+  ]
+ },
+ {
+  "name": "UNSUBSCRIBE with no channel leaves nothing",
+  "old": "        names = conn.channels.keys();\n        if (len(names) == 0) {",
+  "new": "        if (len(names) == 0) {",
+  "cases": [
+   "local: UNSUBSCRIBE with no channel leaves each channel"
+  ]
+ },
+ {
+  "name": "an unknown command in subscribed mode is refused as a context",
+  "old": "    if (COMMANDS[name] == nil and ARITY[name] == nil and !CONN_COMMANDS.has(name)) {\n        return unknownCommand(argv);\n    }",
+  "new": "",
+  "cases": [
+   "local: an unknown command in subscribed mode is an unknown command"
+  ]
+ },
+ {
+  "name": "the arity check in subscribed mode comes after the context",
+  "old": "    if (ARITY[name] != nil and !arityOk(name, len(argv))) {\n        return wrongArgs(lower(name));\n    }\n    return errorReply(\"ERR Can't execute",
+  "new": "    return errorReply(\"ERR Can't execute",
+  "cases": [
+   "local: a wrong number of arguments in subscribed mode comes first"
+  ]
+ },
+ {
+  "name": "WAIT is unknown in subscribed mode",
+  "old": "var CONN_COMMANDS = {\"REPLCONF\": true, \"PSYNC\": true, \"WAIT\": true};",
+  "new": "var CONN_COMMANDS = {\"REPLCONF\": true, \"PSYNC\": true};",
+  "cases": [
+   "local: subscribed mode refuses WAIT"
+  ]
+ },
+ {
+  "name": "SUBSCRIBE in MULTI is queued",
+  "old": "    if (name == \"SUBSCRIBE\" or name == \"UNSUBSCRIBE\") {\n        // Redis queues them",
+  "new": "    if (false) {\n        // Redis queues them",
+  "cases": [
+   "local: SUBSCRIBE in MULTI is refused"
+  ]
+ },
+ {
+  "name": "a subscriber that goes keeps its channels",
+  "old": "    unwatchAll(conn);\n    unsubscribeAll(conn);",
+  "new": "    unwatchAll(conn);",
+  "cases": [
+   "local: a subscriber that goes leaves its channels"
+  ]
+ },
+ {
+  "name": "no hard limit for a subscriber",
+  "old": "    if (conn.pubPending > PUBSUB_HARD_COST\n        or",
+  "new": "    if (false\n        or",
+  "cases": [
+   "local: PS1 a subscriber that never reads is closed over the hard limit of 32 MB"
+  ]
+ },
+ {
+  "name": "the soft limit closes at once",
+  "old": "        or (conn.pubSoftSince != nil and now - conn.pubSoftSince > PUBSUB_SOFT_SECONDS * 1000)) {",
+  "new": "        or conn.pubSoftSince != nil) {",
+  "cases": [
+   "local: PS2 a subscriber over the soft limit stays while the soft time runs"
+  ]
+ },
+ {
+  "name": "no soft limit for a subscriber",
+  "old": "        or (conn.pubSoftSince != nil and now - conn.pubSoftSince > PUBSUB_SOFT_SECONDS * 1000)) {",
+  "new": "        or false) {",
+  "cases": [
+   "local: PS2 a subscriber still over the soft limit after its time is closed"
+  ]
+ },
+ {
+  "name": "the session does not take back the cost",
+  "old": "    conn.pubPending = conn.pubPending - messageCost(channel, message);",
+  "new": "",
+  "cases": [
+   "local: PS2 a subscriber over the soft limit stays while the soft time runs"
+  ]
+ },
+ {
+  "name": "PUBLISH is not propagated",
+  "old": "    replicate([\"PUBLISH\", channel, message], nil);",
+  "new": "",
+  "cases": [
+   "local: PUBLISH is propagated to the replicas"
+  ]
+ },
+ {
+  "name": "PUBLISH goes to the AOF",
+  "old": "            if (entry.head[0] != \"REPLCONF\" and entry.head[0] != \"PUBLISH\") {",
+  "new": "            if (entry.head[0] != \"REPLCONF\") {",
+  "cases": [
+   "local: PUBLISH does not go to the AOF"
+  ]
+ },
+ {
+  "name": "SUBSCRIBE does not yield",
+  "old": "        out.add(subscribeReply(\"subscribe\", channel, conn.subCount));\n        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }",
+  "new": "        out.add(subscribeReply(\"subscribe\", channel, conn.subCount));\n        i = i + 1;",
+  "cases": [
+   "local: PS3 SUBSCRIBE of 1048575 channels stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "the end of a subscriber does not yield",
+  "old": "        leaveChannel(conn, names[i]);\n        i = i + 1;\n        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }",
+  "new": "        leaveChannel(conn, names[i]);\n        i = i + 1;",
+  "cases": [
+   "local: PS4 the end of a client with 1048575 channels stalls PING at most 1 s"
+  ]
+ }
+]

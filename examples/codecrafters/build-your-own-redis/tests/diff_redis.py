@@ -296,6 +296,15 @@ SCRIPTS = {
             ["LLEN"], ["LRANGE", "l", "0"],
         ]),
     ],
+    "pub-sub": [
+        ("subscribed-mode", [
+            ["UNSUBSCRIBE"], ["UNSUBSCRIBE", "x"], ["PUBLISH", "ch", "m"], ["PUBLISH", "a"], ["SUBSCRIBE"],
+            ["SUBSCRIBE", "a"], ["SUBSCRIBE", "b"], ["SUBSCRIBE", "a"], ["PING"], ["PING", "hi"],
+            ["PING", "a", "b"], ["ECHO", "x"], ["GET"], ["NOSUCH"], ["set", "a", "b"], ["MULTI"],
+            ["WATCH", "k"], ["PUBLISH", "a", "m"], ["INCR", "n"], ["UNSUBSCRIBE", "a"], ["UNSUBSCRIBE", "zz"],
+            ["UNSUBSCRIBE", "b"], ["PING"], ["ECHO", "back"], ["PUBLISH", "a", "m"],
+        ]),
+    ],
 }
 
 
@@ -390,6 +399,7 @@ def main():
     rdb_checks(prog)
     replication_checks(prog)
     aof_checks(prog)
+    pubsub_checks(prog)
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
 
@@ -635,6 +645,40 @@ def aof_checks(prog):
         for proc in procs:
             stop_proc(proc)
         shutil.rmtree(top, ignore_errors=True)
+
+
+def pubsub_checks(prog):
+    """Two subscribers and a publisher on each server: the counts and the
+    messages must agree."""
+    global PASS, FAIL
+    print("== pub-sub (two subscribers and a publisher)")
+    oracle = RedisServer()
+    ours = Server(prog, [])
+    try:
+        results = []
+        for srv in (oracle, ours):
+            s1, s2, p = srv.client(), srv.client(), srv.client()
+            out = [s1.call("SUBSCRIBE", "c1"), s2.call("SUBSCRIBE", "c1"), s2.call("SUBSCRIBE", "c2"),
+                   p.call("PUBLISH", "c1", "hello"), p.call("PUBLISH", "c2", "world"),
+                   s1.read(), s2.read(), s2.read(),
+                   s2.call("UNSUBSCRIBE", "c1"), p.call("PUBLISH", "c1", "again"), s1.read(),
+                   p.call("PUBLISH", "c2", "")]
+            out.append(s2.read())
+            for c in (s1, s2, p):
+                c.close()
+            results.append(out)
+        if results[0] == results[1]:
+            PASS += 1
+            print("  ok   pub-sub delivery")
+        else:
+            FAIL += 1
+            print("  FAIL pub-sub delivery\n       redis %r\n       lox   %r" % tuple(results))
+    except (OSError, EOFError, ValueError) as e:
+        FAIL += 1
+        print("  FAIL pub-sub delivery  %r" % e)
+    finally:
+        oracle.stop()
+        ours.stop()
 
 
 def replication_checks(prog):

@@ -3980,9 +3980,6 @@ fun cmdPublish(ctx, argv) {
 }
 
 fun deliver(conn, channel, message, cost, now) {
-    if (conn.pubClosed) {
-        return;
-    }
     conn.pubPending = conn.pubPending + cost;
     if (conn.pubPending <= PUBSUB_SOFT_COST) {
         conn.pubSoftSince = nil;
@@ -3993,8 +3990,7 @@ fun deliver(conn, channel, message, cost, now) {
         or (conn.pubSoftSince != nil and now - conn.pubSoftSince > PUBSUB_SOFT_SECONDS * 1000)) {
         // The subscriber does not read fast enough: close it, as Redis
         // does at its output buffer limit. Its session ends and leaves
-        // its channels.
-        conn.pubClosed = true;
+        // its channels. A second close does nothing.
         try {
             conn.sock.close();
         } catch (ignored) {
@@ -4274,13 +4270,12 @@ class Conn {
         this.replSentCost = 0;
         this.softSince = nil;
         // Pub/Sub: channel -> true for each channel, their number, the
-        // cost of the messages that the session has not written, the time
-        // it went over the soft limit, and whether it was closed for it.
+        // cost of the messages that the session has not written, and the
+        // time it went over the soft limit.
         this.channels = {};
         this.subCount = 0;
         this.pubPending = 0;
         this.pubSoftSince = nil;
-        this.pubClosed = false;
     }
 }
 

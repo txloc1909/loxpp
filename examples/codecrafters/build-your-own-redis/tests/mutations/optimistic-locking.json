@@ -161,8 +161,8 @@
  },
  {
   "name": "unwatchAll runs in a deferred call",
-  "old": "    // cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n    if (conn.isReplica) {",
-  "new": "    // cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n    if (conn.isReplica) {",
+  "old": "    // a deferred call cannot suspend (YieldAcrossNativeError).\n    unwatchAll(conn);\n    unsubscribeAll(conn);",
+  "new": "    // a deferred call cannot suspend (YieldAcrossNativeError).\n    defer unwatchAll(conn);\n    unsubscribeAll(conn);",
   "cases": [
    "local: the server serves on after a client that watched 5000 keys goes"
   ]
