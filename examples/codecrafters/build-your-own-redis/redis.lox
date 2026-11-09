@@ -2929,7 +2929,8 @@ fun respLength(parts) {
 // Notes a write for the replicas: head and tail are Lists of arguments,
 // tail can be nil. It runs in the step of the command that writes.
 fun replicate(head, tail) {
-    if (loadingAof or (len(replicas) == 0 and !aofOn)) {
+    // During the replay aofOn is still false, so the replay adds nothing.
+    if (len(replicas) == 0 and !aofOn) {
         return;
     }
     if (replInExec and !replExecWrote) {
@@ -3417,7 +3418,7 @@ fun replicaSession() {
 // that wrote replies only when the file has its entry (aofSync), whatever
 // appendfsync says: so at most one command of each client waits in the
 // log for the file (rule 4). The standard library has no fsync, so no
-// policy forces the bytes to the disk (#AOF_FSYNC_ISSUE).
+// policy forces the bytes to the disk (#1190).
 var aofOn = false;
 // True while the server replays the AOF at start.
 var loadingAof = false;
@@ -3515,6 +3516,9 @@ fun replayAofCommand(argv) {
 // its last whole command (outside MULTI), as Redis does with
 // aof-load-truncated yes.
 fun replayAofFile(path, isLast) {
+    if (!is_file(path)) {
+        throw AofError("the manifest names " + path + ", which is not there", false);
+    }
     var f = open(path, "r");
     var data = f.read();
     f.close();
@@ -3696,6 +3700,12 @@ fun writeAof() {
         return;
     }
     var done = aofDoneOffset;
+    // A failed open() halts the program, and catch cannot stop it, so the
+    // file is checked first.
+    if (!is_file(aofPath)) {
+        print "redis.lox: cannot write the AOF file: " + aofPath + " is gone";
+        exit(1);
+    }
     try {
         var f = open(aofPath, "a");
         var out = Output(FileSink(f));

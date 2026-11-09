@@ -389,6 +389,7 @@ def main():
                 ours.stop()
     rdb_checks(prog)
     replication_checks(prog)
+    aof_checks(prog)
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
 
@@ -535,6 +536,105 @@ def wait_synced(master_port, seconds=10):
         return False
     finally:
         c.close()
+
+
+AOF_WRITES = [
+    ["SET", "s", "v"], ["SET", "p", "v", "PX", "600000"], ["SET", "e", "v", "EX", "600"],
+    ["SET", "soon", "v", "PX", "1000"], ["SET", "at", "v", "PXAT", "99999999999999"],
+    ["SET", "s", "w", "KEEPTTL"], ["SET", "s", "x", "NX"], ["SET", "bad", "1", "FOO"],
+    ["RPUSH", "l", "a", "b", "c"], ["LPUSH", "l", "z"], ["LPOP", "l"], ["LPOP", "l", "1"],
+    ["INCR", "n"], ["INCR", "n"], ["INCR", "l"],
+    ["XADD", "x", "1-1", "f", "v"], ["XADD", "x", "1-2", "g", "w", "h", "u"],
+    ["SET", "d", "1"], ["DEL", "d", "missing"],
+    ["MULTI"], ["SET", "m", "1"], ["INCR", "m"], ["RPUSH", "ml", "q"], ["EXEC"],
+    ["MULTI"], ["SET", "m2", "1"], ["DISCARD"],
+]
+AOF_READS = [
+    ["GET", "s"], ["GET", "p"], ["GET", "e"], ["GET", "soon"], ["GET", "at"], ["GET", "x"],
+    ["GET", "bad"], ["LRANGE", "l", "0", "-1"], ["GET", "n"], ["XRANGE", "x", "-", "+"],
+    ["GET", "d"], ["GET", "m"], ["LRANGE", "ml", "0", "-1"], ["GET", "m2"],
+    ["TYPE", "s"], ["TYPE", "l"], ["TYPE", "x"], ["TYPE", "soon"],
+    ["CONFIG", "GET", "appendonly"], ["CONFIG", "GET", "appenddirname"],
+    ["CONFIG", "GET", "appendfilename"], ["CONFIG", "GET", "appendfsync"],
+]
+
+
+def start_redis_aof(d):
+    port = free_port()
+    proc = subprocess.Popen(
+        ["redis-server", "--port", str(port), "--bind", "127.0.0.1", "--save", "",
+         "--appendonly", "yes", "--appendfsync", "always", "--dir", d],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wait_port(port)
+    return proc, Port(port)
+
+
+def start_lox_aof(prog, d):
+    return Server(prog, ["--dir", d, "--appendonly", "yes", "--appendfsync", "always"])
+
+
+def stop_proc(proc):
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
+def aof_checks(prog):
+    """The same writes go to redis-server and to the Lox++ server, each with
+    appendonly yes. Then each server starts again from the files, and the
+    reads must agree: each from its own files, and each from the files of
+    the other (a copy, as a start appends to them)."""
+    global PASS, FAIL
+    print("== aof (writes, a restart from the files, and the files of the other)")
+    top = tempfile.mkdtemp(prefix="loxpp-aofdiff-")
+    rdir, ldir = os.path.join(top, "redis"), os.path.join(top, "lox")
+    os.mkdir(rdir)
+    os.mkdir(ldir)
+    procs = []
+    try:
+        rproc, rport = start_redis_aof(rdir)
+        ours = start_lox_aof(prog, ldir)
+        run_script(rport, AOF_WRITES)
+        run_script(ours, AOF_WRITES)
+        stop_proc(rproc)
+        ours.stop()
+        time.sleep(1.5)
+        for a, b in (("redis", "lox-from-redis"), ("lox", "redis-from-lox")):
+            shutil.copytree(os.path.join(top, a), os.path.join(top, b))
+        cases = []
+        for name, kind, sub in (("aof restart: redis from its files", "redis", "redis"),
+                                ("aof restart: lox from its files", "lox", "lox"),
+                                ("aof: lox from the files of redis", "lox", "lox-from-redis"),
+                                ("aof: redis from the files of lox", "redis", "redis-from-lox")):
+            d = os.path.join(top, sub)
+            if kind == "redis":
+                proc, srv = start_redis_aof(d)
+                procs.append(proc)
+            else:
+                srv = start_lox_aof(prog, d)
+                procs.append(srv.proc)
+            try:
+                cases.append((name, run_script(srv, AOF_READS)))
+            except (OSError, EOFError, ValueError) as e:
+                cases.append((name, repr(e)))
+        want = cases[0][1]
+        for name, got in cases:
+            if got == want:
+                PASS += 1
+                print("  ok   %s" % name)
+            else:
+                FAIL += 1
+                print("  FAIL %s" % name)
+                if isinstance(got, list):
+                    for cmd, w, g in zip(AOF_READS, want, got):
+                        if w != g:
+                            print("       %r: redis %r, this %r" % (cmd, w, g))
+                else:
+                    print("       %s" % got)
+    finally:
+        for proc in procs:
+            stop_proc(proc)
+        shutil.rmtree(top, ignore_errors=True)
 
 
 def replication_checks(prog):

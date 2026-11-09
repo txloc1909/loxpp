@@ -3721,7 +3721,9 @@ def stages_aof_in(prog, d):
             ("local: a manifest line with an unknown type is refused", encode("SET", "r", "1"), {},
              "file {R} seq 1 type z\n"),
             ("local: a manifest line with a missing value is refused", encode("SET", "r", "1"), {},
-             "file {R} seq 1 type\n")]:
+             "file {R} seq 1 type\n"),
+            ("local: a manifest that names a missing file is refused", encode("SET", "r", "1"), {},
+             "file nothere.aof seq 1 type i\n")]:
         rname = rand_word(6)
         base = os.path.join(d, "bad" + rand_word(4))
         os.makedirs(os.path.join(base, "ad"))
@@ -3753,6 +3755,41 @@ def stages_aof_in(prog, d):
     finally:
         srv.stop()
 
+    # With appendonly yes, the RDB file is not loaded.
+    base = os.path.join(d, "rdbtoo")
+    os.mkdir(base)
+    write_rdb(os.path.join(base, "dump.rdb"), [("rdbkey", "v", None, None)])
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes"])
+    try:
+        name = "local: with appendonly yes, the RDB file is not loaded"
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            check(name, c.call("GET", "rdbkey") is None)
+            c.close()
+    finally:
+        srv.stop()
+
+    # A write that the file cannot take stops the server, as Redis does with
+    # appendfsync always: part of a command may be in the file.
+    base, adir, aname, rpath = prepared("werr")
+    srv = Server(prog, ["--dir", base, "--appendonly", "yes", "--appenddirname", adir,
+                        "--appendfilename", aname])
+    try:
+        name = "local: a write that the AOF file cannot take stops the server"
+        if aof_started(srv, [name]):
+            shutil.rmtree(os.path.join(base, adir))
+            c = Asker(srv)
+            got = c.call("SET", "k", "v")
+            try:
+                code = srv.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                code = None
+            check(name, got is CLOSED and code == 1 and "redis.lox: cannot write the AOF file" in srv.log_text(),
+                  repr((got, code, srv.log_text()[-200:])))
+            c.close()
+    finally:
+        srv.stop()
+
     # Flags that the server refuses.
     for name, args in [
             ("local: --appendonly needs yes or no", ["--appendonly", "maybe"]),
@@ -3770,6 +3807,7 @@ def stages_aof_in(prog, d):
                         "--appendfilename", aname])
     try:
         names = ["local: AOF1 SET of 64 MB with the AOF stalls PING at most 1 s",
+                 "local: the reply of EXEC comes after the file has the transaction",
                  "local: AOF2 RPUSH of 1048573 elements with the AOF stalls PING at most 1 s",
                  "local: AOF2 the file has every element"]
         if aof_started(srv, names):
@@ -3781,7 +3819,16 @@ def stages_aof_in(prog, d):
             worst, wrong, _ = measure_while(srv, set_big)
             check(names[0], worst <= 1.0 and not wrong and read_bytes(rpath) == encode("SET", "big", big),
                   "worst %.3f s" % worst)
-            c.call("DEL", "big")
+            # The reply of EXEC comes after the file has the transaction:
+            # the 64 MB take the writer long enough to show a reply that
+            # does not wait.
+            mark = len(read_bytes(rpath))
+            c.call("MULTI")
+            c.call("SET", "big2", big)
+            c.call("EXEC")
+            check("local: the reply of EXEC comes after the file has the transaction",
+                  read_bytes(rpath)[mark:] == encode("MULTI") + encode("SET", "big2", big) + encode("EXEC"))
+            c.call("DEL", "big", "big2")
             mark = len(read_bytes(rpath))
             n = 1048573
             elems = ["e%d" % i for i in range(n)]
@@ -3792,9 +3839,9 @@ def stages_aof_in(prog, d):
                 c.c.read()
                 c.c.sock.settimeout(5)
             worst, wrong, _ = measure_while(srv, push)
-            check(names[1], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
+            check(names[2], worst <= 1.0 and not wrong, "worst %.3f s" % worst)
             got = read_bytes(rpath)[mark:]
-            check(names[2], got == encode("RPUSH", "L", *elems), "%d bytes" % len(got))
+            check(names[3], got == encode("RPUSH", "L", *elems), "%d bytes" % len(got))
             c.close()
     finally:
         srv.stop()
