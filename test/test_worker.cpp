@@ -515,8 +515,9 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
 // leave a pending wake for the next wait() to read.
 //
 // The wait ends on a descriptor that is readable before the script runs, not
-// on a wall-clock deadline: a deadline can expire on a busy host before the
-// script sets `me`, and the handler would then run too early.
+// on a wall-clock deadline. The first wait of the main task is the receive, so
+// the handler runs after the script has set `me`, and no deadline ends that
+// wait early.
 TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     VM vm;
     int fired = 0;
