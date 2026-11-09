@@ -7,7 +7,8 @@
 # that crashes or times out on the copy also counts as a kill. Prints one
 # line per mutation, and exits 1 when a mutation stays alive or its old text
 # is not found exactly once. CI does not run it: it starts one server per
-# mutation and takes minutes.
+# mutation and takes minutes. Set REDIS_STAGE_GROUPS (see run_stages.py) to
+# run only the group of the named cases.
 import json
 import os
 import subprocess

@@ -30,7 +30,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | optimistic-locking | 8 | pass |
 | persistence-rdb | 6 | pass |
 | replication | 18 | pass |
-| persistence-aof | 10 | not started |
+| persistence-aof | 10 | pass |
 | pub-sub | 7 | not started |
 | sorted-sets | 8 | not started |
 | geospatial | 8 | not started |
@@ -220,6 +220,64 @@ counts each byte of the pattern that it reads as a step, in a set too, so
 it takes at most len(key) x len(pattern) steps, and it yields every 65536
 steps.
 
+### AOF persistence
+
+With `--appendonly yes`, at start, before it listens, the server makes
+`<dir>/<appenddirname>` if it is not there (`startAof`). When the manifest
+`<appendfilename>.manifest` is there, the server replays the files that
+it names: the base file (type `b`, an RDB file or an AOF file), then each
+incremental file (type `i`) in its order. It skips a history file (type
+`h`). The writes go to the last incremental file. With no manifest, the
+server makes an empty `<appendfilename>.1.incr.aof` and a manifest with
+the line `file <appendfilename>.1.incr.aof seq 1 type i`. With appendonly
+yes, the RDB file is not loaded, as in Redis. `CONFIG GET dir` gives the
+directory where the server started when `--dir` is not given.
+
+The replay parses the RESP commands of each file and runs each as a client
+that gets no replies. It runs a `MULTI` ... `EXEC` as one step. It accepts
+`SELECT 0` and the annotation lines (`#...`) of Redis, also one that ends
+the file with no newline, and it goes on after an `EXEC` with no `MULTI`,
+as Redis does. As in Redis, no key expires while the files load, and an
+RDB base keeps a key that has expired for the commands after it. A last file that ends inside a command, or
+inside `MULTI`, is cut back to its last whole command (as Redis does with
+`aof-load-truncated yes`) and the server starts. A file that is not RESP,
+an unknown command, `SELECT` of another database, a manifest line that is
+not `file <name> seq <n> type <t>` (with a seq from 1; the keys have no
+case), an empty manifest, a blank line, two base files, incremental files
+out of the order of their seq (an equal seq too), a name with a `/`, and a
+missing file stop the start with a message. A manifest with comments only
+names no file: the server makes a first incremental file. Redis does the
+same for each of these forms, except some forms that Redis itself does not
+write, which the known differences list (`seq 1x`, a base line with
+`seq -1` and `type incr` among them). The values of `--appendonly` and `--appendfsync` have no case.
+
+The AOF is one more reader of the replication log: each write appends its
+effective form in its own step (`replicate`), and a writer task (`writeAof`)
+appends the entries to the file in steps, as a replica session writes them
+to its socket. A served `BLPOP` goes as `LPOP`, `XADD *` with its ID,
+an `EXEC` with more than one write in `MULTI` and `EXEC` (with one write,
+the write alone, as Redis 7.0 writes it), and a lazy expiry as `DEL`.
+`SET` with `EX`, `PX` or `EXAT` goes with `PXAT` and the absolute time, as
+Redis 7.0 writes it, so a replay later does not give the key a new life;
+the replicas get the same form. A time of 16 digits or more goes as it
+came, because `parseInteger` reads 15 digits; such a key lives for tens of
+thousands of years either way. The `GETACK` of `WAIT` does not go to the file.
+The writer closes the file after each batch: the standard library has no
+flush and no fsync, and `close()` is what makes the bytes visible to other
+processes (#1190).
+
+A command that wrote replies only when the file has its entries
+(`aofSync`), whatever `appendfsync` says. So an acknowledged write is in
+the file, and each client has at most one command in the log that the
+file has not got (rule 4). A command that wrote nothing does not wait,
+except a `BLPOP` that times out and an `XREAD BLOCK` that is served: they
+wait for the writes that other clients made while they were blocked. The
+log drops the entries that every reader has got when they hold 1024
+entries or 1 MB of cost (`trimReplLog`), so a long run of large writes
+does not keep them (AOF3). A
+write to the file that fails stops the server with a message, as Redis
+does with `appendfsync always`.
+
 ### Replication
 
 A master keeps a replication log (`replLog`). Each write command appends
@@ -227,7 +285,8 @@ its effective form to the log in its own step (`replicate`), at the point
 where it writes: a push comes before the pop of the client that it serves,
 `XADD *` goes with the ID that the master gave, the pop of `BLPOP` goes as
 `LPOP`, a lazy expiry goes as `DEL`, and `EXEC` wraps its writes in `MULTI`
-and `EXEC`; the pops of the waiters that `EXEC` serves come after it. So the order of
+and `EXEC` when it has more than one (one write goes alone, as in Redis
+7.0); the pops of the waiters that `EXEC` serves come after it. So the order of
 the log is the order of the writes, and the offset (`replOffset`) counts the
 RESP bytes of each entry when it is appended. Each replica session writes
 the log from its own position, in steps (`writeReplLog`). A replica that is
@@ -304,17 +363,30 @@ printed.
   would overflow". Redis goes on to 9223372036854775807.
 - The RDB load reads strings only, in database 0. A file with another
   value kind or another database stops the start. The load does not check
-  the checksum. `CONFIG GET` knows `dir` and `dbfilename` only, and takes
+  the checksum. `CONFIG GET` knows `dir`, `dbfilename`, `appendonly`,
+  `appenddirname`, `appendfilename` and `appendfsync` only, and takes
   no glob pattern, and its order of names is one order that Redis can
   give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
 - A full resync sends an empty RDB file, so a replica gets only the writes
   after it connects. A master has no backlog while it has no replica, so
-  its offset does not grow then. `SET` with a relative `EX` or `PX` goes to a replica
-  as it came, not as `PXAT`. `WAIT`, `REPLCONF` and `PSYNC` cannot be
+  its offset does not grow then, unless appendonly is yes: then the log is
+  kept for the AOF, and the offset grows. `WAIT`, `REPLCONF` and `PSYNC` cannot be
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
   redis-server master makes a new RDB file each time).
+- The manifest forms that Redis does not write: Redis refuses a comment
+  that starts with a space and a last line with no newline, and this
+  server reads both. Redis reads `seq 1x`, a base line with `seq -1` and
+  `type incr`, and this server refuses them. With comments only or
+  history lines only, Redis writes the manifest again without them and
+  deletes the history files; this server keeps them.
+- The AOF: every `appendfsync` policy waits for the file before the reply,
+  as `always` does, and no policy forces the bytes to the disk (#1190). A
+  new incremental file has no `SELECT 0` at its start, and there is no
+  base file and no rewrite (`BGREWRITEAOF`), so the file only grows. A
+  replica refuses `--appendonly yes`. A manifest name in quotes is not
+  read. A write error stops the server under each policy.
 - On a replica, a write from the master of a key that had expired at
   `WATCH` marks the client, and a full resync marks every client that
   watches a key. Redis 7.0 marks neither: it does not mark a client when the
@@ -453,6 +525,9 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | RP3 (with `--replica-soft-seconds 3`): a replica that never reads, then 80 writes of 1 MB, then one more write after 3.5 s | the replica stays while the soft time runs, then goes | as required |
 | Not in the suite: `DEL` of 1048575 keys, live or expired | PING within 1.0 s (rule 5: one pass, as in Redis) | 0.53–0.56 s |
 | Group `replication`: a full resync of 524288 keys on a live replica | the keys are loaded; PING within 1.0 s | 0.009–0.010 s |
+| AOF1 (group `persistence-aof`, on a server of its own): `SET` of 64 MB with the AOF | the file has the command; PING within 1.0 s (rule 6 only) | 0.20 s |
+| AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
+| AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
@@ -477,8 +552,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/transactions.json` or
 `tests/mutations/optimistic-locking.json` or
 `tests/mutations/persistence-rdb.json` or
-`tests/mutations/replication.json` that removes
-its guard (S4, T1, T7, W3, K1 and RP2 hold rule 6 only: no single change removes their
+`tests/mutations/replication.json` or
+`tests/mutations/persistence-aof.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2 and AOF1 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -491,6 +567,13 @@ skip an expired key too), and the check of an early end in `need`
 of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
 key that expires, so no reply shows it. It stays for a client that watches
 the key after the read and before the removal.
+
+Two guards of the AOF have no case. The
+wait of `WATCH` for the file (`aofSync`) holds the `DEL` of a lazy expiry,
+which the writer writes in one step before the next client reads, so no
+timing shows a reply before it. A client that goes while it waits for the
+file ends its session at the wake (`isClosedMsg` in `aofSync`); no client
+timing makes it go inside that short wait.
 
 A large heap brings a second kind of stall: the native VM stops the worker
 for each full collection, and the pause grows with the live heap. With
@@ -541,8 +624,14 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/run_stages.py \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
-# and optimistic-locking.json, persistence-rdb.json, replication.json
+# and optimistic-locking.json, persistence-rdb.json, replication.json,
+# persistence-aof.json
+REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
+
+`REDIS_STAGE_GROUPS` (names split by commas) runs only those groups, also
+under `mutate.py`. A mutation is killed only when its named cases fail, so
+it needs only the group of those cases.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.

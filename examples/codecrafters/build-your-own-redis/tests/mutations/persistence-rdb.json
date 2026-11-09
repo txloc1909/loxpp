@@ -1,8 +1,8 @@
 [
  {
   "name": "CONFIG GET dir gives the file name",
-  "old": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DIR);",
-  "new": "        if (lower(found[i]) == \"dir\") {\n            out.append(CONFIG_DBFILENAME);",
+  "old": "    if (name == \"dir\") {\n        return CONFIG_DIR;",
+  "new": "    if (name == \"dir\") {\n        return CONFIG_DBFILENAME;",
   "cases": [
    "persistence-rdb-01 CONFIG GET dir"
   ]
@@ -17,8 +17,8 @@
  },
  {
   "name": "the RDB file is not loaded",
-  "old": "    try {\n        loadRdb(CONFIG_DIR + \"/\" + CONFIG_DBFILENAME);",
-  "new": "    try {\n        CONFIG_DIR + \"/\" + CONFIG_DBFILENAME;",
+  "old": "            loadRdb(CONFIG_DIR + \"/\" + CONFIG_DBFILENAME);",
+  "new": "            CONFIG_DIR + \"/\" + CONFIG_DBFILENAME;",
   "cases": [
    "persistence-rdb-02 KEYS * gives the key"
   ]
@@ -249,8 +249,8 @@
  },
  {
   "name": "CONFIG GET gives names in lower case",
-  "old": "        out.append(found[i]);\n        if (lower(found[i]) == \"dir\") {",
-  "new": "        out.append(lower(found[i]));\n        if (lower(found[i]) == \"dir\") {",
+  "old": "        out.append(found[i]);\n        out.append(configValue(",
+  "new": "        out.append(lower(found[i]));\n        out.append(configValue(",
   "cases": [
    "local: CONFIG GET of two names gives each once, as sent"
   ]

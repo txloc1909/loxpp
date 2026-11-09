@@ -49,8 +49,8 @@
  },
  {
   "name": "writes are not propagated",
-  "old": "fun replicate(head, tail) {\n    if (len(replicas) == 0) {",
-  "new": "fun replicate(head, tail) {\n    if (true) {",
+  "old": "    // During the replay aofOn is still false, so the replay adds nothing.\n    if (len(replicas) == 0 and !aofOn) {",
+  "new": "    // During the replay aofOn is still false, so the replay adds nothing.\n    if (true) {",
   "cases": [
    "replication-11 the writes reach the replica, in order"
   ]
@@ -249,8 +249,8 @@
  },
  {
   "name": "a full resync loads in one step",
-  "old": "    loadRdbData(data, fresh, true);",
-  "new": "    loadRdbData(data, fresh, false);",
+  "old": "    loadRdbData(data, fresh, true, true);",
+  "new": "    loadRdbData(data, fresh, false, true);",
   "cases": [
    "local: a full resync of 524288 keys stalls PING at most 1 s"
   ]
@@ -361,8 +361,8 @@
  },
  {
   "name": "the replica applies a write of a transaction at once",
-  "old": "        } else if (queued != nil) {\n            queued.append(argv);",
-  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            execute(nil, argv);",
+  "old": "            queued.append(argv);\n        } else if (len(argv) > 0) {",
+  "new": "            queued.append(argv);\n            execute(nil, argv);\n        } else if (len(argv) > 0) {",
   "cases": [
    "local: a client of the replica sees no write of a transaction before its EXEC"
   ]
@@ -409,7 +409,7 @@
  },
  {
   "name": "a replica skips an expired key of the RDB",
-  "old": "expiresAt == nil or expiresAt > now or forReplica)",
+  "old": "expiresAt == nil or expiresAt > now or keepExpired)",
   "new": "expiresAt == nil or expiresAt > now)",
   "cases": [
    "local: a replica keeps an expired key of the RDB for its master"
