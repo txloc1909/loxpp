@@ -1,0 +1,442 @@
+[
+ {
+  "name": "CONFIG GET does not know appendonly",
+  "old": "\"dbfilename\": true, \"appendonly\": true,",
+  "new": "\"dbfilename\": true,",
+  "cases": [
+   "persistence-aof-01 CONFIG GET appendonly gives no"
+  ]
+ },
+ {
+  "name": "CONFIG GET gives appendfilename for appendfsync",
+  "old": "    return CONFIG_APPENDFSYNC;\n}",
+  "new": "    return CONFIG_APPENDFILENAME;\n}",
+  "cases": [
+   "persistence-aof-01 CONFIG GET appendfsync gives everysec"
+  ]
+ },
+ {
+  "name": "the default dir is .",
+  "old": "            if (pwd[\"status\"] == 0 and len(pwd[\"stdout\"]) > 1) {",
+  "new": "            if (false) {",
+  "cases": [
+   "persistence-aof-01 CONFIG GET dir gives the start directory"
+  ]
+ },
+ {
+  "name": "--appendonly is not read",
+  "old": "    CONFIG_APPENDONLY = flagValue(\"--appendonly\", CONFIG_APPENDONLY);",
+  "new": "",
+  "cases": [
+   "persistence-aof-02 CONFIG GET gives each flag"
+  ]
+ },
+ {
+  "name": "--appenddirname is not read",
+  "old": "    CONFIG_APPENDDIRNAME = flagValue(\"--appenddirname\", CONFIG_APPENDDIRNAME);",
+  "new": "",
+  "cases": [
+   "persistence-aof-02 CONFIG GET gives each flag"
+  ]
+ },
+ {
+  "name": "the AOF directory is not made",
+  "old": "    if (!is_dir(dir)) {\n        mkdir(dir);\n    }",
+  "new": "",
+  "cases": [
+   "persistence-aof-03 the AOF directory is made at start"
+  ]
+ },
+ {
+  "name": "an AOF directory that is there is an error",
+  "old": "    if (!is_dir(dir)) {\n        mkdir(dir);\n    }",
+  "new": "    mkdir(dir);",
+  "cases": [
+   "persistence-aof-03 an AOF directory that is there already is not an error"
+  ]
+ },
+ {
+  "name": "the directory is made with appendonly no",
+  "old": "    if (CONFIG_APPENDONLY == \"yes\") {\n        if (REPL_ROLE != \"master\") {",
+  "new": "    if (true) {\n        if (REPL_ROLE != \"master\") {",
+  "cases": [
+   "local: with appendonly no, no AOF directory is made"
+  ]
+ },
+ {
+  "name": "the first file is not made at start",
+  "old": "        aofPath = dir + \"/\" + name;\n        open(aofPath, \"w\").close();",
+  "new": "        aofPath = dir + \"/\" + name;",
+  "cases": [
+   "persistence-aof-04 an empty incremental file is made at start"
+  ]
+ },
+ {
+  "name": "the manifest line has no newline",
+  "old": "        var m = open(manifest, \"w\");\n        m.write(\"file \" + name + \" seq 1 type i\\n\");",
+  "new": "        var m = open(manifest, \"w\");\n        m.write(\"file \" + name + \" seq 1 type i\");",
+  "cases": [
+   "persistence-aof-05 the manifest names the incremental file"
+  ]
+ },
+ {
+  "name": "the writes go to the default file",
+  "old": "        aofPath = dir + \"/\" + incr[len(incr) - 1];",
+  "new": "        aofPath = dir + \"/\" + CONFIG_APPENDFILENAME + \".1.incr.aof\";",
+  "cases": [
+   "persistence-aof-06 SET goes to the file that the manifest names before the reply"
+  ]
+ },
+ {
+  "name": "the writes do not reach the AOF",
+  "old": "    if (aofOn and !aofWoken) {\n        aofWoken = true;",
+  "new": "    if (false) {\n        aofWoken = true;",
+  "cases": [
+   "persistence-aof-07 two writes go to the file in order"
+  ]
+ },
+ {
+  "name": "a write without replicas is not logged",
+  "old": "    if (len(replicas) == 0 and !aofOn) {\n        return;\n    }\n    if (replInExec",
+  "new": "    if (len(replicas) == 0) {\n        return;\n    }\n    if (replInExec",
+  "cases": [
+   "persistence-aof-06 SET goes to the file that the manifest names before the reply"
+  ]
+ },
+ {
+  "name": "a reply does not wait for the file",
+  "old": "    if (!aofOn or target == before or aofDoneOffset >= target) {",
+  "new": "    if (true) {",
+  "cases": [
+   "local: AOF1 SET of 64 MB with the AOF stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "EXEC does not wait for the file",
+  "old": "                unwatchAll(conn);\n            }\n            if (!aofSync(conn, before, replOffset)) {",
+  "new": "                unwatchAll(conn);\n            }\n            if (false) {",
+  "cases": [
+   "local: the reply of EXEC comes after the file has the transaction"
+  ]
+ },
+ {
+  "name": "a command that wrote nothing waits for the whole log",
+  "old": "    if (!aofOn or target == before or aofDoneOffset >= target) {",
+  "new": "    target = replOffset;\n    if (!aofOn or aofDoneOffset >= target) {",
+  "cases": [
+   "local: AOF2 RPUSH of 1048573 elements with the AOF stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "the GETACK of WAIT goes to the file",
+  "old": "            if (entry.head[0] != \"REPLCONF\") {",
+  "new": "            if (true) {",
+  "cases": [
+   "local: the GETACK of WAIT does not go to the file"
+  ]
+ },
+ {
+  "name": "SET PX goes to the file as it came",
+  "old": "    if (expiryUnit != nil and expiryUnit != \"PXAT\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: SET with PX goes to the file with an absolute PXAT"
+  ]
+ },
+ {
+  "name": "the time is not whole milliseconds",
+  "old": "    var t = time() * 1000;\n    return t - t % 1;",
+  "new": "    return time() * 1000;",
+  "cases": [
+   "local: SET with PX goes to the file with an absolute PXAT"
+  ]
+ },
+ {
+  "name": "the writer stops after the first entry",
+  "old": "            aofPos = aofPos + 1;\n            done = entry.endOffset;\n        }",
+  "new": "            aofPos = aofPos + 1;\n            done = entry.endOffset;\n            break;\n        }",
+  "cases": [
+   "local: a transaction goes to the file in MULTI and EXEC"
+  ]
+ },
+ {
+  "name": "the tail of an entry is not written",
+  "old": "                if (entry.tail != nil) {\n                    for (var a in entry.tail) {\n                        out.addBulk(a);\n                    }\n                }\n            }\n            aofPos",
+  "new": "            }\n            aofPos",
+  "cases": [
+   "local: XADD * goes to the file with its ID"
+  ]
+ },
+ {
+  "name": "the writer does not trim the log",
+  "old": "    aofDoneOffset = done;\n    trimReplLog();",
+  "new": "    aofDoneOffset = done;",
+  "cases": [
+   "local: AOF2 the file has every element"
+  ]
+ },
+ {
+  "name": "a key expires during the replay",
+  "old": "        if (loadingAof) {\n            // As in Redis, a key does not expire",
+  "new": "        if (false) {\n            // As in Redis, a key does not expire",
+  "cases": [
+   "local: during the replay an expired key is still there for the next command"
+  ]
+ },
+ {
+  "name": "the replay runs only the first command",
+  "old": "        pos = got[1];\n        if (queued == nil) {\n            valid = pos;\n        }\n    }",
+  "new": "        pos = len(data);\n        if (queued == nil) {\n            valid = pos;\n        }\n    }",
+  "cases": [
+   "persistence-aof-10 GET gives the value of each replayed SET"
+  ]
+ },
+ {
+  "name": "the replay reads the default file",
+  "old": "            replayAofFile(dir + \"/\" + incr[i], i == len(incr) - 1);",
+  "new": "            replayAofFile(dir + \"/\" + CONFIG_APPENDFILENAME + \".1.incr.aof\", i == len(incr) - 1);",
+  "cases": [
+   "persistence-aof-09 GET gives the value of the replayed SET"
+  ]
+ },
+ {
+  "name": "the replay runs a transaction at MULTI",
+  "old": "        } else if (queued != nil) {\n            queued.append(argv);\n        } else {\n            replayAofCommand(argv);",
+  "new": "        } else if (queued != nil) {\n            queued.append(argv);\n            replayAofCommand(argv);\n        } else {\n            replayAofCommand(argv);",
+  "cases": [
+   "local: a last file that ends inside MULTI is cut back to before MULTI"
+  ]
+ },
+ {
+  "name": "the replay drops a transaction",
+  "old": "            for (var q in queued) {\n                replayAofCommand(q);\n            }",
+  "new": "",
+  "cases": [
+   "local: the replay applies a transaction"
+  ]
+ },
+ {
+  "name": "the base file is not replayed",
+  "old": "        if (files[0] != nil) {\n            replayAofFile",
+  "new": "        if (false) {\n            replayAofFile",
+  "cases": [
+   "local: the replay loads a base RDB file and then the incremental files in order"
+  ]
+ },
+ {
+  "name": "only the last incremental file is replayed",
+  "old": "        var i = 0;\n        while (i < len(incr)) {\n            replayAofFile",
+  "new": "        var i = len(incr) - 1;\n        while (i < len(incr)) {\n            replayAofFile",
+  "cases": [
+   "local: the replay loads a base RDB file and then the incremental files in order"
+  ]
+ },
+ {
+  "name": "a history file is replayed",
+  "old": "        } else if (kind != \"h\") {\n",
+  "new": "        } else if (kind == \"h\") {\n            incr.append(name);\n        } else {\n",
+  "cases": [
+   "local: the replay loads a base AOF file and skips a history file"
+  ]
+ },
+ {
+  "name": "an RDB base is read as AOF",
+  "old": "    if (len(data) >= 5 and data[0:5] == \"REDIS\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: the replay loads a base RDB file and then the incremental files in order"
+  ]
+ },
+ {
+  "name": "SELECT 0 is refused",
+  "old": "        if (len(argv) != 2 or argv[1] != \"0\") {",
+  "new": "        if (true) {",
+  "cases": [
+   "local: the replay accepts SELECT 0 and annotation lines"
+  ]
+ },
+ {
+  "name": "SELECT of another database is accepted",
+  "old": "        if (len(argv) != 2 or argv[1] != \"0\") {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: the replay refuses SELECT of another database"
+  ]
+ },
+ {
+  "name": "an annotation line is a format error",
+  "old": "        if (data[pos] == \"#\") {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: the replay accepts SELECT 0 and annotation lines"
+  ]
+ },
+ {
+  "name": "an unknown command is skipped",
+  "old": "    if (COMMANDS[name] == nil) {\n        throw AofError(\"unknown command",
+  "new": "    if (COMMANDS[name] == nil) {\n        return;\n        throw AofError(\"unknown command",
+  "cases": [
+   "local: the replay refuses an unknown command"
+  ]
+ },
+ {
+  "name": "a file that is not RESP is skipped",
+  "old": "    if (data[pos] != lead) {\n        throw AofError(\"bad file format at byte \" + str(pos), false);",
+  "new": "    if (data[pos] != lead) {\n        throw AofError(\"bad file format at byte \" + str(pos), true);",
+  "cases": [
+   "local: the replay refuses a file that is not RESP"
+  ]
+ },
+ {
+  "name": "a cut file is not written back",
+  "old": "        var w = open(path, \"w\");\n        w.write(data[0:valid]);\n        w.close();",
+  "new": "",
+  "cases": [
+   "local: a last file that ends inside a command is cut back"
+  ]
+ },
+ {
+  "name": "a file that ends early stops the start",
+  "old": "            truncated = true;\n        }\n        if (truncated) {\n            break;\n        }",
+  "new": "            throw e;\n        }\n        if (truncated) {\n            break;\n        }",
+  "cases": [
+   "local: a last file that ends inside a command is cut back"
+  ]
+ },
+ {
+  "name": "a file that ends inside MULTI is kept",
+  "old": "    if (queued != nil) {\n        valid = beforeMulti;\n        truncated = true;\n    }",
+  "new": "",
+  "cases": [
+   "local: a last file that ends inside MULTI is cut back to before MULTI"
+  ]
+ },
+ {
+  "name": "a header line that ends early is a format error",
+  "old": "    if (i + 1 >= len(data)) {\n        throw AofError(\"the file ends inside a command\", true);",
+  "new": "    if (i + 1 >= len(data)) {\n        throw AofError(\"the file ends inside a command\", false);",
+  "cases": [
+   "local: a last file that ends inside a header line is cut back"
+  ]
+ },
+ {
+  "name": "a file that is not the last may end early",
+  "old": "        if (!isLast) {\n            throw AofError",
+  "new": "        if (false) {\n            throw AofError",
+  "cases": [
+   "local: a file that ends inside a command and is not the last is refused"
+  ]
+ },
+ {
+  "name": "a manifest name with a slash is accepted",
+  "old": "        if (!plainFileName(name)) {\n            throw AofError(\"the manifest names a file in another directory\", false);",
+  "new": "        if (false) {\n            throw AofError(\"the manifest names a file in another directory\", false);",
+  "cases": [
+   "local: a manifest that names a file in another directory is refused"
+  ]
+ },
+ {
+  "name": "an unknown manifest type is skipped",
+  "old": "            throw AofError(\"the manifest has the unknown file type '\" + kind + \"'\", false);",
+  "new": "",
+  "cases": [
+   "local: a manifest line with an unknown type is refused"
+  ]
+ },
+ {
+  "name": "a manifest line with a missing value is accepted",
+  "old": "        if (name == nil or kind == nil or i != len(words)) {",
+  "new": "        if (name == nil or kind == nil) {",
+  "cases": [
+   "local: a manifest line with a missing value is refused"
+  ]
+ },
+ {
+  "name": "a missing file of the manifest is skipped",
+  "old": "    if (!is_file(path)) {\n        throw AofError(\"the manifest names \" + path + \", which is not there\", false);\n    }",
+  "new": "    if (!is_file(path)) {\n        return;\n    }",
+  "cases": [
+   "local: a manifest that names a missing file is refused"
+  ]
+ },
+ {
+  "name": "a manifest with no incremental file gets none",
+  "old": "        if (len(incr) == 0) {\n            var name = CONFIG_APPENDFILENAME",
+  "new": "        if (false) {\n            var name = CONFIG_APPENDFILENAME",
+  "cases": [
+   "local: a manifest with no incremental file gets one, and the writes go to it"
+  ]
+ },
+ {
+  "name": "the next run truncates the file",
+  "old": "        aofPath = dir + \"/\" + incr[len(incr) - 1];\n        // The file must exist even before the first write.\n        open(aofPath, \"a\").close();",
+  "new": "        aofPath = dir + \"/\" + incr[len(incr) - 1];\n        // The file must exist even before the first write.\n        open(aofPath, \"w\").close();",
+  "cases": [
+   "local: the next run appends to the same file"
+  ]
+ },
+ {
+  "name": "appendonly yes also loads the RDB file",
+  "old": "        // As Redis does, the AOF replaces the RDB file at start.\n        try {",
+  "new": "        // As Redis does, the AOF replaces the RDB file at start.\n        loadRdb(CONFIG_DIR + \"/\" + CONFIG_DBFILENAME);\n        try {",
+  "cases": [
+   "local: with appendonly yes, the RDB file is not loaded"
+  ]
+ },
+ {
+  "name": "a gone file is opened anyway",
+  "old": "    if (!is_file(aofPath)) {\n        print \"redis.lox: cannot write the AOF file: \" + aofPath + \" is gone\";",
+  "new": "    if (false) {\n        print \"redis.lox: cannot write the AOF file: \" + aofPath + \" is gone\";",
+  "cases": [
+   "local: a write that the AOF file cannot take stops the server"
+  ]
+ },
+ {
+  "name": "--appendonly takes any value",
+  "old": "    if (CONFIG_APPENDONLY != \"yes\" and CONFIG_APPENDONLY != \"no\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: --appendonly needs yes or no"
+  ]
+ },
+ {
+  "name": "--appendfsync takes any value",
+  "old": "    if (CONFIG_APPENDFSYNC != \"always\" and CONFIG_APPENDFSYNC != \"everysec\" and CONFIG_APPENDFSYNC != \"no\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: --appendfsync needs always, everysec or no"
+  ]
+ },
+ {
+  "name": "a name with a slash is accepted",
+  "old": "        if (name[i] == \"/\") {\n            return false;",
+  "new": "        if (false) {\n            return false;",
+  "cases": [
+   "local: --appendfilename needs a name with no '/'"
+  ]
+ },
+ {
+  "name": "the name .. is accepted",
+  "old": "    if (name == \"\" or name == \".\" or name == \"..\") {",
+  "new": "    if (name == \"\") {",
+  "cases": [
+   "local: --appenddirname needs a name with no '/'"
+  ]
+ },
+ {
+  "name": "a replica takes appendonly yes",
+  "old": "        if (REPL_ROLE != \"master\") {\n            print \"redis.lox: --appendonly yes on a replica is not supported\";",
+  "new": "        if (false) {\n            print \"redis.lox: --appendonly yes on a replica is not supported\";",
+  "cases": [
+   "local: appendonly yes on a replica is refused"
+  ]
+ },
+ {
+  "name": "a served BLPOP does not wait for its pop",
+  "old": "        // A served pop goes to the log in the step of the push that served\n        // it, before this wake.\n        after = replOffset;",
+  "new": "",
+  "cases": [
+   "local: a served BLPOP goes to the file as LPOP"
+  ]
+ }
+]

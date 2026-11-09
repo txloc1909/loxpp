@@ -3867,7 +3867,12 @@ def main():
         print("entrypoint not found: %s" % prog)
         return 1
     random.seed(1)
+    # REDIS_STAGE_GROUPS=a,b runs only those groups: a mutation run that
+    # names cases of one group needs only that group.
+    only = os.environ.get("REDIS_STAGE_GROUPS")
     for name, run in GROUPS:
+        if only and name not in only.split(","):
+            continue
         print("== %s" % name)
         try:
             run(prog)
