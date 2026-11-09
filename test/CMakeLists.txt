@@ -483,6 +483,19 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_runner_precondition.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # Issue #1176: tools/check_examples.py ran each example with
+    # subprocess.run and no timeout, and held the whole of its stdout in one
+    # string and then in one object per line. One hanging example blocked the
+    # job and named no example; one traced example was enough to take a 7 GB
+    # python3 down with the kernel OOM killer. This holds the tool to its two
+    # limits on directories the test writes itself, so it walks no corpus and
+    # costs a few seconds. The case that hangs sleeps rather than spins, so a
+    # build that traces each instruction cannot reach the output cap first.
+    add_test(NAME CheckExamplesLimits
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_examples_limits.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # Issue #895: benchmarks/run.py compares every backend with a pinned
     # checksum, so a value that is wrong on every backend fails, and a program
     # with no pinned value is refused before any launch. The checker drives
