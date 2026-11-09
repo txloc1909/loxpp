@@ -536,10 +536,10 @@ set(LOXPP_GTEST_TARGETS
 if(LOXPP_LSP)
     list(APPEND LOXPP_GTEST_TARGETS test_lsp)
 endif()
-# A task-wait test that fails by sleeping for ever never returns. A ctest
-# TIMEOUT ends it. The limit is far above the run time of any task-wait test
+# A task-wait or worker test that fails by sleeping for ever never returns. A
+# ctest TIMEOUT ends it. The limit is far above the run time of any such test
 # on a loaded host, so only a hang reaches it.
-set(LOXPP_HANG_GUARDED_TARGETS test_task_wait test_task_wait_gc)
+set(LOXPP_HANG_GUARDED_TARGETS test_task_wait test_task_wait_gc test_worker test_worker_gc)
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
     set(props "")
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
