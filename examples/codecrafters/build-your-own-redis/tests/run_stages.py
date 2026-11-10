@@ -4521,7 +4521,7 @@ def stages_pubsub_limits(prog):
                 rss.append(rss_kib(srv.proc.pid) // 1024)
             print("       measured: RSS in MB after each round %r" % rss)
             # Without the drop of empty channels the growth from round 2 to
-            # round 5 is about 380 MB; with it, 150-210 MB (the GC keeps some
+            # round 5 is 380-470 MB; with it, 150-210 MB (the GC keeps some
             # garbage; the baseline heap moves the GC points).
             check(name, rss[4] - rss[1] < 300, repr(rss))
     finally:
@@ -5449,6 +5449,12 @@ def stages_bitmaps_on(srv):
            c.call("BITCOUNT", "abc", "0", "9223372036854775808")]
     check("local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once",
           got[:2] == [10, 10] and isinstance(got[2], Error) and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
+    got = [c.call("BITCOUNT", "abc", "-99999999999999999", "-1"), c.call("BITCOUNT", "abc", "-9223372036854775808", "-1"),
+           c.call("BITCOUNT", "abc", "0", "0999999999999999999"), c.call("BITCOUNT", "abc", "-9223372036854775809", "-1")]
+    check("local: BITCOUNT reads a negative index of 17 digits as before the start", got[0] == 10, repr(got))
+    check("local: BITCOUNT reads the least 64-bit index", got[1] == 10, repr(got))
+    check("local: BITCOUNT refuses an index of 19 digits with a leading zero, and one past the 64-bit range",
+          isinstance(got[2], Error) and isinstance(got[3], Error), repr(got))
     check("local: BITOP OR keeps a bit of both sources", c.call("GETBIT", "dest9", "0") == 1)
     check("local: GETBIT past the end gives 0", c.call("GETBIT", "bc", "100") == 0 and c.call("GETBIT", "mykey", "9") == 0)
     check("local: BITCOUNT of a missing key gives 0 before it reads the arguments, as Redis does",
@@ -5531,6 +5537,7 @@ def stages_bitmaps_limits(prog):
                  "local: the split of a string by SETBIT spends the bitmap work of EXEC",
                  "local: BITOP spends the bitmap work of EXEC",
                  "local: the copy of GET spends the bitmap work of EXEC",
+                 "local: SET GET over the bitmap work of EXEC does not write",
                  "local: the copy of BITCOUNT spends the bitmap work of EXEC",
                  "local: GET of a bitmap writes it as it was when it ran",
                  "local: a BITCOUNT whose client goes stops with the connection"]
@@ -5621,6 +5628,10 @@ def stages_bitmaps_limits(prog):
                 reply = x.read()
                 x.close()
                 return reply
+            # SET ... GET over the budget does not write.
+            reply = exec_after_bitop("SET", "small", "x", "GET")
+            check("local: SET GET over the bitmap work of EXEC does not write",
+                  isinstance(reply, list) and isinstance(reply[1], Error) and c.call("GETBIT", "small", "0") == 1, repr(reply)[-80:])
             for name, cmd in (("the split of a string by SETBIT", ("SETBIT", "p1", "0", "1")),
                               ("BITOP", ("BITOP", "NOT", "hn", "p1")),
                               ("the copy of GET", ("GET", "small")),

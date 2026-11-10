@@ -350,5 +350,37 @@
   "cases": [
    "local: a BITCOUNT whose client goes stops with the connection"
   ]
+ },
+ {
+  "name": "SET GET over the budget writes",
+  "old": "            if (reply == BITMAP_EXEC_TOO_MUCH) {\n                return reply;\n            }",
+  "new": "",
+  "cases": [
+   "local: SET GET over the bitmap work of EXEC does not write"
+  ]
+ },
+ {
+  "name": "a negative index of 16 digits is positive",
+  "old": "    if (neg) {\n        return -1000000000000000000;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT reads a negative index of 17 digits as before the start"
+  ]
+ },
+ {
+  "name": "the least 64-bit index is refused",
+  "old": "        limit = \"9223372036854775808\";",
+  "new": "        limit = \"9223372036854775807\";",
+  "cases": [
+   "local: BITCOUNT reads the least 64-bit index"
+  ]
+ },
+ {
+  "name": "an index with a leading zero is taken",
+  "old": " or !isDigits(digits) or digits[0] == \"0\") {",
+  "new": " or !isDigits(digits)) {",
+  "cases": [
+   "local: BITCOUNT refuses an index of 19 digits with a leading zero, and one past the 64-bit range"
+  ]
  }
 ]

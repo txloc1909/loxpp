@@ -450,6 +450,10 @@ fun cmdSet(argv) {
         reply = NULL_BULK;
         if (old != nil) {
             reply = stringReply(old.value);
+            // Over the bitmap work of EXEC: the SET does nothing.
+            if (reply == BITMAP_EXEC_TOO_MUCH) {
+                return reply;
+            }
         }
     }
     if ((condition == "NX" and old != nil) or (condition == "XX" and old == nil)) {

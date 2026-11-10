@@ -684,7 +684,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | PS5: a subscriber that reads 40 messages of 1 MB | not closed (when the session does not give back the cost: closed) | as required |
 | PS6: 600000 empty messages to a subscriber that does not read | closed (when a message costs only its bytes, or 64 more: not closed; 500000 such messages took 104 MB of RSS) | as required |
 | PS7 (with `--pubsub-soft-seconds 2`): 12 MB, read, 2.5 s, 12 MB more | not closed: the soft time starts again | as required |
-| PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 300 MB from round 2 to 5 (without the drop of empty channels: about 380 MB). The growth with the drop moves with the baseline heap (#1206) | 241, 290, 394, 433, 498 MB |
+| PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 300 MB from round 2 to 5 (without the drop of empty channels: 380–470 MB). The growth with the drop moves with the baseline heap (#1206) | 241, 290, 394, 433, 498 MB |
 | Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
 | Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
 | Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
