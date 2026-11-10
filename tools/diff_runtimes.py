@@ -318,7 +318,12 @@ class RunTimeout(Exception):
 
 
 def run_program(
-    cmd: list[str], input_file: Path, timeout: float, *, raise_native_stack: bool = False
+    cmd: list[str],
+    input_file: Path,
+    timeout: float,
+    *,
+    raise_native_stack: bool = False,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str, int]:
     """Runs one program and returns (stdout, stderr, exit code).
 
@@ -326,6 +331,7 @@ def run_program(
 
     raise_native_stack scopes _raise_native_stack_limit to this one child via
     preexec_fn — never this parent process, never the other runner's child.
+    env, when given, is the child's whole environment.
     """
     stdin_data = input_file.read_text(encoding="utf-8") if input_file.exists() else ""
     try:
@@ -335,6 +341,7 @@ def run_program(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
             preexec_fn=_raise_native_stack_limit if raise_native_stack else None,
         )
     except subprocess.TimeoutExpired as exc:
@@ -466,6 +473,16 @@ def main() -> None:
         "--only-spec-probes",
         action="store_true",
         help="run only the spec probes (the files with a STATUS line) of the program list",
+    )
+    parser.add_argument(
+        "--other-check",
+        metavar="RUNNER",
+        default=None,
+        help=(
+            "a check-only runner for the other side: it runs with LOXPP_CHECK_ONLY=1 and "
+            "must exit 0 when the program compiles. Used only where native halts and the "
+            "other runner printed nothing, which a rejection also does"
+        ),
     )
     parser.add_argument(
         "--compile-errors",
@@ -712,6 +729,31 @@ def main() -> None:
                     print(f"            | {line}")
                 diverged += 1
                 continue
+            # An empty stdout is a prefix of every stdout, so the prefix rule
+            # below cannot tell this halt from a rejection. The check-only run
+            # decides: a program the other runner compiles may halt before it
+            # prints anything.
+            if args.other_check is not None and other_out == "":
+                try:
+                    check_out, check_err, check_status = run_program(
+                        [args.other_check, str(lox_file)],
+                        input_file,
+                        args.timeout,
+                        env={**os.environ, "LOXPP_CHECK_ONLY": "1"},
+                    )
+                except RunTimeout:
+                    check_status = None
+                    check_err = ""
+                if check_status != 0:
+                    status_text = "did not finish" if check_status is None else f"exited {check_status}"
+                    print(
+                        f"DIVERGE     {lox_file}  (compile phase: the other runner's check {status_text}; "
+                        f"native halts, so the other runner must compile the program)"
+                    )
+                    for line in check_err.splitlines()[:20]:
+                        print(f"            | {line}")
+                    diverged += 1
+                    continue
             if native_out.startswith(other_out) or other_out.startswith(native_out):
                 print(f"MATCH       {lox_file}  (halt)")
                 matched += 1
