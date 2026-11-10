@@ -545,6 +545,9 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
             loxpp-dev:latest \
             bash -c "cmake --preset debug -B build-examples \
               -DLOXPP_DEBUG_TRACE_EXECUTION=OFF -DLOXPP_DEBUG_PRINT_CODE=OFF \
