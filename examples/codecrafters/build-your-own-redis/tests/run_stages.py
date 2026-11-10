@@ -5223,7 +5223,7 @@ def stages_geo_limits(prog):
                  "local: GEOADD of more than 16384 members is refused",
                  "local: EXEC refuses a GEOSEARCH over the element budget",
                  "local: GEOPOS of more than 16384 members is refused",
-                 "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
+                 "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
                  "local: G4 GEOADD parses its places in steps",
                  "local: GEOPOS spends the sorted set work of EXEC"]
         if aof_started(srv, names):
@@ -5271,7 +5271,7 @@ def stages_geo_limits(prog):
                 x.close()
             worst, wrong, _ = measure_while(srv, exec_searches)
             r = reply[0]
-            check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
+            check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
                   worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524289 for x in r[:3])
                   and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[3:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
             c.call("ZREM", "dense", "extra")

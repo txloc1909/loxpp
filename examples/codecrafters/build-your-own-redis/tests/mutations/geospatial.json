@@ -229,7 +229,7 @@
   "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n",
   "new": "",
   "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
  },
  {
@@ -293,7 +293,7 @@
   "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n",
   "new": "",
   "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
  },
  {
@@ -301,7 +301,7 @@
   "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n        }\n    }\n    if (geoExecCandidates != nil) {\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
   "new": "        }\n    }\n    if (geoExecCandidates != nil) {\n        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
   "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
  },
  {
@@ -333,7 +333,7 @@
   "old": "                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;",
   "new": "                return GEO_EXEC_TOO_MANY;",
   "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
  }
 ]
