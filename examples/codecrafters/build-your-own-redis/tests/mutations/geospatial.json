@@ -194,8 +194,8 @@
  },
  {
   "name": "a geo command reads a string as a sorted set",
-  "old": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    var parts = [",
-  "new": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        entry = nil;\n    }\n    var parts = [",
+  "old": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "new": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        entry = nil;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
   "cases": [
    "local: GEOPOS of a string gives WRONGTYPE"
   ]
@@ -206,6 +206,102 @@
   "new": "\"ZADD\": true, \"ZREM\": true};",
   "cases": [
    "local: a replica refuses GEOADD from a client"
+  ]
+ },
+ {
+  "name": "no limit on the names of GEOPOS",
+  "old": "    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }\n    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "new": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "cases": [
+   "local: GEOPOS of more than 16384 members is refused"
+  ]
+ },
+ {
+  "name": "GEOPOS spends no work",
+  "old": "    if (!spendZsetWork(len(argv) - 2)) {\n        return ZSET_EXEC_TOO_MUCH;\n    }\n    var parts",
+  "new": "    var parts",
+  "cases": [
+   "local: GEOPOS spends the sorted set work of EXEC"
+  ]
+ },
+ {
+  "name": "no GEOSEARCH limit in EXEC",
+  "old": "        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }",
+  "new": "",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+  ]
+ },
+ {
+  "name": "EXEC does not set the GEOSEARCH limit",
+  "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n",
+  "new": "",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+  ]
+ },
+ {
+  "name": "no pruning of the boxes",
+  "old": "    if (steps >= 2) {\n        if (area[2] < minLat) {",
+  "new": "    if (false) {\n        if (area[2] < minLat) {",
+  "cases": [
+   "local: GEOSEARCH leaves out the boxes outside the search area, as Redis does"
+  ]
+ },
+ {
+  "name": "the southern bounding box is the northern one",
+  "old": "    if (lat < 0) {\n        minLon = lon - lonDeltaBottom;",
+  "new": "    if (false) {\n        minLon = lon - lonDeltaBottom;",
+  "cases": [
+   "local: GEOSEARCH south of the equator takes the bounding box of Redis"
+  ]
+ },
+ {
+  "name": "a repeated FROMLONLAT is refused",
+  "old": "        if (opt == \"FROMLONLAT\" and i + 2 < len(argv)) {",
+  "new": "        if (opt == \"FROMLONLAT\" and i + 2 < len(argv) and !byLonLat) {",
+  "cases": [
+   "local: GEOSEARCH takes the last of an option that comes again, as Redis does"
+  ]
+ },
+ {
+  "name": "FROMLONLAT and FROMMEMBER together are taken",
+  "old": "    if (byLonLat == byMember) {",
+  "new": "    if (!byLonLat and !byMember) {",
+  "cases": [
+   "local: GEOSEARCH g8 FROMLONLAT 2 48 FROMMEMBER Paris BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "inf is written as a number",
+  "old": "    if (x == math.inf) {\n        return \"inf\";\n    }",
+  "new": "",
+  "cases": [
+   "local: GEOADD g9 inf 0 x gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "-0 is written as 0",
+  "old": "    if (x < 0 or (x == 0 and 1 / x < 0)) {",
+  "new": "    if (x < 0) {",
+  "cases": [
+   "local: GEOADD g9 -0 100 x gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "GEOADD parses with no yield",
+  "old": "        i = i + 3;\n        if (mayYield and len(pairs) % ELEMENTS_PER_YIELD == 0) {",
+  "new": "        i = i + 3;\n        if (false) {",
+  "cases": [
+   "local: G4 GEOADD parses its places in steps"
+  ]
+ },
+ {
+  "name": "GEOSEARCH checks the key after the options",
+  "old": "    var key = argv[1];\n    var entry = zsetEntry(key);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    var z = nil;",
+  "new": "    var key = argv[1];\n    var entry = zsetEntry(key);\n    if (entry == false) {\n        entry = nil;\n    }\n    var z = nil;",
+  "cases": [
+   "local: GEOSEARCH str FROMLONLAT 999 0 BYRADIUS 1 m gives the error of Redis, in its order"
   ]
  }
 ]

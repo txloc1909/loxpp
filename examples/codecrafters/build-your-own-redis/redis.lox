@@ -2098,6 +2098,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
     zsetExecWork = ZSET_EXEC_WORK;
+    geoExecCandidates = GEO_EXEC_CANDIDATES;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2115,6 +2116,7 @@ fun execQueued(tx) {
     }
     execElements = nil;
     zsetExecWork = nil;
+    geoExecCandidates = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -4580,8 +4582,15 @@ fun geoDistance(lon1, lat1, lon2, lat2) {
 // x with exactly d decimals, as printf("%.<d>f") gives it, rounded half
 // away from zero.
 fun fixedText(x, d) {
+    if (x == math.inf) {
+        return "inf";
+    }
+    if (x == -math.inf) {
+        return "-inf";
+    }
     var sign = "";
-    if (x < 0) {
+    // 1 / x tells -0 from 0, as %f writes "-0.000000".
+    if (x < 0 or (x == 0 and 1 / x < 0)) {
         sign = "-";
         x = -x;
     }
@@ -4597,9 +4606,6 @@ fun fixedText(x, d) {
     var fracText = str(frac);
     while (len(fracText) < d) {
         fracText = "0" + fracText;
-    }
-    if (sign == "-" and n == 0) {
-        sign = "-";
     }
     if (d == 0) {
         return sign + str(whole);
@@ -4623,6 +4629,12 @@ fun geoUnit(text) {
     }
     return nil;
 }
+
+// At most GEO_EXEC_CANDIDATES members of the boxes of GEOSEARCH in one
+// EXEC: the walk of a box is Lox++ code in the step of EXEC (rule 6).
+var GEO_EXEC_CANDIDATES = 2097152;
+var geoExecCandidates = nil;
+var GEO_EXEC_TOO_MANY = "-ERR the GEOSEARCH work of this transaction is over its limit\r\n";
 
 var GEO_BAD_UNIT = "-ERR unsupported unit provided. please use M, KM, FT, MI\r\n";
 
@@ -4689,9 +4701,16 @@ fun cmdGeopos(ctx, argv) {
     if (len(argv) < 2) {
         return wrongArgs("geopos");
     }
+    // Each name is a decode of about 15 microseconds in one step.
+    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
     var entry = zsetEntry(argv[1]);
     if (entry == false) {
         return WRONGTYPE;
+    }
+    if (!spendZsetWork(len(argv) - 2)) {
+        return ZSET_EXEC_TOO_MUCH;
     }
     var parts = ["*" + str(len(argv) - 2) + "\r\n"];
     var i = 2;
@@ -4880,28 +4899,51 @@ class GeoSearchReply {
 }
 
 // GEOSEARCH key FROMLONLAT lon lat | FROMMEMBER member BYRADIUS radius unit.
+// As in Redis 7.0 it reads the key first (WRONGTYPE comes before any parse
+// error), decodes a FROMMEMBER member while it parses, and takes the last
+// of an option that comes again.
 fun cmdGeosearch(ctx, argv) {
     if (len(argv) < 7) {
         return wrongArgs("geosearch");
     }
     var key = argv[1];
+    var entry = zsetEntry(key);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    var z = nil;
+    if (entry != nil) {
+        z = entry.value;
+    }
     var from = nil;
-    var fromMember = nil;
+    var byLonLat = false;
+    var byMember = false;
     var radius = nil;
     var conversion = nil;
     var i = 2;
     while (i < len(argv)) {
         var opt = upper(argv[i]);
-        if (opt == "FROMLONLAT" and i + 2 < len(argv) and from == nil and fromMember == nil) {
+        if (opt == "FROMLONLAT" and i + 2 < len(argv)) {
             from = geoLonLat(argv[i + 1], argv[i + 2]);
             if (type(from) == "String") {
                 return from;
             }
+            byLonLat = true;
             i = i + 3;
-        } else if (opt == "FROMMEMBER" and i + 1 < len(argv) and from == nil and fromMember == nil) {
-            fromMember = argv[i + 1];
+        } else if (opt == "FROMMEMBER" and i + 1 < len(argv)) {
+            var score = nil;
+            if (z != nil) {
+                score = z.dict[argv[i + 1]];
+            }
+            if (score != nil) {
+                from = geoDecodeScore(score);
+            }
+            if (score == nil or from == nil) {
+                return errorReply("ERR could not decode requested zset member");
+            }
+            byMember = true;
             i = i + 2;
-        } else if (opt == "BYRADIUS" and i + 2 < len(argv) and radius == nil) {
+        } else if (opt == "BYRADIUS" and i + 2 < len(argv)) {
             radius = parseScore(argv[i + 1]);
             if (radius == nil) {
                 return errorReply("ERR need numeric radius");
@@ -4918,29 +4960,14 @@ fun cmdGeosearch(ctx, argv) {
             return errorReply("ERR syntax error");
         }
     }
-    if (from == nil and fromMember == nil) {
+    if (byLonLat == byMember) {
         return errorReply("ERR exactly one of FROMMEMBER or FROMLONLAT can be specified for GEOSEARCH");
     }
     if (radius == nil) {
         return errorReply("ERR exactly one of BYRADIUS and BYBOX can be specified for GEOSEARCH");
     }
-    var entry = zsetEntry(key);
-    if (entry == false) {
-        return WRONGTYPE;
-    }
-    if (entry == nil) {
+    if (z == nil) {
         return arrayReply([]);
-    }
-    var z = entry.value;
-    if (fromMember != nil) {
-        var score = z.dict[fromMember];
-        if (score == nil) {
-            return errorReply("ERR could not decode requested zset member");
-        }
-        from = geoDecodeScore(score);
-        if (from == nil) {
-            return errorReply("ERR could not decode requested zset member");
-        }
     }
     var meters = radius * conversion;
     var boxes = geoSearchBoxes(from[0], from[1], meters);
@@ -4964,6 +4991,12 @@ fun cmdGeosearch(ctx, argv) {
             scores.append(x.score);
             x = x.forward[0];
         }
+    }
+    if (geoExecCandidates != nil) {
+        if (len(members) > geoExecCandidates) {
+            return GEO_EXEC_TOO_MANY;
+        }
+        geoExecCandidates = geoExecCandidates - len(members);
     }
     if (!spendElements(len(members))) {
         return EXEC_TOO_LARGE;

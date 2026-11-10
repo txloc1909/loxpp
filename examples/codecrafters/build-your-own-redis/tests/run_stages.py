@@ -5172,6 +5172,31 @@ def stages_geo_on(srv):
     got = c.call("GEOSEARCH", "near", "FROMLONLAT", "-63.5937", "81.3621", "BYRADIUS", "200", "km")
     check("local: GEOSEARCH takes a step less near the edge of the box, as Redis does",
           got == ["k1", "k10", "k5", "k7", "k6"], repr(got))
+    c.call("SET", "str", "v")
+    # Redis drops a box outside the search area, also when a member in it
+    # is in the radius: p0 is in the radius, and the reply is empty.
+    c.call("GEOADD", "prune", "-31.3558", "85", "p0")
+    check("local: GEOSEARCH leaves out the boxes outside the search area, as Redis does",
+          c.call("GEOSEARCH", "prune", "FROMLONLAT", "0", "80", "BYRADIUS", "1200", "km") == [])
+    # South of the equator the bounding box takes the other edge, so the
+    # boxes and the order change (redis-server 7.0 gives this order).
+    c.call("GEOADD", "south", "23.8262", "-67.2450", "p0", "9.4288", "-35.6265", "p1")
+    got = c.call("GEOSEARCH", "south", "FROMLONLAT", "7.4526", "-47.7530", "BYRADIUS", "2398855", "m")
+    check("local: GEOSEARCH south of the equator takes the bounding box of Redis", got == ["p0", "p1"], repr(got))
+    for cmd, want in ((("GEOSEARCH", "str", "FROMLONLAT", "999", "0", "BYRADIUS", "1", "m"), "WRONGTYPE"),
+                      (("GEOSEARCH", "g8", "FROMMEMBER", "nosuch", "BYRADIUS", "1", "xx"), "ERR could not decode requested zset member"),
+                      (("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "m"), "ERR could not decode requested zset member"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "FROMMEMBER", "Paris", "BYRADIUS", "1", "m"),
+                       "ERR exactly one of FROMMEMBER or FROMLONLAT"),
+                      (("GEOADD", "g9", "inf", "0", "x"), "ERR invalid longitude,latitude pair inf,0.000000"),
+                      (("GEOADD", "g9", "-0", "100", "x"), "ERR invalid longitude,latitude pair -0.000000,100.000000")):
+        got = c.call(*cmd)
+        check("local: %s gives the error of Redis, in its order" % " ".join(cmd),
+              isinstance(got, Error) and got.startswith(want), repr(got))
+    got = c.call("GEOSEARCH", "g8", "FROMLONLAT", "100", "0", "FROMLONLAT", "2", "48", "BYRADIUS", "1", "m",
+                 "BYRADIUS", "500", "km")
+    check("local: GEOSEARCH takes the last of an option that comes again, as Redis does",
+          isinstance(got, list) and sorted(got) == ["London", "Paris"], repr(got))
     got = c.call("GEOSEARCH", "g8", "FROMLONLAT", "0", "0", "BYRADIUS", "20000", "km")
     # redis-server 7.0 gives these three: the place at the top corner has
     # bit 52 set, past the range of every box.
@@ -5192,7 +5217,11 @@ def stages_geo_limits(prog):
         names = ["local: G1 GEOSEARCH over 524288 members of the boxes stalls PING at most 1 s",
                  "local: G2 GEOADD of 16384 members stalls PING at most 1 s",
                  "local: GEOADD of more than 16384 members is refused",
-                 "local: EXEC refuses a GEOSEARCH over the element budget"]
+                 "local: EXEC refuses a GEOSEARCH over the element budget",
+                 "local: GEOPOS of more than 16384 members is refused",
+                 "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
+                 "local: G4 GEOADD parses its places in steps",
+                 "local: GEOPOS spends the sorted set work of EXEC"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(60)
@@ -5201,6 +5230,8 @@ def stages_geo_limits(prog):
                 args += ["1", "1", "x%d" % i]
             got = c.call("GEOADD", "lim", *args)
             check(names[2], isinstance(got, Error) and "16384" in got, repr(got))
+            got = c.call("GEOPOS", "lim", *["x%d" % i for i in range(16385)])
+            check("local: GEOPOS of more than 16384 members is refused", isinstance(got, Error) and "16384" in got, repr(got))
             # 524288 members in a square of about 1 km.
             for b in range(32):
                 part = []
@@ -5217,19 +5248,37 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, search)
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
-            # The element budget of EXEC: 16 GEOSEARCH of 524288 members fill
-            # it, and the 17th is refused.
+            # G3: one EXEC walks at most 2097152 members of boxes: 4
+            # GEOSEARCH of 524288, and the fifth is refused.
+            reply = [None]
+
+            def exec_searches():
+                x = Client(srv.port)
+                x.sock.settimeout(120)
+                x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 5
+                           + encode("EXEC"))
+                for _ in range(6):
+                    x.read()
+                reply[0] = x.read()
+                x.close()
+            worst, wrong, _ = measure_while(srv, exec_searches)
+            r = reply[0]
+            check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 5 and all(len(x) == 524288 for x in r[:4])
+                  and isinstance(r[4], Error) and "GEOSEARCH" in r[4], "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+            # The element budget: 8 ZRANGE WITHSCORES of 524288 fill it, and a
+            # GEOSEARCH after them is refused.
             x = Client(srv.port)
             x.sock.settimeout(120)
-            x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 17
-                       + encode("EXEC"))
-            for _ in range(18):
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "dense", "0", "-1", "WITHSCORES") * 8
+                       + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") + encode("EXEC"))
+            for _ in range(10):
                 x.read()
             reply = x.read()
             x.close()
             check("local: EXEC refuses a GEOSEARCH over the element budget",
-                  isinstance(reply, list) and len(reply) == 17 and all(len(r) == 524288 for r in reply[:16])
-                  and isinstance(reply[16], Error), repr(reply[16])[:80] if isinstance(reply, list) else repr(reply)[:80])
+                  isinstance(reply, list) and len(reply) == 9 and isinstance(reply[8], Error)
+                  and "elements" in reply[8], repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
             more = []
             for i in range(16384):
                 more += ["%.6f" % (10 + i * 0.0001), "%.6f" % (20 + i * 0.0001), "n%d" % i]
@@ -5239,6 +5288,22 @@ def stages_geo_limits(prog):
                 c.raw().try_read(60)
             worst, wrong, _ = measure_while(srv, geoadd)
             check(names[1], worst <= 1.0 and not wrong and c.call("ZCARD", "dense") == 524288 + 16384, "worst %.3f s" % worst)
+            # G4: the same GEOADD again changes nothing, so its parse is the
+            # work: with a yield every 1024 places it stalls little (rule 2).
+            worst, wrong, _ = measure_while(srv, geoadd)
+            check("local: G4 GEOADD parses its places in steps", worst <= 0.1 and not wrong, "worst %.3f s" % worst)
+            # GEOPOS spends the sorted set work of EXEC: two of 16384 names
+            # fill it, and the third is refused.
+            names16 = ["m%d" % i for i in range(16384)]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("GEOPOS", "dense", *names16) * 3 + encode("EXEC"))
+            for _ in range(4):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: GEOPOS spends the sorted set work of EXEC",
+                  isinstance(reply, list) and len(reply) == 3 and isinstance(reply[2], Error), repr(reply)[-80:])
             c.close()
     finally:
         srv.stop()
