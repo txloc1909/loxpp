@@ -6387,11 +6387,15 @@ try {
             // all (e.g. a self-referential top-level expression), where a
             // host StackOverflowError would otherwise reach here directly.
             try {
-                var pad = env("LOXPP_BOOTSTRAP_PAD");
-                if (pad == nil) {
-                    interpreter.interpret(stmts);
-                } else {
-                    __pad(parseIntStr(pad));
+                // LOXPP_CHECK_ONLY=1 stops after the resolver, so the program
+                // is only compiled. diff_runtimes.py --other-check uses this.
+                if (env("LOXPP_CHECK_ONLY") != "1") {
+                    var pad = env("LOXPP_BOOTSTRAP_PAD");
+                    if (pad == nil) {
+                        interpreter.interpret(stmts);
+                    } else {
+                        __pad(parseIntStr(pad));
+                    }
                 }
             } catch (e) {
                 if (e.kind != "StackOverflowError") throw e;
