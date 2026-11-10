@@ -340,6 +340,8 @@ class Entry {
         this.value = value;
         // Milliseconds since the epoch, or nil for a key with no expiry.
         this.expiresAt = expiresAt;
+        // The count cache of a string value (CountCache), or nil.
+        this.cache = nil;
     }
 }
 
@@ -1967,6 +1969,7 @@ fun cmdIncr(ctx, argv) {
     n = n + 1;
     // The key keeps its expiry, as in Redis.
     entry.value = str(n);
+    entry.cache = nil;
     touch(argv[1]);
     replicate(argv, nil);
     return integerReply(n);
@@ -5047,9 +5050,6 @@ fun writeGeoSearch(conn, reply) {
         i = i + 1;
         if (i % ELEMENTS_PER_YIELD == 0) {
             yield nil;
-            if (conn.closed) {
-                return;
-            }
         }
     }
     writeBulks(conn, Bulks([], keep));
@@ -5264,12 +5264,14 @@ fun cmdSetbit(ctx, argv) {
     }
     if (entry == nil) {
         entry = Entry("string", Bytes([], 0), nil);
+        entry.cache = CountCache(0);
         store[key] = entry;
     } else if (type(entry.value) == "String") {
         entry.value = bytesOf(entry.value);
     }
     var b = entry.value;
     growBytes(b, byteIndex + 1);
+    cacheGrew(entry, len(b.chunks));
     var c = (byteIndex - byteIndex % BYTES_CHUNK) / BYTES_CHUNK;
     var j = byteIndex % BYTES_CHUNK;
     var chunk = b.chunks[c];
@@ -5284,6 +5286,7 @@ fun cmdSetbit(ctx, argv) {
     }
     if (now != old) {
         b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];
+        cacheBitChanged(entry, c, was, 1 - was);
     }
     touch(key);
     replicate(argv, nil);
@@ -5340,12 +5343,75 @@ var POPCOUNT = [];
     }
 }
 
-// The reply of BITCOUNT: the chunks of the value, taken in the step of the
-// command, and the range. The session counts in steps (writeBitcount), so
-// the command stays atomic and the other clients go on.
+// The count cache of a string value (README rule 7): the number of 1 bits
+// of each chunk of BYTES_CHUNK bytes of entry.value (a String or a Bytes;
+// both have the same chunk borders), or nil when no scan has read it. total is the sum of the known counts, and known
+// their number, so a whole-value count is O(1) when known equals the
+// number of chunks. It lives on the Entry: SET, BITOP and the RDB load make
+// a new Entry, INCR drops it, and SETBIT keeps it right in O(1).
+class CountCache {
+    init(n) {
+        this.counts = [];
+        var i = 0;
+        while (i < n) {
+            this.counts.append(nil);
+            i = i + 1;
+        }
+        this.known = 0;
+        this.total = 0;
+    }
+}
+
+fun chunkCount(length) {
+    return (length + BYTES_CHUNK - 1 - (length + BYTES_CHUNK - 1) % BYTES_CHUNK) / BYTES_CHUNK;
+}
+
+// The chunk c of a value: a slice of a String, or a chunk of a Bytes.
+fun chunkOf(value, c) {
+    if (type(value) == "String") {
+        var end = (c + 1) * BYTES_CHUNK;
+        if (end > len(value)) {
+            end = len(value);
+        }
+        return value[c * BYTES_CHUNK:end];
+    }
+    return value.chunks[c];
+}
+
+// SETBIT changed a bit of chunk c from was to now (0 or 1).
+fun cacheBitChanged(entry, c, was, now) {
+    var cache = entry.cache;
+    if (cache == nil or was == now) {
+        return;
+    }
+    var v = cache.counts[c];
+    if (v != nil) {
+        cache.counts[c] = v + now - was;
+        cache.total = cache.total + now - was;
+    }
+}
+
+// The value of entry grew to n chunks. The new bytes are zero, so the old
+// last chunk keeps its count and each new chunk counts 0.
+fun cacheGrew(entry, n) {
+    var cache = entry.cache;
+    if (cache == nil) {
+        return;
+    }
+    while (len(cache.counts) < n) {
+        cache.counts.append(0);
+        cache.known = cache.known + 1;
+    }
+}
+
+// The reply of BITCOUNT: the value as a snapshot taken in the step of the
+// command (a String, or a copy of the List of chunks), the Entry and its
+// cache, and the range. The session counts in steps (writeBitcount).
 class BitcountReply {
-    init(value, first, last, firstMask, lastMask) {
+    init(value, entry, cache, first, last, firstMask, lastMask) {
         this.bitValue = value;
+        this.entry = entry;
+        this.cache = cache;
         this.first = first;
         this.last = last;
         this.firstMask = firstMask;
@@ -5353,7 +5419,7 @@ class BitcountReply {
     }
 }
 
-// The 1 bits of byte b that a mask keeps: the bits from bit lo to bit hi.
+// The 1 bits of byte b from bit lo to bit hi.
 fun maskedBits(b, lo, hi) {
     var n = 0;
     var k = lo;
@@ -5463,6 +5529,15 @@ fun cmdBitcount(ctx, argv) {
     if (start > end or total == 0) {
         return integerReply(0);
     }
+    var chunks = chunkCount(length);
+    if (entry.cache == nil) {
+        entry.cache = CountCache(chunks);
+    }
+    var cache = entry.cache;
+    // The whole value with every chunk counted: O(1).
+    if (!bitMode and start == 0 and end == length - 1 and cache.known == chunks) {
+        return integerReply(cache.total);
+    }
     if (type(value) != "String") {
         // A copy of the List of chunks: SETBIT replaces its chunks. One unit
         // of bitmap work for each chunk.
@@ -5472,56 +5547,94 @@ fun cmdBitcount(ctx, argv) {
         value = Bytes(value.chunks[0:len(value.chunks)], value.length);
     }
     if (!bitMode) {
-        return BitcountReply(value, start, end, 0, 7);
+        return BitcountReply(value, entry, cache, start, end, 0, 7);
     }
-    return BitcountReply(value, (start - start % 8) / 8, (end - end % 8) / 8, start % 8, end % 8);
+    return BitcountReply(value, entry, cache, (start - start % 8) / 8, (end - end % 8) / 8, start % 8, end % 8);
 }
 
-// In the session: counts the 1 bits from byte first (from its bit
-// firstMask) to byte last (to its bit lastMask), with a yield every
-// ELEMENTS_PER_YIELD * 64 bytes.
-fun writeBitcount(conn, reply) {
-    var v = reply.bitValue;
+// The 1 bits of chunk text (its first byte is byte base of the value) from
+// byte lo to byte hi, with the bit masks of the first and the last byte of
+// the reply. A chunk of zero bytes is one native compare.
+fun scanBits(text, base, lo, hi, reply) {
+    if (text == ZERO_CHUNK) {
+        return 0;
+    }
     var n = 0;
-    var i = reply.first;
-    var steps = 0;
-    while (i <= reply.last) {
-        // A whole chunk of zero bytes inside the range adds nothing: one
-        // native compare, so a sparse bitmap counts fast.
-        if (type(v) != "String" and i % BYTES_CHUNK == 0 and i > reply.first and i + BYTES_CHUNK - 1 < reply.last
-            and v.chunks[(i - i % BYTES_CHUNK) / BYTES_CHUNK] == ZERO_CHUNK) {
-            i = i + BYTES_CHUNK;
-            steps = steps + 1;
-            if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
-                yield nil;
-                if (conn.closed) {
-                    return;
-                }
-            }
-            continue;
-        }
-        var b = byteAt(v, i);
+    var i = lo;
+    while (i <= hi) {
+        var b = ord(text[i - base]);
         if (i == reply.first or i == reply.last) {
-            var lo = 0;
-            var hi = 7;
+            var bitLo = 0;
+            var bitHi = 7;
             if (i == reply.first) {
-                lo = reply.firstMask;
+                bitLo = reply.firstMask;
             }
             if (i == reply.last) {
-                hi = reply.lastMask;
+                bitHi = reply.lastMask;
             }
-            n = n + maskedBits(b, lo, hi);
+            n = n + maskedBits(b, bitLo, bitHi);
         } else {
             n = n + POPCOUNT[b];
         }
         i = i + 1;
-        steps = steps + 1;
-        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
-            yield nil;
-            if (conn.closed) {
-                return;
-            }
+    }
+    return n;
+}
+
+// True when the live value of the key of the reply still holds the chunk
+// snap at index c. The cache lives on the Entry, and a new value at the key
+// makes a new Entry (INCR drops the cache), so a count written to this
+// cache cannot reach a new value.
+fun chunkLive(reply, c, snap) {
+    return chunkOf(reply.entry.value, c) == snap;
+}
+
+// In the session: the 1 bits of the range, at most one chunk of per-byte
+// work a step. A whole chunk takes its count from the live cache when the
+// live value still holds the chunk of the snapshot. Else the chunk of the
+// snapshot is scanned, and its count is written back before the yield if
+// the live value holds that chunk, so each chunk is scanned at most once
+// after each write, and scans at the same time share the work. The count
+// always ends with its reply (rule 7).
+fun writeBitcount(conn, reply) {
+    var v = reply.bitValue;
+    var cache = reply.cache;
+    var n = 0;
+    var c = (reply.first - reply.first % BYTES_CHUNK) / BYTES_CHUNK;
+    var lastChunk = (reply.last - reply.last % BYTES_CHUNK) / BYTES_CHUNK;
+    var cheap = 0;
+    while (c <= lastChunk) {
+        var snap = chunkOf(v, c);
+        var lo = c * BYTES_CHUNK;
+        var hi = lo + len(snap) - 1;
+        var a = reply.first;
+        if (a < lo) {
+            a = lo;
         }
+        var b = reply.last;
+        if (b > hi) {
+            b = hi;
+        }
+        var whole = a == lo and b == hi and !(a == reply.first and reply.firstMask > 0)
+            and !(b == reply.last and reply.lastMask < 7);
+        var live = whole and chunkLive(reply, c, snap);
+        if (live and cache.counts[c] != nil) {
+            n = n + cache.counts[c];
+            cheap = cheap + 1;
+            if (cheap % ELEMENTS_PER_YIELD == 0) {
+                yield nil;
+            }
+        } else {
+            var got = scanBits(snap, lo, a, b, reply);
+            n = n + got;
+            if (live) {
+                cache.counts[c] = got;
+                cache.known = cache.known + 1;
+                cache.total = cache.total + got;
+            }
+            yield nil;
+        }
+        c = c + 1;
     }
     conn.sock.write(integerReply(n));
 }
@@ -6183,8 +6296,6 @@ class Conn {
         this.pubSoftSince = nil;
         // The Published messages in the mailbox of the session.
         this.pubQueued = 0;
-        // True when the reader has seen the end of the stream.
-        this.closed = false;
     }
 }
 
@@ -6305,9 +6416,6 @@ fun readLoop(conn) {
             printFault("read fault: ", e);
         }
     }
-    // A count in the session (BITCOUNT, GEOSEARCH) reads this at each step,
-    // so it stops with the connection.
-    conn.closed = true;
     try {
         task.send(conn.session, Msg.Closed());
     } catch (ignored) {

@@ -337,11 +337,24 @@
   ]
  },
  {
-  "name": "GEOSEARCH goes on after its client",
-  "old": "            yield nil;\n            if (conn.closed) {\n                return;\n            }\n        }\n    }\n    writeBulks(conn, Bulks([], keep));",
-  "new": "            yield nil;\n        }\n    }\n    writeBulks(conn, Bulks([], keep));",
+  "name": "M3 GEOSEARCH stops at the end of the stream",
+  "edits": [
+   [
+    "        this.pubQueued = 0;\n    }\n}",
+    "        this.pubQueued = 0;\n        this.eof = false;\n    }\n}"
+   ],
+   [
+    "            if (cmd == nil) {\n                break;\n            }",
+    "            if (cmd == nil) {\n                conn.eof = true;\n                break;\n            }"
+   ],
+   [
+    "        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n        }\n    }\n    writeBulks(conn, Bulks([], keep));",
+    "        if (i % ELEMENTS_PER_YIELD == 0) {\n            yield nil;\n            if (conn.eof) {\n                return;\n            }\n        }\n    }\n    writeBulks(conn, Bulks([], keep));"
+   ]
+  ],
   "cases": [
-   "local: a GEOSEARCH whose client goes stops with the connection"
+   "local: H4 GEOSEARCH, PING and a half-close get both replies",
+   "local: H5 GEOSEARCH and a half-close get the reply, then the close"
   ]
  }
 ]

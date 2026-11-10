@@ -5231,7 +5231,8 @@ def stages_geo_limits(prog):
         names = ["local: G1 GEOSEARCH over 524288 members of the boxes stalls PING at most 1 s",
                  "local: G2 GEOADD of 16384 members stalls PING at most 1 s",
                  "local: GEOADD of more than 16384 members is refused",
-                 "local: a GEOSEARCH whose client goes stops with the connection",
+                 "local: H4 GEOSEARCH, PING and a half-close get both replies",
+                 "local: H5 GEOSEARCH and a half-close get the reply, then the close",
                  "local: EXEC refuses a GEOSEARCH over the element budget",
                  "local: GEOPOS of more than 16384 members is refused",
                  "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
@@ -5263,26 +5264,23 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, search)
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
-            # A GEOSEARCH whose client goes stops its filter with the
-            # connection.
-            def geo_clients():
-                info = c.call("INFO", "clients")
-                for line in (info or "").split("\r\n"):
-                    if line.startswith("connected_clients:"):
-                        return int(line.split(":")[1])
-                return -1
-            base = geo_clients()
-            for _ in range(3):
-                g = Client(srv.port)
-                g.send_raw(encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km"))
-                time.sleep(0.05)
-                g.close()
-            deadline = time.time() + 1.5
-            now = geo_clients()
-            while now != base and time.time() < deadline:
-                time.sleep(0.05)
-                now = geo_clients()
-            check("local: a GEOSEARCH whose client goes stops with the connection", now == base, "%d, %d before" % (now, base))
+            # A GEOSEARCH read before a half-close gets its reply (rule 7).
+            places = []
+            for i in range(5000):
+                places += ["%.4f" % ((i % 100) * 0.01), "%.4f" % ((i // 100) * 0.01), "g%d" % i]
+            c.call("GEOADD", "g", *places)
+            search = encode("GEOSEARCH", "g", "FROMLONLAT", "0", "0", "BYRADIUS", "1000", "km")
+            for name, cmds, tail in (("local: H4 GEOSEARCH, PING and a half-close get both replies",
+                                      search + encode("PING"), ["PONG"]),
+                                     ("local: H5 GEOSEARCH and a half-close get the reply, then the close", search, [])):
+                x = Client(srv.port)
+                x.send_raw(cmds)
+                x.sock.shutdown(socket.SHUT_WR)
+                got = [x.try_read(60) for _ in range(1 + len(tail))]
+                end = x.try_read(10)
+                x.close()
+                check(name, isinstance(got[0], list) and len(got[0]) == 5000 and got[1:] == tail and end is CLOSED,
+                      repr((len(got[0]) if isinstance(got[0], list) else got[0], got[1:], end)))
             # G3: one EXEC walks at most 2097152 members of boxes. With one
             # member more (524289, which does not divide the limit), 3
             # GEOSEARCH run and 61 are refused; a refused walk spends what is
@@ -5391,6 +5389,7 @@ def stages_bitmaps(prog):
     finally:
         srv.stop()
     stages_bitmaps_limits(prog)
+    stages_bitmaps_cache(prog)
     stages_bitmaps_replication(prog)
 
 
@@ -5528,6 +5527,7 @@ def stages_bitmaps_limits(prog):
                  "local: B1 the bitmap is 512 MB with the bit set",
                  "local: B2 BITCOUNT of a dense 8 MB stalls PING at most 1 s",
                  "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s",
+                 "local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s",
                  "local: B4 BITOP of 1048576 source bytes stalls PING at most 1 s",
                  "local: BITOP over 1048576 source bytes is refused",
                  "local: B5 GET of a bitmap of 64 MB stalls PING at most 1 s",
@@ -5539,8 +5539,7 @@ def stages_bitmaps_limits(prog):
                  "local: the copy of GET spends the bitmap work of EXEC",
                  "local: SET GET over the bitmap work of EXEC does not write",
                  "local: the copy of BITCOUNT spends the bitmap work of EXEC",
-                 "local: GET of a bitmap writes it as it was when it ran",
-                 "local: a BITCOUNT whose client goes stops with the connection"]
+                 "local: GET of a bitmap writes it as it was when it ran"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(120)
@@ -5576,6 +5575,14 @@ def stages_bitmaps_limits(prog):
             t0 = time.time()
             got = c.call("BITCOUNT", "max")
             check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
+            # A string that SET wrote and SETBIT grew has no counts: its first
+            # count compares each new zero chunk natively.
+            c.call("SET", "maxs", "x")
+            c.call("SETBIT", "maxs", "4294967295", "1")
+            t0 = time.time()
+            got = c.call("BITCOUNT", "maxs")
+            check("local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s",
+                  got == 5 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
             c.call("SET", "h1", "\xff" * (1 << 19))
             c.call("SET", "h2", "\x0f" * (1 << 19))
             got = [None]
@@ -5635,7 +5642,7 @@ def stages_bitmaps_limits(prog):
             for name, cmd in (("the split of a string by SETBIT", ("SETBIT", "p1", "0", "1")),
                               ("BITOP", ("BITOP", "NOT", "hn", "p1")),
                               ("the copy of GET", ("GET", "small")),
-                              ("the copy of BITCOUNT", ("BITCOUNT", "small"))):
+                              ("the copy of BITCOUNT", ("BITCOUNT", "small", "0", "0", "BIT"))):
                 reply = exec_after_bitop(*cmd)
                 check("local: %s spends the bitmap work of EXEC" % name,
                       isinstance(reply, list) and reply[0] == 524288 and isinstance(reply[1], Error)
@@ -5654,26 +5661,245 @@ def stages_bitmaps_limits(prog):
             check("local: GET of a bitmap writes it as it was when it ran",
                   isinstance(val, str) and len(val) == 64 * 1024 * 1024 and val[-125] == "\x00" and val[-1] == "\x01",
                   repr(val[-130:-120]) if isinstance(val, str) else repr(val))
-            # A BITCOUNT whose client goes stops: the connection leaves the
-            # count of connected clients at once.
-            def clients():
-                info = c.call("INFO", "clients")
-                for line in (info or "").split("\r\n"):
-                    if line.startswith("connected_clients:"):
-                        return int(line.split(":")[1])
-                return -1
-            base = clients()
-            for _ in range(5):
-                g = Client(srv.port)
-                g.send_raw(encode("BITCOUNT", "b8"))
-                time.sleep(0.05)
-                g.close()
-            deadline = time.time() + 1.5
-            now = clients()
-            while now != base and time.time() < deadline:
-                time.sleep(0.05)
-                now = clients()
-            check("local: a BITCOUNT whose client goes stops with the connection", now == base, "%d, %d before" % (now, base))
+            c.close()
+    finally:
+        srv.stop()
+
+
+def cpu_seconds(pid):
+    """The user and system CPU time of the process, in seconds."""
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+    except OSError:
+        return 0.0
+
+
+def wait_idle(pid, limit):
+    """Waits until the process uses no CPU for 0.4 s, at most limit seconds.
+    Returns its CPU time then."""
+    deadline = time.time() + limit
+    last = cpu_seconds(pid)
+    quiet = 0
+    while time.time() < deadline:
+        time.sleep(0.2)
+        now = cpu_seconds(pid)
+        quiet = quiet + 1 if now - last < 0.02 else 0
+        last = now
+        if quiet >= 2:
+            break
+    return last
+
+
+def connected_clients(c):
+    info = c.call("INFO", "clients")
+    for line in (info or "").split("\r\n"):
+        if line.startswith("connected_clients:"):
+            return int(line.split(":")[1])
+    return -1
+
+
+def clients_back(c, base, limit=3.0):
+    deadline = time.time() + limit
+    now = connected_clients(c)
+    while now != base and time.time() < deadline:
+        time.sleep(0.05)
+        now = connected_clients(c)
+    return now
+
+
+DENSE = "\xff" * (8 * 1024 * 1024)
+DENSE_BITS = 8 * 8 * 1024 * 1024
+
+
+def fresh_dense(c, key="u"):
+    """SET key to 8 MB of 0xff: a new value that no count has read."""
+    c.raw().sock.settimeout(60)
+    c.raw().send_raw(encode("SET", key, DENSE))
+    return c.raw().try_read(60) == "OK"
+
+
+def timed(c, *cmd):
+    t0 = time.time()
+    got = c.call(*cmd)
+    return got, time.time() - t0
+
+
+def one_count_cpu(srv, c):
+    """The CPU time of one BITCOUNT of a fresh dense 8 MB value."""
+    fresh_dense(c)
+    t = wait_idle(srv.proc.pid, 5)
+    c.raw().send_raw(encode("BITCOUNT", "u"))
+    c.raw().try_read(120)
+    return wait_idle(srv.proc.pid, 10) - t
+
+
+def stages_bitmaps_cache(prog):
+    """Rule 7 of the README: the session answers each command it read, and
+    the count cache keeps the work after a close to one scan of each byte."""
+    names = ["local: H1 BITCOUNT, PING and a half-close get both replies, then the close",
+             "local: H2 BITCOUNT and a half-close get the reply, then the close",
+             "local: H3 BITCOUNT and a protocol error get the count, the error, then the close",
+             "local: C1 a second BITCOUNT of the same data replies within 0.2 s",
+             "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s",
+             "local: C3 a range count scans only its end chunks, within 0.2 s",
+             "local: C4a a SETBIT during a count does not leave a wrong count",
+             "local: C4b a SET during a count does not leave a wrong count",
+             "local: INCR drops the counts of the value"]
+    srv = Server(prog, [])
+    try:
+        if aof_started(srv, names):
+            c = Asker(srv)
+            for name, cmds, tail in ((names[0], encode("BITCOUNT", "u") + encode("PING"), ["PONG"]),
+                                     (names[1], encode("BITCOUNT", "u"), [])):
+                fresh_dense(c)
+                x = Client(srv.port)
+                x.send_raw(cmds)
+                x.sock.shutdown(socket.SHUT_WR)
+                got = [x.try_read(60) for _ in range(1 + len(tail))]
+                end = x.try_read(10)
+                x.close()
+                check(name, got == [DENSE_BITS] + tail and end is CLOSED, repr((got, end)))
+            fresh_dense(c)
+            x = Client(srv.port)
+            x.send_raw(encode("BITCOUNT", "u") + b"*1\r\n$abc\r\n")
+            got = x.try_read(60)
+            err = x.try_read(60)
+            end = x.try_read(10)
+            x.close()
+            check(names[2], got == DENSE_BITS and isinstance(err, Error)
+                  and err.startswith("ERR Protocol error: invalid bulk length") and end is CLOSED, repr((got, err, end)))
+            fresh_dense(c)
+            c.raw().send_raw(encode("BITCOUNT", "u"))
+            first = c.raw().try_read(60)
+            got, took = timed(c, "BITCOUNT", "u")
+            check(names[3], first == DENSE_BITS and got == DENSE_BITS and took < 0.2, "%r %r in %.3f s" % (first, got, took))
+            # Each step: the reply of SETBIT, then a whole count and a count
+            # of the first chunk, each from the cache.
+            seen = []
+            ok = True
+            for bit, was, want in (("0", 1, DENSE_BITS - 1), ("0", 0, DENSE_BITS - 1), ("1", 0, DENSE_BITS)):
+                old = c.call("SETBIT", "u", "0", bit)
+                whole, t1 = timed(c, "BITCOUNT", "u")
+                part, t2 = timed(c, "BITCOUNT", "u", "0", "4095")
+                seen.append((old, whole, part, round(t1, 3), round(t2, 3)))
+                ok = ok and old == was and whole == want and part == want - DENSE_BITS + 32768 and t1 < 0.2 and t2 < 0.2
+            check(names[4], ok, repr(seen))
+            seen = []
+            ok = True
+            for cmd, want in ((("1", "8388606"), 8388606 * 8), (("4096", "8191"), 32768),
+                              (("5", "67108860", "BIT"), 67108856)):
+                got, took = timed(c, "BITCOUNT", "u", *cmd)
+                seen.append((got, round(took, 3)))
+                ok = ok and got == want and took < 0.2
+            check(names[5], ok, repr(seen))
+            # A write to the last chunk, which the scan has not read yet.
+            for name, write, want in ((names[6], ("SETBIT", "u", "67108863", "0"), DENSE_BITS - 1),
+                                      (names[7], ("SET", "u", "ab"), 6)):
+                fresh_dense(c)
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.send_raw(encode("BITCOUNT", "u"))
+                time.sleep(0.5)
+                wrote = c.call(*write)
+                snap = x.try_read(60)
+                x.close()
+                c.raw().send_raw(encode("BITCOUNT", "u"))
+                after = c.raw().try_read(60)
+                check(name, wrote in (1, "OK") and snap == DENSE_BITS and after == want, repr((wrote, snap, after)))
+            # "7" is 0x37 (five 1 bits), "8" is 0x38 (three).
+            c.call("SET", "n", "7")
+            before = c.call("BITCOUNT", "n")
+            c.call("INCR", "n")
+            after = c.call("BITCOUNT", "n")
+            check("local: INCR drops the counts of the value", before == 5 and after == 3, repr((before, after)))
+            c.close()
+    finally:
+        srv.stop()
+    stages_bitmaps_cache_cpu(prog)
+    stages_bitmaps_cache_steps(prog)
+
+
+def stages_bitmaps_cache_cpu(prog):
+    names = ["local: C6 ten counts that close at the same time cost at most two counts",
+             "local: C7 200 counts that close cost at most 1.5 counts",
+             "local: C7 200 counts and a half-close get 200 replies"]
+    srv = Server(prog, [])
+    try:
+        if aof_started(srv, names):
+            c = Asker(srv)
+            pid = srv.proc.pid
+            one = one_count_cpu(srv, c)
+            print("       measured: one count of 8 MB uses %.2f s of CPU" % one)
+            limit = 4 * one + 5
+            fresh_dense(c)
+            base = connected_clients(c)
+            t = wait_idle(pid, 5)
+            xs = [Client(srv.port) for _ in range(10)]
+            for x in xs:
+                x.send_raw(encode("BITCOUNT", "u"))
+            for x in xs:
+                x.close()
+            spent = wait_idle(pid, limit) - t
+            now = clients_back(c, base)
+            check(names[0], spent <= 2 * one and now == base, "%.2f s, one %.2f s; clients %d, %d before" % (spent, one, now, base))
+            fresh_dense(c)
+            base = connected_clients(c)
+            t = wait_idle(pid, 5)
+            x = Client(srv.port)
+            x.send_raw(encode("BITCOUNT", "u") * 200)
+            x.close()
+            spent = wait_idle(pid, limit) - t
+            now = clients_back(c, base)
+            check(names[1], spent <= 1.5 * one and now == base, "%.2f s, one %.2f s; clients %d, %d before" % (spent, one, now, base))
+            fresh_dense(c)
+            x = Client(srv.port)
+            x.send_raw(encode("BITCOUNT", "u") * 200)
+            x.sock.shutdown(socket.SHUT_WR)
+            deadline = time.time() + limit
+            got = []
+            while len(got) < 200 and time.time() < deadline:
+                r = x.try_read(max(0.1, deadline - time.time()))
+                if r is TIMEOUT or r is CLOSED or r is BAD_REPLY:
+                    break
+                got.append(r)
+            end = x.try_read(10)
+            x.close()
+            check(names[2], got == [DENSE_BITS] * 200 and end is CLOSED, "%d replies, %r" % (len(got), end))
+            c.close()
+    finally:
+        srv.stop()
+
+
+# The number of counts at the same time in S1: with one chunk a step, the
+# measurer waits for about K steps of 2 ms; with 16 chunks a step it waits
+# more than 0.5 s.
+S1_COUNTS = 32
+
+
+def stages_bitmaps_cache_steps(prog):
+    name = "local: S1 %d counts of 1 MB at the same time stall PING at most 0.5 s" % S1_COUNTS
+    srv = Server(prog, [])
+    try:
+        if aof_started(srv, [name]):
+            c = Asker(srv)
+            for i in range(S1_COUNTS):
+                c.raw().sock.settimeout(60)
+                c.raw().send_raw(encode("SET", "k%d" % i, "\xff" * (1 << 20)))
+                c.raw().try_read(60)
+            got = []
+
+            def counts():
+                xs = [Client(srv.port) for _ in range(S1_COUNTS)]
+                for i, x in enumerate(xs):
+                    x.send_raw(encode("BITCOUNT", "k%d" % i))
+                for x in xs:
+                    got.append(x.try_read(120))
+                    x.close()
+            worst, wrong, _ = measure_while(srv, counts)
+            check(name, worst <= 0.5 and not wrong and got == [8 << 20] * S1_COUNTS,
+                  "worst %.3f s, %r" % (worst, sorted(set(map(repr, got)))))
             c.close()
     finally:
         srv.stop()

@@ -73,7 +73,7 @@
  },
  {
   "name": "BITCOUNT in bits counts whole bytes",
-  "old": "            n = n + maskedBits(b, lo, hi);",
+  "old": "            n = n + maskedBits(b, bitLo, bitHi);",
   "new": "            n = n + POPCOUNT[b];",
   "cases": [
    "local: BITCOUNT with negative indexes and in bits"
@@ -89,18 +89,18 @@
  },
  {
   "name": "BITCOUNT skips every inner chunk",
-  "old": "            and v.chunks[(i - i % BYTES_CHUNK) / BYTES_CHUNK] == ZERO_CHUNK) {",
-  "new": "            ) {",
+  "old": "    if (text == ZERO_CHUNK) {\n        return 0;",
+  "new": "    if (true) {\n        return 0;",
   "cases": [
    "local: a bitmap over several chunks reads back as written"
   ]
  },
  {
   "name": "BITCOUNT skips no zero chunk",
-  "old": "        if (type(v) != \"String\" and i % BYTES_CHUNK == 0 and i > reply.first",
-  "new": "        if (false and i % BYTES_CHUNK == 0 and i > reply.first",
+  "old": "    if (text == ZERO_CHUNK) {\n        return 0;",
+  "new": "    if (false) {\n        return 0;",
   "cases": [
-   "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s"
+   "local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s"
   ]
  },
  {
@@ -257,7 +257,7 @@
  },
  {
   "name": "BITCOUNT in bits counts to the end of the byte",
-  "old": "            if (i == reply.last) {\n                hi = reply.lastMask;\n            }",
+  "old": "            if (i == reply.last) {\n                bitHi = reply.lastMask;\n            }",
   "new": "",
   "cases": [
    "local: BITCOUNT in bits stops at the last bit"
@@ -336,22 +336,6 @@
   ]
  },
  {
-  "name": "BITCOUNT goes on after its client",
-  "old": "        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {\n            yield nil;\n            if (conn.closed) {\n                return;\n            }\n        }\n    }\n    conn.sock.write(integerReply(n));",
-  "new": "        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {\n            yield nil;\n        }\n    }\n    conn.sock.write(integerReply(n));",
-  "cases": [
-   "local: a BITCOUNT whose client goes stops with the connection"
-  ]
- },
- {
-  "name": "the reader does not mark the end",
-  "old": "    conn.closed = true;\n",
-  "new": "",
-  "cases": [
-   "local: a BITCOUNT whose client goes stops with the connection"
-  ]
- },
- {
   "name": "SET GET over the budget writes",
   "old": "            if (reply == BITMAP_EXEC_TOO_MUCH) {\n                return reply;\n            }",
   "new": "",
@@ -381,6 +365,136 @@
   "new": " or !isDigits(digits)) {",
   "cases": [
    "local: BITCOUNT refuses an index of 19 digits with a leading zero, and one past the 64-bit range"
+  ]
+ },
+ {
+  "name": "M1 BITCOUNT stops at the end of the stream",
+  "edits": [
+   [
+    "        this.pubQueued = 0;\n    }\n}",
+    "        this.pubQueued = 0;\n        this.eof = false;\n    }\n}"
+   ],
+   [
+    "            if (cmd == nil) {\n                break;\n            }",
+    "            if (cmd == nil) {\n                conn.eof = true;\n                break;\n            }"
+   ],
+   [
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }",
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }\n        if (conn.eof) {\n            return;\n        }"
+   ]
+  ],
+  "cases": [
+   "local: H1 BITCOUNT, PING and a half-close get both replies, then the close",
+   "local: H2 BITCOUNT and a half-close get the reply, then the close"
+  ]
+ },
+ {
+  "name": "M2 BITCOUNT stops after a protocol error",
+  "edits": [
+   [
+    "        this.pubQueued = 0;\n    }\n}",
+    "        this.pubQueued = 0;\n        this.eof = false;\n    }\n}"
+   ],
+   [
+    "        if (kind == \"ProtocolError\") {\n            try {",
+    "        if (kind == \"ProtocolError\") {\n            conn.eof = true;\n            try {"
+   ],
+   [
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }",
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }\n        if (conn.eof) {\n            return;\n        }"
+   ]
+  ],
+  "cases": [
+   "local: H3 BITCOUNT and a protocol error get the count, the error, then the close"
+  ]
+ },
+ {
+  "name": "M4 the scan does not keep the counts",
+  "old": "            if (live) {\n                cache.counts[c] = got;",
+  "new": "            if (false) {\n                cache.counts[c] = got;",
+  "cases": [
+   "local: C1 a second BITCOUNT of the same data replies within 0.2 s",
+   "local: C7 200 counts that close cost at most 1.5 counts"
+  ]
+ },
+ {
+  "name": "M5 SETBIT does not change the count of its chunk",
+  "old": "        cache.counts[c] = v + now - was;\n",
+  "new": "",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M6 SETBIT does not change the total",
+  "old": "        cache.total = cache.total + now - was;\n",
+  "new": "",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M7 SETBIT changes the count when the bit does not change",
+  "old": "        b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];\n        cacheBitChanged(entry, c, was, 1 - was);\n    }",
+  "new": "        b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];\n    }\n    cacheBitChanged(entry, c, was, 1 - was);",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M8 a range count takes the cached count of an end chunk",
+  "old": "        var live = whole and chunkLive(reply, c, snap);",
+  "new": "        var live = chunkLive(reply, c, snap);",
+  "cases": [
+   "local: C3 a range count scans only its end chunks, within 0.2 s"
+  ]
+ },
+ {
+  "name": "M9 the scan writes back with no check of the chunk",
+  "old": "            if (live) {\n                cache.counts[c] = got;",
+  "new": "            if (whole) {\n                cache.counts[c] = got;",
+  "cases": [
+   "local: C4a a SETBIT during a count does not leave a wrong count"
+  ]
+ },
+ {
+  "name": "M10 the step of the scan is 65536 bytes",
+  "old": "            yield nil;\n        }\n        c = c + 1;",
+  "new": "            if (c % 16 == 15) {\n                yield nil;\n            }\n        }\n        c = c + 1;",
+  "cases": [
+   "local: S1 32 counts of 1 MB at the same time stall PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "M11 the scan reads the cache only at its start",
+  "edits": [
+   [
+    "    var cheap = 0;\n    while (c <= lastChunk) {",
+    "    var cheap = 0;\n    var seen = cache.counts[0:len(cache.counts)];\n    while (c <= lastChunk) {"
+   ],
+   [
+    "        if (live and cache.counts[c] != nil) {\n            n = n + cache.counts[c];",
+    "        if (live and seen[c] != nil) {\n            n = n + seen[c];"
+   ]
+  ],
+  "cases": [
+   "local: C6 ten counts that close at the same time cost at most two counts"
+  ]
+ },
+ {
+  "name": "INCR keeps the counts of the old value",
+  "old": "    entry.value = str(n);\n    entry.cache = nil;",
+  "new": "    entry.value = str(n);",
+  "cases": [
+   "local: INCR drops the counts of the value"
+  ]
+ },
+ {
+  "name": "growth counts a new zero chunk as 1",
+  "old": "        cache.counts.append(0);",
+  "new": "        cache.counts.append(1);",
+  "cases": [
+   "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s"
   ]
  }
 ]
