@@ -21,11 +21,11 @@ matcher can show; a character a read boundary splits; the report's elision and
 its truncation marker; CHECK order and white space; the `.input` file; and the
 usage errors.
 
-`stop()` has a case of its own: an example that hangs is stopped at its limit
-and the whole run must come back soon after. That is the rule a program can see.
-The further saving of not waiting for a group that holds only zombies depends on
-the host's PID 1 reaping a reparented one, so the same case does not show it
-everywhere: on a host whose PID 1 reaps, both builds return at once.
+`stop()` has a case of its own: an example that hangs is stopped at its limit,
+through a runner that leaves a descendant, and the whole run must come back soon
+after. Waiting for such a group costs the full limit of each signal, because the
+stopped descendant stays in the group as a zombie and only a parent that reaps
+can remove it.
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
@@ -344,8 +344,11 @@ def main() -> None:
         # `stop()` must return soon after the limit ends the example. Waiting
         # for a process group that is already gone costs two seconds per run.
         d = write_dir(tmp, {"slowstop.lox": "// CHECK: never\nsleep(60);\n"})
+        slow = tmp / "slowstop.sh"
+        slow.write_text("#!/bin/sh\nsleep 300 &\nwait\n", encoding="utf-8")
+        slow.chmod(0o755)
         rc, out, took = run(
-            [sys.executable, str(TOOL), native, str(d), "--timeout", "0.5"]
+            [sys.executable, str(TOOL), str(slow), str(d), "--timeout", "0.5"]
         )
         check(
             "a stopped run returns soon after its limit",
@@ -359,7 +362,7 @@ def main() -> None:
         rc, out, _ = run([sys.executable, str(TOOL), native, str(empty)])
         check("a directory with no example is exit 2", rc == 2, f"rc={rc} out={out!r}")
 
-        # 11 and 12: an option with no value is a usage error.
+        # An option with no value is a usage error.
         d = write_dir(tmp, {"passing.lox": PASSING})
         for option in ("--timeout", "--max-output-bytes"):
             rc, out, _ = run([sys.executable, str(TOOL), native, str(d), option])
@@ -404,6 +407,14 @@ def main() -> None:
             [sys.executable, str(TOOL), native, str(d_flag), "--timeout", "5"]
         )
         check("--timeout with a good value still runs", rc == 0, f"rc={rc} out={out!r}")
+        rc, out, _ = run(
+            [sys.executable, str(TOOL), native, str(d_flag), "--timeout", "86400"]
+        )
+        check("--timeout at the ceiling still runs", rc == 0, f"rc={rc} out={out[:200]!r}")
+        rc, out, _ = run(
+            [sys.executable, str(TOOL), native, str(d_flag), "--timeout", "86401"]
+        )
+        check("--timeout one second over the ceiling is exit 2", rc == 2, f"rc={rc} out={out[:200]!r}")
 
     # The line bound itself: the part kept while a line accumulates, and the
     # text kept for the report, are both bounded. A mutant that assembles whole
@@ -451,6 +462,16 @@ def main() -> None:
         "a line that goes on after the buffer is full cannot match",
         late.missing() == "ab",
         f"missing={late.missing()!r} overflow={late.overflow}",
+    )
+    trailing = tool_module.Capture(["ab"])
+    trailing.feed("ab")
+    trailing.feed(" " * 1)          # fills the buffer
+    trailing.feed(" " * 1000)       # and goes on, in white space only
+    trailing.finish()
+    check(
+        "white space past the buffer is not a mismatch",
+        trailing.missing() is None,
+        f"missing={trailing.missing()!r} overflow={trailing.overflow}",
     )
     matching = tool_module.Capture(["ab"])
     matching.feed("  ab  \n")
