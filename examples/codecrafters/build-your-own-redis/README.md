@@ -346,15 +346,19 @@ byte go from the most significant, as in Redis.
 counts in steps (`writeBitcount`): the command stays atomic, and the other
 clients go on. It skips a whole chunk of zero bytes with one native
 compare, so a sparse bitmap counts fast; a dense one costs about 0.5
-microseconds a byte (8 MB: 4 s, with no stall). As in Redis 7.0, it reads
-the key before its arguments, and it takes `BYTE` and `BIT` ranges.
+microseconds a byte (8 MB: 4 s, with no stall). It stops at its next step
+when the client goes (the reader marks `conn.closed`), as `GEOSEARCH`
+does, so no count outlives its connection. As in Redis 7.0, it reads the
+key before its arguments, gives 0 for two negative indexes with the start
+after the end, takes `BYTE` and `BIT` ranges, and takes an index of up to
+19 digits.
 
 `BITOP AND | OR | XOR | NOT` runs in one step with tables of 65536 entries
 (each built from an earlier one at start). Each source byte is Lox++ code,
 so one `BITOP` reads at most 1048576 source bytes (the length of the result
 times the number of sources), and one `EXEC` does at most 1048576 units of
-bitmap work: the chunks that `SETBIT` adds or splits, and the source bytes
-of `BITOP` (rule 6).
+bitmap work: the chunks that `SETBIT` adds or splits, the source bytes of
+`BITOP`, and the chunks that `GET` and `BITCOUNT` copy (rule 6).
 
 ### Pub/Sub
 
@@ -695,9 +699,10 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | B1 (group `bitmaps`, on a server of its own): `SETBIT` at offset 2^32 - 1 | a string of 512 MB with the bit set; PING within 1.0 s (rule 6 only) | 0.01–0.02 s |
 | B2: `BITCOUNT` of a dense 8 MB | PING within 1.0 s (rule 6 only) | 0.12 s (4 s in all) |
 | B3: `BITCOUNT` of the sparse 512 MB of B1 | a reply within 2 s (when a zero chunk is not skipped: minutes) | 0.04 s |
-| B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.33 s |
+| B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
 | B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
-| B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | as required |
+| B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |
+| Not in the suite: `SETBIT` on a String of 512 MB, which splits it into chunks | PING within 1.0 s; the split is once for each String | 0.62–0.63 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
