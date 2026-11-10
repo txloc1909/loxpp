@@ -152,7 +152,7 @@ def main() -> None:
             sys.exit(2)
         check("the runner runs one example", rc == 0, out)
 
-        # 1 and 2: a run that never ends, and its own limit.
+        # A run that never ends, and its own limit.
         d = write_dir(tmp, {"hang.lox": HANG})
         rc, out, took = run([sys.executable, str(TOOL), native, str(d), "--timeout", "1"])
         check(
@@ -174,7 +174,7 @@ def main() -> None:
             f"rc={rc} took={took:.1f}s out={out!r}",
         )
 
-        # 3: output past the limit, which is what a traced build emits.
+        # Output past the limit, which is what a traced build emits.
         d = write_dir(tmp, {"flood.lox": FLOOD})
         rc, out, took = run(
             [sys.executable, str(TOOL), native, str(d), "--max-output-bytes", "1000"]
@@ -185,7 +185,7 @@ def main() -> None:
             f"rc={rc} took={took:.1f}s out={out!r}",
         )
 
-        # 4: more lines than the report keeps, still matched, middle elided.
+        # More lines than the report keeps: matched, and the middle elided.
         d = write_dir(tmp, {"many.lox": MANY_LINES})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("a long output is still matched", rc == 0 and "PASS  many.lox" in out, out)
@@ -203,7 +203,7 @@ def main() -> None:
             out,
         )
 
-        # 5: an unmatched CHECK names the line and shows output.
+        # An unmatched CHECK names the line and shows output.
         d = write_dir(tmp, {"unmatched.lox": UNMATCHED})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check(
@@ -212,7 +212,7 @@ def main() -> None:
             out,
         )
 
-        # 6: a passing example, with its checks in order.
+        # A passing example, with its checks in order.
         d = write_dir(tmp, {"passing.lox": PASSING})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check(
@@ -233,7 +233,7 @@ def main() -> None:
             out,
         )
 
-        # 7: an exit code that is not zero.
+        # An exit code that is not zero.
         d = write_dir(tmp, {"halting.lox": HALTING})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check(
@@ -242,24 +242,24 @@ def main() -> None:
             out,
         )
 
-        # 8: leading white space of the output line is ignored.
+        # Leading white space of the output line is ignored.
         d = write_dir(tmp, {"indented.lox": INDENTED})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("a CHECK matches a line that starts with spaces", rc == 0, out)
 
-        # 9: the .input file still reaches stdin.
+        # The .input file still reaches stdin.
         d = write_dir(tmp, {"stdin.lox": STDIN, "stdin.input": "from the file\n"})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("the .input file reaches the program's stdin", rc == 0, out)
 
-        # 13: a two-byte character that a 64 KiB read boundary splits.
+        # A two-byte character that a 64 KiB read boundary splits.
         long_line = "x" * 65535 + "\u00e9"
         d = write_dir(tmp, {"split.lox": f'// CHECK: {long_line}\nprint "{long_line}";\n'})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("a character split by a read boundary still matches", rc == 0, out[:400])
 
-        # 14: one line longer than the limit, so the limit cannot wait for a
-        # line end.
+        # One line longer than the limit, so the limit cannot wait for a line
+        # end.
         d = write_dir(
             tmp,
             {
@@ -278,9 +278,9 @@ def main() -> None:
             out[:400],
         )
 
-        # 15: a stream that never ends its line. A stub runner writes 100 KB of
-        # one line and then sleeps, so the only way to reach the limit is to
-        # count the bytes as they arrive.
+        # A stream that never ends its line. A stub runner writes 100 KB of one
+        # line and then sleeps, so the only way to reach the limit is to count
+        # the bytes as they arrive.
         stub = tmp / "stub.sh"
         stub.write_text(
             "#!/bin/sh\ndd if=/dev/zero bs=1000 count=100 2>/dev/null | tr '\\0' x\nsleep 30\n",
@@ -326,7 +326,7 @@ def main() -> None:
             f"rc={rc} longest_report_line={longest}",
         )
 
-        # 10: a directory with no .lox file is an error.
+        # A directory with no .lox file is an error.
         empty = tmp / "empty"
         empty.mkdir()
         rc, out, _ = run([sys.executable, str(TOOL), native, str(empty)])
@@ -355,11 +355,51 @@ def main() -> None:
             rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
             check(f"// TIMEOUT: {bad} is exit 2", rc == 2, f"rc={rc} out={out!r}")
 
-        for bad in ("nan", "1e10"):
+        # A fresh directory: the one above carries a bad directive, which would
+        # answer for the flag and leave its rule untested.
+        d_flag = write_dir(tmp, {"plain.lox": PASSING})
+        for bad in ("nan", "1e10", "-1", "0", "inf"):
             rc, out, _ = run(
-                [sys.executable, str(TOOL), native, str(d), "--timeout", bad]
+                [sys.executable, str(TOOL), native, str(d_flag), "--timeout", bad]
             )
-            check(f"--timeout {bad} is exit 2, not a traceback", rc == 2 and "Traceback" not in out, f"rc={rc} out={out!r}")
+            check(
+                f"--timeout {bad} is exit 2, not a traceback",
+                rc == 2 and "Traceback" not in out,
+                f"rc={rc} out={out!r}",
+            )
+        rc, out, _ = run(
+            [sys.executable, str(TOOL), native, str(d_flag), "--timeout", "5"]
+        )
+        check("--timeout with a good value still runs", rc == 0, f"rc={rc} out={out!r}")
+
+    # The line bound itself: the part kept while a line accumulates, and the
+    # text kept for the report, are both bounded. A mutant that assembles whole
+    # lines fails these, and no program can be written to show it.
+    sys.path.insert(0, str(ROOT / "tools"))
+    import check_examples as tool_module
+
+    capture = tool_module.Capture(["ab"])
+    capture.feed("z" * 10_000_000)
+    check(
+        "the match buffer is bounded by the longest CHECK",
+        capture.kept <= len("ab") + 1 and capture.overflow,
+        f"kept={capture.kept} overflow={capture.overflow}",
+    )
+    check(
+        "the report text is bounded too",
+        capture.shown_len <= tool_module.REPORT_LINE_CHARS,
+        f"shown={capture.shown_len}",
+    )
+    capture.finish()
+    check(
+        "a line past the bound cannot match, and a short one still can",
+        capture.missing() == "ab"
+        and tool_module.Capture(["ab"]).feed("  ab  \n") is None,
+        f"missing={capture.missing()!r}",
+    )
+    matching = tool_module.Capture(["ab"])
+    matching.feed("  ab  \n")
+    check("a matching line still matches after trimming", matching.missing() is None)
 
     if failures:
         print(f"\n{len(failures)} case(s) failed")

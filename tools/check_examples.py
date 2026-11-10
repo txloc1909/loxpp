@@ -99,7 +99,7 @@ def extract_checks(lox_file: Path) -> list[str]:
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 
 
-TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\S+)\s*$")
+TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:(.*)$")
 
 # A limit that cannot be given to select(2) or waited for in practice is a
 # mistake. A day is already far past anything a check wants.
@@ -122,7 +122,7 @@ def extract_timeout(lox_file: Path) -> float | None:
         m = TIMEOUT_RE.match(line)
         if m:
             try:
-                return float(m.group(1))
+                return float(m.group(1).strip())
             except ValueError:
                 return math.nan
     return None
@@ -153,16 +153,21 @@ class Capture:
         # What the failure report will show, independent of the match limit.
         self.shown: list[str] = []
         self.shown_len = 0
+        self.shown_cut = False
 
     def _piece(self, body: str) -> None:
         """Takes one piece of the current line, keeping no more than the limit."""
         if not body:
             return
         room_shown = REPORT_LINE_CHARS - self.shown_len
-        if room_shown > 0:
+        if room_shown <= 0:
+            self.shown_cut = True
+        else:
             part = body[:room_shown]
             self.shown.append(part)
             self.shown_len += len(part)
+            if len(body) > room_shown:
+                self.shown_cut = True
         if self.kept == 0 and not self.overflow:
             body = body.lstrip()
             if not body:
@@ -187,7 +192,7 @@ class Capture:
         line = "".join(self.line)
         self.lines += 1
         shown = "".join(self.shown)
-        text = shown if len(shown) < REPORT_LINE_CHARS else shown + "..."
+        text = shown + "..." if self.shown_cut else shown
         if len(self.head) < REPORT_HEAD_LINES:
             self.head.append(text)
         else:
@@ -205,6 +210,7 @@ class Capture:
         self.overflow = False
         self.shown = []
         self.shown_len = 0
+        self.shown_cut = False
 
     def feed(self, text: str) -> None:
         """Takes decoded output: any number of whole lines and a last part."""
@@ -230,6 +236,34 @@ class Capture:
             self._end_line()
 
 
+def group_alive(pgid: int) -> bool:
+    """True while a process of the group is not a zombie.
+
+    A stopped descendant that its own parent never reaps stays in the group as
+    a zombie, which no signal can remove and which `killpg(pgid, 0)` still
+    finds. Waiting for such a group costs the whole wait for nothing.
+    """
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return True
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", "rb") as handle:
+                raw = handle.read()
+        except OSError:
+            continue
+        # "pid (comm) state ppid pgrp ..." and comm may hold spaces.
+        tail = raw.rpartition(b")")[2].split()
+        if len(tail) < 3 or tail[0] == b"Z":
+            continue
+        if int(tail[2]) == pgid:
+            return True
+    return False
+
+
 def stop(proc: subprocess.Popen) -> None:
     """Stops the child and everything it started.
 
@@ -250,9 +284,7 @@ def stop(proc: subprocess.Popen) -> None:
                 pass
             # A descendant that ignores SIGTERM keeps the group alive even
             # after the shell is gone, so the group decides, not the child.
-            try:
-                os.killpg(proc.pid, 0)
-            except ProcessLookupError:
+            if not group_alive(proc.pid):
                 return
         if sig == signal.SIGKILL:
             return
