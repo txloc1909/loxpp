@@ -22,6 +22,13 @@ Cases:
   6. native halts after the CHECK lines and the stub halts with the same lines
      and one more (a deferred call that only it runs): MATCH (halt), exit 0.
   7. control: native against itself on every program above: exit 0.
+  8. native halts on a program that is not a spec probe, the stub prints
+     nothing and exits non-zero, and the `--other-check` runner rejects the
+     program: DIVERGE (compile phase), exit 1.
+  9. the same halt, and the `--other-check` runner accepts the program: the
+     empty stdout is a real halt, MATCH (halt), exit 0.
+ 10. the same halt, and the `--other-check` runner does not finish: DIVERGE,
+     exit 1.
 
 Usage:
     tools/check_diff_runtimes_phases.py --native build/loxpp
@@ -57,6 +64,9 @@ print "after";
 // STATUS: error
 // CHECK: before
 """
+# Not a spec probe: a halt before any output, which a rejection also looks like.
+HALT_PLAIN = """print undeclared_name;
+"""
 
 
 def write_stub(path: Path, body: str) -> Path:
@@ -65,9 +75,9 @@ def write_stub(path: Path, body: str) -> Path:
     return path
 
 
-def diff(native: str, runner: str, programs: list[Path]) -> tuple[int, str]:
+def diff(native: str, runner: str, programs: list[Path], extra: tuple[str, ...] = ()) -> tuple[int, str]:
     completed = subprocess.run(
-        [sys.executable, str(DIFF_RUNTIMES), native, runner, *map(str, programs)],
+        [sys.executable, str(DIFF_RUNTIMES), native, runner, *extra, *map(str, programs)],
         capture_output=True,
         text=True,
         timeout=300,
@@ -90,6 +100,8 @@ def main() -> int:
         runs.write_text(RUNS, encoding="utf-8")
         halt_probe = work / "halt_probe.lox"
         halt_probe.write_text(HALT_PROBE, encoding="utf-8")
+        halt_plain = work / "halt_plain.lox"
+        halt_plain.write_text(HALT_PLAIN, encoding="utf-8")
 
         try:
             trace = subprocess.run([native, str(runs)], capture_output=True, text=True, timeout=60)
@@ -113,6 +125,21 @@ def main() -> int:
         halt_with_defer = write_stub(
             work / "halt_with_defer.sh", 'echo "before"\necho "deferred"\nexit 1\n'
         )
+        # The run prints nothing and exits 1. Under LOXPP_CHECK_ONLY=1 (the
+        # --other-check run) the stub does what its name says.
+        check_rejects = write_stub(
+            work / "check_rejects.sh",
+            'if [ "$LOXPP_CHECK_ONLY" = "1" ]; then\n'
+            '    echo "stub: check rejects" >&2\n    exit 1\nfi\nexit 1\n',
+        )
+        check_accepts = write_stub(
+            work / "check_accepts.sh",
+            'if [ "$LOXPP_CHECK_ONLY" = "1" ]; then exit 0; fi\nexit 1\n',
+        )
+        check_hangs = write_stub(
+            work / "check_hangs.sh",
+            'if [ "$LOXPP_CHECK_ONLY" = "1" ]; then sleep 30; fi\nexit 1\n',
+        )
 
         cases = [
             ("1 native rejects, stub runs", str(acceptor), [static_error], 1, "compile phase"),
@@ -127,9 +154,20 @@ def main() -> int:
             ("7 control: native against itself", native, [static_error, runs, halt_probe], 0,
              "3 matched"),
         ]
+        check_cases = [
+            ("8 non-probe halt, --other-check rejects", check_rejects, [halt_plain],
+             ("--other-check", check_rejects), 1, "compile phase"),
+            ("9 non-probe halt, --other-check accepts", check_accepts, [halt_plain],
+             ("--other-check", check_accepts), 0, "MATCH       "),
+            ("10 non-probe halt, --other-check does not finish", check_hangs, [halt_plain],
+             ("--other-check", check_hangs, "--timeout", "2"), 1, "did not finish"),
+        ]
+        rows = [(name, runner, programs, (), want_code, want_text)
+                for name, runner, programs, want_code, want_text in cases]
+        rows += check_cases
         failures = []
-        for name, runner, programs, want_code, want_text in cases:
-            code, out = diff(native, runner, programs)
+        for name, runner, programs, extra, want_code, want_text in rows:
+            code, out = diff(native, runner, programs, extra)
             if code != want_code or want_text not in out:
                 failures.append(
                     f"case {name}: want exit {want_code} and {want_text!r}, got exit {code}:\n"
@@ -143,7 +181,7 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL  {failure}")
         return 1
-    print(f"OK: {len(cases)} case(s)")
+    print(f"OK: {len(rows)} case(s)")
     return 0
 
 
