@@ -496,5 +496,13 @@
   "cases": [
    "local: B3 a range count of the sparse 512 MB adds the counts of its new chunks"
   ]
+ },
+ {
+  "name": "M12 the write-back does not check that the cache is still the cache of the key",
+  "old": "    return reply.entry.cache == reply.cache and chunkOf(reply.entry.value, c) == snap;",
+  "new": "    return chunkOf(reply.entry.value, c) == snap;",
+  "cases": [
+   "local: a count after INCR does not take a count of the cache that INCR dropped"
+  ]
  }
 ]

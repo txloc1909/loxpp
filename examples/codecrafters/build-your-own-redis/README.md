@@ -361,7 +361,10 @@ is written back if the live value still holds the same chunk. So each
 byte is scanned at most one time after each write, and counts at the same
 time share the scan. A whole chunk of zero bytes is one native compare.
 `SET`, `BITOP` and the RDB load make a new `Entry` with no counts, and
-`INCR` drops them, so no count can reach a new value.
+`INCR` drops them. A scan uses or writes back a count only while its cache
+is still the cache of the `Entry` and the live value holds the same chunk:
+in one `EXEC`, a `SETBIT` and an `INCR` can give the old bytes back while
+the old cache counts the bytes between them.
 
 As in Redis, the session answers each command that it read before the end
 of the stream, also after a half-close or a protocol error (rule 7). So a

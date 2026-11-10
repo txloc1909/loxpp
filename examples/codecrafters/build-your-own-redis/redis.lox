@@ -5581,12 +5581,13 @@ fun scanBits(text, base, lo, hi, reply) {
     return n;
 }
 
-// True when the live value of the key of the reply still holds the chunk
-// snap at index c. The cache lives on the Entry, and a new value at the key
-// makes a new Entry (INCR drops the cache), so a count written to this
-// cache cannot reach a new value.
+// True when the cache of the reply is still the cache of its Entry, and the
+// live value still holds the chunk snap at index c. A new value at the key
+// makes a new Entry. INCR keeps the Entry and drops its cache: a SETBIT and
+// an INCR can give the old bytes back, while the old cache counts the bytes
+// between them, so the chunk alone does not prove the count.
 fun chunkLive(reply, c, snap) {
-    return chunkOf(reply.entry.value, c) == snap;
+    return reply.entry.cache == reply.cache and chunkOf(reply.entry.value, c) == snap;
 }
 
 // In the session: the 1 bits of the range, at most one chunk of per-byte

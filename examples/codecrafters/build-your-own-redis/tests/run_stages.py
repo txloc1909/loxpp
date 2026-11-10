@@ -5759,7 +5759,8 @@ def stages_bitmaps_cache(prog):
              "local: C3 a range count scans only its end chunks, within 0.2 s",
              "local: C4a a SETBIT during a count does not leave a wrong count",
              "local: C4b a SET during a count does not leave a wrong count",
-             "local: INCR drops the counts of the value"]
+             "local: INCR drops the counts of the value",
+             "local: a count after INCR does not take a count of the cache that INCR dropped"]
     srv = Server(prog, [])
     try:
         if aof_started(srv, names):
@@ -5827,6 +5828,20 @@ def stages_bitmaps_cache(prog):
             c.call("INCR", "n")
             after = c.call("BITCOUNT", "n")
             check("local: INCR drops the counts of the value", before == 5 and after == 3, repr((before, after)))
+            # In one EXEC, SETBIT changes the old cache and INCR gives the
+            # same bytes back ("19" -> "18" -> "19"): the count of the
+            # snapshot must not come from the old cache.
+            c.call("SET", "k", "19")
+            c.call("BITCOUNT", "k")
+            x = Client(srv.port)
+            x.send_raw(encode("MULTI") + encode("BITCOUNT", "k", "0", "15", "BIT") + encode("SETBIT", "k", "15", "0")
+                       + encode("INCR", "k") + encode("EXEC"))
+            for _ in range(4):
+                x.try_read(10)
+            reply = x.try_read(10)
+            x.close()
+            check("local: a count after INCR does not take a count of the cache that INCR dropped",
+                  reply == [7, 1, 19], repr(reply))
             c.close()
     finally:
         srv.stop()
