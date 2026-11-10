@@ -24,9 +24,9 @@ usage errors.
 `stop()` has a case of its own: an example that hangs is stopped at its limit,
 through a runner that leaves a descendant, and the whole run must come back soon
 after. A runner that traps SIGTERM is stopped by the SIGKILL round, so its case
-needs that round. Waiting for such a group costs the full limit of each signal, because the
-stopped descendant stays in the group as a zombie and only a parent that reaps
-can remove it.
+needs that round. Waiting for such a group costs the full limit of each signal,
+because the stopped descendant stays in the group as a zombie and only a parent
+that reaps can remove it.
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
@@ -358,7 +358,7 @@ def main() -> None:
         )
 
         # A runner that traps SIGTERM. Only the SIGKILL round ends it. If stop()
-        # sent SIGTERM alone, the tool would wait for the runner for ever, so
+        # sent SIGTERM alone, the tool would wait for the runner forever, so
         # this run has a limit of its own, and a tool that does not return
         # within it fails the case.
         d = write_dir(tmp, {"trapped.lox": "// CHECK: never\nsleep(60);\n"})
