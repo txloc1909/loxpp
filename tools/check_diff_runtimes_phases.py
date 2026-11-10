@@ -29,6 +29,10 @@ Cases:
      empty stdout is a real halt, MATCH (halt), exit 0.
  10. the same halt, and the `--other-check` runner does not finish: DIVERGE,
      exit 1.
+ 11. the same halt with no `--other-check`: the check never runs, so the
+     silent halt is MATCH (halt), exit 0.
+ 12. the same halt with `--other-check`, and the other runner prints output: the
+     check does not run, so the output decides, MATCH (halt), exit 0.
 
 Usage:
     tools/check_diff_runtimes_phases.py --native build/loxpp
@@ -140,6 +144,9 @@ def main() -> int:
             work / "check_hangs.sh",
             'if [ "$LOXPP_CHECK_ONLY" = "1" ]; then sleep 30; fi\nexit 1\n',
         )
+        prints_partial = write_stub(
+            work / "prints_partial.sh", 'echo "partial"\nexit 1\n'
+        )
 
         cases = [
             ("1 native rejects, stub runs", str(acceptor), [static_error], 1, "compile phase"),
@@ -161,6 +168,13 @@ def main() -> int:
              ("--other-check", check_accepts), 0, "MATCH       "),
             ("10 non-probe halt, --other-check does not finish", check_hangs, [halt_plain],
              ("--other-check", check_hangs, "--timeout", "2"), 1, "did not finish"),
+            # Without the flag the check never runs, so a silent halt matches.
+            ("11 non-probe halt, no --other-check", check_rejects, [halt_plain],
+             (), 0, "MATCH       "),
+            # The other runner printed output, so it compiled the program: the
+            # check must not run, even though it would reject.
+            ("12 non-probe halt, --other-check, other prints output", prints_partial,
+             [halt_plain], ("--other-check", check_rejects), 0, "MATCH       "),
         ]
         rows = [(name, runner, programs, (), want_code, want_text)
                 for name, runner, programs, want_code, want_text in cases]

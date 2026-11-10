@@ -737,7 +737,7 @@ def main() -> None:
             # prints anything.
             if args.other_check is not None and other_out == "":
                 try:
-                    check_out, check_err, check_status = run_program(
+                    _, check_err, check_status = run_program(
                         [args.other_check, str(lox_file)],
                         input_file,
                         args.timeout,
