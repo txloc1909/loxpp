@@ -435,6 +435,42 @@ long msSince(PClock::time_point start) {
 // after its task waited, whatever start-up took.
 PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
 
+// A pipe for a test that waits on its read end. The destructor cancels the
+// wait and closes both descriptors, so an ASSERT that returns early cannot
+// leave a descriptor or a poller registration behind.
+struct ReadablePipe {
+    Poller& poller;
+    int fds[2]{-1, -1};
+
+    ReadablePipe(Poller& p, bool readable) : poller(p) {
+        if (pipe(fds) != 0) {
+            fds[0] = fds[1] = -1;
+            return;
+        }
+        if (readable && write(fds[1], "x", 1) != 1) {
+            close(fds[0]);
+            close(fds[1]);
+            fds[0] = fds[1] = -1;
+        }
+    }
+
+    ~ReadablePipe() {
+        if (fds[0] >= 0) {
+            std::vector<Poller::Token> cancelled;
+            poller.cancelFd(fds[0], cancelled);
+            close(fds[0]);
+        }
+        if (fds[1] >= 0) {
+            close(fds[1]);
+        }
+    }
+
+    ReadablePipe(const ReadablePipe&) = delete;
+    ReadablePipe& operator=(const ReadablePipe&) = delete;
+
+    int readFd() const { return fds[0]; }
+};
+
 } // namespace
 
 // A program in which no task is `waiting` makes no poller, and opens no
@@ -457,9 +493,11 @@ TEST_F(WorkerTest, AWorkerWithNoWaitingTaskMakesNoPoller) {
 // guard in test/CMakeLists.txt ends the test.
 TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
     VM vm;
-    int fds[2];
-    ASSERT_EQ(pipe(fds), 0);
-    ASSERT_NE(vm.runtime().poller().waitFd(fds[0], Poller::Interest::Read), 0);
+    ReadablePipe readPipe(vm.runtime().poller(), false);
+    ASSERT_GE(readPipe.readFd(), 0);
+    ASSERT_NE(
+        vm.runtime().poller().waitFd(readPipe.readFd(), Poller::Interest::Read),
+        0);
     const auto start = PClock::now();
     ASSERT_EQ(vm.interpret(R"(
         fun far(main) { sleep(0.1); task.send(main, "hi"); }
@@ -469,10 +507,6 @@ TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
               InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "got"), "hi");
     EXPECT_LT(msSince(start), 4000);
-    std::vector<Poller::Token> cancelled;
-    vm.runtime().poller().cancelFd(fds[0], cancelled);
-    close(fds[0]);
-    close(fds[1]);
 }
 
 // The main worker holds a registered wait, so it is busy, and the main task
@@ -486,10 +520,9 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     int fired = 0;
     Runtime& rt = vm.runtime();
     rt.setSchedulerClock(&noSwitchPoll);
-    int fds[2];
-    ASSERT_EQ(pipe(fds), 0);
-    ASSERT_EQ(write(fds[1], "x", 1), 1);
-    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
+    ReadablePipe readPipe(rt.poller(), true);
+    ASSERT_GE(readPipe.readFd(), 0);
+    ASSERT_NE(rt.poller().waitFd(readPipe.readFd(), Poller::Interest::Read), 0);
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
         // C7: the worker holds a registered wait, so it stays in the group's
@@ -522,10 +555,6 @@ TEST_F(WorkerTest, NoFalseDeadlockWhileAWaitIsRegistered) {
     EXPECT_EQ(err.find("Deadlock"), std::string::npos) << err;
     EXPECT_EQ(fired, 1);
     EXPECT_EQ(globalString(vm, "got"), "7");
-    std::vector<Poller::Token> cancelled;
-    rt.poller().cancelFd(fds[0], cancelled);
-    close(fds[0]);
-    close(fds[1]);
 }
 
 // A send must write the wakeup descriptor only while the worker sleeps in its
@@ -542,10 +571,9 @@ TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     int fired = 0;
     Runtime& rt = vm.runtime();
     rt.setSchedulerClock(&noSwitchPoll);
-    int fds[2];
-    ASSERT_EQ(pipe(fds), 0);
-    ASSERT_EQ(write(fds[1], "x", 1), 1);
-    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
+    ReadablePipe readPipe(rt.poller(), true);
+    ASSERT_GE(readPipe.readFd(), 0);
+    ASSERT_NE(rt.poller().waitFd(readPipe.readFd(), Poller::Interest::Read), 0);
     rt.setPollHandler([&](const std::vector<Poller::Token>&) {
         ++fired;
         Inbox& inbox = rt.memoryManager().inbox();
@@ -565,10 +593,6 @@ TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
     )"),
               InterpretResult::OK);
     EXPECT_EQ(fired, 1);
-    std::vector<Poller::Token> cancelled;
-    rt.poller().cancelFd(fds[0], cancelled);
-    close(fds[0]);
-    close(fds[1]);
 }
 
 // The runtime clears the pointers that senders use before the poller is
@@ -610,10 +634,9 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
     // deadlock. Without it, pollWhileBusy can end the wait first. No assertion
     // below checks which path ends the wait.
     rt.setSchedulerClock(&noSwitchPoll);
-    int fds[2];
-    ASSERT_EQ(pipe(fds), 0);
-    ASSERT_EQ(write(fds[1], "x", 1), 1);
-    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
+    ReadablePipe readPipe(rt.poller(), true);
+    ASSERT_GE(readPipe.readFd(), 0);
+    ASSERT_NE(rt.poller().waitFd(readPipe.readFd(), Poller::Interest::Read), 0);
     rt.setPollHandler([&](const std::vector<Poller::Token>&) { ++fired; });
     testing::internal::CaptureStderr();
     InterpretResult result = vm.interpret("var got = task.receive();");
@@ -623,10 +646,30 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
               std::string::npos)
         << err;
     EXPECT_EQ(fired, 1);
-    std::vector<Poller::Token> cancelled;
-    rt.poller().cancelFd(fds[0], cancelled);
-    close(fds[0]);
-    close(fds[1]);
+}
+
+// A ReadablePipe releases its descriptors and its wait when its scope ends
+// early, as it does when an ASSERT returns from the test.
+TEST(ReadablePipeTest, ReleasesDescriptorsAndWaitOnEarlyExit) {
+    auto openDescriptors = [] {
+        int count = 0;
+        DIR* dir = opendir("/proc/self/fd");
+        while (dir != nullptr && readdir(dir) != nullptr)
+            ++count;
+        if (dir != nullptr)
+            closedir(dir);
+        return count;
+    };
+    Poller poller;
+    const int before = openDescriptors();
+    auto earlyExit = [&] {
+        ReadablePipe readPipe(poller, true);
+        poller.waitFd(readPipe.readFd(), Poller::Interest::Read);
+        return;
+    };
+    earlyExit();
+    EXPECT_FALSE(poller.hasWaits());
+    EXPECT_EQ(openDescriptors(), before);
 }
 
 // --- The wait record after a wait, a line and a run --------------------------
