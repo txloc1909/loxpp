@@ -167,7 +167,8 @@ def main() -> int:
             ("9 non-probe halt, --other-check accepts", check_accepts, [halt_plain],
              ("--other-check", check_accepts), 0, "MATCH       "),
             ("10 non-probe halt, --other-check does not finish", check_hangs, [halt_plain],
-             ("--other-check", check_hangs, "--timeout", "2"), 1, "did not finish"),
+             ("--other-check", check_hangs, "--timeout", "2"), 1,
+             "compile phase: the other runner's check did not finish"),
             # Without the flag the check never runs, so a silent halt matches.
             ("11 non-probe halt, no --other-check", check_rejects, [halt_plain],
              (), 0, "MATCH       "),

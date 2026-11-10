@@ -39,11 +39,11 @@ stdout must also start with them (tools/check_spec_probes.py), or the program
 reports DIVERGE (compile phase when the other stdout is empty). For a program
 that is not a spec probe, the script cannot know where the fault is. For a
 probe with no CHECK line, the halt prints nothing before its fault, and the
-spec binds nothing else that tells it from a rejection. For such a halt, with
-an empty stdout from the other runner, `--other-check RUNNER` runs the other
-runner with LOXPP_CHECK_ONLY=1. Exit 0 means the program compiles, so the halt
-matches. Any other exit reports DIVERGE (compile phase). Without that option
-the prefix rule is the only check, and a rejection by the other runner matches.
+spec binds nothing else that tells it from a rejection. So for a halt where the
+other runner prints nothing, `--other-check RUNNER` runs that runner with
+LOXPP_CHECK_ONLY=1. Exit 0 means the program compiles, so the halt matches.
+Any other exit reports DIVERGE (compile phase). Without that option the prefix
+rule is the only check, and a rejection by the other runner matches.
 
 Run. Otherwise this script compares stdout and the exact exit status: a run
 with the same stdout but another exit status reports DIVERGE. The probe
