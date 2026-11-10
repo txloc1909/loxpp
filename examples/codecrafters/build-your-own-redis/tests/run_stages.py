@@ -5350,6 +5350,223 @@ def stages_geo_replication(prog):
         m.close()
 
 
+def stages_bitmaps(prog):
+    srv = Server(prog, [])
+    try:
+        check("bitmaps: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        stages_bitmaps_on(srv)
+    finally:
+        srv.stop()
+    stages_bitmaps_limits(prog)
+    stages_bitmaps_replication(prog)
+
+
+def stages_bitmaps_on(srv):
+    c = Asker(srv)
+    check("bitmaps-01 SETBIT gives the old bit", c.call("SETBIT", "bitmap_key", "3", "1") == 0)
+    c.call("SETBIT", "bit_key", "2", "1")
+    check("bitmaps-02 GETBIT of a set bit gives 1", c.call("GETBIT", "bit_key", "2") == 1)
+    check("bitmaps-02 GETBIT of a bit that is not set gives 0", c.call("GETBIT", "bit_key", "3") == 0)
+    check("bitmaps-02 GETBIT of a missing key gives 0", c.call("GETBIT", "new_key", "2") == 0)
+    c.call("SET", "mykey", "A")
+    check("bitmaps-03 GETBIT reads a string from SET", [c.call("GETBIT", "mykey", o) for o in ("1", "7", "0")] == [1, 1, 0])
+    c.call("SETBIT", "mykey4", "1", "1")
+    check("bitmaps-04 GET reads a bitmap", c.call("GET", "mykey4") == "@")
+    c.call("SETBIT", "grow", "1", "1")
+    check("bitmaps-05 STRLEN of a bitmap of one byte gives 1", c.call("STRLEN", "grow") == 1)
+    check("bitmaps-05 SETBIT in a second byte gives 0", c.call("SETBIT", "grow", "10", "1") == 0)
+    check("bitmaps-05 GETBIT of the new bit gives 1", c.call("GETBIT", "grow", "10") == 1)
+    check("bitmaps-05 STRLEN after the growth gives 2", c.call("STRLEN", "grow") == 2)
+    c.call("SETBIT", "bc", "1", "1")
+    c.call("SETBIT", "bc", "10", "1")
+    got = [c.call("BITCOUNT", "bc"), c.call("BITCOUNT", "bc", "0", "0"), c.call("BITCOUNT", "bc", "1", "1"),
+           c.call("BITCOUNT", "bc", "0", "1"), c.call("BITCOUNT", "bc", "1", "5")]
+    check("bitmaps-06 BITCOUNT counts the set bits", got == [2, 1, 1, 2, 1], repr(got))
+    for k, offs in (("k1", ("0", "4")), ("k2", ("0", "6"))):
+        for o in offs:
+            c.call("SETBIT", k, o, "1")
+    check("bitmaps-07 BITOP AND gives the length", c.call("BITOP", "AND", "dest", "k1", "k2") == 1)
+    check("bitmaps-07 BITOP AND keeps the common bits", [c.call("GETBIT", "dest", o) for o in ("0", "4")] == [1, 0])
+    c.call("SETBIT", "k3", "1", "1")
+    c.call("SETBIT", "k3", "10", "1")
+    c.call("SETBIT", "k4", "1", "1")
+    check("bitmaps-08 BITOP AND of different lengths gives the longest", c.call("BITOP", "AND", "dest8", "k3", "k4") == 2)
+    check("bitmaps-08 BITOP AND reads a missing byte as 0", [c.call("GETBIT", "dest8", o) for o in ("1", "10")] == [1, 0])
+    check("bitmaps-09 BITOP OR gives the length", c.call("BITOP", "OR", "dest9", "k1", "k2") == 1)
+    check("bitmaps-09 BITOP OR keeps a bit of one source", c.call("GETBIT", "dest9", "4") == 1)
+    check("bitmaps-09 BITOP OR of different lengths", c.call("BITOP", "OR", "dest10", "k3", "k4") == 2
+          and c.call("GETBIT", "dest10", "10") == 1)
+
+    # Local cases.
+    check("local: BITOP XOR and NOT", c.call("BITOP", "XOR", "x", "k1", "k2") == 1 and c.call("GET", "x") == chr(0x0a)
+          and c.call("BITOP", "NOT", "n", "k1") == 1 and c.call("GET", "n") == chr(0x77))
+    check("local: BITOP of missing keys only removes the destination",
+          c.call("BITOP", "AND", "dest", "nokey", "nokey2") == 0 and c.call("TYPE", "dest") == "none")
+    got = [c.call("BITCOUNT", "bc", "0", "-1"), c.call("BITCOUNT", "bc", "1", "10", "BIT"),
+           c.call("BITCOUNT", "bc", "-5", "-1", "bit"), c.call("BITCOUNT", "bc", "2", "1"), c.call("BITCOUNT", "nokey")]
+    check("local: BITCOUNT with negative indexes and in bits", got == [2, 2, 0, 0, 0], repr(got))
+    for cmd, want in ((("SETBIT", "x", "-1", "1"), "ERR bit offset is not an integer or out of range"),
+                      (("SETBIT", "x", "4294967296", "1"), "ERR bit offset is not an integer or out of range"),
+                      (("SETBIT", "x", "1", "2"), "ERR bit is not an integer or out of range"),
+                      (("GETBIT", "x", "abc"), "ERR bit offset is not an integer or out of range"),
+                      (("BITCOUNT", "bc", "0"), "ERR syntax error"),
+                      (("BITCOUNT", "bc", "0", "1", "FOO"), "ERR syntax error"),
+                      (("BITCOUNT", "bc", "a", "b"), "ERR value is not an integer or out of range"),
+                      (("BITOP", "FOO", "d", "k1"), "ERR syntax error"),
+                      (("BITOP", "NOT", "d", "k1", "k2"), "ERR BITOP NOT must be called with a single source key."),
+                      (("SETBIT", "x", "1"), "ERR wrong number of arguments for 'setbit'"),
+                      (("STRLEN",), "ERR wrong number of arguments for 'strlen'")):
+        got = c.call(*cmd)
+        check("local: %s gives the error of Redis" % " ".join(cmd), isinstance(got, Error) and got.startswith(want), repr(got))
+    c.call("LPUSH", "l", "a")
+    for cmd in (("SETBIT", "l", "1", "1"), ("GETBIT", "l", "1"), ("STRLEN", "l"), ("BITCOUNT", "l"), ("BITOP", "AND", "d", "l")):
+        got = c.call(*cmd)
+        check("local: %s of a list gives WRONGTYPE" % cmd[0], isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+    check("local: BITOP to a list key replaces it", c.call("BITOP", "AND", "l", "k1") == 1 and c.call("TYPE", "l") == "string")
+    c.call("SET", "num", "10")
+    check("local: INCR reads a string that SETBIT changed", c.call("SETBIT", "num", "15", "1") == 0 and c.call("GET", "num") == "11"
+          and c.call("INCR", "num") == 12)
+    c.call("SET", "s", "hello")
+    c.call("SETBIT", "s", "0", "1")
+    check("local: SET GET gives the old value of a bitmap", c.call("SET", "s", "x", "GET") == chr(ord("h") | 0x80) + "ello"
+          and c.call("GET", "s") == "x")
+    check("local: SETBIT 0 on a new key makes a zero byte", c.call("SETBIT", "z", "0", "0") == 0
+          and c.call("GET", "z") == "\x00" and c.call("STRLEN", "z") == 1)
+    # Across chunks: bits in many chunks, then GET, GETBIT and BITCOUNT agree
+    # with a model.
+    model = bytearray(20000)
+    for o in (0, 7, 8191, 32767, 32768, 65535, 100001, 159999):
+        c.call("SETBIT", "chunks", str(o), "1")
+        model[o // 8] |= 0x80 >> (o % 8)
+    c.call("SETBIT", "chunks", "32767", "0")
+    model[32767 // 8] &= ~(0x80 >> 7)
+    got = c.call("GET", "chunks")
+    check("local: a bitmap over several chunks reads back as written",
+          isinstance(got, str) and got.encode("latin-1") == bytes(model) and c.call("STRLEN", "chunks") == 20000
+          and c.call("BITCOUNT", "chunks") == sum(bin(b).count("1") for b in model)
+          and c.call("BITCOUNT", "chunks", "1000", "15000") == sum(bin(b).count("1") for b in model[1000:15001]),
+          repr(got)[:60])
+    # WATCH: SETBIT and BITOP mark the watchers.
+    w = Asker(srv)
+    w.call("WATCH", "k1")
+    c.call("SETBIT", "k1", "1", "1")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: SETBIT fails EXEC of a client that watches the key", w.call("EXEC") is None)
+    w.call("WATCH", "dest7")
+    c.call("BITOP", "OR", "dest7", "k1", "k2")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: BITOP fails EXEC of a client that watches the destination", w.call("EXEC") is None)
+    w.close()
+    c.close()
+
+
+def stages_bitmaps_limits(prog):
+    srv = Server(prog, [])
+    try:
+        names = ["local: B1 SETBIT at the largest offset stalls PING at most 1 s",
+                 "local: B1 the bitmap is 512 MB with the bit set",
+                 "local: B2 BITCOUNT of 8 MB stalls PING at most 1 s",
+                 "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s",
+                 "local: B4 BITOP of 1048576 source bytes stalls PING at most 1 s",
+                 "local: BITOP over 1048576 source bytes is refused",
+                 "local: B5 GET of a bitmap of 64 MB stalls PING at most 1 s",
+                 "local: EXEC refuses bitmap work over 1048576"]
+        if aof_started(srv, names):
+            c = Asker(srv)
+            c.c.sock.settimeout(120)
+            got = [None]
+
+            def setbit_max():
+                got[0] = c.call("SETBIT", "max", "4294967295", "1")
+            worst, wrong, _ = measure_while(srv, setbit_max)
+            check(names[0], worst <= 1.0 and not wrong and got[0] == 0, "worst %.3f s" % worst)
+            check(names[1], c.call("STRLEN", "max") == 536870912 and c.call("GETBIT", "max", "4294967295") == 1)
+            c.call("SETBIT", "b8", str(8 * 8 * 1024 * 1024 - 1), "1")
+            c.call("SETBIT", "b8", "12345", "1")
+
+            def bitcount8():
+                c.raw().send_raw(encode("BITCOUNT", "b8", "0", "-1"))
+                got[0] = c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, bitcount8)
+            check(names[2], worst <= 1.0 and not wrong and got[0] == 2, "worst %.3f s, %r" % (worst, got[0]))
+            t0 = time.time()
+            got = c.call("BITCOUNT", "max")
+            check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
+            c.call("SET", "h1", "\xff" * (1 << 19))
+            c.call("SET", "h2", "\x0f" * (1 << 19))
+            got = [None]
+
+            def bitop():
+                got[0] = c.call("BITOP", "AND", "hd", "h1", "h2")
+            worst, wrong, _ = measure_while(srv, bitop)
+            check(names[4], worst <= 1.0 and not wrong and got[0] == 524288 and c.call("GETBIT", "hd", "4") == 1
+                  and c.call("GETBIT", "hd", "3") == 0, "worst %.3f s" % worst)
+            got = c.call("BITOP", "AND", "hd", "h1", "h2", "h1")
+            check(names[5], isinstance(got, Error) and "1048576" in got, repr(got))
+            c.call("SETBIT", "b64", str(64 * 8 * 1024 * 1024 - 1), "1")
+            got = [None]
+
+            def get64():
+                c.raw().send_raw(encode("GET", "b64"))
+                got[0] = c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, get64)
+            check(names[6], worst <= 1.0 and not wrong and isinstance(got[0], str) and len(got[0]) == 64 * 1024 * 1024
+                  and got[0][-1] == "\x01", "worst %.3f s" % worst)
+            # 7 SETBIT at the largest offset on new keys are 7 x 131073
+            # chunks, under 1048576; the eighth is over.
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + b"".join(encode("SETBIT", "e%d" % i, "4294967295", "1") for i in range(8)) + encode("EXEC"))
+            for _ in range(9):
+                x.read()
+            reply = x.read()
+            x.close()
+            check(names[7], isinstance(reply, list) and reply[:7] == [0] * 7 and isinstance(reply[7], Error)
+                  and "bitmap work" in reply[7] and c.call("TYPE", "e7") == "none", repr(reply)[-80:])
+            c.close()
+    finally:
+        srv.stop()
+
+
+def stages_bitmaps_replication(prog):
+    srv = Server(prog, [])
+    try:
+        name = "local: SETBIT and BITOP are propagated"
+        if aof_started(srv, [name]):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            c.call("SETBIT", "rb", "3", "1")
+            c.call("BITOP", "NOT", "rd", "rb")
+            c.call("SET", "end", "1")
+            got = [r.try_read(2) for _ in range(3)]
+            check(name, got == [["SETBIT", "rb", "3", "1"], ["BITOP", "NOT", "rd", "rb"], ["SET", "end", "1"]], repr(got))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        names = ["local: a replica refuses SETBIT and BITOP from a client", "local: a replica applies SETBIT of its master"]
+        if aof_started(rep, names):
+            link = m.accept()
+            fake_handshake(link)
+            c = Asker(rep)
+            got = [c.call("SETBIT", "q", "1", "1"), c.call("BITOP", "NOT", "q2", "q")]
+            check(names[0], all(isinstance(g, Error) and g.startswith("READONLY") for g in got), repr(got))
+            link.send_raw(encode("SETBIT", "q", "1", "1"))
+            time.sleep(0.3)
+            check(names[1], c.call("GET", "q") == "@")
+            c.close()
+    finally:
+        rep.stop()
+        m.close()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -5362,6 +5579,7 @@ GROUPS = [
     ("pub-sub", stages_pubsub),
     ("sorted-sets", stages_zset),
     ("geospatial", stages_geo),
+    ("bitmaps", stages_bitmaps),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
