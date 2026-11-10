@@ -269,6 +269,18 @@ public final class RuntimeStdlibTest {
 
             checkThrows(() -> call(globals, "stat", 1.0), LoxError.class, "stat() rejects a non-string");
 
+            // A path that holds a NUL byte names a shorter path at the JDK
+            // too, and Paths.get() refuses one with an InvalidPathException
+            // that no Lox try catches (spec/05-stdlib.md, Paths; issue #1158).
+            // A metadata call that passed the String through would answer
+            // with the shorter path's result instead.
+            String nulFile = tmpFile.getAbsolutePath() + "\u0000tail";
+            String nulDir = tmpDir.getAbsolutePath() + "\u0000tail";
+            checkHalting(() -> call(globals, "exists", nulFile), "exists() rejects a NUL byte");
+            checkHalting(() -> call(globals, "is_dir", nulDir), "is_dir() rejects a NUL byte");
+            checkHalting(() -> call(globals, "is_file", nulFile), "is_file() rejects a NUL byte");
+            checkHalting(() -> call(globals, "stat", nulFile), "stat() rejects a NUL byte");
+
             check(call(globals, "mkdir", tmpDir.getAbsolutePath() + "/one") == null,
                     "mkdir() creates one directory and returns nil");
             check(Boolean.TRUE.equals(call(globals, "is_dir", tmpDir.getAbsolutePath() + "/one")),

@@ -473,29 +473,32 @@ public final class LoxRuntime {
                                throw new LoxError(
                                    "Expected a string argument.");
                            }
-                           return Files.exists(Paths.get((String)args[0]));
+                           Path p = resolvePath("exists", (String)args[0]);
+                           return p != null && Files.exists(p);
                        }));
         globals.define("is_dir", new LoxNative("is_dir", 1, args -> {
                            if (!(args[0] instanceof String)) {
                                throw new LoxError(
                                    "Expected a string argument.");
                            }
-                           return Files.isDirectory(Paths.get((String)args[0]));
+                           Path p = resolvePath("is_dir", (String)args[0]);
+                           return p != null && Files.isDirectory(p);
                        }));
         globals.define(
             "is_file", new LoxNative("is_file", 1, args -> {
                 if (!(args[0] instanceof String)) {
                     throw new LoxError("Expected a string argument.");
                 }
-                return Files.isRegularFile(Paths.get((String)args[0]));
+                Path p = resolvePath("is_file", (String)args[0]);
+                return p != null && Files.isRegularFile(p);
             }));
         globals.define(
             "stat", new LoxNative("stat", 1, args -> {
                 if (!(args[0] instanceof String)) {
                     throw new LoxError("Expected a string argument.");
                 }
-                Path p = Paths.get((String)args[0]);
-                if (!Files.exists(p)) {
+                Path p = resolvePath("stat", (String)args[0]);
+                if (p == null || !Files.exists(p)) {
                     return null; // Lox nil, matching os_api.cpp's statNative
                 }
                 LoxMap map = new LoxMap();
@@ -527,14 +530,7 @@ public final class LoxRuntime {
                                throw new LoxError("Expected 1 or 2 arguments.");
                            }
                            String path = requireString(args[0]);
-                           // Paths.get() rejects a NUL itself, and a raw
-                           // InvalidPathException would escape every Lox
-                           // try, so both checks use the String.
-                           if (path.indexOf('\0') >= 0) {
-                               throw new LoxError(
-                                   "mkdir() path must not contain a NUL byte.");
-                           }
-                           Path p = Paths.get(path);
+                           Path p = resolvePath("mkdir", path);
                            boolean parents = false;
                            if (args.length == 2) {
                                if (!"p".equals(requireString(args[1]))) {
@@ -547,9 +543,14 @@ public final class LoxRuntime {
                                // An empty path names no directory. The JDK
                                // resolves it to the working directory and
                                // creates that, which no other consumer does.
-                               if (path.isEmpty()) {
+                               // A path the JDK refuses outright names no
+                               // directory either.
+                               if (path.isEmpty() || p == null) {
                                    throw new java.nio.file.NoSuchFileException(
-                                       "", null, "the path is empty");
+                                       path, null,
+                                       path.isEmpty()
+                                           ? "the path is empty"
+                                           : "the path cannot be resolved");
                                }
                                if (parents) {
                                    Files.createDirectories(p);
@@ -559,7 +560,7 @@ public final class LoxRuntime {
                            } catch (IOException e) {
                                throw LoxOps.makeError(
                                    "DirectoryError",
-                                   "mkdir(): cannot create '" + p + "': " +
+                                   "mkdir(): cannot create '" + path + "': " +
                                        e.getMessage());
                            }
                            return null;
@@ -600,6 +601,29 @@ public final class LoxRuntime {
             throw new LoxError("Expected a string argument.");
         }
         return (String)v;
+    }
+
+    /**
+     * Resolves a path String for a filesystem native (spec/05-stdlib.md,
+     * Paths).
+     *
+     * A String that holds a NUL byte cannot name a path on any consumer, so
+     * it is the spec's halting fault, checked before the JDK sees it. A
+     * String the JDK refuses for another reason throws InvalidPathException
+     * at the resolve, which is a RuntimeException no Lox `try` catches; this
+     * returns null for it, and the caller gives it the outcome its own spec
+     * section gives for a path it cannot use.
+     */
+    static Path resolvePath(String function, String path) {
+        if (path.indexOf('\0') >= 0) {
+            throw new LoxError(
+                function + "() path must not contain a NUL byte.");
+        }
+        try {
+            return Paths.get(path);
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
     }
 
     private static int requirePort(Object v, int minPort) {
