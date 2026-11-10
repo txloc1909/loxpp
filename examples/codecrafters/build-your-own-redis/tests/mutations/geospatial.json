@@ -225,14 +225,6 @@
   ]
  },
  {
-  "name": "no GEOSEARCH limit in EXEC",
-  "old": "        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }",
-  "new": "",
-  "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
-  ]
- },
- {
   "name": "EXEC does not set the GEOSEARCH limit",
   "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n",
   "new": "",
@@ -265,14 +257,6 @@
   ]
  },
  {
-  "name": "FROMLONLAT and FROMMEMBER together are taken",
-  "old": "    if (byLonLat == byMember) {",
-  "new": "    if (!byLonLat and !byMember) {",
-  "cases": [
-   "local: GEOSEARCH g8 FROMLONLAT 2 48 FROMMEMBER Paris BYRADIUS 1 m gives the error of Redis, in its order"
-  ]
- },
- {
   "name": "inf is written as a number",
   "old": "    if (x == math.inf) {\n        return \"inf\";\n    }",
   "new": "",
@@ -302,6 +286,46 @@
   "new": "    var key = argv[1];\n    var entry = zsetEntry(key);\n    if (entry == false) {\n        entry = nil;\n    }\n    var z = nil;",
   "cases": [
    "local: GEOSEARCH str FROMLONLAT 999 0 BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "no GEOSEARCH limit in EXEC",
+  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                return GEO_EXEC_TOO_MANY;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+  ]
+ },
+ {
+  "name": "the GEOSEARCH limit is checked after the walk",
+  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                return GEO_EXEC_TOO_MANY;\n            }\n        }\n    }\n    if (geoExecCandidates != nil) {\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
+  "new": "        }\n    }\n    if (geoExecCandidates != nil) {\n        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused"
+  ]
+ },
+ {
+  "name": "FROMMEMBER after FROMLONLAT is taken",
+  "old": "            if (byLonLat) {\n                return errorReply(\"ERR syntax error\");\n            }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH g8 FROMLONLAT 2 48 FROMMEMBER Paris BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "FROMLONLAT after FROMMEMBER is taken",
+  "old": "            if (byMember) {\n                return errorReply(\"ERR syntax error\");\n            }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH g8 FROMMEMBER Paris FROMLONLAT 999 48 BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "FROMMEMBER of a missing key is an error",
+  "old": "            if (z != nil) {\n                var score = z.dict[argv[i + 1]];",
+  "new": "            if (true) {\n                var score = nil;\n                if (z != nil) {\n                    score = z.dict[argv[i + 1]];\n                }",
+  "cases": [
+   "local: GEOSEARCH FROMMEMBER of a missing key is empty, as in Redis"
   ]
  }
 ]

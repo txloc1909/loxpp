@@ -4924,6 +4924,11 @@ fun cmdGeosearch(ctx, argv) {
     while (i < len(argv)) {
         var opt = upper(argv[i]);
         if (opt == "FROMLONLAT" and i + 2 < len(argv)) {
+            // As in Redis, FROMLONLAT after FROMMEMBER is a syntax error,
+            // and the other way too.
+            if (byMember) {
+                return errorReply("ERR syntax error");
+            }
             from = geoLonLat(argv[i + 1], argv[i + 2]);
             if (type(from) == "String") {
                 return from;
@@ -4931,15 +4936,19 @@ fun cmdGeosearch(ctx, argv) {
             byLonLat = true;
             i = i + 3;
         } else if (opt == "FROMMEMBER" and i + 1 < len(argv)) {
-            var score = nil;
+            if (byLonLat) {
+                return errorReply("ERR syntax error");
+            }
+            // On a missing key Redis decodes nothing, and the reply is
+            // empty after the parse.
             if (z != nil) {
-                score = z.dict[argv[i + 1]];
-            }
-            if (score != nil) {
-                from = geoDecodeScore(score);
-            }
-            if (score == nil or from == nil) {
-                return errorReply("ERR could not decode requested zset member");
+                var score = z.dict[argv[i + 1]];
+                if (score != nil) {
+                    from = geoDecodeScore(score);
+                }
+                if (score == nil or from == nil) {
+                    return errorReply("ERR could not decode requested zset member");
+                }
             }
             byMember = true;
             i = i + 2;
@@ -4960,7 +4969,7 @@ fun cmdGeosearch(ctx, argv) {
             return errorReply("ERR syntax error");
         }
     }
-    if (byLonLat == byMember) {
+    if (!byLonLat and !byMember) {
         return errorReply("ERR exactly one of FROMMEMBER or FROMLONLAT can be specified for GEOSEARCH");
     }
     if (radius == nil) {
@@ -4990,12 +4999,14 @@ fun cmdGeosearch(ctx, argv) {
             members.append(x.member);
             scores.append(x.score);
             x = x.forward[0];
+            // In EXEC the walk stops as soon as it is over the limit, so a
+            // refused GEOSEARCH costs no more than the limit.
+            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {
+                return GEO_EXEC_TOO_MANY;
+            }
         }
     }
     if (geoExecCandidates != nil) {
-        if (len(members) > geoExecCandidates) {
-            return GEO_EXEC_TOO_MANY;
-        }
         geoExecCandidates = geoExecCandidates - len(members);
     }
     if (!spendElements(len(members))) {

@@ -5142,6 +5142,8 @@ def stages_geo_on(srv):
     check("local: GEOSEARCH FROMMEMBER uses the place of the member",
           sorted(c.call("GEOSEARCH", "g8", "FROMMEMBER", "Paris", "BYRADIUS", "500", "km")) == ["London", "Paris"])
     check("local: GEOSEARCH of a missing key is empty", c.call("GEOSEARCH", "nokey", "FROMLONLAT", "2", "48", "BYRADIUS", "1", "m") == [])
+    check("local: GEOSEARCH FROMMEMBER of a missing key is empty, as in Redis",
+          c.call("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "m") == [])
     check("local: GEOADD of an existing member at the same place gives 0",
           c.call("GEOADD", "g8", "2.2944692", "48.8584625", "Paris") == 0)
     check("local: a place at the top corner is decoded and clamped", c.call("GEOADD", "g8", "180", "85.05112878", "edge") == 1
@@ -5185,9 +5187,11 @@ def stages_geo_on(srv):
     check("local: GEOSEARCH south of the equator takes the bounding box of Redis", got == ["p0", "p1"], repr(got))
     for cmd, want in ((("GEOSEARCH", "str", "FROMLONLAT", "999", "0", "BYRADIUS", "1", "m"), "WRONGTYPE"),
                       (("GEOSEARCH", "g8", "FROMMEMBER", "nosuch", "BYRADIUS", "1", "xx"), "ERR could not decode requested zset member"),
-                      (("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "m"), "ERR could not decode requested zset member"),
+                      (("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "xx"), "ERR unsupported unit provided"),
                       (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "FROMMEMBER", "Paris", "BYRADIUS", "1", "m"),
-                       "ERR exactly one of FROMMEMBER or FROMLONLAT"),
+                       "ERR syntax error"),
+                      (("GEOSEARCH", "g8", "FROMMEMBER", "Paris", "FROMLONLAT", "999", "48", "BYRADIUS", "1", "m"),
+                       "ERR syntax error"),
                       (("GEOADD", "g9", "inf", "0", "x"), "ERR invalid longitude,latitude pair inf,0.000000"),
                       (("GEOADD", "g9", "-0", "100", "x"), "ERR invalid longitude,latitude pair -0.000000,100.000000")):
         got = c.call(*cmd)
@@ -5249,23 +5253,25 @@ def stages_geo_limits(prog):
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
             # G3: one EXEC walks at most 2097152 members of boxes: 4
-            # GEOSEARCH of 524288, and the fifth is refused.
+            # GEOSEARCH of 524288, and the rest are refused. With 64 of
+            # them, a walk that ran to its end before the refusal would stall
+            # for seconds.
             reply = [None]
 
             def exec_searches():
                 x = Client(srv.port)
                 x.sock.settimeout(120)
-                x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 5
+                x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 64
                            + encode("EXEC"))
-                for _ in range(6):
+                for _ in range(65):
                     x.read()
                 reply[0] = x.read()
                 x.close()
             worst, wrong, _ = measure_while(srv, exec_searches)
             r = reply[0]
             check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
-                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 5 and all(len(x) == 524288 for x in r[:4])
-                  and isinstance(r[4], Error) and "GEOSEARCH" in r[4], "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524288 for x in r[:4])
+                  and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[4:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
             # The element budget: 8 ZRANGE WITHSCORES of 524288 fill it, and a
             # GEOSEARCH after them is refused.
             x = Client(srv.port)
