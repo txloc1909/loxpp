@@ -368,6 +368,33 @@ SCRIPTS = {
             ["GEOADD", "x", "inf", "0", "z"], ["GEOADD", "x", "-0", "100", "z"],
         ]),
     ],
+    "bitmaps": [
+        ("bitmap-basics", [
+            ["SETBIT", "b", "3", "1"], ["SETBIT", "b", "3", "1"], ["GETBIT", "b", "3"], ["GETBIT", "b", "4"], ["GETBIT", "nokey", "2"],
+            ["SET", "a", "A"], ["GETBIT", "a", "1"], ["GETBIT", "a", "7"], ["GETBIT", "a", "0"], ["GETBIT", "a", "100"],
+            ["SETBIT", "m", "1", "1"], ["GET", "m"], ["STRLEN", "m"], ["SETBIT", "m", "10", "1"], ["STRLEN", "m"], ["GET", "m"],
+            ["BITCOUNT", "m"], ["BITCOUNT", "m", "0", "0"], ["BITCOUNT", "m", "1", "1"], ["BITCOUNT", "m", "0", "-1"],
+            ["BITCOUNT", "m", "1", "10", "BIT"], ["BITCOUNT", "m", "-5", "-1", "bit"], ["BITCOUNT", "m", "2", "1"],
+            ["BITCOUNT", "m", "-100", "100"], ["BITCOUNT", "m", "0", "1", "byte"], ["BITCOUNT", "nokey"],
+            ["SETBIT", "k1", "0", "1"], ["SETBIT", "k1", "4", "1"], ["SETBIT", "k2", "0", "1"], ["SETBIT", "k2", "6", "1"],
+            ["BITOP", "AND", "d", "k1", "k2"], ["GET", "d"], ["BITOP", "OR", "d", "k1", "k2"], ["GET", "d"],
+            ["BITOP", "XOR", "d", "k1", "k2"], ["GET", "d"], ["BITOP", "NOT", "d", "k1"], ["GET", "d"],
+            ["SETBIT", "k3", "1", "1"], ["SETBIT", "k3", "10", "1"], ["SETBIT", "k4", "1", "1"],
+            ["BITOP", "AND", "d", "k3", "k4"], ["GET", "d"], ["BITOP", "OR", "d", "k3", "k4"], ["GET", "d"],
+            ["BITOP", "AND", "d", "nokey", "nokey2"], ["TYPE", "d"], ["BITOP", "OR", "d", "k3", "nokey"], ["GET", "d"],
+            ["SET", "n", "10"], ["SETBIT", "n", "15", "1"], ["GET", "n"], ["INCR", "n"],
+            ["SET", "s", "hello"], ["SETBIT", "s", "0", "1"], ["SET", "s", "x", "GET"], ["STRLEN", "nokey"],
+            ["SETBIT", "z", "0", "0"], ["GET", "z"], ["SETBIT", "big", "100000", "1"], ["STRLEN", "big"], ["BITCOUNT", "big"],
+        ]),
+        ("bitmap-errors", [
+            ["SETBIT", "x", "-1", "1"], ["SETBIT", "x", "4294967296", "1"], ["SETBIT", "x", "1", "2"], ["SETBIT", "x", "1", "a"],
+            ["GETBIT", "x", "-1"], ["GETBIT", "x", "abc"], ["SETBIT", "x", "1"], ["GETBIT", "x"], ["STRLEN"], ["BITCOUNT"],
+            ["BITCOUNT", "x", "0"], ["BITCOUNT", "x", "a", "b"], ["BITCOUNT", "x", "0", "1", "FOO"], ["BITOP", "AND", "d"],
+            ["BITOP", "FOO", "d", "k"], ["BITOP", "NOT", "d", "a", "b"], ["LPUSH", "l", "a"], ["SETBIT", "l", "1", "1"],
+            ["GETBIT", "l", "1"], ["STRLEN", "l"], ["BITCOUNT", "l"], ["BITOP", "AND", "d", "l"], ["BITOP", "AND", "l", "nokey"],
+            ["TYPE", "l"],
+        ]),
+    ],
     "pub-sub": [
         ("subscribed-mode", [
             ["UNSUBSCRIBE"], ["UNSUBSCRIBE", "x"], ["PUBLISH", "ch", "m"], ["PUBLISH", "a"], ["SUBSCRIBE"],

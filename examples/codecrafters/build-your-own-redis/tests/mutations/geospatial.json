@@ -202,7 +202,7 @@
  },
  {
   "name": "a replica takes GEOADD from a client",
-  "old": "\"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "old": "\"ZADD\": true, \"ZREM\": true, \"GEOADD\": true, \"SETBIT\": true, \"BITOP\": true};",
   "new": "\"ZADD\": true, \"ZREM\": true};",
   "cases": [
    "local: a replica refuses GEOADD from a client"

@@ -1,0 +1,242 @@
+[
+ {
+  "name": "SETBIT gives the new bit",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(1);",
+  "cases": [
+   "bitmaps-01 SETBIT gives the old bit"
+  ]
+ },
+ {
+  "name": "the bits of a byte go the other way",
+  "old": "var BIT_WEIGHT = [128, 64, 32, 16, 8, 4, 2, 1];",
+  "new": "var BIT_WEIGHT = [1, 2, 4, 8, 16, 32, 64, 128];",
+  "cases": [
+   "bitmaps-04 GET reads a bitmap"
+  ]
+ },
+ {
+  "name": "GETBIT past the end gives 1",
+  "old": "    if (i >= valueLength(value)) {\n        return 0;\n    }",
+  "new": "    if (i >= valueLength(value)) {\n        return 255;\n    }",
+  "cases": [
+   "local: GETBIT past the end gives 0"
+  ]
+ },
+ {
+  "name": "SETBIT 0 does not clear",
+  "old": "    } else if (argv[3] == \"0\" and was == 1) {\n        now = old - weight;\n    }",
+  "new": "    }",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "the last chunk does not grow",
+  "old": "        b.chunks[count - 1] = last + ZERO_CHUNK[0:room];\n        b.length = b.length + room;",
+  "new": "        b.length = b.length + room;",
+  "cases": [
+   "bitmaps-05 GETBIT of the new bit gives 1"
+  ]
+ },
+ {
+  "name": "a zero chunk too few",
+  "old": "        while (k < full) {\n            b.chunks.append(ZERO_CHUNK);",
+  "new": "        while (k + 1 < full) {\n            b.chunks.append(ZERO_CHUNK);",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "the chunk of a byte is wrong",
+  "old": "    var c = (i - i % BYTES_CHUNK) / BYTES_CHUNK;\n    return ord(value.chunks[c][i % BYTES_CHUNK]);",
+  "new": "    var c = 0;\n    return ord(value.chunks[c][i % BYTES_CHUNK]);",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "STRLEN of a bitmap is the chunks",
+  "old": "    return integerReply(valueLength(entry.value));\n}",
+  "new": "    return integerReply(len(entry.value.chunks));\n}",
+  "cases": [
+   "bitmaps-05 STRLEN after the growth gives 2"
+  ]
+ },
+ {
+  "name": "BITCOUNT counts each byte as 1",
+  "old": "            n = n + POPCOUNT[b];",
+  "new": "            n = n + 1;",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "BITCOUNT in bits counts whole bytes",
+  "old": "            n = n + maskedBits(b, lo, hi);",
+  "new": "            n = n + POPCOUNT[b];",
+  "cases": [
+   "local: BITCOUNT with negative indexes and in bits"
+  ]
+ },
+ {
+  "name": "BITCOUNT takes no negative start",
+  "old": "        if (start < 0) {\n            start = total + start;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT with negative indexes and in bits"
+  ]
+ },
+ {
+  "name": "BITCOUNT skips every inner chunk",
+  "old": "            and v.chunks[(i - i % BYTES_CHUNK) / BYTES_CHUNK] == ZERO_CHUNK) {",
+  "new": "            ) {",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "BITCOUNT skips no zero chunk",
+  "old": "        if (type(v) != \"String\" and i % BYTES_CHUNK == 0 and i > reply.first",
+  "new": "        if (false and i % BYTES_CHUNK == 0 and i > reply.first",
+  "cases": [
+   "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s"
+  ]
+ },
+ {
+  "name": "BITCOUNT counts the live chunks",
+  "old": "        value = Bytes(value.chunks[0:len(value.chunks)], value.length);",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT counts the bitmap as it was when it ran"
+  ]
+ },
+ {
+  "name": "BITCOUNT reads the arguments first",
+  "old": "    if (entry == nil) {\n        return integerReply(0);\n    }\n    if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {",
+  "new": "    if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {",
+  "cases": [
+   "local: BITCOUNT of a missing key gives 0 before it reads the arguments, as Redis does"
+  ]
+ },
+ {
+  "name": "BITOP AND is OR",
+  "old": "var BITOP_TABLES = {\"AND\": bitopTable(\"AND\"), \"OR\": bitopTable(\"OR\"), \"XOR\": bitopTable(\"XOR\")};",
+  "new": "var BITOP_TABLES = {\"AND\": bitopTable(\"OR\"), \"OR\": bitopTable(\"OR\"), \"XOR\": bitopTable(\"XOR\")};",
+  "cases": [
+   "bitmaps-07 BITOP AND keeps the common bits"
+  ]
+ },
+ {
+  "name": "BITOP reads a missing byte as 255",
+  "old": "                var b = 0;\n                if (j < len(texts[k])) {",
+  "new": "                var b = 255;\n                if (j < len(texts[k])) {",
+  "cases": [
+   "bitmaps-08 BITOP AND reads a missing byte as 0"
+  ]
+ },
+ {
+  "name": "BITOP NOT keeps the byte",
+  "old": "            acc = 255 - acc;",
+  "new": "            acc = acc;",
+  "cases": [
+   "local: BITOP XOR and NOT"
+  ]
+ },
+ {
+  "name": "BITOP of missing keys keeps the destination",
+  "old": "        if (store.has(dest)) {\n            store.del(dest);",
+  "new": "        if (false) {\n            store.del(dest);",
+  "cases": [
+   "local: BITOP of missing keys only removes the destination"
+  ]
+ },
+ {
+  "name": "no limit on BITOP",
+  "old": "    if (work > BITOP_MAX_WORK) {\n        return BITOP_TOO_LARGE;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITOP over 1048576 source bytes is refused"
+  ]
+ },
+ {
+  "name": "no bitmap work limit in EXEC",
+  "old": "    if (!spendBitmapWork(made)) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses bitmap work over 1048576"
+  ]
+ },
+ {
+  "name": "GET of a bitmap drops its last chunk",
+  "old": "    for (var c in reply.bulkChunks) {\n        out.add(c);\n    }",
+  "new": "    var ci = 0;\n    while (ci + 1 < len(reply.bulkChunks)) {\n        out.add(reply.bulkChunks[ci]);\n        ci = ci + 1;\n    }",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "INCR joins a large bitmap",
+  "old": "    if (valueLength(entry.value) <= 16) {\n        n = parseInteger(stringOf(entry.value));\n    }",
+  "new": "    n = parseInteger(stringOf(entry.value));",
+  "cases": [
+   "local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "SETBIT does not mark the watchers",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    replicate(argv, nil);\n    return integerReply(was);",
+  "cases": [
+   "local: SETBIT fails EXEC of a client that watches the key"
+  ]
+ },
+ {
+  "name": "BITOP does not mark the watchers",
+  "old": "    store[dest] = Entry(\"string\", Bytes(parts, maxLen), nil);\n    touch(dest);",
+  "new": "    store[dest] = Entry(\"string\", Bytes(parts, maxLen), nil);",
+  "cases": [
+   "local: BITOP fails EXEC of a client that watches the destination"
+  ]
+ },
+ {
+  "name": "SETBIT is not propagated",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    touch(key);\n    return integerReply(was);",
+  "cases": [
+   "local: SETBIT and BITOP are propagated"
+  ]
+ },
+ {
+  "name": "a replica takes SETBIT from a client",
+  "old": "\"GEOADD\": true, \"SETBIT\": true, \"BITOP\": true};",
+  "new": "\"GEOADD\": true, \"BITOP\": true};",
+  "cases": [
+   "local: a replica refuses SETBIT and BITOP from a client"
+  ]
+ },
+ {
+  "name": "SETBIT takes any bit",
+  "old": "    if (argv[3] != \"0\" and argv[3] != \"1\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: SETBIT x 1 2 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "SETBIT takes an offset of 2^32",
+  "old": "    if (n == nil or n < 0 or n > BIT_OFFSET_MAX) {",
+  "new": "    if (n == nil or n < 0) {",
+  "cases": [
+   "local: SETBIT x 4294967296 1 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "a list is read as a string",
+  "old": "    if (entry.kind != \"string\") {\n        return false;\n    }\n    return entry;\n}\n\nfun cmdSetbit",
+  "new": "    return entry;\n}\n\nfun cmdSetbit",
+  "cases": [
+   "local: STRLEN of a list gives WRONGTYPE"
+  ]
+ }
+]

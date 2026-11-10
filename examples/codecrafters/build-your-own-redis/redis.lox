@@ -5354,12 +5354,21 @@ fun maskedBits(b, lo, hi) {
     return n;
 }
 
-// BITCOUNT key [start end [BYTE | BIT]].
+// BITCOUNT key [start end [BYTE | BIT]]. As in Redis 7.0 it reads the key
+// first: a missing key gives 0, and WRONGTYPE comes, before the arguments
+// are checked.
 fun cmdBitcount(ctx, argv) {
+    if (len(argv) < 2) {
+        return wrongArgs("bitcount");
+    }
+    var entry = stringEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
     if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {
-        if (len(argv) < 2) {
-            return wrongArgs("bitcount");
-        }
         return errorReply("ERR syntax error");
     }
     var bitMode = false;
@@ -5379,13 +5388,6 @@ fun cmdBitcount(ctx, argv) {
                 return errorReply("ERR syntax error");
             }
         }
-    }
-    var entry = stringEntry(argv[1]);
-    if (entry == false) {
-        return WRONGTYPE;
-    }
-    if (entry == nil) {
-        return integerReply(0);
     }
     var value = entry.value;
     var length = valueLength(value);

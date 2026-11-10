@@ -66,8 +66,8 @@
  },
  {
   "name": "missing key not null",
-  "old": "        return NULL_BULK;\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
-  "new": "        return bulk(\"\");\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
+  "old": "        return NULL_BULK;\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return stringReply(entry.value);",
+  "new": "        return bulk(\"\");\n    }\n    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return stringReply(entry.value);",
   "cases": [
    "local: GET of a missing key is a null bulk string",
    "base-07 GET after expiry"

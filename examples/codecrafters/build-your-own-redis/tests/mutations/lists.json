@@ -97,8 +97,8 @@
  },
  {
   "name": "GET of a list key",
-  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return Bulk(entry.value);",
-  "new": "    return Bulk(entry.value);",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    return stringReply(entry.value);",
+  "new": "    return stringReply(entry.value);",
   "cases": [
    "local: GET on a list key is WRONGTYPE"
   ]

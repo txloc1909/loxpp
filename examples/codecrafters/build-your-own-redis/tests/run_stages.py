@@ -5407,6 +5407,9 @@ def stages_bitmaps_on(srv):
     got = [c.call("BITCOUNT", "bc", "0", "-1"), c.call("BITCOUNT", "bc", "1", "10", "BIT"),
            c.call("BITCOUNT", "bc", "-5", "-1", "bit"), c.call("BITCOUNT", "bc", "2", "1"), c.call("BITCOUNT", "nokey")]
     check("local: BITCOUNT with negative indexes and in bits", got == [2, 2, 0, 0, 0], repr(got))
+    check("local: GETBIT past the end gives 0", c.call("GETBIT", "bc", "100") == 0 and c.call("GETBIT", "mykey", "9") == 0)
+    check("local: BITCOUNT of a missing key gives 0 before it reads the arguments, as Redis does",
+          c.call("BITCOUNT", "nokey", "0") == 0 and c.call("BITCOUNT", "nokey", "a", "b") == 0)
     for cmd, want in ((("SETBIT", "x", "-1", "1"), "ERR bit offset is not an integer or out of range"),
                       (("SETBIT", "x", "4294967296", "1"), "ERR bit offset is not an integer or out of range"),
                       (("SETBIT", "x", "1", "2"), "ERR bit is not an integer or out of range"),
@@ -5474,7 +5477,9 @@ def stages_bitmaps_limits(prog):
                  "local: B4 BITOP of 1048576 source bytes stalls PING at most 1 s",
                  "local: BITOP over 1048576 source bytes is refused",
                  "local: B5 GET of a bitmap of 64 MB stalls PING at most 1 s",
-                 "local: EXEC refuses bitmap work over 1048576"]
+                 "local: EXEC refuses bitmap work over 1048576",
+                 "local: BITCOUNT counts the bitmap as it was when it ran",
+                 "local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(120)
@@ -5493,6 +5498,18 @@ def stages_bitmaps_limits(prog):
                 got[0] = c.raw().try_read(60)
             worst, wrong, _ = measure_while(srv, bitcount8)
             check(names[2], worst <= 1.0 and not wrong and got[0] == 2, "worst %.3f s, %r" % (worst, got[0]))
+            # BITCOUNT counts the bitmap as it was when it ran: a bit that a
+            # SETBIT sets near the end while the count is near the start
+            # does not count.
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("BITCOUNT", "b8", "0", "-1"))
+            time.sleep(0.3)
+            c.call("SETBIT", "b8", str(8 * 8 * 1024 * 1024 - 100), "1")
+            got_count = x.read()
+            x.close()
+            check("local: BITCOUNT counts the bitmap as it was when it ran",
+                  got_count == 2 and c.call("BITCOUNT", "b8") == 3, repr(got_count))
             t0 = time.time()
             got = c.call("BITCOUNT", "max")
             check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
@@ -5516,6 +5533,13 @@ def stages_bitmaps_limits(prog):
             worst, wrong, _ = measure_while(srv, get64)
             check(names[6], worst <= 1.0 and not wrong and isinstance(got[0], str) and len(got[0]) == 64 * 1024 * 1024
                   and got[0][-1] == "\x01", "worst %.3f s" % worst)
+            got = [None]
+
+            def incr_max():
+                got[0] = c.call("INCR", "max")
+            worst, wrong, _ = measure_while(srv, incr_max)
+            check("local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and isinstance(got[0], Error), "worst %.3f s, %r" % (worst, got[0]))
             # 7 SETBIT at the largest offset on new keys are 7 x 131073
             # chunks, under 1048576; the eighth is over.
             x = Client(srv.port)
