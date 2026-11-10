@@ -246,8 +246,12 @@ The module is `integer`.
 Every argument must be an Int, or the call is a type fault. The `math`
 module does not change: its functions take Numbers, as today.
 
-Out of scope: popcount, count of leading or trailing zeros, and rotate. A
-later proposal can add them to the module.
+Added in #886 and #1214: `integer.popcount(x)`, `integer.clz(x)`,
+`integer.ctz(x)`, `integer.rotl(x, n)`, `integer.rotr(x, n)` and
+`integer.popcount_bytes(s[, start[, end]])`. `spec/05-stdlib.md`, `integer`,
+defines them. A rotate count outside 0 to 63 is a runtime error, as a shift
+count is. `popcount_bytes` counts the 1 bits of a range of the bytes of a
+String with no copy; its range is half open and does not clamp.
 
 ### Standard library
 

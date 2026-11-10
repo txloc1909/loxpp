@@ -636,6 +636,8 @@ TEST(ToolingResolver, StdlibGlobalIsKnown) {
     EXPECT_TRUE(isStdlibGlobal("float"));
     EXPECT_TRUE(isStdlibGlobal("integer"));
     EXPECT_TRUE(isIntegerMember("parse_unsigned"));
+    EXPECT_TRUE(isIntegerMember("popcount_bytes"));
+    EXPECT_TRUE(isIntegerMember("rotl"));
     EXPECT_FALSE(isIntegerMember("floor"));
     EXPECT_FALSE(isStdlibGlobal("print"));
 }

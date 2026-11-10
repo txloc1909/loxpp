@@ -74,6 +74,21 @@ public final class RuntimeStdlibTest {
                 "integer.ustr(-1)");
         checkEquals(-1L, callField((LoxInstance) integer, "parse_unsigned", "18446744073709551615"),
                 "integer.parse_unsigned(max)");
+        checkEquals(8L, callField((LoxInstance) integer, "popcount", 255L), "integer.popcount(255)");
+        checkEquals(64L, callField((LoxInstance) integer, "clz", 0L), "integer.clz(0)");
+        checkEquals(64L, callField((LoxInstance) integer, "ctz", 0L), "integer.ctz(0)");
+        checkEquals(3L, callField((LoxInstance) integer, "rotl", Long.MIN_VALUE | 1L, 1L),
+                "integer.rotl wraps the top bit");
+        checkEquals(Long.MIN_VALUE | 1L, callField((LoxInstance) integer, "rotr", 3L, 1L),
+                "integer.rotr wraps the low bit");
+        checkThrows(() -> callField((LoxInstance) integer, "rotl", 1L, 64L), LoxError.class,
+                "integer.rotl rejects a count above 63");
+        checkEquals(6L, callField((LoxInstance) integer, "popcount_bytes", "ab"), "integer.popcount_bytes(s)");
+        checkEquals(3L, callField((LoxInstance) integer, "popcount_bytes", "ab", 1L), "integer.popcount_bytes(s, start)");
+        checkEquals(0L, callField((LoxInstance) integer, "popcount_bytes", "ab", 1L, 1L),
+                "integer.popcount_bytes empty range");
+        checkThrows(() -> callField((LoxInstance) integer, "popcount_bytes", "ab", 1L, 3L), LoxError.class,
+                "integer.popcount_bytes rejects an end beyond the String");
         checkThrows(() -> callField((LoxInstance) integer, "abs", 1.0), LoxError.class,
                 "integer.abs rejects a Number");
         checkThrows(() -> callField((LoxInstance) integer, "udiv", 1L, 0L), LoxError.class,

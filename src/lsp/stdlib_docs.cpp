@@ -125,7 +125,7 @@ constexpr std::array<StdlibEntry, 25> kMath = {{
 
 // `integer.<name>`: src/stdlib/integer_module.cpp kIntegerFunctions and
 // kIntegerConstants. Descriptions condensed from spec/05-stdlib.md, integer.
-constexpr std::array<StdlibEntry, 10> kInteger = {{
+constexpr std::array<StdlibEntry, 16> kInteger = {{
     {"min_value", "integer.min_value", kArityConstant,
      "The smallest Int, -9223372036854775808."},
     {"max_value", "integer.max_value", kArityConstant,
@@ -149,6 +149,22 @@ constexpr std::array<StdlibEntry, 10> kInteger = {{
     {"parse_unsigned", "integer.parse_unsigned(s) -> Int", 1,
      "The Int with the bit pattern of the unsigned decimal String `s`, at "
      "most 2^64 - 1."},
+    {"popcount", "integer.popcount(x) -> Int", 1,
+     "The number of 1 bits in the 64-bit pattern of `x`."},
+    {"clz", "integer.clz(x) -> Int", 1,
+     "The count of leading 0 bits of `x`, 0 to 64."},
+    {"ctz", "integer.ctz(x) -> Int", 1,
+     "The count of trailing 0 bits of `x`, 0 to 64."},
+    {"rotl", "integer.rotl(x, n) -> Int", 2,
+     "The 64-bit pattern of `x` rotated left by `n` bits. `n` outside 0 to "
+     "63 faults."},
+    {"rotr", "integer.rotr(x, n) -> Int", 2,
+     "The 64-bit pattern of `x` rotated right by `n` bits. `n` outside 0 to "
+     "63 faults."},
+    {"popcount_bytes", "integer.popcount_bytes(s, start, end) -> Int",
+     kArityVariadic,
+     "The number of 1 bits in the bytes of String `s` from `start` up to "
+     "`end`. `start` and `end` are optional."},
 }};
 
 // Built-in methods on Map values (src/stdlib/map_api.cpp), File values

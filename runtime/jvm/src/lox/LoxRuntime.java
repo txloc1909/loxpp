@@ -740,7 +740,63 @@ public final class LoxRuntime {
         module.fields.put("parse_unsigned",
                           new LoxNative("parse_unsigned", 1,
                                         args -> parseUnsigned(args[0])));
+        module.fields.put("popcount", new LoxNative("popcount", 1, args -> {
+            return (long)Long.bitCount(requireInt(args[0]));
+        }));
+        module.fields.put("clz", new LoxNative("clz", 1, args -> {
+            return (long)Long.numberOfLeadingZeros(requireInt(args[0]));
+        }));
+        module.fields.put("ctz", new LoxNative("ctz", 1, args -> {
+            return (long)Long.numberOfTrailingZeros(requireInt(args[0]));
+        }));
+        module.fields.put("rotl", new LoxNative("rotl", 2, args -> {
+            long x = requireInt(args[0]);
+            return Long.rotateLeft(x, rotateCount("rotl", args[1]));
+        }));
+        module.fields.put("rotr", new LoxNative("rotr", 2, args -> {
+            long x = requireInt(args[0]);
+            return Long.rotateRight(x, rotateCount("rotr", args[1]));
+        }));
+        module.fields.put("popcount_bytes",
+                          new LoxNative("popcount_bytes", -1,
+                                        args -> popcountBytes(args)));
         globals.define("integer", module);
+    }
+
+    private static int rotateCount(String name, Object v) {
+        long count = requireInt(v);
+        if (count < 0L || count > 63L) {
+            throw new LoxError("integer." + name
+                               + "() count must be from 0 to 63.");
+        }
+        return (int)count;
+    }
+
+    /**
+     * popcount_bytes(s[, start[, end]]): the 1 bits of the bytes of `s` from
+     * `start` up to, and not including, `end`. A String holds one byte per
+     * char here, as everywhere in this runtime.
+     */
+    private static Object popcountBytes(Object[] args) {
+        if (args.length < 1 || args.length > 3) {
+            throw new LoxError("Expected 1 to 3 arguments.");
+        }
+        if (!(args[0] instanceof String)) {
+            throw new LoxError(
+                "integer.popcount_bytes() argument must be a String.");
+        }
+        String text = (String)args[0];
+        long start = args.length > 1 ? requireInt(args[1]) : 0L;
+        long end = args.length > 2 ? requireInt(args[2]) : text.length();
+        if (start < 0L || start > end || end > text.length()) {
+            throw new LoxError(
+                "integer.popcount_bytes() range must lie within the String.");
+        }
+        long total = 0L;
+        for (int i = (int)start; i < (int)end; i++) {
+            total += Integer.bitCount(text.charAt(i) & 0xFF);
+        }
+        return total;
     }
 
     private static long requireInt(Object v) {

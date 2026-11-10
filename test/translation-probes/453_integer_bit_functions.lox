@@ -1,0 +1,216 @@
+// The bit functions of the `integer` module (spec/05-stdlib.md): `popcount`,
+// `clz`, `ctz`, `rotl`, `rotr`, and `popcount_bytes`. The operands are read as
+// 64-bit patterns, so `0xFFFFFFFFFFFFFFFF` is all ones. `clz` and `ctz` of 0
+// give 64. A rotate count of 0 gives the operand, and a count of 63 is the
+// largest. `popcount_bytes` reads the bytes of a String, the range is half
+// open, and the 8-byte loop and the byte tail of an implementation both run:
+// the ranges cover lengths below 8, at 8, and above 8. The expected values
+// come from Python integers.
+
+print integer.popcount(0x0);
+print integer.clz(0x0);
+print integer.ctz(0x0);
+print integer.popcount(0x1);
+print integer.clz(0x1);
+print integer.ctz(0x1);
+print integer.popcount(0x5);
+print integer.clz(0x5);
+print integer.ctz(0x5);
+print integer.popcount(0xFF);
+print integer.clz(0xFF);
+print integer.ctz(0xFF);
+print integer.popcount(0x8000000000000000);
+print integer.clz(0x8000000000000000);
+print integer.ctz(0x8000000000000000);
+print integer.popcount(0xFFFFFFFFFFFFFFFF);
+print integer.clz(0xFFFFFFFFFFFFFFFF);
+print integer.ctz(0xFFFFFFFFFFFFFFFF);
+print integer.popcount(0x7FFFFFFFFFFFFFFF);
+print integer.clz(0x7FFFFFFFFFFFFFFF);
+print integer.ctz(0x7FFFFFFFFFFFFFFF);
+print integer.popcount(0xF0000000000F00);
+print integer.clz(0xF0000000000F00);
+print integer.ctz(0xF0000000000F00);
+print integer.popcount(0x123456789ABCDEF0);
+print integer.clz(0x123456789ABCDEF0);
+print integer.ctz(0x123456789ABCDEF0);
+print integer.popcount(-1i);
+print integer.popcount(1i);
+print type(integer.popcount(7i));
+print integer.rotl(0x1, 0i);
+print integer.rotr(0x1, 0i);
+print integer.rotl(0x1, 1i);
+print integer.rotr(0x1, 1i);
+print integer.rotl(0x1, 4i);
+print integer.rotr(0x1, 4i);
+print integer.rotl(0x1, 31i);
+print integer.rotr(0x1, 31i);
+print integer.rotl(0x1, 32i);
+print integer.rotr(0x1, 32i);
+print integer.rotl(0x1, 63i);
+print integer.rotr(0x1, 63i);
+print integer.rotl(0x8000000000000001, 0i);
+print integer.rotr(0x8000000000000001, 0i);
+print integer.rotl(0x8000000000000001, 1i);
+print integer.rotr(0x8000000000000001, 1i);
+print integer.rotl(0x8000000000000001, 4i);
+print integer.rotr(0x8000000000000001, 4i);
+print integer.rotl(0x8000000000000001, 31i);
+print integer.rotr(0x8000000000000001, 31i);
+print integer.rotl(0x8000000000000001, 32i);
+print integer.rotr(0x8000000000000001, 32i);
+print integer.rotl(0x8000000000000001, 63i);
+print integer.rotr(0x8000000000000001, 63i);
+print integer.rotl(0x123456789ABCDEF0, 0i);
+print integer.rotr(0x123456789ABCDEF0, 0i);
+print integer.rotl(0x123456789ABCDEF0, 1i);
+print integer.rotr(0x123456789ABCDEF0, 1i);
+print integer.rotl(0x123456789ABCDEF0, 4i);
+print integer.rotr(0x123456789ABCDEF0, 4i);
+print integer.rotl(0x123456789ABCDEF0, 31i);
+print integer.rotr(0x123456789ABCDEF0, 31i);
+print integer.rotl(0x123456789ABCDEF0, 32i);
+print integer.rotr(0x123456789ABCDEF0, 32i);
+print integer.rotl(0x123456789ABCDEF0, 63i);
+print integer.rotr(0x123456789ABCDEF0, 63i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 0i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 0i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 1i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 1i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 4i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 4i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 31i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 31i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 32i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 32i);
+print integer.rotl(0xFFFFFFFFFFFFFFFF, 63i);
+print integer.rotr(0xFFFFFFFFFFFFFFFF, 63i);
+print integer.rotl(0x0, 0i);
+print integer.rotr(0x0, 0i);
+print integer.rotl(0x0, 1i);
+print integer.rotr(0x0, 1i);
+print integer.rotl(0x0, 4i);
+print integer.rotr(0x0, 4i);
+print integer.rotl(0x0, 31i);
+print integer.rotr(0x0, 31i);
+print integer.rotl(0x0, 32i);
+print integer.rotr(0x0, 32i);
+print integer.rotl(0x0, 63i);
+print integer.rotr(0x0, 63i);
+var s = "ab" + chr(255) + chr(0) + "abcdefghijklmnop";
+print integer.popcount_bytes("");
+print integer.popcount_bytes("a");
+print integer.popcount_bytes(s);
+print integer.popcount_bytes(s, 0i, 0i);
+print integer.popcount_bytes(s, 2i, 3i);
+print integer.popcount_bytes(s, 1i, 20i);
+print integer.popcount_bytes(s, 3i);
+print integer.popcount_bytes(s, 20i);
+print integer.popcount_bytes(s, 0i, 20i);
+print integer.popcount_bytes(s, 4i, 13i);
+print integer.popcount_bytes(s, 5i, 12i);
+print type(integer.popcount_bytes(s));
+
+// STATUS: ok
+// CHECK: 0
+// CHECK: 64
+// CHECK: 64
+// CHECK: 1
+// CHECK: 63
+// CHECK: 0
+// CHECK: 2
+// CHECK: 61
+// CHECK: 0
+// CHECK: 8
+// CHECK: 56
+// CHECK: 0
+// CHECK: 1
+// CHECK: 0
+// CHECK: 63
+// CHECK: 64
+// CHECK: 0
+// CHECK: 0
+// CHECK: 63
+// CHECK: 1
+// CHECK: 0
+// CHECK: 8
+// CHECK: 8
+// CHECK: 8
+// CHECK: 32
+// CHECK: 3
+// CHECK: 4
+// CHECK: 64
+// CHECK: 1
+// CHECK: Int
+// CHECK: 1
+// CHECK: 1
+// CHECK: 2
+// CHECK: -9223372036854775808
+// CHECK: 16
+// CHECK: 1152921504606846976
+// CHECK: 2147483648
+// CHECK: 8589934592
+// CHECK: 4294967296
+// CHECK: 4294967296
+// CHECK: -9223372036854775808
+// CHECK: 2
+// CHECK: -9223372036854775807
+// CHECK: -9223372036854775807
+// CHECK: 3
+// CHECK: -4611686018427387904
+// CHECK: 24
+// CHECK: 1729382256910270464
+// CHECK: 3221225472
+// CHECK: 12884901888
+// CHECK: 6442450944
+// CHECK: 6442450944
+// CHECK: -4611686018427387904
+// CHECK: 3
+// CHECK: 1311768467463790320
+// CHECK: 1311768467463790320
+// CHECK: 2623536934927580640
+// CHECK: 655884233731895160
+// CHECK: 2541551405711093505
+// CHECK: 81985529216486895
+// CHECK: 5575015950070721340
+// CHECK: 3853319726573333745
+// CHECK: -7296712173568108936
+// CHECK: -7296712173568108936
+// CHECK: 655884233731895160
+// CHECK: 2623536934927580640
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: -1
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 0
+// CHECK: 3
+// CHECK: 79
+// CHECK: 0
+// CHECK: 8
+// CHECK: 76
+// CHECK: 65
+// CHECK: 0
+// CHECK: 79
+// CHECK: 33
+// CHECK: 26
+// CHECK: Int

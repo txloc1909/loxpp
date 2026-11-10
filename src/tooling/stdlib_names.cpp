@@ -38,9 +38,11 @@ constexpr std::array<std::string_view, 25> kMath = {
 
 // From src/stdlib/integer_module.cpp: kIntegerFunctions and
 // kIntegerConstants.
-constexpr std::array<std::string_view, 10> kInteger = {
-    "min_value", "max_value", "abs", "min",  "max",
-    "udiv",      "urem",      "ult", "ustr", "parse_unsigned",
+constexpr std::array<std::string_view, 16> kInteger = {
+    "min_value", "max_value",      "abs",      "min",
+    "max",       "udiv",           "urem",     "ult",
+    "ustr",      "parse_unsigned", "popcount", "clz",
+    "ctz",       "rotl",           "rotr",     "popcount_bytes",
 };
 
 } // namespace

@@ -239,11 +239,16 @@ function, so the module cannot take it.
 | `integer.ult(a, b)` | `true` when `a` is below `b` with both read as unsigned 64-bit values, `false` otherwise. |
 | `integer.ustr(x)` | The String of the decimal digits of `x` read as an unsigned 64-bit value: `integer.ustr(-1i)` is `"18446744073709551615"`. |
 | `integer.parse_unsigned(s)` | The Int whose bit pattern is the unsigned decimal integer that the String `s` names. `s` is one or more decimal digits, with no sign and nothing else, and its value is at most 18446744073709551615 (2^64 - 1). |
+| `integer.popcount(x)` | The number of 1 bits in the 64-bit pattern of `x`, 0 to 64. |
+| `integer.clz(x)` | The count of leading 0 bits in the 64-bit pattern of `x`, 0 to 64. `integer.clz(0i)` is 64. |
+| `integer.ctz(x)` | The count of trailing 0 bits in the 64-bit pattern of `x`, 0 to 64. `integer.ctz(0i)` is 64. |
+| `integer.rotl(x, n)`, `integer.rotr(x, n)` | The 64-bit pattern of `x` rotated left, or right, by `n` bits. The bits that leave one end enter the other. `n` outside 0 to 63 is a runtime error. |
+| `integer.popcount_bytes(s)`, `integer.popcount_bytes(s, start)`, `integer.popcount_bytes(s, start, end)` | The number of 1 bits in the bytes of the String `s` from byte index `start` (default 0i) up to, and not including, `end` (default the length of `s`), as an Int. The String is not copied. A `start` or `end` outside the String, or a `start` above `end`, is a runtime error: unlike a slice, the range does not clamp. |
 
-Every argument must be an Int, except the argument of `parse_unsigned`, which
-must be a String. An argument of any other kind, an integer-valued Number
-included, is a runtime error. So is a `parse_unsigned` argument that is not of
-the form above or is too large.
+Every argument must be an Int, except the first argument of `parse_unsigned`
+and of `popcount_bytes`, which must be a String. An argument of any other
+kind, an integer-valued Number included, is a runtime error. So is a
+`parse_unsigned` argument that is not of the form above or is too large.
 
 The `math` module does not change: its functions take Numbers, and an Int
 argument is a runtime error.
@@ -252,9 +257,12 @@ argument is a runtime error.
 print integer.max_value;                   // 9223372036854775807
 print integer.ustr(0xFFFFFFFFFFFFFFFF);    // 18446744073709551615
 print integer.ult(1i, 0xFFFFFFFFFFFFFFFF); // true
+print integer.popcount(0xFF);              // 8
+print integer.rotl(0x8000000000000001, 1i); // 3
+print integer.popcount_bytes("ab");        // 6
 ```
 
-**Arity:** `abs`, `ustr`, and `parse_unsigned` 1; `min`, `max`, `udiv`, `urem`, and `ult` 2  
+**Arity:** `abs`, `ustr`, `parse_unsigned`, `popcount`, `clz`, and `ctz` 1; `min`, `max`, `udiv`, `urem`, `ult`, `rotl`, and `rotr` 2; `popcount_bytes` 1 to 3  
 **Returns:** Int, except `ult` (Boolean) and `ustr` (String)
 
 ---

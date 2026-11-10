@@ -5,6 +5,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -105,6 +106,107 @@ Value ustrNative(int /*argCount*/, Value* args) {
     return Value{static_cast<Obj*>(getActiveMM()->makeString(digits))};
 }
 
+Value popcountNative(int /*argCount*/, Value* args) {
+    std::array<Int, 1> values{};
+    if (!readInts(args, values.size(), values.data())) {
+        return from<Nil>(Nil{});
+    }
+    return makeIntValue(*getActiveMM(),
+                        std::popcount(static_cast<std::uint64_t>(values[0])));
+}
+
+Value clzNative(int /*argCount*/, Value* args) {
+    std::array<Int, 1> values{};
+    if (!readInts(args, values.size(), values.data())) {
+        return from<Nil>(Nil{});
+    }
+    return makeIntValue(
+        *getActiveMM(),
+        std::countl_zero(static_cast<std::uint64_t>(values[0])));
+}
+
+Value ctzNative(int /*argCount*/, Value* args) {
+    std::array<Int, 1> values{};
+    if (!readInts(args, values.size(), values.data())) {
+        return from<Nil>(Nil{});
+    }
+    return makeIntValue(
+        *getActiveMM(),
+        std::countr_zero(static_cast<std::uint64_t>(values[0])));
+}
+
+// The count must be from 0 to 63, as a shift count is.
+Value rotateNative(Value* args, bool left, const char* name) {
+    std::array<Int, 2> values{};
+    if (!readInts(args, values.size(), values.data())) {
+        return from<Nil>(Nil{});
+    }
+    if (values[1] < 0 || values[1] > 63) {
+        const std::string message =
+            std::string("integer.") + name + "() count must be from 0 to 63.";
+        nativeRuntimeError(message.c_str());
+        return from<Nil>(Nil{});
+    }
+    const auto bits = static_cast<std::uint64_t>(values[0]);
+    const auto count = static_cast<int>(values[1]);
+    const std::uint64_t rotated =
+        left ? std::rotl(bits, count) : std::rotr(bits, count);
+    return makeIntValue(*getActiveMM(), std::bit_cast<Int>(rotated));
+}
+
+Value rotlNative(int /*argCount*/, Value* args) {
+    return rotateNative(args, true, "rotl");
+}
+
+Value rotrNative(int /*argCount*/, Value* args) {
+    return rotateNative(args, false, "rotr");
+}
+
+// popcount_bytes(s), popcount_bytes(s, start), popcount_bytes(s, start, end):
+// the 1 bits of the bytes of `s` from `start` up to, and not including, `end`.
+// A bound outside the String, or `start` above `end`, is a fault: unlike a
+// slice, the count does not clamp.
+Value popcountBytesNative(int argCount, Value* args) {
+    if (argCount < 1 || argCount > 3) {
+        nativeRuntimeError("Expected 1 to 3 arguments.");
+        return from<Nil>(Nil{});
+    }
+    if (!isString(args[0])) {
+        nativeRuntimeError(
+            "integer.popcount_bytes() argument must be a String.");
+        return from<Nil>(Nil{});
+    }
+    const LoxString& chars = asObjString(as<Obj*>(args[0]))->chars;
+    std::array<Int, 2> bounds{0, static_cast<Int>(chars.size())};
+    for (int i = 1; i < argCount; ++i) {
+        if (!is<Int>(args[i])) {
+            nativeRuntimeError("integer function argument must be an Int.");
+            return from<Nil>(Nil{});
+        }
+        bounds[static_cast<std::size_t>(i - 1)] = as<Int>(args[i]);
+    }
+    if (bounds[0] < 0 || bounds[0] > bounds[1] ||
+        bounds[1] > static_cast<Int>(chars.size())) {
+        nativeRuntimeError(
+            "integer.popcount_bytes() range must lie within the String.");
+        return from<Nil>(Nil{});
+    }
+    const char* at = chars.data() + bounds[0];
+    std::size_t left = static_cast<std::size_t>(bounds[1] - bounds[0]);
+    Int total = 0;
+    while (left >= sizeof(std::uint64_t)) {
+        std::uint64_t word = 0;
+        std::memcpy(&word, at, sizeof word);
+        total += std::popcount(word);
+        at += sizeof word;
+        left -= sizeof word;
+    }
+    for (; left > 0; --left, ++at) {
+        total += std::popcount(static_cast<unsigned char>(*at));
+    }
+    return makeIntValue(*getActiveMM(), total);
+}
+
 // The String form of parse_unsigned(): one or more decimal digits, no sign and
 // nothing else, with a value of at most 2^64 - 1 (spec/05-stdlib.md,
 // integer).
@@ -151,10 +253,20 @@ struct IntegerConstEntry {
 };
 
 const IntegerFnEntry kIntegerFunctions[] = {
-    {"abs", absNative, 1},   {"min", minNative, 2},
-    {"max", maxNative, 2},   {"udiv", udivNative, 2},
-    {"urem", uremNative, 2}, {"ult", ultNative, 2},
-    {"ustr", ustrNative, 1}, {"parse_unsigned", parseUnsignedNative, 1},
+    {"abs", absNative, 1},
+    {"min", minNative, 2},
+    {"max", maxNative, 2},
+    {"udiv", udivNative, 2},
+    {"urem", uremNative, 2},
+    {"ult", ultNative, 2},
+    {"ustr", ustrNative, 1},
+    {"parse_unsigned", parseUnsignedNative, 1},
+    {"popcount", popcountNative, 1},
+    {"clz", clzNative, 1},
+    {"ctz", ctzNative, 1},
+    {"rotl", rotlNative, 2},
+    {"rotr", rotrNative, 2},
+    {"popcount_bytes", popcountBytesNative, -1},
 };
 
 const IntegerConstEntry kIntegerConstants[] = {
