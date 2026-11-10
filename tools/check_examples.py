@@ -99,7 +99,11 @@ def extract_checks(lox_file: Path) -> list[str]:
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 
 
-TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
+TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\S+)\s*$")
+
+# A limit that cannot be given to select(2) or waited for in practice is a
+# mistake. A day is already far past anything a check wants.
+MAX_TIMEOUT = 86400.0
 
 # Lines kept for the failure report: the head shows how the program started and
 # the tail shows where it stopped. Neither grows with the output.
@@ -109,11 +113,18 @@ REPORT_LINE_CHARS = 200
 
 
 def extract_timeout(lox_file: Path) -> float | None:
-    """The example's own `// TIMEOUT: <seconds>`, or None."""
+    """The example's own `// TIMEOUT: <seconds>`, or None.
+
+    A value that is not a number comes back as nan, so one rule below decides
+    every bad spelling: nan is not finite, and that is exit 2.
+    """
     for line in lox_file.read_text(encoding="utf-8").splitlines():
         m = TIMEOUT_RE.match(line)
         if m:
-            return float(m.group(1))
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return math.nan
     return None
 
 
@@ -226,7 +237,7 @@ def stop(proc: subprocess.Popen) -> None:
     an interpreter of its own. SIGTERM first, so a wrapper's own trap runs and
     removes what it made, then SIGKILL for whatever is left.
     """
-    for sig, wait in ((signal.SIGTERM, 2.0), (signal.SIGKILL, 5.0)):
+    for sig, wait in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 1.0)):
         try:
             os.killpg(proc.pid, sig)
         except ProcessLookupError:
@@ -375,8 +386,12 @@ def main() -> None:
     except ValueError:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
-    if not math.isfinite(timeout) or timeout <= 0:
-        print(USAGE, file=sys.stderr)
+    if not math.isfinite(timeout) or not 0 < timeout <= MAX_TIMEOUT:
+        print(
+            f"error: --timeout must be a finite number of seconds greater than "
+            f"zero and at most {MAX_TIMEOUT:g}\n{USAGE}",
+            file=sys.stderr,
+        )
         sys.exit(2)
     if output_arg is not None and max_bytes <= 0:
         print(USAGE, file=sys.stderr)
@@ -420,10 +435,10 @@ def main() -> None:
 
         input_file = lox_file.with_suffix(".input")
         own = extract_timeout(lox_file)
-        if own is not None and (not math.isfinite(own) or own <= 0):
+        if own is not None and (not math.isfinite(own) or not 0 < own <= MAX_TIMEOUT):
             print(
-                f"error: {lox_file.name}: // TIMEOUT: must be a number greater "
-                f"than zero",
+                f"error: {lox_file.name}: // TIMEOUT: must be a finite number "
+                f"of seconds greater than zero and at most {MAX_TIMEOUT:g}",
                 file=sys.stderr,
             )
             sys.exit(2)

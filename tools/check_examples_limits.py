@@ -8,29 +8,39 @@ until the workflow's own limit and named no example, and one example on a
 traced build — `sieve.lox` emits 370 MB in 15 s — was enough to take a 7 GB
 python3 down with the kernel OOM killer.
 
-Twenty-two checks in fifteen groups, each on a directory the test writes
-itself, so no corpus is walked and the whole run costs a few seconds. Every
-check is graded: one `ok` line each.
+Each group runs on a directory the test writes itself, so no corpus is
+walked and the whole run costs a few seconds. Every check is graded and prints
+one `ok` line; the run prints no count of its own, so this list is the rule:
 
-  1. a runner that runs one passing example passes;
-  2. an example that never ends fails the run in bounded time, and the report
-     names it and the limit it used;
-  3. its own `// TIMEOUT: <seconds>` takes the place of --timeout, so a short
-     directive binds a long flag;
-  4. an example whose output passes --max-output-bytes fails by that limit and
-     names it;
-  5. an example that prints more than the report keeps is still matched, and a
-     passing run prints no elision;
-  6. a failing run with a long output elides the middle of the report;
-  7. an unmatched CHECK fails the run and shows the output;
-  8. a passing example passes and reports its check count, and a CHECK pair
-     that arrives out of order fails;
-  9. an example that halts fails by its exit code;
- 10. `// CHECK:` matching ignores leading white space of the output line, as it
-     always did;
- 11. the `<name>.input` file still reaches the program's stdin;
- 12. a directory with no .lox file is an error (exit 2), and --timeout or
-     --max-output-bytes with no value is a usage error (exit 2).
+  - a runner that runs one passing example passes;
+  - an example that never ends fails the run in bounded time, and the report
+    names it and the limit it used;
+  - its own `// TIMEOUT: <seconds>` takes the place of --timeout, so a short
+    directive binds a long flag;
+  - an example whose output passes --max-output-bytes fails by that limit and
+    names it;
+  - an example that prints more than the report keeps is still matched, and a
+    passing run prints no elision;
+  - a failing run with a long output elides the middle of the report, and the
+    lines it prints are shortened rather than quoted whole;
+  - an unmatched CHECK fails the run and shows the output;
+  - a passing example passes and reports its check count, and a CHECK pair that
+    arrives out of order fails;
+  - an example that halts fails by its exit code;
+  - `// CHECK:` matching ignores leading white space of the output line, as it
+    always did;
+  - the `<name>.input` file still reaches the program's stdin;
+  - a character whose two bytes a read boundary splits still matches;
+  - a single line longer than --max-output-bytes fails by the limit, so the
+    limit does not depend on the program ending a line;
+  - a stream that never ends its line fails by the limit and not by the
+    timeout: the runner is a stub that writes 100 KB and then sleeps;
+  - a directory with no .lox file is an error (exit 2);
+  - --timeout or --max-output-bytes with no value is a usage error (exit 2);
+  - --max-output-bytes 0 is exit 2, not "no limit";
+  - an example whose `// TIMEOUT:` is zero, negative, not a number, or longer
+    than a day is exit 2;
+  - --timeout that is not a finite number of seconds in range is exit 2.
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
@@ -296,6 +306,26 @@ def main() -> None:
             f"rc={rc} took={took:.1f}s out={out[:300]!r}",
         )
 
+        # R4: the line bound. A long line that does not match must appear in
+        # the report shortened, which is the only way a program can see that
+        # the line was not kept whole.
+        d = write_dir(
+            tmp,
+            {
+                "longline.lox": '// CHECK: absent\n'
+                'var s = "";\n'
+                'while (len(s) < 100000) { s = s + "0123456789abcdef"; }\n'
+                'print s;\n'
+            },
+        )
+        rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
+        longest = max((len(line) for line in out.splitlines()), default=0)
+        check(
+            "a long line is shortened in the report, not quoted whole",
+            rc == 1 and longest < 400,
+            f"rc={rc} longest_report_line={longest}",
+        )
+
         # 10: a directory with no .lox file is an error.
         empty = tmp / "empty"
         empty.mkdir()
@@ -316,6 +346,20 @@ def main() -> None:
         d = write_dir(tmp, {"zero.lox": "// TIMEOUT: 0\n// CHECK: never\nprint \"x\";\n"})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         check("// TIMEOUT: 0 is exit 2", rc == 2 and "greater than zero" in out, f"rc={rc} out={out!r}")
+
+        for bad in ("-1", "nan", "1e10"):
+            d = write_dir(
+                tmp,
+                {f"bad{len(bad)}.lox": f'// TIMEOUT: {bad}\n// CHECK: never\nprint "x";\n'},
+            )
+            rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
+            check(f"// TIMEOUT: {bad} is exit 2", rc == 2, f"rc={rc} out={out!r}")
+
+        for bad in ("nan", "1e10"):
+            rc, out, _ = run(
+                [sys.executable, str(TOOL), native, str(d), "--timeout", bad]
+            )
+            check(f"--timeout {bad} is exit 2, not a traceback", rc == 2 and "Traceback" not in out, f"rc={rc} out={out!r}")
 
     if failures:
         print(f"\n{len(failures)} case(s) failed")
