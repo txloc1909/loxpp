@@ -324,8 +324,12 @@ from the first score of each box; the session keeps the members within the
 radius in steps (`writeGeoSearch`), so the command stays atomic and the
 other clients go on. The order of the reply is the order of Redis: a fuzz
 of 2400 searches and distances against redis-server 7.0 gave no
-difference. In `EXEC`, `GEOSEARCH` spends the element budget for each
-member of its boxes.
+difference. As in Redis 7.0, it reads the key first, decodes a
+`FROMMEMBER` member while it parses, and takes the last of an option that
+comes again. In `EXEC`, `GEOSEARCH` spends the element budget for each
+member of its boxes, and one `EXEC` walks at most 2097152 members of boxes
+(rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
+work of `EXEC`.
 
 ### Pub/Sub
 
@@ -472,8 +476,13 @@ printed.
   `FROMLONLAT` or `FROMMEMBER` with `BYRADIUS` (not `BYBOX`, `ASC`, `DESC`,
   `COUNT`, `WITHCOORD`, `WITHDIST` or `WITHHASH`). `GEOPOS` of a member
   whose score is negative or at least 2^63 gives a null array; Redis
-  converts it to an unsigned 64-bit value. There is no `GEOHASH`,
-  `GEORADIUS` or `GEOSEARCHSTORE`.
+  converts it to an unsigned 64-bit value. `GEOPOS` names at most 16384
+  members, and one `EXEC` walks at most 2097152 members of `GEOSEARCH`
+  boxes. The coordinates in the error of `GEOADD`, and a distance, are
+  rounded from the product by 10^d, so a value within one unit of the last
+  place of a tie can round the other way from `printf`, and a coordinate
+  of 1e15 or more is not written with all its digits. There is no
+  `GEOHASH`, `GEORADIUS` or `GEOSEARCHSTORE`.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -650,6 +659,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.24–0.25 s). Its margin is small: on a host with every CPU busy it can fail. | 0.06–0.07 s |
 | G1 (group `geospatial`, on a server of its own): `GEOSEARCH` whose boxes hold 524288 members, all in the radius | every member; PING within 1.0 s (rule 6 only) | 0.38 s |
 | G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
+| G3: `EXEC` of 5 `GEOSEARCH` of that set | the fifth is refused; PING within 1.0 s (with no limit, 16 of them: 1.5–1.6 s) | 0.48 s |
+| G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s) | 0.04 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
@@ -695,12 +706,7 @@ the key after the read and before the removal.
 
 The element budget that a `PUBLISH` in `EXEC` spends has no case: it
 needs 8388608 deliveries in one `EXEC`, such as 65536 `PUBLISH` to 128
-subscribers, which is too long for the suite. Two guards of the geospatial group have no case. The pruning of the boxes
-outside the search area changes which boxes `GEOSEARCH` reads, and so its
-cost, but a pruned box holds no member in the radius; the fuzz found one
-search in 3200 where it changed the order, and no small case shows it. The
-yield of the `GEOADD` parse holds a parse of 16384 places, which takes
-less than 1 s also in one step. Two guards of the AOF have no case. The
+subscribers, which is too long for the suite. Two guards of the AOF have no case. The
 wait of `WATCH` for the file (`aofSync`) holds the `DEL` of a lazy expiry,
 which the writer writes in one step before the next client reads, so no
 timing shows a reply before it. A client that goes while it waits for the
