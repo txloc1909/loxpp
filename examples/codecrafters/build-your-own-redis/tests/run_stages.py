@@ -888,9 +888,16 @@ def stages_lists(prog):
         check("local: LPUSH on a string key is WRONGTYPE",
               isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
         c.call("RPUSH", "L" + key, "x")
-        got = c.call("GET", "L" + key)
+        # A reply that does not come fails this case by name, and the
+        # cases after it go on with a new connection.
+        try:
+            got = c.call("GET", "L" + key)
+        except (OSError, EOFError, ValueError):
+            got = CLOSED
         check("local: GET on a list key is WRONGTYPE",
               isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        if got is CLOSED:
+            c = srv.client()
 
         # Bug class of #1123: the work of a list command stays linear, so a
         # long list does not stop the other clients.
@@ -5472,7 +5479,7 @@ def stages_bitmaps_limits(prog):
     try:
         names = ["local: B1 SETBIT at the largest offset stalls PING at most 1 s",
                  "local: B1 the bitmap is 512 MB with the bit set",
-                 "local: B2 BITCOUNT of 8 MB stalls PING at most 1 s",
+                 "local: B2 BITCOUNT of a dense 8 MB stalls PING at most 1 s",
                  "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s",
                  "local: B4 BITOP of 1048576 source bytes stalls PING at most 1 s",
                  "local: BITOP over 1048576 source bytes is refused",
@@ -5490,14 +5497,15 @@ def stages_bitmaps_limits(prog):
             worst, wrong, _ = measure_while(srv, setbit_max)
             check(names[0], worst <= 1.0 and not wrong and got[0] == 0, "worst %.3f s" % worst)
             check(names[1], c.call("STRLEN", "max") == 536870912 and c.call("GETBIT", "max", "4294967295") == 1)
-            c.call("SETBIT", "b8", str(8 * 8 * 1024 * 1024 - 1), "1")
-            c.call("SETBIT", "b8", "12345", "1")
+            # A dense 8 MB: each byte 0x01, kept as Bytes after one SETBIT.
+            c.call("SET", "b8", "\x01" * (8 * 1024 * 1024))
+            c.call("SETBIT", "b8", "0", "0")
 
             def bitcount8():
                 c.raw().send_raw(encode("BITCOUNT", "b8", "0", "-1"))
                 got[0] = c.raw().try_read(60)
             worst, wrong, _ = measure_while(srv, bitcount8)
-            check(names[2], worst <= 1.0 and not wrong and got[0] == 2, "worst %.3f s, %r" % (worst, got[0]))
+            check(names[2], worst <= 1.0 and not wrong and got[0] == 8 * 1024 * 1024, "worst %.3f s, %r" % (worst, got[0]))
             # BITCOUNT counts the bitmap as it was when it ran: a bit that a
             # SETBIT sets near the end while the count is near the start
             # does not count.
@@ -5507,9 +5515,10 @@ def stages_bitmaps_limits(prog):
             time.sleep(0.3)
             c.call("SETBIT", "b8", str(8 * 8 * 1024 * 1024 - 100), "1")
             got_count = x.read()
+            again = x.call("BITCOUNT", "b8")
             x.close()
             check("local: BITCOUNT counts the bitmap as it was when it ran",
-                  got_count == 2 and c.call("BITCOUNT", "b8") == 3, repr(got_count))
+                  got_count == 8 * 1024 * 1024 and again == 8 * 1024 * 1024 + 1, repr((got_count, again)))
             t0 = time.time()
             got = c.call("BITCOUNT", "max")
             check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))

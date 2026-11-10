@@ -34,7 +34,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | pub-sub | 7 | pass |
 | sorted-sets | 8 | pass |
 | geospatial | 8 | pass |
-| bitmaps | 9 | not started |
+| bitmaps | 9 | pass |
 | authentication | 8 | not started |
 
 ## Design
@@ -331,6 +331,31 @@ member of its boxes, and one `EXEC` walks at most 2097152 members of boxes
 (rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
 work of `EXEC`.
 
+### Bitmaps
+
+A String cannot be changed in place, so a string that `SETBIT` writes is
+kept as `Bytes`: chunks of 4096 bytes and the length. `SETBIT` copies one
+chunk, so it costs O(1) as in Redis; the growth appends a shared chunk of
+zero bytes, so `SETBIT` at the largest offset (2^32 - 1, 512 MB) is fast.
+The type stays `string`, and `GET`, `SET ... GET`, `STRLEN`, `INCR` and
+`GETBIT` read both forms: `GET` writes the chunks in steps, from a copy of
+their List taken in its step (`ChunkedBulk`), with no join. The bits of a
+byte go from the most significant, as in Redis.
+
+`BITCOUNT` takes a copy of the List of chunks in its step, and the session
+counts in steps (`writeBitcount`): the command stays atomic, and the other
+clients go on. It skips a whole chunk of zero bytes with one native
+compare, so a sparse bitmap counts fast; a dense one costs about 0.5
+microseconds a byte (8 MB: 4 s, with no stall). As in Redis 7.0, it reads
+the key before its arguments, and it takes `BYTE` and `BIT` ranges.
+
+`BITOP AND | OR | XOR | NOT` runs in one step with tables of 65536 entries
+(each built from an earlier one at start). Each source byte is Lox++ code,
+so one `BITOP` reads at most 1048576 source bytes (the length of the result
+times the number of sources), and one `EXEC` does at most 1048576 units of
+bitmap work: the chunks that `SETBIT` adds or splits, and the source bytes
+of `BITOP` (rule 6).
+
 ### Pub/Sub
 
 `subscribers` maps each channel to the Conns that subscribe to it, and each
@@ -485,6 +510,10 @@ printed.
   place of a tie can round the other way from `printf`, and a coordinate
   of 1e15 or more is not written with all its digits. There is no
   `GEOHASH`, `GEORADIUS` or `GEOSEARCHSTORE`.
+- Bitmaps: one `BITOP` reads at most 1048576 source bytes, and one `EXEC`
+  does at most 1048576 units of bitmap work; Redis has no such limits.
+  `BITCOUNT` of a dense bitmap is much slower than in Redis (it does not
+  stall the other clients). There is no `BITPOS`, `BITFIELD` or `SETRANGE`.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -663,6 +692,12 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
 | G3: `EXEC` of 64 `GEOSEARCH` of that set with one member more (524289, which does not divide the limit) | 3 run and 61 are refused; the walk of the fourth stops as soon as it passes the limit and spends what is left, so the others walk no more; PING within 1.0 s (when the limit is checked after the walk: 5.3 s; when a refused walk spends nothing: 6.9–7.1 s). On a host with every CPU busy it can fail. | 0.45–0.50 s |
 | G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s). Its margin is small: on a host with every CPU busy it can fail. | 0.04–0.05 s |
+| B1 (group `bitmaps`, on a server of its own): `SETBIT` at offset 2^32 - 1 | a string of 512 MB with the bit set; PING within 1.0 s (rule 6 only) | 0.01–0.02 s |
+| B2: `BITCOUNT` of a dense 8 MB | PING within 1.0 s (rule 6 only) | 0.12 s (4 s in all) |
+| B3: `BITCOUNT` of the sparse 512 MB of B1 | a reply within 2 s (when a zero chunk is not skipped: minutes) | 0.04 s |
+| B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.33 s |
+| B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
+| B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | as required |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
@@ -691,8 +726,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/persistence-rdb.json` or
 `tests/mutations/replication.json` or
 `tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
-`tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` that removes
-its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1 and G2 hold rule 6 only: no single change removes their
+`tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` or
+`tests/mutations/bitmaps.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4 and B5 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -765,7 +801,8 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
 # and optimistic-locking.json, persistence-rdb.json, replication.json,
-# persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json
+# persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json,
+# bitmaps.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
 
