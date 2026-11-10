@@ -1992,7 +1992,8 @@ var ARITY = {
     "BLPOP": -3, "TYPE": 2, "XADD": -5, "XRANGE": -4, "XREAD": -4,
     "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1, "DEL": -2,
     "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1,
-    "ZADD": -4, "ZREM": -3, "ZCARD": 2, "ZSCORE": 3, "ZRANK": 3, "ZRANGE": -4
+    "ZADD": -4, "ZREM": -3, "ZCARD": 2, "ZSCORE": 3, "ZRANK": 3, "ZRANGE": -4,
+    "GEOADD": -5, "GEOPOS": -2, "GEODIST": -4, "GEOSEARCH": -7
 };
 
 fun arityOk(name, count) {
@@ -2097,6 +2098,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
     zsetExecWork = ZSET_EXEC_WORK;
+    geoExecCandidates = GEO_EXEC_CANDIDATES;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2114,6 +2116,7 @@ fun execQueued(tx) {
     }
     execElements = nil;
     zsetExecWork = nil;
+    geoExecCandidates = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -2147,6 +2150,8 @@ fun writeReply(conn, reply) {
         out.flush();
     } else if (type(reply) == "Instance" and hasField(reply, "fwd")) {
         writeBulks(conn, reply);
+    } else if (type(reply) == "Instance" and hasField(reply, "geoMembers")) {
+        writeGeoSearch(conn, reply);
     } else if (type(reply) == "Instance") {
         writeSegments(conn, reply);
     } else if (reply != "") {
@@ -3253,7 +3258,7 @@ fun cmdWait(conn, argv) {
 
 // The commands that write, which a replica refuses from its clients.
 var WRITES = {"SET": true, "INCR": true, "RPUSH": true, "LPUSH": true, "LPOP": true,
-              "BLPOP": true, "XADD": true, "DEL": true, "ZADD": true, "ZREM": true};
+              "BLPOP": true, "XADD": true, "DEL": true, "ZADD": true, "ZREM": true, "GEOADD": true};
 var READONLY = "-READONLY You can't write against a read only replica.\r\n";
 
 fun replicationInfo() {
@@ -4020,6 +4025,21 @@ class ZSet {
         return r - 1;
     }
 
+    // The first node with a score of at least min, or nil.
+    firstAtOrAbove(min) {
+        var x = this.header;
+        var i = this.level - 1;
+        while (i >= 0) {
+            var f = x.forward[i];
+            while (f != nil and f.score < min) {
+                x = f;
+                f = x.forward[i];
+            }
+            i = i - 1;
+        }
+        return x.forward[0];
+    }
+
     // The node at the 0-based rank.
     nodeAt(rank) {
         var x = this.header;
@@ -4227,7 +4247,12 @@ fun cmdZadd(ctx, argv) {
     if (type(pairs) == "String") {
         return pairs;
     }
-    var key = argv[1];
+    return zaddPairs(argv[1], pairs, argv);
+}
+
+// Adds the [score, member] pairs to the sorted set at key, and propagates
+// replArgs when the set changes. ZADD and GEOADD share it. Returns the reply.
+fun zaddPairs(key, pairs, replArgs) {
     var entry = zsetEntry(key);
     if (entry == false) {
         return WRONGTYPE;
@@ -4275,7 +4300,7 @@ fun cmdZadd(ctx, argv) {
     }
     if (changed) {
         touch(key);
-        replicate(argv, nil);
+        replicate(replArgs, nil);
     }
     return integerReply(added);
 }
@@ -4450,6 +4475,565 @@ fun cmdZrange(ctx, argv) {
         count = count - 1;
     }
     return Bulks([], out);
+}
+
+// ===========================================================================
+// Geospatial
+// ===========================================================================
+
+// A geo key is a sorted set whose scores are 52-bit geohashes, as in Redis:
+// 26 bits of the latitude and 26 of the longitude offset, interleaved. The
+// code follows geohash.c, geohash_helper.c and geo.c of Redis 7.0.
+
+var GEO_LAT_MIN = -85.05112878;
+var GEO_LAT_MAX = 85.05112878;
+var GEO_LONG_MIN = -180.0;
+var GEO_LONG_MAX = 180.0;
+var GEO_STEP_MAX = 26;
+var EARTH_RADIUS_IN_METERS = 6372797.560856;
+var MERCATOR_MAX = 20037726.37;
+var DEG_TO_RAD = 0.017453292519943295769236907684886;
+// 2^63 as a Number: a score at or above it does not fit an Int. A score
+// from 2^52 is decoded as Redis decodes it: a coordinate at the top of its
+// range gives an offset of 2^26, and the centre is clamped to the range.
+var GEO_SCORE_LIMIT = 9223372036854775808.0;
+
+// The bits of x (an Int below 2^32) spread to the even bit places.
+fun spreadBits(x) {
+    x = (x | (x << 16i)) & 0x0000FFFF0000FFFF;
+    x = (x | (x << 8i)) & 0x00FF00FF00FF00FF;
+    x = (x | (x << 4i)) & 0x0F0F0F0F0F0F0F0F;
+    x = (x | (x << 2i)) & 0x3333333333333333;
+    x = (x | (x << 1i)) & 0x5555555555555555;
+    return x;
+}
+
+// The even bit places of x, packed together.
+fun squashBits(x) {
+    x = x & 0x5555555555555555;
+    x = (x | (x >>> 1i)) & 0x3333333333333333;
+    x = (x | (x >>> 2i)) & 0x0F0F0F0F0F0F0F0F;
+    x = (x | (x >>> 4i)) & 0x00FF00FF00FF00FF;
+    x = (x | (x >>> 8i)) & 0x0000FFFF0000FFFF;
+    x = (x | (x >>> 16i)) & 0x00000000FFFFFFFF;
+    return x;
+}
+
+// The geohash of (lon, lat) at step bits per coordinate, as an Int:
+// latitude in the even bits, longitude in the odd bits.
+fun geoEncode(lon, lat, step) {
+    var latOffset = (lat - GEO_LAT_MIN) / (GEO_LAT_MAX - GEO_LAT_MIN);
+    var lonOffset = (lon - GEO_LONG_MIN) / (GEO_LONG_MAX - GEO_LONG_MIN);
+    var scale = float(1i << int(step));
+    // C converts the offsets to uint32 by truncation.
+    var ilat = int(math.floor(latOffset * scale));
+    var ilon = int(math.floor(lonOffset * scale));
+    return spreadBits(ilat) | (spreadBits(ilon) << 1i);
+}
+
+// The area of a geohash: [lonMin, lonMax, latMin, latMax].
+fun geoArea(bits, step) {
+    var ilat = squashBits(bits);
+    var ilon = squashBits(bits >>> 1i);
+    var scale = float(1i << int(step));
+    var latScale = GEO_LAT_MAX - GEO_LAT_MIN;
+    var lonScale = GEO_LONG_MAX - GEO_LONG_MIN;
+    return [GEO_LONG_MIN + (float(ilon) / scale) * lonScale,
+            GEO_LONG_MIN + (float(ilon + 1i) / scale) * lonScale,
+            GEO_LAT_MIN + (float(ilat) / scale) * latScale,
+            GEO_LAT_MIN + (float(ilat + 1i) / scale) * latScale];
+}
+
+// The [lon, lat] of a score, the centre of its area, or nil for a score
+// below 0 or from 2^63.
+fun geoDecodeScore(score) {
+    if (!(score >= 0) or score >= GEO_SCORE_LIMIT) {
+        return nil;
+    }
+    var a = geoArea(int(math.floor(score)), GEO_STEP_MAX);
+    var lon = (a[0] + a[1]) / 2;
+    var lat = (a[2] + a[3]) / 2;
+    if (lon > GEO_LONG_MAX) {
+        lon = GEO_LONG_MAX;
+    }
+    if (lon < GEO_LONG_MIN) {
+        lon = GEO_LONG_MIN;
+    }
+    if (lat > GEO_LAT_MAX) {
+        lat = GEO_LAT_MAX;
+    }
+    if (lat < GEO_LAT_MIN) {
+        lat = GEO_LAT_MIN;
+    }
+    return [lon, lat];
+}
+
+fun geoDistance(lon1, lat1, lon2, lat2) {
+    var lon1r = lon1 * DEG_TO_RAD;
+    var lon2r = lon2 * DEG_TO_RAD;
+    var v = math.sin((lon2r - lon1r) / 2);
+    var lat1r = lat1 * DEG_TO_RAD;
+    var lat2r = lat2 * DEG_TO_RAD;
+    var u = math.sin((lat2r - lat1r) / 2);
+    var a = u * u + math.cos(lat1r) * math.cos(lat2r) * v * v;
+    return 2.0 * EARTH_RADIUS_IN_METERS * math.asin(math.sqrt(a));
+}
+
+// x with exactly d decimals, as printf("%.<d>f") gives it, rounded half
+// away from zero.
+fun fixedText(x, d) {
+    if (x == math.inf) {
+        return "inf";
+    }
+    if (x == -math.inf) {
+        return "-inf";
+    }
+    var sign = "";
+    // 1 / x tells -0 from 0, as %f writes "-0.000000".
+    if (x < 0 or (x == 0 and 1 / x < 0)) {
+        sign = "-";
+        x = -x;
+    }
+    var scale = 1;
+    var i = 0;
+    while (i < d) {
+        scale = scale * 10;
+        i = i + 1;
+    }
+    var n = math.round(x * scale);
+    var whole = math.floor(n / scale);
+    var frac = n - whole * scale;
+    var fracText = str(frac);
+    while (len(fracText) < d) {
+        fracText = "0" + fracText;
+    }
+    if (d == 0) {
+        return sign + str(whole);
+    }
+    return sign + str(whole) + "." + fracText;
+}
+
+fun geoUnit(text) {
+    var u = lower(text);
+    if (u == "m") {
+        return 1.0;
+    }
+    if (u == "km") {
+        return 1000.0;
+    }
+    if (u == "ft") {
+        return 0.3048;
+    }
+    if (u == "mi") {
+        return 1609.34;
+    }
+    return nil;
+}
+
+// At most GEO_EXEC_CANDIDATES members of the boxes of GEOSEARCH in one
+// EXEC: the walk of a box is Lox++ code in the step of EXEC (rule 6).
+var GEO_EXEC_CANDIDATES = 2097152;
+var geoExecCandidates = nil;
+var GEO_EXEC_TOO_MANY = "-ERR the GEOSEARCH work of this transaction is over its limit\r\n";
+
+var GEO_BAD_UNIT = "-ERR unsupported unit provided. please use M, KM, FT, MI\r\n";
+
+// Reads a longitude and a latitude. Returns [lon, lat], or an error reply.
+fun geoLonLat(lonText, latText) {
+    var lon = parseScore(lonText);
+    var lat = parseScore(latText);
+    if (lon == nil or lat == nil) {
+        return NOT_FLOAT;
+    }
+    if (lon < GEO_LONG_MIN or lon > GEO_LONG_MAX or lat < GEO_LAT_MIN or lat > GEO_LAT_MAX) {
+        return errorReply("ERR invalid longitude,latitude pair " + fixedText(lon, 6) + "," + fixedText(lat, 6));
+    }
+    return [lon, lat];
+}
+
+// GEOADD key longitude latitude member [...], parsed before the command
+// runs, with yields. Returns the [score, member] pairs, or an error reply.
+fun parseGeoadd(argv, mayYield) {
+    if (len(argv) < 5) {
+        return wrongArgs("geoadd");
+    }
+    if ((len(argv) - 2) % 3 != 0) {
+        return errorReply("ERR syntax error");
+    }
+    if ((len(argv) - 2) / 3 > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
+    var pairs = [];
+    var i = 2;
+    while (i < len(argv)) {
+        var xy = geoLonLat(argv[i], argv[i + 1]);
+        if (type(xy) == "String") {
+            return xy;
+        }
+        pairs.append([float(geoEncode(xy[0], xy[1], GEO_STEP_MAX)), argv[i + 2]]);
+        i = i + 3;
+        if (mayYield and len(pairs) % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    return pairs;
+}
+
+// As in Redis, GEOADD goes to the replicas and the AOF as the ZADD that it
+// does.
+fun cmdGeoadd(ctx, argv) {
+    var pairs = ctx;
+    if (pairs == nil) {
+        pairs = parseGeoadd(argv, false);
+    }
+    if (type(pairs) == "String") {
+        return pairs;
+    }
+    var replArgs = ["ZADD", argv[1]];
+    for (var p in pairs) {
+        replArgs.append(str(p[0]));
+        replArgs.append(p[1]);
+    }
+    return zaddPairs(argv[1], pairs, replArgs);
+}
+
+fun cmdGeopos(ctx, argv) {
+    if (len(argv) < 2) {
+        return wrongArgs("geopos");
+    }
+    // Each name is a decode of about 15 microseconds in one step.
+    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {
+        return ZSET_TOO_MANY;
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (!spendZsetWork(len(argv) - 2)) {
+        return ZSET_EXEC_TOO_MUCH;
+    }
+    var parts = ["*" + str(len(argv) - 2) + "\r\n"];
+    var i = 2;
+    while (i < len(argv)) {
+        var xy = nil;
+        if (entry != nil) {
+            var score = entry.value.dict[argv[i]];
+            if (score != nil) {
+                xy = geoDecodeScore(score);
+            }
+        }
+        if (xy == nil) {
+            parts.append(NULL_ARRAY);
+        } else {
+            parts.append("*2\r\n" + bulk(str(xy[0])) + bulk(str(xy[1])));
+        }
+        i = i + 1;
+    }
+    return joinRange(parts, 0, len(parts));
+}
+
+fun cmdGeodist(ctx, argv) {
+    if (len(argv) < 4) {
+        return wrongArgs("geodist");
+    }
+    if (len(argv) > 5) {
+        return errorReply("ERR syntax error");
+    }
+    var conversion = 1.0;
+    if (len(argv) == 5) {
+        conversion = geoUnit(argv[4]);
+        if (conversion == nil) {
+            return GEO_BAD_UNIT;
+        }
+    }
+    var entry = zsetEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return NULL_BULK;
+    }
+    var s1 = entry.value.dict[argv[2]];
+    var s2 = entry.value.dict[argv[3]];
+    if (s1 == nil or s2 == nil) {
+        return NULL_BULK;
+    }
+    var a = geoDecodeScore(s1);
+    var b = geoDecodeScore(s2);
+    if (a == nil or b == nil) {
+        return NULL_BULK;
+    }
+    return bulk(fixedText(geoDistance(a[0], a[1], b[0], b[1]) / conversion, 4));
+}
+
+fun geoEstimateSteps(rangeMeters, lat) {
+    if (rangeMeters == 0) {
+        return 26;
+    }
+    var step = 1;
+    while (rangeMeters < MERCATOR_MAX) {
+        rangeMeters = rangeMeters * 2;
+        step = step + 1;
+    }
+    step = step - 2;
+    if (lat > 66 or lat < -66) {
+        step = step - 1;
+        if (lat > 80 or lat < -80) {
+            step = step - 1;
+        }
+    }
+    if (step < 1) {
+        step = 1;
+    }
+    if (step > 26) {
+        step = 26;
+    }
+    return step;
+}
+
+// The neighbour of a geohash, moved by dx in longitude (odd bits) and dy in
+// latitude (even bits), as geohash_move_x and geohash_move_y do.
+fun geoMove(bits, step, dx, dy) {
+    var shift = 64i - int(float(step)) * 2i;
+    var evens = 0x5555555555555555;
+    var odds = 0xAAAAAAAAAAAAAAAA;
+    if (dx != 0) {
+        var x = bits & odds;
+        var y = bits & evens;
+        var zz = evens >>> shift;
+        if (dx > 0) {
+            x = x + (zz + 1i);
+        } else {
+            x = x | zz;
+            x = x - (zz + 1i);
+        }
+        x = x & (odds >>> shift);
+        bits = x | y;
+    }
+    if (dy != 0) {
+        var x = bits & odds;
+        var y = bits & evens;
+        var zz = odds >>> shift;
+        if (dy > 0) {
+            y = y + (zz + 1i);
+        } else {
+            y = y | zz;
+            y = y - (zz + 1i);
+        }
+        y = y & (evens >>> shift);
+        bits = x | y;
+    }
+    return bits;
+}
+
+// The boxes that GEOSEARCH reads for a circle: the geohash of the centre
+// and its 8 neighbours, as geohashCalculateAreasByShapeWGS84 gives them,
+// in the order of membersOfAllNeighbors. Each is [bits, step], or nil for
+// a box that is left out.
+fun geoSearchBoxes(lon, lat, radiusMeters) {
+    var latDelta = (radiusMeters / EARTH_RADIUS_IN_METERS) / DEG_TO_RAD;
+    var lonDeltaTop = (radiusMeters / EARTH_RADIUS_IN_METERS / math.cos((lat + latDelta) * DEG_TO_RAD)) / DEG_TO_RAD;
+    var lonDeltaBottom = (radiusMeters / EARTH_RADIUS_IN_METERS / math.cos((lat - latDelta) * DEG_TO_RAD)) / DEG_TO_RAD;
+    var minLon = lon - lonDeltaTop;
+    var maxLon = lon + lonDeltaTop;
+    if (lat < 0) {
+        minLon = lon - lonDeltaBottom;
+        maxLon = lon + lonDeltaBottom;
+    }
+    var minLat = lat - latDelta;
+    var maxLat = lat + latDelta;
+    var steps = geoEstimateSteps(radiusMeters, lat);
+    var hash = geoEncode(lon, lat, steps);
+    var north = geoArea(geoMove(hash, steps, 0, 1), steps);
+    var south = geoArea(geoMove(hash, steps, 0, -1), steps);
+    var east = geoArea(geoMove(hash, steps, 1, 0), steps);
+    var west = geoArea(geoMove(hash, steps, -1, 0), steps);
+    if (steps > 1 and (north[3] < maxLat or south[2] > minLat or east[1] < maxLon or west[0] > minLon)) {
+        steps = steps - 1;
+        hash = geoEncode(lon, lat, steps);
+    }
+    var area = geoArea(hash, steps);
+    // centre, north, south, east, west, north-east, north-west,
+    // south-east, south-west
+    var moves = [[0, 0], [0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+    var boxes = [];
+    for (var m in moves) {
+        boxes.append([geoMove(hash, steps, m[0], m[1]), steps]);
+    }
+    if (steps >= 2) {
+        if (area[2] < minLat) {
+            boxes[2] = nil;
+            boxes[8] = nil;
+            boxes[7] = nil;
+        }
+        if (area[3] > maxLat) {
+            boxes[1] = nil;
+            boxes[5] = nil;
+            boxes[6] = nil;
+        }
+        if (area[0] < minLon) {
+            boxes[4] = nil;
+            boxes[8] = nil;
+            boxes[6] = nil;
+        }
+        if (area[1] > maxLon) {
+            boxes[3] = nil;
+            boxes[7] = nil;
+            boxes[5] = nil;
+        }
+    }
+    return boxes;
+}
+
+// The reply of GEOSEARCH: the members and scores of the boxes, taken in the
+// step of the command, and the circle. The session keeps the members within
+// the radius, in steps (writeGeoSearch), so the command stays atomic.
+class GeoSearchReply {
+    init(members, scores, lon, lat, radius) {
+        this.geoMembers = members;
+        this.scores = scores;
+        this.lon = lon;
+        this.lat = lat;
+        this.radius = radius;
+    }
+}
+
+// GEOSEARCH key FROMLONLAT lon lat | FROMMEMBER member BYRADIUS radius unit.
+// As in Redis 7.0 it reads the key first (WRONGTYPE comes before any parse
+// error), decodes a FROMMEMBER member while it parses, and takes the last
+// of an option that comes again.
+fun cmdGeosearch(ctx, argv) {
+    if (len(argv) < 7) {
+        return wrongArgs("geosearch");
+    }
+    var key = argv[1];
+    var entry = zsetEntry(key);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    var z = nil;
+    if (entry != nil) {
+        z = entry.value;
+    }
+    var from = nil;
+    var byLonLat = false;
+    var byMember = false;
+    var radius = nil;
+    var conversion = nil;
+    var i = 2;
+    while (i < len(argv)) {
+        var opt = upper(argv[i]);
+        if (opt == "FROMLONLAT" and i + 2 < len(argv)) {
+            // As in Redis, FROMLONLAT after FROMMEMBER is a syntax error,
+            // and the other way too.
+            if (byMember) {
+                return errorReply("ERR syntax error");
+            }
+            from = geoLonLat(argv[i + 1], argv[i + 2]);
+            if (type(from) == "String") {
+                return from;
+            }
+            byLonLat = true;
+            i = i + 3;
+        } else if (opt == "FROMMEMBER" and i + 1 < len(argv)) {
+            if (byLonLat) {
+                return errorReply("ERR syntax error");
+            }
+            // On a missing key Redis decodes nothing, and the reply is
+            // empty after the parse.
+            if (z != nil) {
+                var score = z.dict[argv[i + 1]];
+                if (score != nil) {
+                    from = geoDecodeScore(score);
+                }
+                if (score == nil or from == nil) {
+                    return errorReply("ERR could not decode requested zset member");
+                }
+            }
+            byMember = true;
+            i = i + 2;
+        } else if (opt == "BYRADIUS" and i + 2 < len(argv)) {
+            radius = parseScore(argv[i + 1]);
+            if (radius == nil) {
+                return errorReply("ERR need numeric radius");
+            }
+            if (radius < 0) {
+                return errorReply("ERR radius cannot be negative");
+            }
+            conversion = geoUnit(argv[i + 2]);
+            if (conversion == nil) {
+                return GEO_BAD_UNIT;
+            }
+            i = i + 3;
+        } else {
+            return errorReply("ERR syntax error");
+        }
+    }
+    if (!byLonLat and !byMember) {
+        return errorReply("ERR exactly one of FROMMEMBER or FROMLONLAT can be specified for GEOSEARCH");
+    }
+    if (radius == nil) {
+        return errorReply("ERR exactly one of BYRADIUS and BYBOX can be specified for GEOSEARCH");
+    }
+    if (z == nil) {
+        return arrayReply([]);
+    }
+    var meters = radius * conversion;
+    var boxes = geoSearchBoxes(from[0], from[1], meters);
+    var members = [];
+    var scores = [];
+    var last = nil;
+    for (var box in boxes) {
+        if (box == nil) {
+            continue;
+        }
+        if (last != nil and box[0] == last[0] and box[1] == last[1]) {
+            continue;
+        }
+        last = box;
+        var shift = 52i - int(float(box[1])) * 2i;
+        var min = float(box[0] << shift);
+        var max = float((box[0] + 1i) << shift);
+        var x = z.firstAtOrAbove(min);
+        while (x != nil and x.score < max) {
+            members.append(x.member);
+            scores.append(x.score);
+            x = x.forward[0];
+            // In EXEC the walk stops as soon as it is over the limit, so a
+            // refused GEOSEARCH costs no more than the limit.
+            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {
+                // The walk spent what was left, so a later GEOSEARCH of this
+                // EXEC walks no more.
+                geoExecCandidates = 0;
+                return GEO_EXEC_TOO_MANY;
+            }
+        }
+    }
+    if (geoExecCandidates != nil) {
+        geoExecCandidates = geoExecCandidates - len(members);
+    }
+    if (!spendElements(len(members))) {
+        return EXEC_TOO_LARGE;
+    }
+    return GeoSearchReply(members, scores, from[0], from[1], meters);
+}
+
+// In the session: keeps the members within the radius, with a yield every
+// ELEMENTS_PER_YIELD members, then writes them.
+fun writeGeoSearch(conn, reply) {
+    var keep = [];
+    var i = 0;
+    while (i < len(reply.geoMembers)) {
+        var xy = geoDecodeScore(reply.scores[i]);
+        if (xy != nil and geoDistance(reply.lon, reply.lat, xy[0], xy[1]) <= reply.radius) {
+            keep.append(reply.geoMembers[i]);
+        }
+        i = i + 1;
+        if (i % ELEMENTS_PER_YIELD == 0) {
+            yield nil;
+        }
+    }
+    writeBulks(conn, Bulks([], keep));
 }
 
 // ===========================================================================
@@ -4784,7 +5368,11 @@ var COMMANDS = {
     "ZCARD": cmdZcard,
     "ZSCORE": cmdZscore,
     "ZRANK": cmdZrank,
-    "ZRANGE": cmdZrange
+    "ZRANGE": cmdZrange,
+    "GEOADD": cmdGeoadd,
+    "GEOPOS": cmdGeopos,
+    "GEODIST": cmdGeodist,
+    "GEOSEARCH": cmdGeosearch
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -4793,7 +5381,8 @@ var PARSERS = {
     "XRANGE": parseXrange,
     "XREAD": parseXread,
     "ZADD": parseZadd,
-    "ZRANGE": parseZrange
+    "ZRANGE": parseZrange,
+    "GEOADD": parseGeoadd
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.

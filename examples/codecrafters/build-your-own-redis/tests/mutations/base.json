@@ -58,8 +58,8 @@
  },
  {
   "name": "PX option case-sensitive",
-  "old": "var opt = upper(argv[i]);",
-  "new": "var opt = argv[i];",
+  "old": "        var opt = upper(argv[i]);\n        if ((opt == \"PX\"",
+  "new": "        var opt = argv[i];\n        if ((opt == \"PX\"",
   "cases": [
    "base-07 SET with PX"
   ]

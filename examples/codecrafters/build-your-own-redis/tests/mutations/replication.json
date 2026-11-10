@@ -89,8 +89,8 @@
  },
  {
   "name": "a transaction is not wrapped",
-  "old": "    zsetExecWork = ZSET_EXEC_WORK;\n    replInExec = true;",
-  "new": "    zsetExecWork = ZSET_EXEC_WORK;",
+  "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n    replInExec = true;",
+  "new": "    geoExecCandidates = GEO_EXEC_CANDIDATES;",
   "cases": [
    "local: a transaction is propagated in MULTI and EXEC"
   ]
@@ -393,8 +393,8 @@
  },
  {
   "name": "DEL is not a write",
-  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true, \"ZADD\": true, \"ZREM\": true};",
-  "new": "\"BLPOP\": true, \"XADD\": true, \"ZADD\": true, \"ZREM\": true};",
+  "old": "\"BLPOP\": true, \"XADD\": true, \"DEL\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "new": "\"BLPOP\": true, \"XADD\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
   "cases": [
    "local: a replica refuses DEL from a client"
   ]

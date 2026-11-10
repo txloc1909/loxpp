@@ -1,0 +1,339 @@
+[
+ {
+  "name": "the interleave drops a step",
+  "old": "    x = (x | (x << 4i)) & 0x0F0F0F0F0F0F0F0F;\n",
+  "new": "",
+  "cases": [
+   "geospatial-04 the score is the geohash"
+  ]
+ },
+ {
+  "name": "latitude and longitude change places",
+  "old": "    return spreadBits(ilat) | (spreadBits(ilon) << 1i);",
+  "new": "    return spreadBits(ilon) | (spreadBits(ilat) << 1i);",
+  "cases": [
+   "geospatial-04 the score is the geohash"
+  ]
+ },
+ {
+  "name": "the offset is rounded",
+  "old": "    var ilat = int(math.floor(latOffset * scale));",
+  "new": "    var ilat = int(math.round(latOffset * scale));",
+  "cases": [
+   "geospatial-04 the score is the geohash"
+  ]
+ },
+ {
+  "name": "the decode gives the corner, not the centre",
+  "old": "    var lon = (a[0] + a[1]) / 2;\n    var lat = (a[2] + a[3]) / 2;",
+  "new": "    var lon = a[0];\n    var lat = a[2];",
+  "cases": [
+   "geospatial-06 GEOPOS decodes the score"
+  ]
+ },
+ {
+  "name": "the latitude is not clamped",
+  "old": "    if (lat > GEO_LAT_MAX) {\n        lat = GEO_LAT_MAX;\n    }",
+  "new": "",
+  "cases": [
+   "local: a place at the top corner is decoded and clamped"
+  ]
+ },
+ {
+  "name": "a score from 2^52 is not decoded",
+  "old": "var GEO_SCORE_LIMIT = 9223372036854775808.0;",
+  "new": "var GEO_SCORE_LIMIT = 4503599627370496.0;",
+  "cases": [
+   "local: a place at the top corner is decoded and clamped"
+  ]
+ },
+ {
+  "name": "a negative score is decoded",
+  "old": "    if (!(score >= 0) or score >= GEO_SCORE_LIMIT) {",
+  "new": "    if (score >= GEO_SCORE_LIMIT) {",
+  "cases": [
+   "local: GEOPOS of a negative score gives a null array"
+  ]
+ },
+ {
+  "name": "the radius of the earth is wrong",
+  "old": "var EARTH_RADIUS_IN_METERS = 6372797.560856;",
+  "new": "var EARTH_RADIUS_IN_METERS = 6371000.0;",
+  "cases": [
+   "geospatial-07 GEODIST gives the distance in meters with 4 decimals"
+  ]
+ },
+ {
+  "name": "the decimals are not padded",
+  "old": "    while (len(fracText) < d) {\n        fracText = \"0\" + fracText;\n    }",
+  "new": "",
+  "cases": [
+   "local: GEODIST in each unit"
+  ]
+ },
+ {
+  "name": "a mile is 1600 m",
+  "old": "    if (u == \"mi\") {\n        return 1609.34;",
+  "new": "    if (u == \"mi\") {\n        return 1600.0;",
+  "cases": [
+   "local: GEODIST in each unit"
+  ]
+ },
+ {
+  "name": "a unit has case",
+  "old": "fun geoUnit(text) {\n    var u = lower(text);",
+  "new": "fun geoUnit(text) {\n    var u = text;",
+  "cases": [
+   "local: GEODIST in each unit"
+  ]
+ },
+ {
+  "name": "GEOADD takes any place",
+  "old": "    if (lon < GEO_LONG_MIN or lon > GEO_LONG_MAX or lat < GEO_LAT_MIN or lat > GEO_LAT_MAX) {",
+  "new": "    if (false) {",
+  "cases": [
+   "geospatial-02 GEOADD of an invalid pair gives an error that names both"
+  ]
+ },
+ {
+  "name": "the latitude goes to 90",
+  "old": "var GEO_LAT_MAX = 85.05112878;",
+  "new": "var GEO_LAT_MAX = 90.0;",
+  "cases": [
+   "geospatial-02 an invalid latitude names the latitude"
+  ]
+ },
+ {
+  "name": "GEOSEARCH keeps every candidate",
+  "old": "        if (xy != nil and geoDistance(reply.lon, reply.lat, xy[0], xy[1]) <= reply.radius) {",
+  "new": "        if (xy != nil) {",
+  "cases": [
+   "local: GEOSEARCH takes a step less near the edge of the box, as Redis does",
+   "local: GEOSEARCH gives the members of the boxes in their order"
+  ]
+ },
+ {
+  "name": "GEOSEARCH reads only the centre box",
+  "old": "    for (var m in moves) {\n        boxes.append([geoMove(hash, steps, m[0], m[1]), steps]);\n    }",
+  "new": "    boxes.append([hash, steps]);\n    for (var m in moves[1:9]) {\n        boxes.append(nil);\n    }",
+  "cases": [
+   "local: GEOSEARCH gives the members of the boxes in their order"
+  ]
+ },
+ {
+  "name": "the step is not one less near the edge",
+  "old": "    if (steps > 1 and (north[3] < maxLat or south[2] > minLat or east[1] < maxLon or west[0] > minLon)) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: GEOSEARCH takes a step less near the edge of the box, as Redis does"
+  ]
+ },
+ {
+  "name": "a box that repeats is read again",
+  "old": "        if (last != nil and box[0] == last[0] and box[1] == last[1]) {\n            continue;\n        }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH over the whole earth gives each member once"
+  ]
+ },
+ {
+  "name": "the neighbours move the wrong way",
+  "old": "        if (dx > 0) {\n            x = x + (zz + 1i);",
+  "new": "        if (dx < 0) {\n            x = x + (zz + 1i);",
+  "cases": [
+   "local: GEOSEARCH gives the members of the boxes in their order"
+  ]
+ },
+ {
+  "name": "GEOSEARCH spends no elements",
+  "old": "    if (!spendElements(len(members))) {\n        return EXEC_TOO_LARGE;\n    }\n    return GeoSearchReply",
+  "new": "    return GeoSearchReply",
+  "cases": [
+   "local: EXEC refuses a GEOSEARCH over the element budget"
+  ]
+ },
+ {
+  "name": "GEOADD goes to the replicas as GEOADD",
+  "old": "    return zaddPairs(argv[1], pairs, replArgs);",
+  "new": "    return zaddPairs(argv[1], pairs, argv);",
+  "cases": [
+   "local: GEOADD goes to the replicas as the ZADD that it does"
+  ]
+ },
+ {
+  "name": "no limit on the members of GEOADD",
+  "old": "    if ((len(argv) - 2) / 3 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }",
+  "new": "",
+  "cases": [
+   "local: GEOADD of more than 16384 members is refused"
+  ]
+ },
+ {
+  "name": "GEOADD takes an odd count",
+  "old": "    if ((len(argv) - 2) % 3 != 0) {\n        return errorReply(\"ERR syntax error\");\n    }",
+  "new": "",
+  "cases": [
+   "local: GEOADD g9 1 2 a 3 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "GEOSEARCH takes a negative radius",
+  "old": "            if (radius < 0) {\n                return errorReply(\"ERR radius cannot be negative\");\n            }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH g8 FROMLONLAT 2 48 BYRADIUS -1 m gives the error of Redis"
+  ]
+ },
+ {
+  "name": "FROMMEMBER is read as the origin",
+  "old": "        from = geoDecodeScore(score);",
+  "new": "        from = [0, 0];",
+  "cases": [
+   "local: GEOSEARCH FROMMEMBER uses the place of the member"
+  ]
+ },
+ {
+  "name": "a geo command reads a string as a sorted set",
+  "old": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "new": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        entry = nil;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "cases": [
+   "local: GEOPOS of a string gives WRONGTYPE"
+  ]
+ },
+ {
+  "name": "a replica takes GEOADD from a client",
+  "old": "\"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "new": "\"ZADD\": true, \"ZREM\": true};",
+  "cases": [
+   "local: a replica refuses GEOADD from a client"
+  ]
+ },
+ {
+  "name": "no limit on the names of GEOPOS",
+  "old": "    if (len(argv) - 2 > ZSET_COMMAND_MEMBERS) {\n        return ZSET_TOO_MANY;\n    }\n    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "new": "    var entry = zsetEntry(argv[1]);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    if (!spendZsetWork(len(argv) - 2)) {",
+  "cases": [
+   "local: GEOPOS of more than 16384 members is refused"
+  ]
+ },
+ {
+  "name": "GEOPOS spends no work",
+  "old": "    if (!spendZsetWork(len(argv) - 2)) {\n        return ZSET_EXEC_TOO_MUCH;\n    }\n    var parts",
+  "new": "    var parts",
+  "cases": [
+   "local: GEOPOS spends the sorted set work of EXEC"
+  ]
+ },
+ {
+  "name": "EXEC does not set the GEOSEARCH limit",
+  "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n",
+  "new": "",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
+  ]
+ },
+ {
+  "name": "no pruning of the boxes",
+  "old": "    if (steps >= 2) {\n        if (area[2] < minLat) {",
+  "new": "    if (false) {\n        if (area[2] < minLat) {",
+  "cases": [
+   "local: GEOSEARCH leaves out the boxes outside the search area, as Redis does"
+  ]
+ },
+ {
+  "name": "the southern bounding box is the northern one",
+  "old": "    if (lat < 0) {\n        minLon = lon - lonDeltaBottom;",
+  "new": "    if (false) {\n        minLon = lon - lonDeltaBottom;",
+  "cases": [
+   "local: GEOSEARCH south of the equator takes the bounding box of Redis"
+  ]
+ },
+ {
+  "name": "a repeated FROMLONLAT is refused",
+  "old": "        if (opt == \"FROMLONLAT\" and i + 2 < len(argv)) {",
+  "new": "        if (opt == \"FROMLONLAT\" and i + 2 < len(argv) and !byLonLat) {",
+  "cases": [
+   "local: GEOSEARCH takes the last of an option that comes again, as Redis does"
+  ]
+ },
+ {
+  "name": "inf is written as a number",
+  "old": "    if (x == math.inf) {\n        return \"inf\";\n    }",
+  "new": "",
+  "cases": [
+   "local: GEOADD g9 inf 0 x gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "-0 is written as 0",
+  "old": "    if (x < 0 or (x == 0 and 1 / x < 0)) {",
+  "new": "    if (x < 0) {",
+  "cases": [
+   "local: GEOADD g9 -0 100 x gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "GEOADD parses with no yield",
+  "old": "        i = i + 3;\n        if (mayYield and len(pairs) % ELEMENTS_PER_YIELD == 0) {",
+  "new": "        i = i + 3;\n        if (false) {",
+  "cases": [
+   "local: G4 GEOADD parses its places in steps"
+  ]
+ },
+ {
+  "name": "GEOSEARCH checks the key after the options",
+  "old": "    var key = argv[1];\n    var entry = zsetEntry(key);\n    if (entry == false) {\n        return WRONGTYPE;\n    }\n    var z = nil;",
+  "new": "    var key = argv[1];\n    var entry = zsetEntry(key);\n    if (entry == false) {\n        entry = nil;\n    }\n    var z = nil;",
+  "cases": [
+   "local: GEOSEARCH str FROMLONLAT 999 0 BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "no GEOSEARCH limit in EXEC",
+  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
+  ]
+ },
+ {
+  "name": "the GEOSEARCH limit is checked after the walk",
+  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n        }\n    }\n    if (geoExecCandidates != nil) {\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
+  "new": "        }\n    }\n    if (geoExecCandidates != nil) {\n        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
+  ]
+ },
+ {
+  "name": "FROMMEMBER after FROMLONLAT is taken",
+  "old": "            if (byLonLat) {\n                return errorReply(\"ERR syntax error\");\n            }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH g8 FROMLONLAT 2 48 FROMMEMBER Paris BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "FROMLONLAT after FROMMEMBER is taken",
+  "old": "            if (byMember) {\n                return errorReply(\"ERR syntax error\");\n            }",
+  "new": "",
+  "cases": [
+   "local: GEOSEARCH g8 FROMMEMBER Paris FROMLONLAT 999 48 BYRADIUS 1 m gives the error of Redis, in its order"
+  ]
+ },
+ {
+  "name": "FROMMEMBER of a missing key is an error",
+  "old": "            if (z != nil) {\n                var score = z.dict[argv[i + 1]];",
+  "new": "            if (true) {\n                var score = nil;\n                if (z != nil) {\n                    score = z.dict[argv[i + 1]];\n                }",
+  "cases": [
+   "local: GEOSEARCH FROMMEMBER of a missing key is empty, as in Redis"
+  ]
+ },
+ {
+  "name": "a refused GEOSEARCH spends nothing",
+  "old": "                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;",
+  "new": "                return GEO_EXEC_TOO_MANY;",
+  "cases": [
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
+  ]
+ }
+]

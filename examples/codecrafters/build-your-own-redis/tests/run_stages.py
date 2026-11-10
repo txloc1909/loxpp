@@ -5060,6 +5060,296 @@ def stages_zset_replication(prog):
         m.close()
 
 
+def stages_geo(prog):
+    srv = Server(prog, [])
+    try:
+        check("geospatial: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        stages_geo_on(srv)
+    finally:
+        srv.stop()
+    stages_geo_limits(prog)
+    stages_geo_replication(prog)
+
+
+def stages_geo_on(srv):
+    c = Asker(srv)
+    check("geospatial-01 GEOADD of a new location gives 1", c.call("GEOADD", "g1", "11.5030378", "48.164271", "Munich") == 1)
+    got = c.call("GEOADD", "g2", "200", "100", "foo")
+    check("geospatial-02 GEOADD of an invalid pair gives an error that names both",
+          isinstance(got, Error) and got.startswith("ERR") and "longitude" in got and "latitude" in got, repr(got))
+    got = c.call("GEOADD", "g2", "10", "86", "foo")
+    check("geospatial-02 an invalid latitude names the latitude",
+          isinstance(got, Error) and got.startswith("ERR") and "latitude" in got, repr(got))
+    got = c.call("GEOADD", "g2", "181", "10", "foo")
+    check("geospatial-02 an invalid longitude names the longitude",
+          isinstance(got, Error) and got.startswith("ERR") and "longitude" in got, repr(got))
+    check("geospatial-03 GEOADD adds to a sorted set", c.call("GEOADD", "g3", "2.2944692", "48.8584625", "Paris") == 1
+          and c.call("ZRANGE", "g3", "0", "-1") == ["Paris"])
+    c.call("GEOADD", "g4", "2.2944692", "48.8584625", "Paris")
+    c.call("GEOADD", "g4", "-0.127758", "51.507351", "London")
+    check("geospatial-04 the score is the geohash", c.call("ZSCORE", "g4", "Paris") == "3663832614298053"
+          and c.call("ZSCORE", "g4", "London") == "2163557714754256")
+    c.call("GEOADD", "g5", "-0.0884948", "51.506479", "London")
+    c.call("GEOADD", "g5", "11.5030378", "48.164271", "Munich")
+    got = c.call("GEOPOS", "g5", "London", "Munich")
+    check("geospatial-05 GEOPOS gives a pair of floats for each location",
+          isinstance(got, list) and len(got) == 2 and all(isinstance(p, list) and len(p) == 2 for p in got)
+          and all(abs(float(a) - b) < 1e-5 for a, b in zip(got[0] + got[1], [-0.0884948, 51.506479, 11.5030378, 48.164271])),
+          repr(got))
+    check("geospatial-05 GEOPOS of a missing location gives a null array", c.call("GEOPOS", "g5", "missing_location") == [None])
+    check("geospatial-05 GEOPOS of a missing key gives a null array for each", c.call("GEOPOS", "missing_key", "a", "b") == [None, None])
+    for score, m in (("3663832614298053", "Foo"), ("3876464048901851", "Bar"), ("3468915414364476", "Baz"),
+                     ("3781709020344510", "Caz")):
+        c.call("ZADD", "g6", score, m)
+    check("geospatial-06 GEOPOS decodes the score", c.call("GEOPOS", "g6", "Foo") == [["2.294471561908722", "48.85846255040141"]],
+          repr(c.call("GEOPOS", "g6", "Foo")))
+    c.call("GEOADD", "g7", "11.5030378", "48.164271", "Munich")
+    c.call("GEOADD", "g7", "2.2944692", "48.8584625", "Paris")
+    check("geospatial-07 GEODIST gives the distance in meters with 4 decimals",
+          c.call("GEODIST", "g7", "Munich", "Paris") == "682477.7582")
+    c.call("GEOADD", "g8", "11.5030378", "48.164271", "Munich")
+    c.call("GEOADD", "g8", "2.2944692", "48.8584625", "Paris")
+    c.call("GEOADD", "g8", "-0.0884948", "51.506479", "London")
+    got = [c.call("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "BYRADIUS", r, "m") for r in ("100000", "500000")]
+    got.append(c.call("GEOSEARCH", "g8", "FROMLONLAT", "11", "50", "BYRADIUS", "300000", "m"))
+    check("geospatial-08 GEOSEARCH gives the locations within the radius",
+          [sorted(g) if isinstance(g, list) else g for g in got] == [["Paris"], ["London", "Paris"], ["Munich"]], repr(got))
+
+    # Local cases.
+    check("local: GEODIST in each unit", [c.call("GEODIST", "g7", "Munich", "Paris", u) for u in ("km", "mi", "ft", "M")]
+          == ["682.4778", "424.0731", "2239100.2564", "682477.7582"])
+    check("local: GEODIST of a missing member gives a null bulk", c.call("GEODIST", "g7", "Munich", "nosuch") is None)
+    check("local: GEODIST of a missing key gives a null bulk", c.call("GEODIST", "nokey", "a", "b") is None)
+    for cmd, want in ((("GEODIST", "g7", "Munich", "Paris", "yd"), "ERR unsupported unit provided"),
+                      (("GEODIST", "g7", "Munich"), "ERR wrong number of arguments for 'geodist'"),
+                      (("GEODIST", "g7", "a", "b", "m", "x"), "ERR syntax error"),
+                      (("GEOADD", "g9", "1", "2"), "ERR wrong number of arguments for 'geoadd'"),
+                      (("GEOADD", "g9", "1", "2", "a", "3"), "ERR syntax error"),
+                      (("GEOADD", "g9", "abc", "2", "a"), "ERR value is not a valid float"),
+                      (("GEOADD", "g9", "200", "100", "foo"), "ERR invalid longitude,latitude pair 200.000000,100.000000"),
+                      (("GEOADD", "g9", "-180.5", "0", "foo"), "ERR invalid longitude,latitude pair -180.500000,0.000000"),
+                      (("GEOPOS",), "ERR wrong number of arguments for 'geopos'"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "BYRADIUS", "-1", "m"), "ERR radius cannot be negative"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "BYRADIUS", "abc", "m"), "ERR need numeric radius"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "BYRADIUS", "1", "yd"), "ERR unsupported unit provided"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "200", "48", "BYRADIUS", "1", "m"), "ERR invalid longitude,latitude pair"),
+                      (("GEOSEARCH", "g8", "FROMMEMBER", "nosuch", "BYRADIUS", "1", "m"), "ERR could not decode requested zset member"),
+                      (("GEOSEARCH", "g8", "BYRADIUS", "1", "m", "x", "y"), "ERR syntax error")):
+        got = c.call(*cmd)
+        check("local: %s gives the error of Redis" % " ".join(cmd), isinstance(got, Error) and got.startswith(want), repr(got))
+    check("local: GEOSEARCH FROMMEMBER uses the place of the member",
+          sorted(c.call("GEOSEARCH", "g8", "FROMMEMBER", "Paris", "BYRADIUS", "500", "km")) == ["London", "Paris"])
+    check("local: GEOSEARCH of a missing key is empty", c.call("GEOSEARCH", "nokey", "FROMLONLAT", "2", "48", "BYRADIUS", "1", "m") == [])
+    check("local: GEOSEARCH FROMMEMBER of a missing key is empty, as in Redis",
+          c.call("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "m") == [])
+    check("local: GEOADD of an existing member at the same place gives 0",
+          c.call("GEOADD", "g8", "2.2944692", "48.8584625", "Paris") == 0)
+    check("local: a place at the top corner is decoded and clamped", c.call("GEOADD", "g8", "180", "85.05112878", "edge") == 1
+          and c.call("GEOPOS", "g8", "edge") == [["180", "85.05112878"]], repr(c.call("GEOPOS", "g8", "edge")))
+    c.call("ZADD", "g8", "-1", "neg")
+    check("local: GEOPOS of a negative score gives a null array", c.call("GEOPOS", "g8", "neg") == [None])
+    c.call("SET", "str", "v")
+    for cmd in (("GEOADD", "str", "1", "2", "a"), ("GEOPOS", "str", "a"), ("GEODIST", "str", "a", "b"),
+                ("GEOSEARCH", "str", "FROMLONLAT", "1", "2", "BYRADIUS", "1", "m")):
+        got = c.call(*cmd)
+        check("local: %s of a string gives WRONGTYPE" % cmd[0], isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+    # GEOSEARCH reads the 9 boxes in the order of Redis: a reply in that
+    # order, from a set where the order of score would differ.
+    pts = []
+    for i in range(60):
+        pts += ["%.4f" % (2 + (i % 8) * 0.07), "%.4f" % (48 + (i // 8) * 0.05), "q%d" % i]
+    c.call("GEOADD", "order", *pts)
+    got = c.call("GEOSEARCH", "order", "FROMLONLAT", "2.25", "48.2", "BYRADIUS", "20", "km")
+    check("local: GEOSEARCH gives the members of the boxes in their order",
+          isinstance(got, list) and len(got) > 3 and got == GEO_ORDER_WANT, repr(got)[:120])
+    # Near the edge of its box the step is one less, as Redis makes it;
+    # the order of the reply shows the boxes (redis-server 7.0 gives it).
+    near = ['-69.28528', '79.45329', 'k0', '-68.51768', '80.68773', 'k1', '-67.85737', '77.09054', 'k2',
+            '-64.85591', '77.85720', 'k3', '-64.10863', '79.47066', 'k4', '-67.33019', '80.95595', 'k5',
+            '-63.91068', '79.88423', 'k6', '-66.93099', '81.94326', 'k7', '-66.75277', '76.74126', 'k8',
+            '-68.05013', '77.16314', 'k9', '-66.73072', '80.30099', 'k10', '-67.38640', '77.63146', 'k11']
+    c.call("GEOADD", "near", *near)
+    got = c.call("GEOSEARCH", "near", "FROMLONLAT", "-63.5937", "81.3621", "BYRADIUS", "200", "km")
+    check("local: GEOSEARCH takes a step less near the edge of the box, as Redis does",
+          got == ["k1", "k10", "k5", "k7", "k6"], repr(got))
+    c.call("SET", "str", "v")
+    # Redis drops a box outside the search area, also when a member in it
+    # is in the radius: p0 is in the radius, and the reply is empty.
+    c.call("GEOADD", "prune", "-31.3558", "85", "p0")
+    check("local: GEOSEARCH leaves out the boxes outside the search area, as Redis does",
+          c.call("GEOSEARCH", "prune", "FROMLONLAT", "0", "80", "BYRADIUS", "1200", "km") == [])
+    # South of the equator the bounding box takes the other edge, so the
+    # boxes and the order change (redis-server 7.0 gives this order).
+    c.call("GEOADD", "south", "23.8262", "-67.2450", "p0", "9.4288", "-35.6265", "p1")
+    got = c.call("GEOSEARCH", "south", "FROMLONLAT", "7.4526", "-47.7530", "BYRADIUS", "2398855", "m")
+    check("local: GEOSEARCH south of the equator takes the bounding box of Redis", got == ["p0", "p1"], repr(got))
+    for cmd, want in ((("GEOSEARCH", "str", "FROMLONLAT", "999", "0", "BYRADIUS", "1", "m"), "WRONGTYPE"),
+                      (("GEOSEARCH", "g8", "FROMMEMBER", "nosuch", "BYRADIUS", "1", "xx"), "ERR could not decode requested zset member"),
+                      (("GEOSEARCH", "nokey", "FROMMEMBER", "a", "BYRADIUS", "1", "xx"), "ERR unsupported unit provided"),
+                      (("GEOSEARCH", "g8", "FROMLONLAT", "2", "48", "FROMMEMBER", "Paris", "BYRADIUS", "1", "m"),
+                       "ERR syntax error"),
+                      (("GEOSEARCH", "g8", "FROMMEMBER", "Paris", "FROMLONLAT", "999", "48", "BYRADIUS", "1", "m"),
+                       "ERR syntax error"),
+                      (("GEOADD", "g9", "inf", "0", "x"), "ERR invalid longitude,latitude pair inf,0.000000"),
+                      (("GEOADD", "g9", "-0", "100", "x"), "ERR invalid longitude,latitude pair -0.000000,100.000000")):
+        got = c.call(*cmd)
+        check("local: %s gives the error of Redis, in its order" % " ".join(cmd),
+              isinstance(got, Error) and got.startswith(want), repr(got))
+    got = c.call("GEOSEARCH", "g8", "FROMLONLAT", "100", "0", "FROMLONLAT", "2", "48", "BYRADIUS", "1", "m",
+                 "BYRADIUS", "500", "km")
+    check("local: GEOSEARCH takes the last of an option that comes again, as Redis does",
+          isinstance(got, list) and sorted(got) == ["London", "Paris"], repr(got))
+    got = c.call("GEOSEARCH", "g8", "FROMLONLAT", "0", "0", "BYRADIUS", "20000", "km")
+    # redis-server 7.0 gives these three: the place at the top corner has
+    # bit 52 set, past the range of every box.
+    check("local: GEOSEARCH over the whole earth gives each member once",
+          got == ["Paris", "Munich", "London"], repr(got))
+    c.close()
+
+
+# The reply of redis-server 7.0 for the order case above.
+GEO_ORDER_WANT = ['q34', 'q42', 'q35', 'q36', 'q43', 'q44', 'q50', 'q51', 'q52', 'q37', 'q45', 'q38', 'q46', 'q53',
+                  'q54', 'q58', 'q59', 'q39', 'q47', 'q10', 'q11', 'q12', 'q18', 'q26', 'q19', 'q20', 'q27', 'q28',
+                  'q13', 'q21', 'q29', 'q22', 'q30', 'q31', 'q32', 'q40', 'q33', 'q41', 'q49', 'q24', 'q17', 'q25']
+
+
+def stages_geo_limits(prog):
+    srv = Server(prog, [])
+    try:
+        names = ["local: G1 GEOSEARCH over 524288 members of the boxes stalls PING at most 1 s",
+                 "local: G2 GEOADD of 16384 members stalls PING at most 1 s",
+                 "local: GEOADD of more than 16384 members is refused",
+                 "local: EXEC refuses a GEOSEARCH over the element budget",
+                 "local: GEOPOS of more than 16384 members is refused",
+                 "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+                 "local: G4 GEOADD parses its places in steps",
+                 "local: GEOPOS spends the sorted set work of EXEC"]
+        if aof_started(srv, names):
+            c = Asker(srv)
+            c.c.sock.settimeout(60)
+            args = []
+            for i in range(16385):
+                args += ["1", "1", "x%d" % i]
+            got = c.call("GEOADD", "lim", *args)
+            check(names[2], isinstance(got, Error) and "16384" in got, repr(got))
+            got = c.call("GEOPOS", "lim", *["x%d" % i for i in range(16385)])
+            check("local: GEOPOS of more than 16384 members is refused", isinstance(got, Error) and "16384" in got, repr(got))
+            # 524288 members in a square of about 1 km.
+            for b in range(32):
+                part = []
+                for i in range(16384):
+                    k = b * 16384 + i
+                    part += ["%.6f" % (2 + (k % 724) * 0.00001), "%.6f" % (48 + (k // 724) * 0.00001), "m%d" % k]
+                c.raw().send_raw(encode("GEOADD", "dense", *part))
+                c.raw().try_read(60)
+            got = [None]
+
+            def search():
+                c.raw().send_raw(encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km"))
+                got[0] = c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, search)
+            check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
+                  "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
+            # G3: one EXEC walks at most 2097152 members of boxes. With one
+            # member more (524289, which does not divide the limit), 3
+            # GEOSEARCH run and 61 are refused; a refused walk spends what is
+            # left, so the others walk no more. With 64 of them, a walk that
+            # did not stop, or did not spend, would stall for seconds.
+            c.call("GEOADD", "dense", "2.0045", "48.0045", "extra")
+            reply = [None]
+
+            def exec_searches():
+                x = Client(srv.port)
+                x.sock.settimeout(120)
+                x.send_raw(encode("MULTI") + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 64
+                           + encode("EXEC"))
+                for _ in range(65):
+                    x.read()
+                reply[0] = x.read()
+                x.close()
+            worst, wrong, _ = measure_while(srv, exec_searches)
+            r = reply[0]
+            check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524289 for x in r[:3])
+                  and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[3:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+            c.call("ZREM", "dense", "extra")
+            # The element budget: 8 ZRANGE WITHSCORES of 524288 fill it, and a
+            # GEOSEARCH after them is refused.
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "dense", "0", "-1", "WITHSCORES") * 8
+                       + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") + encode("EXEC"))
+            for _ in range(10):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: EXEC refuses a GEOSEARCH over the element budget",
+                  isinstance(reply, list) and len(reply) == 9 and isinstance(reply[8], Error)
+                  and "elements" in reply[8], repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
+            more = []
+            for i in range(16384):
+                more += ["%.6f" % (10 + i * 0.0001), "%.6f" % (20 + i * 0.0001), "n%d" % i]
+
+            def geoadd():
+                c.raw().send_raw(encode("GEOADD", "dense", *more))
+                c.raw().try_read(60)
+            worst, wrong, _ = measure_while(srv, geoadd)
+            check(names[1], worst <= 1.0 and not wrong and c.call("ZCARD", "dense") == 524288 + 16384, "worst %.3f s" % worst)
+            # G4: the same GEOADD again changes nothing, so its parse is the
+            # work: with a yield every 1024 places it stalls little (rule 2).
+            worst, wrong, _ = measure_while(srv, geoadd)
+            check("local: G4 GEOADD parses its places in steps", worst <= 0.1 and not wrong, "worst %.3f s" % worst)
+            # GEOPOS spends the sorted set work of EXEC: two of 16384 names
+            # fill it, and the third is refused.
+            names16 = ["m%d" % i for i in range(16384)]
+            x = Client(srv.port)
+            x.sock.settimeout(60)
+            x.send_raw(encode("MULTI") + encode("GEOPOS", "dense", *names16) * 3 + encode("EXEC"))
+            for _ in range(4):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: GEOPOS spends the sorted set work of EXEC",
+                  isinstance(reply, list) and len(reply) == 3 and isinstance(reply[2], Error), repr(reply)[-80:])
+            c.close()
+    finally:
+        srv.stop()
+
+
+def stages_geo_replication(prog):
+    srv = Server(prog, [])
+    try:
+        name = "local: GEOADD goes to the replicas as the ZADD that it does"
+        if aof_started(srv, [name]):
+            r, _, _ = replica_handshake(srv.port)
+            c = Asker(srv)
+            c.call("GEOADD", "rg", "2.2944692", "48.8584625", "Paris")
+            c.call("GEOADD", "rg", "2.2944692", "48.8584625", "Paris")
+            c.call("SET", "end", "1")
+            got = [r.try_read(2), r.try_read(2)]
+            check(name, got == [["ZADD", "rg", "3663832614298053", "Paris"], ["SET", "end", "1"]], repr(got))
+            r.close()
+            c.close()
+    finally:
+        srv.stop()
+    m = FakeMaster()
+    rep = Server(prog, ["--replicaof", "localhost %d" % m.port])
+    try:
+        name = "local: a replica refuses GEOADD from a client"
+        if aof_started(rep, [name]):
+            link = m.accept()
+            fake_handshake(link)
+            c = Asker(rep)
+            got = c.call("GEOADD", "q", "1", "2", "a")
+            check(name, isinstance(got, Error) and got.startswith("READONLY"), repr(got))
+            c.close()
+    finally:
+        rep.stop()
+        m.close()
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -5071,6 +5361,7 @@ GROUPS = [
     ("persistence-aof", stages_aof),
     ("pub-sub", stages_pubsub),
     ("sorted-sets", stages_zset),
+    ("geospatial", stages_geo),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]
