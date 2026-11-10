@@ -429,10 +429,10 @@ long msSince(PClock::time_point start) {
 // Runtime::pollWhileBusy() polls between task switches once a millisecond has
 // passed since the last poll, and that poll can report a timer before the
 // program has run its first statement: under a sanitizer on a loaded host the
-// start of interpret() can take longer than a short timer. The two tests below
-// are about the blocking wait a waiting task makes, so they pin the clock that
-// paces that poll: the only poll left is the one the worker makes after its
-// task waited, whatever start-up took.
+// start of interpret() can take longer than a short timer. The three tests
+// below are about the blocking wait a waiting task makes, so they pin the
+// clock that paces that poll: the only poll left is the one the worker makes
+// after its task waited, whatever start-up took.
 PClock::time_point noSwitchPoll() { return PClock::time_point{}; }
 
 } // namespace
@@ -450,13 +450,16 @@ TEST_F(WorkerTest, AWorkerWithNoWaitingTaskMakesNoPoller) {
     EXPECT_FALSE(vm.runtime().hasPoller());
 }
 
-// The main task waits in receive while its worker sleeps in the poller, on a
-// timer that is far away. A send from another worker must wake it at once. If
-// the sender does not write the wakeup descriptor, the worker sleeps until the
-// timer.
+// The main task waits in receive while its worker sleeps in the poller. The
+// wait ends on a descriptor that never becomes readable, so only a send from
+// another worker can end it. A send must wake it at once. If the sender does
+// not write the wakeup descriptor, the worker sleeps for ever, and the hang
+// guard in test/CMakeLists.txt ends the test.
 TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
     VM vm;
-    vm.runtime().poller().waitUntil(PClock::now() + std::chrono::seconds(8));
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    ASSERT_NE(vm.runtime().poller().waitFd(fds[0], Poller::Interest::Read), 0);
     const auto start = PClock::now();
     ASSERT_EQ(vm.interpret(R"(
         fun far(main) { sleep(0.1); task.send(main, "hi"); }
@@ -466,6 +469,10 @@ TEST_F(WorkerTest, SendWakesAWorkerThatSleepsInItsPoller) {
               InterpretResult::OK);
     EXPECT_EQ(globalString(vm, "got"), "hi");
     EXPECT_LT(msSince(start), 4000);
+    std::vector<Poller::Token> cancelled;
+    vm.runtime().poller().cancelFd(fds[0], cancelled);
+    close(fds[0]);
+    close(fds[1]);
 }
 
 // The main worker holds a registered wait, so it is busy, and the main task
@@ -593,14 +600,21 @@ TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
 }
 
 // When the registered wait ends and nothing can send, the deadlock is real.
+// The wait ends on a descriptor that is readable before the script runs, not
+// on a wall-clock deadline (as in the polling test above).
 TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
     VM vm;
     int fired = 0;
-    const auto start = PClock::now();
-    vm.runtime().poller().waitUntil(PClock::now() +
-                                    std::chrono::milliseconds(200));
-    vm.runtime().setPollHandler(
-        [&](const std::vector<Poller::Token>&) { ++fired; });
+    Runtime& rt = vm.runtime();
+    // The seam keeps the wait's end in waitForWork, the path that reports the
+    // deadlock. Without it, pollWhileBusy can end the wait first. No assertion
+    // below checks which path ends the wait.
+    rt.setSchedulerClock(&noSwitchPoll);
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    ASSERT_EQ(write(fds[1], "x", 1), 1);
+    ASSERT_NE(rt.poller().waitFd(fds[0], Poller::Interest::Read), 0);
+    rt.setPollHandler([&](const std::vector<Poller::Token>&) { ++fired; });
     testing::internal::CaptureStderr();
     InterpretResult result = vm.interpret("var got = task.receive();");
     std::string err = testing::internal::GetCapturedStderr();
@@ -609,7 +623,10 @@ TEST_F(WorkerTest, DeadlockIsReportedWhenTheLastWaitEnds) {
               std::string::npos)
         << err;
     EXPECT_EQ(fired, 1);
-    EXPECT_GE(msSince(start), 190);
+    std::vector<Poller::Token> cancelled;
+    rt.poller().cancelFd(fds[0], cancelled);
+    close(fds[0]);
+    close(fds[1]);
 }
 
 // --- The wait record after a wait, a line and a run --------------------------
