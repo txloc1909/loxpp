@@ -238,5 +238,117 @@
   "cases": [
    "local: STRLEN of a list gives WRONGTYPE"
   ]
+ },
+ {
+  "name": "no 0 for two negative indexes with start after end",
+  "old": "        if (start < 0 and end < 0 and start > end) {\n            return integerReply(0);\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT with two negative indexes and start after end gives 0, as Redis 7.0 does"
+  ]
+ },
+ {
+  "name": "BITCOUNT does not clamp a negative end",
+  "old": "        if (end < 0) {\n            end = 0;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT clamps a negative end to 0"
+  ]
+ },
+ {
+  "name": "BITCOUNT in bits counts to the end of the byte",
+  "old": "            if (i == reply.last) {\n                hi = reply.lastMask;\n            }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT in bits stops at the last bit"
+  ]
+ },
+ {
+  "name": "BITCOUNT does not clamp an end past the string",
+  "old": "        if (end >= total) {\n            end = total - 1;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once"
+  ]
+ },
+ {
+  "name": "BITCOUNT takes no index of 16 digits",
+  "old": "    if (len(digits) < 16 or len(digits) > 19 or !isDigits(digits) or digits[0] == \"0\") {",
+  "new": "    if (true) {",
+  "cases": [
+   "local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once"
+  ]
+ },
+ {
+  "name": "BITOP that removes the destination is not propagated",
+  "old": "            store.del(dest);\n            touch(dest);\n            replicate(argv, nil);",
+  "new": "            store.del(dest);\n            touch(dest);",
+  "cases": [
+   "local: SETBIT and BITOP are propagated"
+  ]
+ },
+ {
+  "name": "BITOP that removes the destination does not mark",
+  "old": "            store.del(dest);\n            touch(dest);",
+  "new": "            store.del(dest);",
+  "cases": [
+   "local: a BITOP that removes the destination fails EXEC of a client that watches it"
+  ]
+ },
+ {
+  "name": "GET shares the live chunks",
+  "old": "    return ChunkedBulk(value.chunks[0:len(value.chunks)], value.length);",
+  "new": "    return ChunkedBulk(value.chunks, value.length);",
+  "cases": [
+   "local: GET of a bitmap writes it as it was when it ran"
+  ]
+ },
+ {
+  "name": "the split of a string spends no work",
+  "old": "            made = (have - have % BYTES_CHUNK) / BYTES_CHUNK + 1;",
+  "new": "            made = 0;",
+  "cases": [
+   "local: the split of a string by SETBIT spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "BITOP spends no work",
+  "old": "    if (!spendBitmapWork(work)) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITOP spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "the copy of GET spends no work",
+  "old": "    // The copy of the List is one unit of bitmap work for each chunk.\n    if (!spendBitmapWork(len(value.chunks))) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: the copy of GET spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "the copy of BITCOUNT spends no work",
+  "old": "        // of bitmap work for each chunk.\n        if (!spendBitmapWork(len(value.chunks))) {\n            return BITMAP_EXEC_TOO_MUCH;\n        }",
+  "new": "        // of bitmap work for each chunk.",
+  "cases": [
+   "local: the copy of BITCOUNT spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "BITCOUNT goes on after its client",
+  "old": "        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {\n            yield nil;\n            if (conn.closed) {\n                return;\n            }\n        }\n    }\n    conn.sock.write(integerReply(n));",
+  "new": "        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {\n            yield nil;\n        }\n    }\n    conn.sock.write(integerReply(n));",
+  "cases": [
+   "local: a BITCOUNT whose client goes stops with the connection"
+  ]
+ },
+ {
+  "name": "the reader does not mark the end",
+  "old": "    conn.closed = true;\n",
+  "new": "",
+  "cases": [
+   "local: a BITCOUNT whose client goes stops with the connection"
+  ]
  }
 ]

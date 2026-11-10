@@ -335,5 +335,13 @@
   "cases": [
    "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
+ },
+ {
+  "name": "GEOSEARCH goes on after its client",
+  "old": "            yield nil;\n            if (conn.closed) {\n                return;\n            }\n        }\n    }\n    writeBulks(conn, Bulks([], keep));",
+  "new": "            yield nil;\n        }\n    }\n    writeBulks(conn, Bulks([], keep));",
+  "cases": [
+   "local: a GEOSEARCH whose client goes stops with the connection"
+  ]
  }
 ]

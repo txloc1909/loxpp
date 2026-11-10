@@ -5043,6 +5043,9 @@ fun writeGeoSearch(conn, reply) {
         i = i + 1;
         if (i % ELEMENTS_PER_YIELD == 0) {
             yield nil;
+            if (conn.closed) {
+                return;
+            }
         }
     }
     writeBulks(conn, Bulks([], keep));
@@ -5100,6 +5103,10 @@ class ChunkedBulk {
 fun stringReply(value) {
     if (type(value) == "String") {
         return Bulk(value);
+    }
+    // The copy of the List is one unit of bitmap work for each chunk.
+    if (!spendBitmapWork(len(value.chunks))) {
+        return BITMAP_EXEC_TOO_MUCH;
     }
     return ChunkedBulk(value.chunks[0:len(value.chunks)], value.length);
 }
@@ -5354,6 +5361,35 @@ fun maskedBits(b, lo, hi) {
     return n;
 }
 
+// An index of up to 19 digits, as a 64-bit integer of Redis. A value
+// past 15 digits is past any string, so it is kept as +-1e18 (exact
+// digits do not matter then). Returns nil for any other text.
+fun parseIndex(text) {
+    var n = parseInteger(text);
+    if (n != nil) {
+        return n;
+    }
+    var neg = len(text) > 0 and text[0] == "-";
+    var digits = text;
+    if (neg) {
+        digits = text[1:len(text)];
+    }
+    if (len(digits) < 16 or len(digits) > 19 or !isDigits(digits) or digits[0] == "0") {
+        return nil;
+    }
+    var limit = "9223372036854775807";
+    if (neg) {
+        limit = "9223372036854775808";
+    }
+    if (len(digits) == 19 and digits > limit) {
+        return nil;
+    }
+    if (neg) {
+        return -1000000000000000000;
+    }
+    return 1000000000000000000;
+}
+
 // BITCOUNT key [start end [BYTE | BIT]]. As in Redis 7.0 it reads the key
 // first: a missing key gives 0, and WRONGTYPE comes, before the arguments
 // are checked.
@@ -5375,10 +5411,15 @@ fun cmdBitcount(ctx, argv) {
     var start = 0;
     var end = 0;
     if (len(argv) >= 4) {
-        start = parseInteger(argv[2]);
-        end = parseInteger(argv[3]);
+        start = parseIndex(argv[2]);
+        end = parseIndex(argv[3]);
         if (start == nil or end == nil) {
             return NOT_INTEGER;
+        }
+        // As in Redis 7.0: two negative indexes with start after end give 0,
+        // before the unit is read.
+        if (start < 0 and end < 0 and start > end) {
+            return integerReply(0);
         }
         if (len(argv) == 5) {
             var unit = upper(argv[4]);
@@ -5419,7 +5460,11 @@ fun cmdBitcount(ctx, argv) {
         return integerReply(0);
     }
     if (type(value) != "String") {
-        // A copy of the List of chunks: SETBIT replaces its chunks.
+        // A copy of the List of chunks: SETBIT replaces its chunks. One unit
+        // of bitmap work for each chunk.
+        if (!spendBitmapWork(len(value.chunks))) {
+            return BITMAP_EXEC_TOO_MUCH;
+        }
         value = Bytes(value.chunks[0:len(value.chunks)], value.length);
     }
     if (!bitMode) {
@@ -5445,6 +5490,9 @@ fun writeBitcount(conn, reply) {
             steps = steps + 1;
             if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
                 yield nil;
+                if (conn.closed) {
+                    return;
+                }
             }
             continue;
         }
@@ -5466,6 +5514,9 @@ fun writeBitcount(conn, reply) {
         steps = steps + 1;
         if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
             yield nil;
+            if (conn.closed) {
+                return;
+            }
         }
     }
     conn.sock.write(integerReply(n));
@@ -6128,6 +6179,8 @@ class Conn {
         this.pubSoftSince = nil;
         // The Published messages in the mailbox of the session.
         this.pubQueued = 0;
+        // True when the reader has seen the end of the stream.
+        this.closed = false;
     }
 }
 
@@ -6248,6 +6301,9 @@ fun readLoop(conn) {
             printFault("read fault: ", e);
         }
     }
+    // A count in the session (BITCOUNT, GEOSEARCH) reads this at each step,
+    // so it stops with the connection.
+    conn.closed = true;
     try {
         task.send(conn.session, Msg.Closed());
     } catch (ignored) {

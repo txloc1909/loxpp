@@ -5228,6 +5228,7 @@ def stages_geo_limits(prog):
         names = ["local: G1 GEOSEARCH over 524288 members of the boxes stalls PING at most 1 s",
                  "local: G2 GEOADD of 16384 members stalls PING at most 1 s",
                  "local: GEOADD of more than 16384 members is refused",
+                 "local: a GEOSEARCH whose client goes stops with the connection",
                  "local: EXEC refuses a GEOSEARCH over the element budget",
                  "local: GEOPOS of more than 16384 members is refused",
                  "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
@@ -5259,6 +5260,26 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, search)
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
+            # A GEOSEARCH whose client goes stops its filter with the
+            # connection.
+            def geo_clients():
+                info = c.call("INFO", "clients")
+                for line in (info or "").split("\r\n"):
+                    if line.startswith("connected_clients:"):
+                        return int(line.split(":")[1])
+                return -1
+            base = geo_clients()
+            for _ in range(3):
+                g = Client(srv.port)
+                g.send_raw(encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km"))
+                time.sleep(0.05)
+                g.close()
+            deadline = time.time() + 1.5
+            now = geo_clients()
+            while now != base and time.time() < deadline:
+                time.sleep(0.05)
+                now = geo_clients()
+            check("local: a GEOSEARCH whose client goes stops with the connection", now == base, "%d, %d before" % (now, base))
             # G3: one EXEC walks at most 2097152 members of boxes. With one
             # member more (524289, which does not divide the limit), 3
             # GEOSEARCH run and 61 are refused; a refused walk spends what is
@@ -5414,6 +5435,18 @@ def stages_bitmaps_on(srv):
     got = [c.call("BITCOUNT", "bc", "0", "-1"), c.call("BITCOUNT", "bc", "1", "10", "BIT"),
            c.call("BITCOUNT", "bc", "-5", "-1", "bit"), c.call("BITCOUNT", "bc", "2", "1"), c.call("BITCOUNT", "nokey")]
     check("local: BITCOUNT with negative indexes and in bits", got == [2, 2, 0, 0, 0], repr(got))
+    c.call("SET", "abc", "abc")
+    got = [c.call("BITCOUNT", "abc", "-100", "-200"), c.call("BITCOUNT", "abc", "-1", "-4", "foo"),
+           c.call("BITCOUNT", "abc", "0", "-100"), c.call("BITCOUNT", "abc", "0", "4", "BIT")]
+    check("local: BITCOUNT with two negative indexes and start after end gives 0, as Redis 7.0 does", got[:2] == [0, 0], repr(got))
+    check("local: BITCOUNT clamps a negative end to 0", got[2] == 3, repr(got))
+    check("local: BITCOUNT in bits stops at the last bit", got[3] == 2, repr(got))
+    t0 = time.time()
+    got = [c.call("BITCOUNT", "abc", "0", "999999999999999"), c.call("BITCOUNT", "abc", "0", "9223372036854775807"),
+           c.call("BITCOUNT", "abc", "0", "9223372036854775808")]
+    check("local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once",
+          got[:2] == [10, 10] and isinstance(got[2], Error) and time.time() - t0 < 1.0, "%r in %.2f s" % (got, time.time() - t0))
+    check("local: BITOP OR keeps a bit of both sources", c.call("GETBIT", "dest9", "0") == 1)
     check("local: GETBIT past the end gives 0", c.call("GETBIT", "bc", "100") == 0 and c.call("GETBIT", "mykey", "9") == 0)
     check("local: BITCOUNT of a missing key gives 0 before it reads the arguments, as Redis does",
           c.call("BITCOUNT", "nokey", "0") == 0 and c.call("BITCOUNT", "nokey", "a", "b") == 0)
@@ -5470,6 +5503,11 @@ def stages_bitmaps_on(srv):
     w.call("MULTI")
     w.call("PING")
     check("local: BITOP fails EXEC of a client that watches the destination", w.call("EXEC") is None)
+    w.call("WATCH", "dest7")
+    c.call("BITOP", "AND", "dest7", "nokey")
+    w.call("MULTI")
+    w.call("PING")
+    check("local: a BITOP that removes the destination fails EXEC of a client that watches it", w.call("EXEC") is None)
     w.close()
     c.close()
 
@@ -5486,7 +5524,13 @@ def stages_bitmaps_limits(prog):
                  "local: B5 GET of a bitmap of 64 MB stalls PING at most 1 s",
                  "local: EXEC refuses bitmap work over 1048576",
                  "local: BITCOUNT counts the bitmap as it was when it ran",
-                 "local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s"]
+                 "local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s",
+                 "local: the split of a string by SETBIT spends the bitmap work of EXEC",
+                 "local: BITOP spends the bitmap work of EXEC",
+                 "local: the copy of GET spends the bitmap work of EXEC",
+                 "local: the copy of BITCOUNT spends the bitmap work of EXEC",
+                 "local: GET of a bitmap writes it as it was when it ran",
+                 "local: a BITCOUNT whose client goes stops with the connection"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(120)
@@ -5560,6 +5604,62 @@ def stages_bitmaps_limits(prog):
             x.close()
             check(names[7], isinstance(reply, list) and reply[:7] == [0] * 7 and isinstance(reply[7], Error)
                   and "bitmap work" in reply[7] and c.call("TYPE", "e7") == "none", repr(reply)[-80:])
+            # Each kind of bitmap work spends the budget of EXEC: a BITOP at
+            # the limit takes all of it, so what comes after is refused.
+            c.call("SET", "p1", "x")
+            c.call("SETBIT", "small", "0", "1")
+
+            def exec_after_bitop(*cmd):
+                x = Client(srv.port)
+                x.sock.settimeout(60)
+                x.send_raw(encode("MULTI") + encode("BITOP", "AND", "hd", "h1", "h2") + encode(*cmd) + encode("EXEC"))
+                for _ in range(3):
+                    x.read()
+                reply = x.read()
+                x.close()
+                return reply
+            for name, cmd in (("the split of a string by SETBIT", ("SETBIT", "p1", "0", "1")),
+                              ("BITOP", ("BITOP", "NOT", "hn", "p1")),
+                              ("the copy of GET", ("GET", "small")),
+                              ("the copy of BITCOUNT", ("BITCOUNT", "small"))):
+                reply = exec_after_bitop(*cmd)
+                check("local: %s spends the bitmap work of EXEC" % name,
+                      isinstance(reply, list) and reply[0] == 524288 and isinstance(reply[1], Error)
+                      and "bitmap work" in reply[1], repr(reply)[-80:])
+            # GET writes a copy of the chunks: a SETBIT while the reply waits
+            # does not change it.
+            x = Client(srv.port)
+            x.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            x.sock.settimeout(60)
+            x.send_raw(encode("GET", "b64"))
+            time.sleep(0.3)
+            c.call("SETBIT", "b64", str(64 * 8 * 1024 * 1024 - 1000), "1")
+            x.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
+            val = x.read()
+            x.close()
+            check("local: GET of a bitmap writes it as it was when it ran",
+                  isinstance(val, str) and len(val) == 64 * 1024 * 1024 and val[-125] == "\x00" and val[-1] == "\x01",
+                  repr(val[-130:-120]) if isinstance(val, str) else repr(val))
+            # A BITCOUNT whose client goes stops: the connection leaves the
+            # count of connected clients at once.
+            def clients():
+                info = c.call("INFO", "clients")
+                for line in (info or "").split("\r\n"):
+                    if line.startswith("connected_clients:"):
+                        return int(line.split(":")[1])
+                return -1
+            base = clients()
+            for _ in range(5):
+                g = Client(srv.port)
+                g.send_raw(encode("BITCOUNT", "b8"))
+                time.sleep(0.05)
+                g.close()
+            deadline = time.time() + 1.5
+            now = clients()
+            while now != base and time.time() < deadline:
+                time.sleep(0.05)
+                now = clients()
+            check("local: a BITCOUNT whose client goes stops with the connection", now == base, "%d, %d before" % (now, base))
             c.close()
     finally:
         srv.stop()
@@ -5574,9 +5674,11 @@ def stages_bitmaps_replication(prog):
             c = Asker(srv)
             c.call("SETBIT", "rb", "3", "1")
             c.call("BITOP", "NOT", "rd", "rb")
+            c.call("BITOP", "AND", "rd", "nokey")
             c.call("SET", "end", "1")
-            got = [r.try_read(2) for _ in range(3)]
-            check(name, got == [["SETBIT", "rb", "3", "1"], ["BITOP", "NOT", "rd", "rb"], ["SET", "end", "1"]], repr(got))
+            got = [r.try_read(2) for _ in range(4)]
+            check(name, got == [["SETBIT", "rb", "3", "1"], ["BITOP", "NOT", "rd", "rb"], ["BITOP", "AND", "rd", "nokey"],
+                                ["SET", "end", "1"]], repr(got))
             r.close()
             c.close()
     finally:
