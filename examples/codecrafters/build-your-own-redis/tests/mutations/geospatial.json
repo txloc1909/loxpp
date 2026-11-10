@@ -108,7 +108,8 @@
   "old": "        if (xy != nil and geoDistance(reply.lon, reply.lat, xy[0], xy[1]) <= reply.radius) {",
   "new": "        if (xy != nil) {",
   "cases": [
-   "geospatial-08 GEOSEARCH gives the locations within the radius"
+   "local: GEOSEARCH takes a step less near the edge of the box, as Redis does",
+   "local: GEOSEARCH gives the members of the boxes in their order"
   ]
  },
  {

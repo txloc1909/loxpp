@@ -33,7 +33,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | persistence-aof | 10 | pass |
 | pub-sub | 7 | pass |
 | sorted-sets | 8 | pass |
-| geospatial | 8 | not started |
+| geospatial | 8 | pass |
 | bitmaps | 9 | not started |
 | authentication | 8 | not started |
 
@@ -305,6 +305,28 @@ nothing is one unit (rule 6); `ZRANGE` in
 `EXEC` spends the element budget, and parses its options before it runs,
 with yields.
 
+### Geospatial
+
+A geo key is a sorted set whose scores are 52-bit geohashes, as in Redis:
+26 bits of the latitude offset and 26 of the longitude offset, interleaved,
+with Int bit operators. The code follows `geohash.c`, `geohash_helper.c`
+and `geo.c` of Redis 7.0. `GEOADD` reads its places before it runs, with
+yields, and adds through the same code as `ZADD`; it goes to the replicas
+and the AOF as that `ZADD`, as in Redis. `GEOPOS` gives the centre of the
+cell of the score, and `GEODIST` the haversine distance on a sphere of
+6372797.560856 m, with four decimals.
+
+`GEOSEARCH` reads the boxes that Redis reads: the geohash of the centre at
+a step from the radius (one less near the edge of its box), and its 8
+neighbours, with the boxes outside the search area left out, in the same
+order. In its step it takes the members and scores of those boxes, a walk
+from the first score of each box; the session keeps the members within the
+radius in steps (`writeGeoSearch`), so the command stays atomic and the
+other clients go on. The order of the reply is the order of Redis: a fuzz
+of 2400 searches and distances against redis-server 7.0 gave no
+difference. In `EXEC`, `GEOSEARCH` spends the element budget for each
+member of its boxes.
+
 ### Pub/Sub
 
 `subscribers` maps each channel to the Conns that subscribe to it, and each
@@ -444,6 +466,14 @@ printed.
   inserts and deletes of sorted sets; Redis has no such limits. A `ZRANGE`
   index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
   gives an empty range. The RDB load does not read a sorted set.
+- Geospatial: `GEOPOS` writes a coordinate as the shortest text, as the
+  stages ask (`2.294471561908722`); Redis 7.0 gives 17 decimals.
+  `GEOADD` takes no options (`NX`, `XX`, `CH`). `GEOSEARCH` takes only
+  `FROMLONLAT` or `FROMMEMBER` with `BYRADIUS` (not `BYBOX`, `ASC`, `DESC`,
+  `COUNT`, `WITHCOORD`, `WITHDIST` or `WITHHASH`). `GEOPOS` of a member
+  whose score is negative or at least 2^63 gives a null array; Redis
+  converts it to an unsigned 64-bit value. There is no `GEOHASH`,
+  `GEORADIUS` or `GEOSEARCHSTORE`.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -618,6 +648,8 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.18 s |
 | Z6: `ZRANGE` with 1048572 `WITHSCORES` | PING within 0.5 s (when the options are parsed in one step: 1.75 s) | 0.04 s |
 | Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.24–0.25 s). Its margin is small: on a host with every CPU busy it can fail. | 0.06–0.07 s |
+| G1 (group `geospatial`, on a server of its own): `GEOSEARCH` whose boxes hold 524288 members, all in the radius | every member; PING within 1.0 s (rule 6 only) | 0.38 s |
+| G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
@@ -646,8 +678,8 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/persistence-rdb.json` or
 `tests/mutations/replication.json` or
 `tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
-`tests/mutations/sorted-sets.json` that removes
-its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2 and Z3 hold rule 6 only: no single change removes their
+`tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1 and G2 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -663,7 +695,12 @@ the key after the read and before the removal.
 
 The element budget that a `PUBLISH` in `EXEC` spends has no case: it
 needs 8388608 deliveries in one `EXEC`, such as 65536 `PUBLISH` to 128
-subscribers, which is too long for the suite. Two guards of the AOF have no case. The
+subscribers, which is too long for the suite. Two guards of the geospatial group have no case. The pruning of the boxes
+outside the search area changes which boxes `GEOSEARCH` reads, and so its
+cost, but a pruned box holds no member in the radius; the fuzz found one
+search in 3200 where it changed the order, and no small case shows it. The
+yield of the `GEOADD` parse holds a parse of 16384 places, which takes
+less than 1 s also in one step. Two guards of the AOF have no case. The
 wait of `WATCH` for the file (`aofSync`) holds the `DEL` of a lazy expiry,
 which the writer writes in one step before the next client reads, so no
 timing shows a reply before it. A client that goes while it waits for the
@@ -720,7 +757,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
 # and optimistic-locking.json, persistence-rdb.json, replication.json,
-# persistence-aof.json, pub-sub.json, sorted-sets.json
+# persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
 
