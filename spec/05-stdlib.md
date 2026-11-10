@@ -392,9 +392,31 @@ returns at once, with no suspension.
 
 ---
 
+## Paths
+
+`exists`, `is_dir`, `is_file`, `stat`, `mkdir`, and `open` each take a
+`path`. The String names a file or directory only when every byte of it
+reaches the host: the interfaces a host offers to the file system read a path
+only up to its first NUL byte, so a path that holds one would name a shorter
+path, which the program cannot name back and did not ask for. A `path` that
+holds a NUL byte is therefore a runtime error, and the call reaches no file
+or directory and changes none. It is a halting fault
+([§04-semantics, Halting Faults](04-semantics.md#halting-faults)).
+
+A path a host refuses for any other reason — a name too long for its file
+system, for example — is not a fault of the argument. Each function above
+gives it the outcome its own section gives for a path it cannot use:
+`exists`, `is_dir`, and `is_file` return `false`, `stat` returns `nil`,
+`mkdir` raises `DirectoryError`, and `open` raises the runtime error its
+section gives for a file it cannot open.
+
+---
+
 ## `exists(path) → Bool`
 
 Returns `true` if the file or directory at `path` exists.
+
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 **Arity:** 1  
 **Returns:** Bool
@@ -405,6 +427,8 @@ Returns `true` if the file or directory at `path` exists.
 
 Returns `true` if `path` exists and is a directory.
 
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+
 **Arity:** 1  
 **Returns:** Bool
 
@@ -413,6 +437,8 @@ Returns `true` if `path` exists and is a directory.
 ## `is_file(path) → Bool`
 
 Returns `true` if `path` exists and is a regular file.
+
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 **Arity:** 1  
 **Returns:** Bool
@@ -432,6 +458,8 @@ does not exist. The Map contains the following keys:
 
 The precision of `mtime` is not part of the contract; an implementation may
 report whole seconds, milliseconds, or finer.
+
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 **Arity:** 1  
 **Returns:** Map on success, Nil if `path` does not exist
@@ -457,8 +485,8 @@ path component is not a directory, because the program has no permission, or
 for any other reason — the call raises a catchable fault of kind
 `DirectoryError` ([§04-semantics, Runtime
 Errors](04-semantics.md#runtime-errors)). An empty `path` names no
-directory, so it raises the same fault. A `path` that holds a NUL byte is a
-runtime error.
+directory, so it raises the same fault.
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 ```lox
 mkdir("/tmp/loxpp-cache/objects", "p");   // makes /tmp/loxpp-cache too
@@ -490,6 +518,7 @@ Strings; any other type is a runtime error.
 
 Any other mode string is a runtime error. If the file cannot be opened, for
 example a missing file in mode `"r"`, `open` raises a runtime error.
+A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 **Arity:** 2  
 **Returns:** File

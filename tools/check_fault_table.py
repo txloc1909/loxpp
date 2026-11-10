@@ -539,6 +539,14 @@ FATAL_ROWS = [
         "fatal",
         'open("/no/such/path", "r");',
     ),
+    # Issue #1158: a path that holds a NUL byte names a shorter path at the
+    # host's file-system interface, so it is a fault of the argument on every
+    # consumer, not the shorter path's answer.
+    Row(
+        "path_holds_nul",
+        "fatal",
+        'exists("/tmp" + chr(0) + "tail");',
+    ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
     # (the catchable table's NaNKeyError/InvalidMapKeyError rows above),
     # Map.has/Map.del are stdlib native methods, and reach this same
