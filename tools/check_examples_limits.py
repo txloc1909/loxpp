@@ -23,9 +23,10 @@ usage errors.
 
 `stop()` has a case of its own: an example that hangs is stopped at its limit,
 through a runner that leaves a descendant, and the whole run must come back soon
-after. Waiting for such a group costs the full limit of each signal, because the
-stopped descendant stays in the group as a zombie and only a parent that reaps
-can remove it.
+after. A runner that traps SIGTERM is stopped by the SIGKILL round, so its case
+needs that round. Waiting for such a group costs the full limit of each signal,
+because the stopped descendant stays in the group as a zombie and only a parent
+that reaps can remove it.
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
@@ -356,6 +357,27 @@ def main() -> None:
             f"rc={rc} took={took:.2f}s",
         )
 
+        # A runner that traps SIGTERM. Only the SIGKILL round ends it. If stop()
+        # sent SIGTERM alone, the tool would wait for the runner forever, so
+        # this run has a limit of its own, and a tool that does not return
+        # within it fails the case.
+        d = write_dir(tmp, {"trapped.lox": "// CHECK: never\nsleep(60);\n"})
+        trapped = tmp / "trapped.sh"
+        trapped.write_text('#!/bin/sh\ntrap "" TERM\nsleep 60 &\nwait\n', encoding="utf-8")
+        trapped.chmod(0o755)
+        try:
+            rc, out, took = run(
+                [sys.executable, str(TOOL), str(trapped), str(d), "--timeout", "0.5"],
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            rc, out, took = None, "the tool did not return", 20.0
+        check(
+            "a runner that traps SIGTERM is stopped by SIGKILL in time",
+            rc == 1 and "TIMEOUT" in out and took < 5,
+            f"rc={rc} took={took:.2f}s out={out[:200]!r}",
+        )
+
         # A directory with no .lox file is an error.
         empty = tmp / "empty"
         empty.mkdir()
@@ -450,6 +472,27 @@ def main() -> None:
         "a truncated line does not match the CHECK it starts with",
         prefix.missing() == "ab",
         f"missing={prefix.missing()!r} overflow={prefix.overflow}",
+    )
+    # A line that starts with the CHECK text and goes on is not that CHECK. It
+    # is short enough to stay in the buffer, so only the exact comparison can
+    # reject it: a matcher that tests the prefix passes it.
+    extended = tool_module.Capture(["ab"])
+    extended.feed("abc\n")
+    extended.finish()
+    check(
+        "a line that starts with the CHECK text and goes on does not match",
+        extended.missing() == "ab" and not extended.overflow,
+        f"missing={extended.missing()!r} overflow={extended.overflow}",
+    )
+    # The same rule end to end: the program prints "abc", the example checks
+    # for "ab", and the run must fail.
+    with tempfile.TemporaryDirectory() as prefix_dir:
+        d = write_dir(pathlib.Path(prefix_dir), {"prefix.lox": '// CHECK: ab\nprint "abc";\n'})
+        rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
+    check(
+        "an example whose output starts with the CHECK text and goes on fails",
+        rc == 1 and "prefix.lox" in out,
+        f"rc={rc} out={out[:300]!r}",
     )
     # The same guard on the piece after the buffer is full: a line that fills
     # the buffer with the CHECK and white space, then continues with a real
