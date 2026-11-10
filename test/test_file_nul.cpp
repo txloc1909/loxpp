@@ -1,10 +1,13 @@
 // test_file_nul.cpp — native File.read/readline/readlines must handle NUL
-// bytes. Regression guard for issue #401.
+// bytes, and open() must refuse a path that holds one. Regression guard for
+// issue #401 and issue #1158.
 
 #include "test_harness.h"
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <unistd.h>
 
@@ -192,4 +195,21 @@ TEST(FileNul, ReadlinesEmptyFileReturnsEmptyList) {
                                    out));
     // Empty file should return empty list, not nil
     EXPECT_EQ(out, "0\nfalse\n");
+}
+TEST(FileNul, OpenPathWithNulHaltsAndKeepsTheShorterFile) {
+    // A path that holds a NUL byte names only its text up to the NUL at the C
+    // library call, so an unchecked open() in mode "w" would truncate that
+    // shorter file and report success (spec/05-stdlib.md, Paths).
+    std::string path = "test_file_nul_open_shorter.bin";
+    ASSERT_TRUE(write_test_file(path, "keep me"));
+
+    VMTestHarness h;
+    EXPECT_EQ(h.run("open(\"" + path + "\" + chr(0) + \"tail\", \"w\");"),
+              InterpretResult::RUNTIME_ERROR);
+
+    std::ifstream in(path, std::ios::binary);
+    std::string after((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+    EXPECT_EQ(after, "keep me");
+    std::remove(path.c_str());
 }

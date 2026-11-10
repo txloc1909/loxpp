@@ -450,3 +450,30 @@ TEST_F(OsApiTest, Mkdir_PathWithNul_RuntimeError) {
     std::error_code ec;
     EXPECT_FALSE(std::filesystem::exists(m_dir / "nul", ec));
 }
+
+TEST_F(OsApiTest, PathWithNul_MetadataCalls_RuntimeError) {
+    VMTestHarness h;
+    // Each metadata call names a shorter path at the C library, and reports
+    // that shorter path's answer as if the program had named it. A path the
+    // program cannot name back is a runtime error instead
+    // (spec/05-stdlib.md, Paths).
+    const std::string nul = "\" + chr(0) + \"tail";
+    EXPECT_EQ(h.run("exists(\"" + m_dir.string() + nul + "\");"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("is_dir(\"" + m_dir.string() + nul + "\");"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("is_file(\"" + m_file.string() + nul + "\");"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("stat(\"" + m_file.string() + nul + "\");"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(OsApiTest, PathWithNul_IsNotAThrowableError) {
+    VMTestHarness h;
+    // The NUL path is the halting fault of spec/04-semantics.md, Halting
+    // Faults, so a `try` does not catch it: a consumer that made it catchable
+    // would print the kind and go on.
+    EXPECT_EQ(h.run("try { exists(\"" + m_dir.string() +
+                    "\" + chr(0) + \"tail\"); } catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+}
