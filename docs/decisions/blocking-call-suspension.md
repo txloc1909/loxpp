@@ -299,11 +299,27 @@ states this exception on `connect`.
 
 When one name resolves to more than one address, `connect` tries the addresses
 in the order of the resolver of the backend and reports the failure of the
-last one. The spec does not bind that order. The native backend uses the order
-of `getaddrinfo`, which can put `::1` first for `localhost`. The JVM backend
-puts IPv4 first. The difference shows only if two addresses of one name both
-listen, and a program must not depend on it. The JVM backend keeps the order
-of its resolver. The spec does not change.
+last one. The native backend uses the order of `getaddrinfo`, which can put
+`::1` first for `localhost`. The JVM backend puts IPv4 first. The difference
+shows only if two addresses of one name both listen, and a program must not
+depend on it. The JVM backend keeps the order of its resolver. The spec does
+not bind that order.
+
+**The whole of name resolution is the platform's answer (2026-11-10, #1095).**
+The order is not the only thing the two resolvers answer differently: they also
+accept different spellings. The C library accepts the wildcard `*` and the
+`inet_aton` numeric forms (`0x7f000001`, `0177.0.0.1`), which the JVM refuses;
+the JVM accepts the bracketed IPv6 literal and a scope identifier
+(`[::1]`, `::1%lo`), which the C library refuses. Neither set is the language: a
+backend that copied one C library's parsing would bind the language to that
+library and refuse a spelling every other resolver answers. So the spec names
+the accepted spellings, the address each names, and the order of the addresses
+as implementation-defined (`spec/README.md`, Conformance, Host-name resolution,
+item 8). What a spelling that names no address raises is
+bound: the catchable `NetworkError` of §05-stdlib. The empty name stays the one
+case the two resolvers disagree on in the other direction, and #1049 makes the
+JVM agree with native there, so probe
+`374_net_host_that_names_no_address` binds it.
 
 `connect_within` (#937) is `connect` with a timer wait added to the same
 suspended task. The timer cannot end a name resolution, because that blocks

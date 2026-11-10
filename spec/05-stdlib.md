@@ -571,6 +571,12 @@ integer-valued Number ([Integer arguments](#integer-arguments)). Any other
 argument is a runtime error. A failure to resolve the name or to connect,
 which includes a refused connection, raises a catchable `NetworkError`.
 
+Which `host` strings resolve, and the address or addresses that each one
+names, is implementation-defined ([Conformance](README.md#conformance),
+Host-name resolution). So is the order in which the call tries the addresses
+of a name that names more than one, and which of them it reports the failure
+of. What that failure raises is not: it is the `NetworkError` above.
+
 The call suspends its task while it waits for the connection. When `host` is a
 host name, the worker blocks while the name resolves, and then the task
 suspends to wait for the connection. When `host` is a numeric address, no
@@ -614,6 +620,12 @@ argument is a runtime error. A failure to resolve the name, to bind, or to
 listen raises a catchable `NetworkError`. The call resolves the name before it
 binds. A name that is not a numeric address waits while it resolves, and no
 other task of the worker runs during that wait.
+
+Which `host` strings resolve, and the address or addresses that each one
+names, is implementation-defined ([Conformance](README.md#conformance),
+Host-name resolution). When a name names more than one address, so is the
+address that the call binds; it binds one of them, or raises the
+`NetworkError` above.
 
 **Arity:** 2  
 **Returns:** Server

@@ -139,6 +139,15 @@ them:
 6. **Speed**.
 7. **Connection loss on read**: whether a read on a Socket whose connection
    the peer reset ends with a `NetworkError` or as an end of stream.
+8. **Host-name resolution**: the `host` strings that `connect`,
+   `connect_within` and `listen` accept, the address or addresses that each
+   one names, and the order in which a call tries the addresses of a name
+   that names more than one. Resolution is the answer of the platform's
+   resolver, so two implementations may answer differently. What a name that
+   names no address raises is not implementation-defined: it is the
+   catchable `NetworkError` that [§05-stdlib,
+   connect](05-stdlib.md#connecthost-port---socket) names, and so is the
+   fault of a connection that fails.
 
 Map iteration order is unspecified ([§03-types](03-types.md)), which is a
 separate rule.
@@ -147,8 +156,9 @@ A program is **portable** when it does not catch a halting fault, does not
 depend on the text of a message, stays within the limits of each
 implementation, does not need two workers to run at the same time, does not
 make calls on one side of a Socket or a Server from two tasks (see
-[§04-semantics, The Task Machine](04-semantics.md#the-task-machine)), and does
-not depend on connection loss on read. Every
+[§04-semantics, The Task Machine](04-semantics.md#the-task-machine)), does
+not depend on connection loss on read, and does not depend on which `host`
+strings a resolver answers. Every
 conforming implementation gives a portable program the same output and the
 same exit status.
 
