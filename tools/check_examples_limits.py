@@ -21,11 +21,11 @@ matcher can show; a character a read boundary splits; the report's elision and
 its truncation marker; CHECK order and white space; the `.input` file; and the
 usage errors.
 
-One rule this file cannot hold by a case: `stop()` returning as soon as the
-process group holds nothing but zombies. The saving needs a PID 1 that does not
-reap, which a runner may or may not have, so the difference is 2 s against 0 s
-on one host and nothing on another. The cost is reachable on a host whose PID 1
-leaves zombies behind.
+`stop()` has a case of its own: an example that hangs is stopped at its limit
+and the whole run must come back soon after. That is the rule a program can see.
+The further saving of not waiting for a group that holds only zombies depends on
+the host's PID 1 reaping a reparented one, so the same case does not show it
+everywhere: on a host whose PID 1 reaps, both builds return at once.
 
 Usage:
     tools/check_examples_limits.py --native <loxpp-binary>
@@ -127,9 +127,9 @@ def main() -> None:
         tmp = pathlib.Path(tmpdir)
 
         # A runner that cannot run is a setup mistake, and the tool under test
-        # says so with exit 2. Grading sixteen cases against it would read as
-        # sixteen failures instead, so the first exit 2 stops this test with
-        # the same code and message.
+        # says so with exit 2. Grading the rest of the cases against it would
+        # read as that many failures instead, so the first exit 2 stops this
+        # test with the same code and message.
         d = write_dir(tmp, {"one.lox": '// CHECK: ok\nprint "ok";\n'})
         rc, out, _ = run([sys.executable, str(TOOL), native, str(d)])
         if rc == 2:
@@ -341,6 +341,18 @@ def main() -> None:
             f"rc={rc2} shown={shown201[:1]}",
         )
 
+        # `stop()` must return soon after the limit ends the example. Waiting
+        # for a process group that is already gone costs two seconds per run.
+        d = write_dir(tmp, {"slowstop.lox": "// CHECK: never\nsleep(60);\n"})
+        rc, out, took = run(
+            [sys.executable, str(TOOL), native, str(d), "--timeout", "0.5"]
+        )
+        check(
+            "a stopped run returns soon after its limit",
+            rc == 1 and "TIMEOUT" in out and took < 1.5,
+            f"rc={rc} took={took:.2f}s",
+        )
+
         # A directory with no .lox file is an error.
         empty = tmp / "empty"
         empty.mkdir()
@@ -427,6 +439,18 @@ def main() -> None:
         "a truncated line does not match the CHECK it starts with",
         prefix.missing() == "ab",
         f"missing={prefix.missing()!r} overflow={prefix.overflow}",
+    )
+    # The same guard on the piece after the buffer is full: a line that fills
+    # the buffer with the CHECK and white space, then continues with a real
+    # character, is not the CHECK either.
+    late = tool_module.Capture(["ab"])
+    late.feed("ab" + " " * 100)
+    late.feed("x")
+    late.finish()
+    check(
+        "a line that goes on after the buffer is full cannot match",
+        late.missing() == "ab",
+        f"missing={late.missing()!r} overflow={late.overflow}",
     )
     matching = tool_module.Capture(["ab"])
     matching.feed("  ab  \n")
