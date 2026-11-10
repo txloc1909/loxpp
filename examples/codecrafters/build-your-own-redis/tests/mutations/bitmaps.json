@@ -494,7 +494,7 @@
   "old": "        cache.counts.append(0);",
   "new": "        cache.counts.append(1);",
   "cases": [
-   "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s"
+   "local: B3 a range count of the sparse 512 MB adds the counts of its new chunks"
   ]
  }
 ]

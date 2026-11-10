@@ -5497,7 +5497,9 @@ def stages_bitmaps_on(srv):
     check("local: a bitmap over several chunks reads back as written",
           isinstance(got, str) and got.encode("latin-1") == bytes(model) and c.call("STRLEN", "chunks") == 20000
           and c.call("BITCOUNT", "chunks") == sum(bin(b).count("1") for b in model)
-          and c.call("BITCOUNT", "chunks", "1000", "15000") == sum(bin(b).count("1") for b in model[1000:15001]),
+          and c.call("BITCOUNT", "chunks", "1000", "15000") == sum(bin(b).count("1") for b in model[1000:15001])
+          and all(c.call("GETBIT", "chunks", str(o)) == (model[o // 8] >> (7 - o % 8)) & 1
+                  for o in (0, 7, 8191, 32767, 32768, 65535, 100000, 100001, 159999)),
           repr(got)[:60])
     # WATCH: SETBIT and BITOP mark the watchers.
     w = Asker(srv)
@@ -5527,7 +5529,6 @@ def stages_bitmaps_limits(prog):
                  "local: B1 the bitmap is 512 MB with the bit set",
                  "local: B2 BITCOUNT of a dense 8 MB stalls PING at most 1 s",
                  "local: B3 BITCOUNT of a sparse bitmap of 512 MB replies within 2 s",
-                 "local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s",
                  "local: B4 BITOP of 1048576 source bytes stalls PING at most 1 s",
                  "local: BITOP over 1048576 source bytes is refused",
                  "local: B5 GET of a bitmap of 64 MB stalls PING at most 1 s",
@@ -5539,7 +5540,9 @@ def stages_bitmaps_limits(prog):
                  "local: the copy of GET spends the bitmap work of EXEC",
                  "local: SET GET over the bitmap work of EXEC does not write",
                  "local: the copy of BITCOUNT spends the bitmap work of EXEC",
-                 "local: GET of a bitmap writes it as it was when it ran"]
+                 "local: GET of a bitmap writes it as it was when it ran",
+                 "local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s",
+                 "local: B3 a range count of the sparse 512 MB adds the counts of its new chunks"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(120)
@@ -5561,7 +5564,9 @@ def stages_bitmaps_limits(prog):
             check(names[2], worst <= 1.0 and not wrong and got[0] == 8 * 1024 * 1024, "worst %.3f s, %r" % (worst, got[0]))
             # BITCOUNT counts the bitmap as it was when it ran: a bit that a
             # SETBIT sets near the end while the count is near the start
-            # does not count.
+            # does not count. A new value, so that no chunk has a count.
+            c.call("SET", "b8", "\x01" * (8 * 1024 * 1024))
+            c.call("SETBIT", "b8", "0", "0")
             x = Client(srv.port)
             x.sock.settimeout(60)
             x.send_raw(encode("BITCOUNT", "b8", "0", "-1"))
@@ -5575,12 +5580,19 @@ def stages_bitmaps_limits(prog):
             t0 = time.time()
             got = c.call("BITCOUNT", "max")
             check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
+            # Without its last byte: only the counts of the zero chunks that
+            # the growth added.
+            t0 = time.time()
+            got = c.call("BITCOUNT", "max", "0", "536870910")
+            check("local: B3 a range count of the sparse 512 MB adds the counts of its new chunks",
+                  got == 0 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
             # A string that SET wrote and SETBIT grew has no counts: its first
             # count compares each new zero chunk natively.
             c.call("SET", "maxs", "x")
             c.call("SETBIT", "maxs", "4294967295", "1")
             t0 = time.time()
             got = c.call("BITCOUNT", "maxs")
+            print("       measured: the count took %.2f s" % (time.time() - t0))
             check("local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s",
                   got == 5 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
             c.call("SET", "h1", "\xff" * (1 << 19))
@@ -5843,6 +5855,7 @@ def stages_bitmaps_cache_cpu(prog):
                 x.close()
             spent = wait_idle(pid, limit) - t
             now = clients_back(c, base)
+            print("       measured: ten counts that close use %.2f s of CPU" % spent)
             check(names[0], spent <= 2 * one and now == base, "%.2f s, one %.2f s; clients %d, %d before" % (spent, one, now, base))
             fresh_dense(c)
             base = connected_clients(c)
@@ -5852,6 +5865,7 @@ def stages_bitmaps_cache_cpu(prog):
             x.close()
             spent = wait_idle(pid, limit) - t
             now = clients_back(c, base)
+            print("       measured: 200 counts that close use %.2f s of CPU" % spent)
             check(names[1], spent <= 1.5 * one and now == base, "%.2f s, one %.2f s; clients %d, %d before" % (spent, one, now, base))
             fresh_dense(c)
             x = Client(srv.port)
