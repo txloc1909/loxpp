@@ -5002,6 +5002,9 @@ fun cmdGeosearch(ctx, argv) {
             // In EXEC the walk stops as soon as it is over the limit, so a
             // refused GEOSEARCH costs no more than the limit.
             if (geoExecCandidates != nil and len(members) > geoExecCandidates) {
+                // The walk spent what was left, so a later GEOSEARCH of this
+                // EXEC walks no more.
+                geoExecCandidates = 0;
                 return GEO_EXEC_TOO_MANY;
             }
         }

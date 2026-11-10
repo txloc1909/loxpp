@@ -5252,10 +5252,12 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, search)
             check(names[0], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s, %r" % (worst, len(got[0]) if isinstance(got[0], list) else got[0]))
-            # G3: one EXEC walks at most 2097152 members of boxes: 4
-            # GEOSEARCH of 524288, and the rest are refused. With 64 of
-            # them, a walk that ran to its end before the refusal would stall
-            # for seconds.
+            # G3: one EXEC walks at most 2097152 members of boxes. With one
+            # member more (524289, which does not divide the limit), 3
+            # GEOSEARCH run and 61 are refused; a refused walk spends what is
+            # left, so the others walk no more. With 64 of them, a walk that
+            # did not stop, or did not spend, would stall for seconds.
+            c.call("GEOADD", "dense", "2.0045", "48.0045", "extra")
             reply = [None]
 
             def exec_searches():
@@ -5270,8 +5272,9 @@ def stages_geo_limits(prog):
             worst, wrong, _ = measure_while(srv, exec_searches)
             r = reply[0]
             check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the fifth of 524288 is refused",
-                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524288 for x in r[:4])
-                  and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[4:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524289 for x in r[:3])
+                  and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[3:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+            c.call("ZREM", "dense", "extra")
             # The element budget: 8 ZRANGE WITHSCORES of 524288 fill it, and a
             # GEOSEARCH after them is refused.
             x = Client(srv.port)

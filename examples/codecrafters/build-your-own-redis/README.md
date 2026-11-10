@@ -661,7 +661,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | Z5: the same `ZADD` again on that replica, which changes nothing, so only the parse is work | PING within 0.15 s (when the replica parses with no yield: 0.24–0.25 s). Its margin is small: on a host with every CPU busy it can fail. | 0.06–0.07 s |
 | G1 (group `geospatial`, on a server of its own): `GEOSEARCH` whose boxes hold 524288 members, all in the radius | every member; PING within 1.0 s (rule 6 only) | 0.38 s |
 | G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
-| G3: `EXEC` of 64 `GEOSEARCH` of that set | 4 run, 60 are refused, each as soon as its walk passes the limit; PING within 1.0 s (when the limit is checked after the walk: 5.3 s). On a host with every CPU busy it can fail. | 0.45–0.48 s |
+| G3: `EXEC` of 64 `GEOSEARCH` of that set with one member more (524289, which does not divide the limit) | 3 run and 61 are refused; the walk of the fourth stops as soon as it passes the limit and spends what is left, so the others walk no more; PING within 1.0 s (when the limit is checked after the walk: 5.3 s; when a refused walk spends nothing: 6.9–7.1 s). On a host with every CPU busy it can fail. | 0.45–0.50 s |
 | G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s). Its margin is small: on a host with every CPU busy it can fail. | 0.04–0.05 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
