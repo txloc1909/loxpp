@@ -21,9 +21,14 @@ The capture is bounded on purpose. A build with LOXPP_DEBUG_TRACE_EXECUTION
 prints one line for every instruction, so a single example can emit hundreds of
 megabytes: `sieve.lox` emits 370 MB in 15 s. Reading that into a Python string
 and splitting it into lines is what took a 7 GB python3 down with the kernel
-OOM killer (issue #1176). So the output is matched as it arrives and only a
-head and a tail are kept, and the memory of a run no longer grows with what the
-program prints: 50 MB of output costs 14 MB where it cost 209 MB.
+OOM killer (issue #1176).
+
+What a run keeps is bounded by the CHECK texts and not by the output: a line is
+compared as it arrives and never held whole, the part kept while it accumulates
+is at most one character longer than the longest CHECK, and the lines the
+failure report prints are shortened. So neither a long output nor one long line
+grows the memory: 50 MB of output costs 14 MB where it cost 209 MB, and a 64 MiB
+line, which cost 210 MB, costs the same 14 MB.
 
 --max-output-bytes is off by default, because a traced build legitimately
 prints gigabytes: `json.lox` emits 6.8 GB in 2m19s on a debug build, and the
@@ -56,6 +61,7 @@ is a mistake in the setup, not a failed example.
 """
 
 import codecs
+import math
 import os
 import re
 import select
@@ -93,31 +99,13 @@ def extract_checks(lox_file: Path) -> list[str]:
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 
 
-def take_lines(buf: str) -> tuple[list[str], str]:
-    """Splits what has arrived into complete lines, keeping a partial one.
-
-    str.splitlines() is what the tool used to call on the whole output, so the
-    incremental reader has to agree with it: \r, \v, \f and the unicode line
-    separators end a line too. A trailing \r is held back because the next
-    chunk may begin with \n.
-    """
-    hold = ""
-    if buf.endswith("\r"):
-        buf, hold = buf[:-1], "\r"
-    parts = buf.splitlines()
-    if parts and not buf.endswith(tuple(LINE_BREAKS)):
-        hold = parts.pop() + hold
-    else:
-        hold += ""
-    return parts, hold
-
-
 TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
 
 # Lines kept for the failure report: the head shows how the program started and
 # the tail shows where it stopped. Neither grows with the output.
 REPORT_HEAD_LINES = 20
 REPORT_TAIL_LINES = 40
+REPORT_LINE_CHARS = 200
 
 
 def extract_timeout(lox_file: Path) -> float | None:
@@ -132,27 +120,90 @@ def extract_timeout(lox_file: Path) -> float | None:
 class Capture:
     """Matches CHECK lines as they arrive, with bounded memory.
 
-    A line is matched against the next CHECK in order and then dropped, except
-    for the first and last few, which the failure report prints.
+    Nothing that arrives is kept whole. A line is compared against the next
+    CHECK in order and then dropped, except for the first and last few, which
+    the failure report prints, and those are shortened. The part of a line kept
+    while it accumulates is at most one character more than the longest CHECK
+    text: anything past that cannot equal a CHECK after stripping, so the
+    memory of a run is O(the CHECK texts) and not O(the output), not even
+    O(one line) — a 64 MiB line used to cost 210 MB (issue #1198).
     """
 
     def __init__(self, checks: list[str]):
         self.checks = checks
         self.cursor = 0
+        self.limit = max((len(c) for c in checks), default=0) + 1
         self.head: list[str] = []
         self.tail: list[str] = []
         self.lines = 0
+        self.line: list[str] = []
+        self.kept = 0
+        self.overflow = False
+        # What the failure report will show, independent of the match limit.
+        self.shown: list[str] = []
+        self.shown_len = 0
 
-    def feed(self, line: str) -> None:
+    def _piece(self, body: str) -> None:
+        """Takes one piece of the current line, keeping no more than the limit."""
+        if not body:
+            return
+        room_shown = REPORT_LINE_CHARS - self.shown_len
+        if room_shown > 0:
+            part = body[:room_shown]
+            self.shown.append(part)
+            self.shown_len += len(part)
+        if self.kept == 0 and not self.overflow:
+            body = body.lstrip()
+            if not body:
+                return
+        room = self.limit - self.kept
+        if room <= 0:
+            if body.strip():
+                self.overflow = True
+            return
+        if len(body) <= room:
+            self.line.append(body)
+            self.kept += len(body)
+            return
+        self.line.append(body[:room])
+        self.kept = self.limit
+        if body[room:].strip():
+            # Past the longest CHECK, and not white space that strip would
+            # remove: no CHECK can equal this line.
+            self.overflow = True
+
+    def _end_line(self) -> None:
+        line = "".join(self.line)
         self.lines += 1
+        shown = "".join(self.shown)
+        text = shown if len(shown) < REPORT_LINE_CHARS else shown + "..."
         if len(self.head) < REPORT_HEAD_LINES:
-            self.head.append(line)
+            self.head.append(text)
         else:
-            self.tail.append(line)
+            self.tail.append(text)
             if len(self.tail) > REPORT_TAIL_LINES:
                 del self.tail[0]
-        if self.cursor < len(self.checks) and line.strip() == self.checks[self.cursor]:
+        if (
+            not self.overflow
+            and self.cursor < len(self.checks)
+            and line.strip() == self.checks[self.cursor]
+        ):
             self.cursor += 1
+        self.line = []
+        self.kept = 0
+        self.overflow = False
+        self.shown = []
+        self.shown_len = 0
+
+    def feed(self, text: str) -> None:
+        """Takes decoded output: any number of whole lines and a last part."""
+        for piece in text.splitlines(keepends=True):
+            if piece and piece[-1] in LINE_BREAKS:
+                # "\r\n" is one break, not two.
+                self._piece(piece[:-2] if piece.endswith("\r\n") else piece[:-1])
+                self._end_line()
+            else:
+                self._piece(piece)
 
     def missing(self) -> str | None:
         return None if self.cursor == len(self.checks) else self.checks[self.cursor]
@@ -161,6 +212,11 @@ class Capture:
         if self.lines <= len(self.head) + len(self.tail):
             return list(self.head) + list(self.tail)
         return list(self.head) + ["..."] + list(self.tail)
+
+    def finish(self) -> None:
+        """Ends the last line, which the output may not have ended."""
+        if self.kept or self.overflow or self.line or self.shown:
+            self._end_line()
 
 
 def stop(proc: subprocess.Popen) -> None:
@@ -174,13 +230,21 @@ def stop(proc: subprocess.Popen) -> None:
         try:
             os.killpg(proc.pid, sig)
         except ProcessLookupError:
-            return
-        try:
-            proc.wait(timeout=wait)
-            if sig == signal.SIGTERM:
+            pass
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                proc.wait(timeout=0.05)
+            except subprocess.TimeoutExpired:
+                pass
+            # A descendant that ignores SIGTERM keeps the group alive even
+            # after the shell is gone, so the group decides, not the child.
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
                 return
-        except subprocess.TimeoutExpired:
-            continue
+        if sig == signal.SIGKILL:
+            return
 
 
 def run_example(
@@ -246,13 +310,16 @@ def run_example(
                 status = "output"
                 break
             pending += decoder.decode(chunk)
-            lines, pending = take_lines(pending)
-            for line in lines:
-                capture.feed(line)
+            # A trailing \r may be the first half of a \r\n that the next
+            # chunk finishes, so it waits here rather than ending a line.
+            if pending.endswith("\r"):
+                body, pending = pending[:-1], "\r"
+            else:
+                body, pending = pending, ""
+            capture.feed(body)
         if status == "done":
-            pending += decoder.decode(b"", final=True)
-            if pending:
-                capture.feed(pending)
+            capture.feed(pending + decoder.decode(b"", final=True))
+            capture.finish()
     except BaseException:
         # An interrupted run must not leave the interpreter behind either.
         stop(proc)
@@ -308,7 +375,10 @@ def main() -> None:
     except ValueError:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
-    if timeout <= 0 or (output_arg is not None and max_bytes <= 0):
+    if not math.isfinite(timeout) or timeout <= 0:
+        print(USAGE, file=sys.stderr)
+        sys.exit(2)
+    if output_arg is not None and max_bytes <= 0:
         print(USAGE, file=sys.stderr)
         sys.exit(2)
 
@@ -350,9 +420,10 @@ def main() -> None:
 
         input_file = lox_file.with_suffix(".input")
         own = extract_timeout(lox_file)
-        if own is not None and own <= 0:
+        if own is not None and (not math.isfinite(own) or own <= 0):
             print(
-                f"error: {lox_file.name}: // TIMEOUT: must be greater than zero",
+                f"error: {lox_file.name}: // TIMEOUT: must be a number greater "
+                f"than zero",
                 file=sys.stderr,
             )
             sys.exit(2)

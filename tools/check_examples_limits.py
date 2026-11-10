@@ -8,8 +8,9 @@ until the workflow's own limit and named no example, and one example on a
 traced build — `sieve.lox` emits 370 MB in 15 s — was enough to take a 7 GB
 python3 down with the kernel OOM killer.
 
-Seventeen checks in twelve groups, each on a directory the test writes
-itself, so no corpus is walked and the whole run costs a few seconds:
+Twenty-two checks in fifteen groups, each on a directory the test writes
+itself, so no corpus is walked and the whole run costs a few seconds. Every
+check is graded: one `ok` line each.
 
   1. a runner that runs one passing example passes;
   2. an example that never ends fails the run in bounded time, and the report
@@ -265,6 +266,34 @@ def main() -> None:
             "a single line past the limit fails by the limit",
             rc == 1 and "output over 1000 bytes" in out,
             out[:400],
+        )
+
+        # 15: a stream that never ends its line. A stub runner writes 100 KB of
+        # one line and then sleeps, so the only way to reach the limit is to
+        # count the bytes as they arrive.
+        stub = tmp / "stub.sh"
+        stub.write_text(
+            "#!/bin/sh\ndd if=/dev/zero bs=1000 count=100 2>/dev/null | tr '\\0' x\nsleep 30\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+        d = write_dir(tmp, {"never.lox": "// CHECK: done\n"})
+        rc, out, took = run(
+            [
+                sys.executable,
+                str(TOOL),
+                str(stub),
+                str(d),
+                "--max-output-bytes",
+                "1000",
+                "--timeout",
+                "20",
+            ]
+        )
+        check(
+            "a stream that never ends its line fails by the limit, not the timeout",
+            rc == 1 and "output over 1000 bytes" in out and took < 15,
+            f"rc={rc} took={took:.1f}s out={out[:300]!r}",
         )
 
         # 10: a directory with no .lox file is an error.
