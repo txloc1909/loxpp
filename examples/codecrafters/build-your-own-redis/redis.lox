@@ -449,7 +449,7 @@ fun cmdSet(argv) {
     if (returnOld) {
         reply = NULL_BULK;
         if (old != nil) {
-            reply = Bulk(old.value);
+            reply = stringReply(old.value);
         }
     }
     if ((condition == "NX" and old != nil) or (condition == "XX" and old == nil)) {
@@ -548,7 +548,7 @@ fun cmdGet(argv) {
     if (entry.kind != "string") {
         return WRONGTYPE;
     }
-    return Bulk(entry.value);
+    return stringReply(entry.value);
 }
 
 // The text of Redis 7.0: the name and the start of the arguments, each cut
@@ -1948,7 +1948,12 @@ fun cmdIncr(ctx, argv) {
     if (entry.kind != "string") {
         return WRONGTYPE;
     }
-    var n = parseInteger(entry.value);
+    // An integer has at most 16 bytes; a longer Bytes is not one, and is
+    // not joined.
+    var n = nil;
+    if (valueLength(entry.value) <= 16) {
+        n = parseInteger(stringOf(entry.value));
+    }
     if (n == nil) {
         return NOT_INTEGER;
     }
@@ -1993,7 +1998,8 @@ var ARITY = {
     "INCR": 2, "MULTI": 1, "EXEC": 1, "DISCARD": 1, "WATCH": -2, "UNWATCH": 1, "DEL": -2,
     "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1,
     "ZADD": -4, "ZREM": -3, "ZCARD": 2, "ZSCORE": 3, "ZRANK": 3, "ZRANGE": -4,
-    "GEOADD": -5, "GEOPOS": -2, "GEODIST": -4, "GEOSEARCH": -7
+    "GEOADD": -5, "GEOPOS": -2, "GEODIST": -4, "GEOSEARCH": -7,
+    "SETBIT": 4, "GETBIT": 3, "STRLEN": 2, "BITCOUNT": -2, "BITOP": -4
 };
 
 fun arityOk(name, count) {
@@ -2099,6 +2105,7 @@ fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
     zsetExecWork = ZSET_EXEC_WORK;
     geoExecCandidates = GEO_EXEC_CANDIDATES;
+    bitmapExecWork = BITMAP_EXEC_WORK;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2117,6 +2124,7 @@ fun execQueued(tx) {
     execElements = nil;
     zsetExecWork = nil;
     geoExecCandidates = nil;
+    bitmapExecWork = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -2152,6 +2160,10 @@ fun writeReply(conn, reply) {
         writeBulks(conn, reply);
     } else if (type(reply) == "Instance" and hasField(reply, "geoMembers")) {
         writeGeoSearch(conn, reply);
+    } else if (type(reply) == "Instance" and hasField(reply, "bitValue")) {
+        writeBitcount(conn, reply);
+    } else if (type(reply) == "Instance" and hasField(reply, "bulkChunks")) {
+        writeChunkedBulk(conn, reply);
     } else if (type(reply) == "Instance") {
         writeSegments(conn, reply);
     } else if (reply != "") {
@@ -3258,7 +3270,7 @@ fun cmdWait(conn, argv) {
 
 // The commands that write, which a replica refuses from its clients.
 var WRITES = {"SET": true, "INCR": true, "RPUSH": true, "LPUSH": true, "LPOP": true,
-              "BLPOP": true, "XADD": true, "DEL": true, "ZADD": true, "ZREM": true, "GEOADD": true};
+              "BLPOP": true, "XADD": true, "DEL": true, "ZADD": true, "ZREM": true, "GEOADD": true, "SETBIT": true, "BITOP": true};
 var READONLY = "-READONLY You can't write against a read only replica.\r\n";
 
 fun replicationInfo() {
@@ -5037,6 +5049,561 @@ fun writeGeoSearch(conn, reply) {
 }
 
 // ===========================================================================
+// Bitmaps
+// ===========================================================================
+
+// A string that SETBIT writes is kept as Bytes: chunks of BYTES_CHUNK
+// bytes (the last one may be shorter) and the length. A String cannot be
+// changed in place, so SETBIT copies one chunk, not the whole value, and it
+// costs O(1) as in Redis. A reader of a string value takes stringOf(), a
+// native join.
+var BYTES_CHUNK = 4096;
+// The largest bit offset of Redis 7.0: 2^32 - 1, a string of 512 MB.
+var BIT_OFFSET_MAX = 4294967295;
+
+class Bytes {
+    init(chunks, length) {
+        this.chunks = chunks;
+        this.length = length;
+    }
+}
+
+fun doubledText(piece, n) {
+    var out = piece;
+    while (len(out) < n) {
+        out = out + out;
+    }
+    return out[0:n];
+}
+
+var ZERO_CHUNK = doubledText(chr(0), BYTES_CHUNK);
+
+// The String of a value. Only for a short value: joinRange copies each
+// level, so a large Bytes is written by its chunks (ChunkedBulk) instead.
+fun stringOf(value) {
+    if (type(value) == "String") {
+        return value;
+    }
+    return joinRange(value.chunks, 0, len(value.chunks));
+}
+
+// A bulk reply of the chunks of a Bytes, a copy of its List taken in the
+// step of the command; the session writes the chunks in steps.
+class ChunkedBulk {
+    init(chunks, length) {
+        this.bulkChunks = chunks;
+        this.length = length;
+    }
+}
+
+// The reply of a string value: a Bulk, or the chunks of a Bytes.
+fun stringReply(value) {
+    if (type(value) == "String") {
+        return Bulk(value);
+    }
+    return ChunkedBulk(value.chunks[0:len(value.chunks)], value.length);
+}
+
+fun writeChunkedBulk(conn, reply) {
+    var out = Output(conn);
+    out.add("$" + str(reply.length) + "\r\n");
+    for (var c in reply.bulkChunks) {
+        out.add(c);
+    }
+    out.add("\r\n");
+    out.flush();
+}
+
+// The bitmap work of one EXEC: the chunks that SETBIT adds or splits, and
+// the source bytes of BITOP. Each is Lox++ code in the step of EXEC.
+var BITMAP_EXEC_WORK = 1048576;
+var bitmapExecWork = nil;
+var BITMAP_EXEC_TOO_MUCH = "-ERR the bitmap work of this transaction is over its limit\r\n";
+
+fun spendBitmapWork(k) {
+    if (bitmapExecWork == nil) {
+        return true;
+    }
+    if (k > bitmapExecWork) {
+        return false;
+    }
+    bitmapExecWork = bitmapExecWork - k;
+    return true;
+}
+
+fun valueLength(value) {
+    if (type(value) == "String") {
+        return len(value);
+    }
+    return value.length;
+}
+
+// The byte at index i, as a Number from 0 to 255, or 0 past the end.
+fun byteAt(value, i) {
+    if (i >= valueLength(value)) {
+        return 0;
+    }
+    if (type(value) == "String") {
+        return ord(value[i]);
+    }
+    var c = (i - i % BYTES_CHUNK) / BYTES_CHUNK;
+    return ord(value.chunks[c][i % BYTES_CHUNK]);
+}
+
+// The Bytes of a String, split into chunks.
+fun bytesOf(s) {
+    var chunks = [];
+    var i = 0;
+    while (i < len(s)) {
+        var end = i + BYTES_CHUNK;
+        if (end > len(s)) {
+            end = len(s);
+        }
+        chunks.append(s[i:end]);
+        i = end;
+    }
+    return Bytes(chunks, len(s));
+}
+
+// Grows b to n bytes with zero bytes.
+fun growBytes(b, n) {
+    if (n <= b.length) {
+        return;
+    }
+    var count = len(b.chunks);
+    if (count > 0 and len(b.chunks[count - 1]) < BYTES_CHUNK) {
+        var last = b.chunks[count - 1];
+        var room = BYTES_CHUNK - len(last);
+        var add = n - b.length;
+        if (add < room) {
+            room = add;
+        }
+        b.chunks[count - 1] = last + ZERO_CHUNK[0:room];
+        b.length = b.length + room;
+    }
+    if (n > b.length) {
+        var full = (n - b.length - (n - b.length) % BYTES_CHUNK) / BYTES_CHUNK;
+        var k = 0;
+        while (k < full) {
+            b.chunks.append(ZERO_CHUNK);
+            k = k + 1;
+        }
+        b.length = b.length + full * BYTES_CHUNK;
+        if (n > b.length) {
+            b.chunks.append(ZERO_CHUNK[0:n - b.length]);
+            b.length = n;
+        }
+    }
+}
+
+// 2^(7 - k), for the bit k of a byte, the most significant first.
+var BIT_WEIGHT = [128, 64, 32, 16, 8, 4, 2, 1];
+
+fun parseBitOffset(text) {
+    var n = parseInteger(text);
+    if (n == nil or n < 0 or n > BIT_OFFSET_MAX) {
+        return nil;
+    }
+    return n;
+}
+
+fun stringEntry(key) {
+    var entry = lookup(key);
+    if (entry == nil) {
+        return nil;
+    }
+    if (entry.kind != "string") {
+        return false;
+    }
+    return entry;
+}
+
+fun cmdSetbit(ctx, argv) {
+    if (len(argv) != 4) {
+        return wrongArgs("setbit");
+    }
+    var offset = parseBitOffset(argv[2]);
+    if (offset == nil) {
+        return errorReply("ERR bit offset is not an integer or out of range");
+    }
+    if (argv[3] != "0" and argv[3] != "1") {
+        return errorReply("ERR bit is not an integer or out of range");
+    }
+    var key = argv[1];
+    var entry = stringEntry(key);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    var byteIndex = (offset - offset % 8) / 8;
+    // The chunks that this SETBIT makes: the split of a String, and the
+    // growth.
+    var have = 0;
+    var made = 0;
+    if (entry != nil) {
+        have = valueLength(entry.value);
+        if (type(entry.value) == "String") {
+            made = (have - have % BYTES_CHUNK) / BYTES_CHUNK + 1;
+        }
+    }
+    if (byteIndex + 1 > have) {
+        made = made + (byteIndex + 1 - have - (byteIndex + 1 - have) % BYTES_CHUNK) / BYTES_CHUNK + 1;
+    }
+    if (!spendBitmapWork(made)) {
+        return BITMAP_EXEC_TOO_MUCH;
+    }
+    if (entry == nil) {
+        entry = Entry("string", Bytes([], 0), nil);
+        store[key] = entry;
+    } else if (type(entry.value) == "String") {
+        entry.value = bytesOf(entry.value);
+    }
+    var b = entry.value;
+    growBytes(b, byteIndex + 1);
+    var c = (byteIndex - byteIndex % BYTES_CHUNK) / BYTES_CHUNK;
+    var j = byteIndex % BYTES_CHUNK;
+    var chunk = b.chunks[c];
+    var old = ord(chunk[j]);
+    var weight = BIT_WEIGHT[offset % 8];
+    var was = (old - old % weight) / weight % 2;
+    var now = old;
+    if (argv[3] == "1" and was == 0) {
+        now = old + weight;
+    } else if (argv[3] == "0" and was == 1) {
+        now = old - weight;
+    }
+    if (now != old) {
+        b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];
+    }
+    touch(key);
+    replicate(argv, nil);
+    return integerReply(was);
+}
+
+fun cmdGetbit(ctx, argv) {
+    if (len(argv) != 3) {
+        return wrongArgs("getbit");
+    }
+    var offset = parseBitOffset(argv[2]);
+    if (offset == nil) {
+        return errorReply("ERR bit offset is not an integer or out of range");
+    }
+    var entry = stringEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    var byte = byteAt(entry.value, (offset - offset % 8) / 8);
+    var weight = BIT_WEIGHT[offset % 8];
+    return integerReply((byte - byte % weight) / weight % 2);
+}
+
+fun cmdStrlen(ctx, argv) {
+    if (len(argv) != 2) {
+        return wrongArgs("strlen");
+    }
+    var entry = stringEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    return integerReply(valueLength(entry.value));
+}
+
+// The number of 1 bits in each byte value.
+var POPCOUNT = [];
+{
+    var v = 0;
+    while (v < 256) {
+        var n = 0;
+        var x = v;
+        while (x > 0) {
+            n = n + x % 2;
+            x = (x - x % 2) / 2;
+        }
+        POPCOUNT.append(n);
+        v = v + 1;
+    }
+}
+
+// The reply of BITCOUNT: the chunks of the value, taken in the step of the
+// command, and the range. The session counts in steps (writeBitcount), so
+// the command stays atomic and the other clients go on.
+class BitcountReply {
+    init(value, first, last, firstMask, lastMask) {
+        this.bitValue = value;
+        this.first = first;
+        this.last = last;
+        this.firstMask = firstMask;
+        this.lastMask = lastMask;
+    }
+}
+
+// The 1 bits of byte b that a mask keeps: the bits from bit lo to bit hi.
+fun maskedBits(b, lo, hi) {
+    var n = 0;
+    var k = lo;
+    while (k <= hi) {
+        var w = BIT_WEIGHT[k];
+        n = n + (b - b % w) / w % 2;
+        k = k + 1;
+    }
+    return n;
+}
+
+// BITCOUNT key [start end [BYTE | BIT]].
+fun cmdBitcount(ctx, argv) {
+    if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {
+        if (len(argv) < 2) {
+            return wrongArgs("bitcount");
+        }
+        return errorReply("ERR syntax error");
+    }
+    var bitMode = false;
+    var start = 0;
+    var end = 0;
+    if (len(argv) >= 4) {
+        start = parseInteger(argv[2]);
+        end = parseInteger(argv[3]);
+        if (start == nil or end == nil) {
+            return NOT_INTEGER;
+        }
+        if (len(argv) == 5) {
+            var unit = upper(argv[4]);
+            if (unit == "BIT") {
+                bitMode = true;
+            } else if (unit != "BYTE") {
+                return errorReply("ERR syntax error");
+            }
+        }
+    }
+    var entry = stringEntry(argv[1]);
+    if (entry == false) {
+        return WRONGTYPE;
+    }
+    if (entry == nil) {
+        return integerReply(0);
+    }
+    var value = entry.value;
+    var length = valueLength(value);
+    var total = length;
+    if (bitMode) {
+        total = length * 8;
+    }
+    if (len(argv) == 2) {
+        start = 0;
+        end = total - 1;
+    } else {
+        if (start < 0) {
+            start = total + start;
+        }
+        if (end < 0) {
+            end = total + end;
+        }
+        if (start < 0) {
+            start = 0;
+        }
+        if (end < 0) {
+            end = 0;
+        }
+        if (end >= total) {
+            end = total - 1;
+        }
+    }
+    if (start > end or total == 0) {
+        return integerReply(0);
+    }
+    if (type(value) != "String") {
+        // A copy of the List of chunks: SETBIT replaces its chunks.
+        value = Bytes(value.chunks[0:len(value.chunks)], value.length);
+    }
+    if (!bitMode) {
+        return BitcountReply(value, start, end, 0, 7);
+    }
+    return BitcountReply(value, (start - start % 8) / 8, (end - end % 8) / 8, start % 8, end % 8);
+}
+
+// In the session: counts the 1 bits from byte first (from its bit
+// firstMask) to byte last (to its bit lastMask), with a yield every
+// ELEMENTS_PER_YIELD * 64 bytes.
+fun writeBitcount(conn, reply) {
+    var v = reply.bitValue;
+    var n = 0;
+    var i = reply.first;
+    var steps = 0;
+    while (i <= reply.last) {
+        // A whole chunk of zero bytes inside the range adds nothing: one
+        // native compare, so a sparse bitmap counts fast.
+        if (type(v) != "String" and i % BYTES_CHUNK == 0 and i > reply.first and i + BYTES_CHUNK - 1 < reply.last
+            and v.chunks[(i - i % BYTES_CHUNK) / BYTES_CHUNK] == ZERO_CHUNK) {
+            i = i + BYTES_CHUNK;
+            steps = steps + 1;
+            if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
+                yield nil;
+            }
+            continue;
+        }
+        var b = byteAt(v, i);
+        if (i == reply.first or i == reply.last) {
+            var lo = 0;
+            var hi = 7;
+            if (i == reply.first) {
+                lo = reply.firstMask;
+            }
+            if (i == reply.last) {
+                hi = reply.lastMask;
+            }
+            n = n + maskedBits(b, lo, hi);
+        } else {
+            n = n + POPCOUNT[b];
+        }
+        i = i + 1;
+        steps = steps + 1;
+        if (steps % (ELEMENTS_PER_YIELD * 64) == 0) {
+            yield nil;
+        }
+    }
+    conn.sock.write(integerReply(n));
+}
+
+// At most BITOP_MAX_WORK bytes of sources in one BITOP (the length of the
+// result times the number of sources): each byte is a step of Lox++ code,
+// and BITOP runs in one step (rule 6). Redis has no such limit.
+var BITOP_MAX_WORK = 1048576;
+var BITOP_TOO_LARGE = "-ERR the BITOP work is over the limit of 1048576 source bytes\r\n";
+
+var CHR = [];
+{
+    var v = 0;
+    while (v < 256) {
+        CHR.append(chr(v));
+        v = v + 1;
+    }
+}
+
+// The table of op (AND, OR or XOR) on two bytes: entry a * 256 + b. Each
+// entry comes from the entry of a / 2 and b / 2, which is before it, and
+// the op of the low bits: one step for each entry.
+fun bitopTable(op) {
+    var t = [];
+    var a = 0;
+    while (a < 256) {
+        var b = 0;
+        while (b < 256) {
+            var x = a % 2;
+            var y = b % 2;
+            var low = (x + y) % 2;
+            if (op == "AND") {
+                low = x * y;
+            } else if (op == "OR" and x + y > 0) {
+                low = 1;
+            }
+            if (a == 0 and b == 0) {
+                t.append(0);
+            } else {
+                t.append(2 * t[((a - x) / 2) * 256 + (b - y) / 2] + low);
+            }
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    return t;
+}
+
+var BITOP_TABLES = {"AND": bitopTable("AND"), "OR": bitopTable("OR"), "XOR": bitopTable("XOR")};
+
+// BITOP AND | OR | XOR | NOT destkey key [key ...].
+fun cmdBitop(ctx, argv) {
+    if (len(argv) < 4) {
+        return wrongArgs("bitop");
+    }
+    var op = upper(argv[1]);
+    if (op != "AND" and op != "OR" and op != "XOR" and op != "NOT") {
+        return errorReply("ERR syntax error");
+    }
+    if (op == "NOT" and len(argv) != 4) {
+        return errorReply("ERR BITOP NOT must be called with a single source key.");
+    }
+    var sources = [];
+    var maxLen = 0;
+    var i = 3;
+    while (i < len(argv)) {
+        var entry = stringEntry(argv[i]);
+        if (entry == false) {
+            return WRONGTYPE;
+        }
+        var s = "";
+        if (entry != nil) {
+            s = entry.value;
+        }
+        sources.append(s);
+        if (valueLength(s) > maxLen) {
+            maxLen = valueLength(s);
+        }
+        i = i + 1;
+    }
+    var work = maxLen * len(sources);
+    if (work > BITOP_MAX_WORK) {
+        return BITOP_TOO_LARGE;
+    }
+    if (!spendBitmapWork(work)) {
+        return BITMAP_EXEC_TOO_MUCH;
+    }
+    var dest = argv[2];
+    if (maxLen == 0) {
+        if (store.has(dest)) {
+            store.del(dest);
+            touch(dest);
+            replicate(argv, nil);
+        }
+        return integerReply(0);
+    }
+    var texts = [];
+    for (var s in sources) {
+        texts.append(stringOf(s));
+    }
+    var table = BITOP_TABLES[op];
+    var parts = [];
+    var out = [];
+    var j = 0;
+    while (j < maxLen) {
+        var acc = 0;
+        if (j < len(texts[0])) {
+            acc = ord(texts[0][j]);
+        }
+        if (op == "NOT") {
+            acc = 255 - acc;
+        } else {
+            var k = 1;
+            while (k < len(texts)) {
+                var b = 0;
+                if (j < len(texts[k])) {
+                    b = ord(texts[k][j]);
+                }
+                acc = table[acc * 256 + b];
+                k = k + 1;
+            }
+        }
+        out.append(CHR[acc]);
+        j = j + 1;
+        if (len(out) == BYTES_CHUNK) {
+            parts.append(joinRange(out, 0, len(out)));
+            out = [];
+        }
+    }
+    if (len(out) > 0) {
+        parts.append(joinRange(out, 0, len(out)));
+    }
+    store[dest] = Entry("string", Bytes(parts, maxLen), nil);
+    touch(dest);
+    replicate(argv, nil);
+    return integerReply(maxLen);
+}
+
+// ===========================================================================
 // Pub/Sub
 // ===========================================================================
 
@@ -5372,7 +5939,12 @@ var COMMANDS = {
     "GEOADD": cmdGeoadd,
     "GEOPOS": cmdGeopos,
     "GEODIST": cmdGeodist,
-    "GEOSEARCH": cmdGeosearch
+    "GEOSEARCH": cmdGeosearch,
+    "SETBIT": cmdSetbit,
+    "GETBIT": cmdGetbit,
+    "STRLEN": cmdStrlen,
+    "BITCOUNT": cmdBitcount,
+    "BITOP": cmdBitop
 };
 
 // Commands whose arguments the session parses before the command runs
