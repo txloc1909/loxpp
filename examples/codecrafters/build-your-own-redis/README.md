@@ -368,7 +368,7 @@ of the stream, also after a half-close or a protocol error (rule 7). So a
 client that sends a `BITCOUNT` of data that has no count and then closes
 leaves the server counting until that scan ends: at most one scan of each
 byte that a client wrote (8 MB: about 1.2 s of CPU; 512 MB: about
-@@512@@ s, measured). The other clients go on. A native count of the 1 bits
+78 s, measured). The other clients go on. A native count of the 1 bits
 of a String (#1214) would remove that first scan. As in Redis 7.0, it reads the
 key before its arguments, gives 0 for two negative indexes with the start
 after the end, takes `BYTE` and `BIT` ranges, and takes an index of up to
@@ -731,11 +731,11 @@ ruling on PR #1204. Every stage group keeps them.
 | G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s). Its margin is small: on a host with every CPU busy it can fail. | 0.04–0.05 s |
 | B1 (group `bitmaps`, on a server of its own): `SETBIT` at offset 2^32 - 1 | a string of 512 MB with the bit set; PING within 1.0 s (rule 6 only) | 0.01–0.02 s |
 | B2: `BITCOUNT` of a dense 8 MB | PING within 1.0 s; the scan yields after each chunk of 4096 bytes (rule 6 only) | 0.003–0.027 s (1.2 s of CPU in all) |
-| B3: `BITCOUNT` of the sparse 512 MB of B1 | a reply within 2 s (the counts of a key that `SETBIT` makes: O(1)) | @@B3@@ s |
-| B3b: `BITCOUNT` of a String that `SET` wrote and `SETBIT` grew to 512 MB, which has no counts | a reply within 2 s (when a zero chunk is scanned: minutes) | @@B3b@@ s |
-| S1 (on a server of its own): 32 connections each send `BITCOUNT` of its own new dense 1 MB at the same time | PING within 0.5 s (when the scan yields every 65536 bytes: @@S1M@@ s) | 0.061–0.066 s |
-| C6 (on a server of its own): 10 connections each send `BITCOUNT` of a new dense 8 MB at the same time and close | server CPU at most 2 times one count; the connections end (when each scan reads the counts only at its start: @@C6M@@) | @@C6@@ |
-| C7: one connection sends 200 `BITCOUNT` of a new dense 8 MB and closes | server CPU at most 1.5 times one count; the connection ends; a second run that half-closes gets 200 replies (when the scan keeps no count: @@C7M@@) | @@C7@@ |
+| B3: `BITCOUNT` of the sparse 512 MB of B1 | a reply within 2 s (the counts of a key that `SETBIT` makes: O(1)) | 0.000 s (O(1)) |
+| B3b: `BITCOUNT` of a String that `SET` wrote and `SETBIT` grew to 512 MB, which has no counts | a reply within 2 s (when a zero chunk is scanned: minutes) | 0.12 s |
+| S1 (on a server of its own): 32 connections each send `BITCOUNT` of its own new dense 1 MB at the same time | PING within 0.5 s (when the scan yields every 65536 bytes: 1.00 s) | 0.061–0.066 s |
+| C6 (on a server of its own): 10 connections each send `BITCOUNT` of a new dense 8 MB at the same time and close | server CPU at most 2 times one count; the connections end (when each scan reads the counts only at its start: 10 s or more, the wait limit of the case) | 1.35 s of CPU; one count 1.19 s |
+| C7: one connection sends 200 `BITCOUNT` of a new dense 8 MB and closes | server CPU at most 1.5 times one count; the connection ends; a second run that half-closes gets 200 replies (when the scan keeps no count: 2.38 s, and 8 replies) | 1.27 s of CPU; one count 1.19 s; 200 replies |
 | B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
 | B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
 | B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |

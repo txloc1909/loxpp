@@ -5579,6 +5579,7 @@ def stages_bitmaps_limits(prog):
                   got_count == 8 * 1024 * 1024 and again == 8 * 1024 * 1024 + 1, repr((got_count, again)))
             t0 = time.time()
             got = c.call("BITCOUNT", "max")
+            print("       measured: the count took %.3f s" % (time.time() - t0))
             check(names[3], got == 1 and time.time() - t0 < 2.0, "%r in %.2f s" % (got, time.time() - t0))
             # Without its last byte: only the counts of the zero chunks that
             # the growth added.
