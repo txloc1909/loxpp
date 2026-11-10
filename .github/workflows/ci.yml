@@ -679,7 +679,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh --other-check bootstrap/lox_wrapper.sh test/translation-probes/ --only-spec-probes --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt --oracle-xfail tools/spec-probe-xfail/native.txt --timeout 120"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/ --other-check bootstrap/lox_wrapper.sh --only-spec-probes --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt --oracle-xfail tools/spec-probe-xfail/native.txt --timeout 120"
 
       # Three probes that the walk above skips. Two have no STATUS line,
       # because a CHECK line cannot hold the NUL byte they print. The third is
@@ -698,7 +698,7 @@ jobs:
             -w /workspace \
             -e LANGUAGE=LOXPP \
             loxpp-dev:latest \
-            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh --other-check bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --timeout 120 && python3 tools/check_cr_bytes.py build/loxpp bootstrap/lox_wrapper.sh"
+            bash -c "python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh test/translation-probes/32_string_nul.lox test/translation-probes/56_file_nul.lox test/translation-probes/bootstrap-only/stdout_no_trailing_newline.lox --other-check bootstrap/lox_wrapper.sh --timeout 120 && python3 tools/check_cr_bytes.py build/loxpp bootstrap/lox_wrapper.sh"
 
       # examples/bench_jump_table.lox is left out by name: it is a
       # 5,000,000-iteration microbenchmark with no CHECK line, and it does
@@ -715,7 +715,7 @@ jobs:
             loxpp-dev:latest \
             bash -c '
               files=$(find examples -maxdepth 1 -name "*.lox" ! -name "bench_jump_table.lox" | sort)
-              python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh --other-check bootstrap/lox_wrapper.sh $files --timeout 120
+              python3 tools/diff_runtimes.py build/loxpp bootstrap/lox_wrapper.sh $files --other-check bootstrap/lox_wrapper.sh --timeout 120
             '
 
       # test/compile-errors/: one program per parser or resolver error.
