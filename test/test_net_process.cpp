@@ -355,31 +355,89 @@ TEST(NetProcessTest, SocketReadBytesZero) {
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 
-TEST(NetProcessTest, SocketReadBytesBadCountFatal) {
+// A bad byte count is a fatal fault, not a Lox++ error value. Each call runs
+// inside a `try` that catches every fault. A fatal fault passes through the
+// `try`, so the run stops with RUNTIME_ERROR. A catchable fault would be
+// caught, and the program would reach its last expression and finish with OK.
+static void expectFatalCountUnderTry(const char* setup,
+                                     const std::string& call) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
-                    "var c = connect(\"127.0.0.1\", l.port()); "
-                    "c.read_bytes(-1);"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
-                    "var c = connect(\"127.0.0.1\", l.port()); "
-                    "c.read_bytes(1.5);"),
-              InterpretResult::RUNTIME_ERROR);
-    EXPECT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
-                    "var c = connect(\"127.0.0.1\", l.port()); "
-                    "c.read_bytes(\"x\");"),
-              InterpretResult::RUNTIME_ERROR);
+    const std::string src =
+        std::string(setup) + "try { " + call + " } catch (e) { } 1;";
+    EXPECT_EQ(h.run(src.c_str()), InterpretResult::RUNTIME_ERROR) << call;
+}
+
+// The server side is accepted and closed, so a read that wrongly accepts a bad
+// count returns "" at once instead of blocking the test run.
+static const char* const kSocketSetup =
+    "var l = listen(\"127.0.0.1\", 0); "
+    "var c = connect(\"127.0.0.1\", l.port()); "
+    "var s = l.accept(); "
+    "s.close(); ";
+
+static const char* const kProcessSetup =
+    "var p = spawn(\"/bin/sh\", [\"-c\", \"printf hello\"]); ";
+
+TEST(NetProcessTest, SocketReadBytesBadCountFatal) {
+    for (const char* bad :
+         {"-1", "1.5", "\"x\"", "\"3\"", "nil", "2147483648"}) {
+        expectFatalCountUnderTry(kSocketSetup,
+                                 std::string("c.read_bytes(") + bad + ");");
+    }
 }
 
 TEST(NetProcessTest, SocketReadSomeBadCountFatal) {
     for (const char* bad : {"0", "-1", "1.5", "\"x\"", "nil", "2147483648"}) {
-        VMTestHarness h;
-        std::string src = "var l = listen(\"127.0.0.1\", 0); "
-                          "var c = connect(\"127.0.0.1\", l.port()); "
-                          "c.read_some(" +
-                          std::string(bad) + ");";
-        EXPECT_EQ(h.run(src.c_str()), InterpretResult::RUNTIME_ERROR) << bad;
+        expectFatalCountUnderTry(kSocketSetup,
+                                 std::string("c.read_some(") + bad + ");");
     }
+}
+
+TEST(NetProcessTest, ProcessReadBytesBadCountFatal) {
+    for (const char* bad :
+         {"-1", "1.5", "\"x\"", "\"3\"", "nil", "2147483648"}) {
+        expectFatalCountUnderTry(kProcessSetup,
+                                 std::string("p.read_bytes(") + bad + ");");
+    }
+}
+
+TEST(NetProcessTest, ProcessErrReadBytesBadCountFatal) {
+    for (const char* bad :
+         {"-1", "1.5", "\"x\"", "\"3\"", "nil", "2147483648"}) {
+        expectFatalCountUnderTry(kProcessSetup,
+                                 std::string("p.err_read_bytes(") + bad + ");");
+    }
+}
+
+// The upper edge is accepted. read_some takes no buffer of n bytes, so
+// 2147483647 returns the bytes that are there, then "" at EOF.
+TEST(NetProcessTest, SocketReadSomeUpperEdgeAccepted) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var l = listen(\"127.0.0.1\", 0); "
+                    "var c = connect(\"127.0.0.1\", l.port()); "
+                    "c.write(\"ab\"); "
+                    "c.close_write(); "
+                    "var s = l.accept(); "
+                    "var a = s.read_some(2147483647); "
+                    "var e = s.read_some(2147483647); "
+                    "s.close(); "
+                    "c.close(); "
+                    "l.close(); "
+                    "(a == \"ab\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// The lower edge is accepted: read_bytes(0) returns "" and consumes nothing.
+TEST(NetProcessTest, ProcessReadBytesZeroConsumesNothing) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var p = spawn(\"/bin/sh\", [\"-c\", \"printf hello\"]); "
+                    "var z = p.read_bytes(0); "
+                    "var a = p.read_bytes(5); "
+                    "p.wait(); "
+                    "(z == \"\") and (a == \"hello\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 
 TEST(NetProcessTest, SocketReadSomeOnClosedIsCatchable) {
