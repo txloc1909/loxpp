@@ -5804,11 +5804,20 @@ class AclUser {
 
 var defaultUser = AclUser(true, true, []);
 
-// The most bytes of passwords in one command: a SHA-256 is Lox++ work for
-// each byte, so it is bounded as an inline line is (rule 3). Redis has no
+// The most SHA-256 blocks of 64 bytes that one command hashes (64 KB): a
+// hash is Lox++ work for each block, also for an empty password, so it is
+// bounded as an inline line is (rule 3). A password of n bytes is
+// hashBlocks(n) blocks, so the longest one is 65527 bytes. Redis has no
 // such limit. SETUSER refuses more, so no stored hash comes from a longer
 // password, and AUTH with one fails with no hash, as it fails in Redis.
-var PASSWORD_MAX = 65536;
+var HASH_BLOCKS_MAX = 1024;
+// The most passwords that the user keeps, so that SETUSER, GETUSER and AUTH
+// stay linear in a small list (rule 5). Redis has no such limit.
+var PASSWORDS_MAX = 256;
+
+fun hashBlocks(n) {
+    return (n + 8 - (n + 8) % 64) / 64 + 1;
+}
 
 var NOAUTH = "-NOAUTH Authentication required.\r\n";
 var WRONGPASS = "-WRONGPASS invalid username-password pair or user is disabled.\r\n";
@@ -5928,7 +5937,7 @@ fun sha256Hex(s, mayYield) {
 // The hashes of the passwords of a command, made by its parse. The parse
 // reads no state, so it runs before the step of the command (and when MULTI
 // queues it): EXEC then hashes nothing. hashes[i] is the hash of the
-// password in argv[i], or nil for a password over PASSWORD_MAX.
+// password in argv[i], or nil for a password over HASH_BLOCKS_MAX blocks.
 class PasswordHashes {
     init(hashes) {
         this.hashes = hashes;
@@ -5939,7 +5948,7 @@ fun parseAuth(argv, mayYield) {
     var hashes = {};
     if (len(argv) == 2 or len(argv) == 3) {
         var password = argv[len(argv) - 1];
-        if (len(password) <= PASSWORD_MAX) {
+        if (hashBlocks(len(password)) <= HASH_BLOCKS_MAX) {
             hashes[len(argv) - 1] = sha256Hex(password, mayYield);
         }
     }
@@ -5997,23 +6006,31 @@ var ACL_SUBCOMMANDS = {"cat": -2, "deluser": -3, "dryrun": -4, "genpass": -2, "g
                        "load": 2, "log": -2, "save": 2, "setuser": -3, "users": 2, "whoami": 2, "help": 2};
 
 // The hashes of the > and < rules of ACL SETUSER. Returns an error when the
-// passwords are over PASSWORD_MAX bytes in all, so the hashes of one
-// command take at most about 90 ms, in steps.
+// passwords are over HASH_BLOCKS_MAX blocks in all, so the hashes of one
+// command take at most about 90 ms. A long hash yields itself; short ones
+// yield here, after each 16 blocks.
 fun parseAcl(argv, mayYield) {
     var hashes = {};
     if (len(argv) < 3 or lower(argv[1]) != "setuser") {
         return PasswordHashes(hashes);
     }
     var total = 0;
+    var sinceYield = 0;
     var i = 3;
     while (i < len(argv)) {
         var rule = argv[i];
         if (len(rule) > 0 and (rule[0] == ">" or rule[0] == "<")) {
-            total = total + len(rule) - 1;
-            if (total > PASSWORD_MAX) {
-                return errorReply("ERR the passwords of one ACL SETUSER are over 65536 bytes, the limit of this server");
+            var blocks = hashBlocks(len(rule) - 1);
+            total = total + blocks;
+            if (total > HASH_BLOCKS_MAX) {
+                return errorReply("ERR the passwords of one ACL SETUSER are over 1024 SHA-256 blocks (64 KB), the limit of this server");
             }
             hashes[i] = sha256Hex(rule[1:len(rule)], mayYield);
+            sinceYield = sinceYield + blocks;
+            if (mayYield and sinceYield >= 16) {
+                sinceYield = 0;
+                yield nil;
+            }
         }
         i = i + 1;
     }
@@ -6101,6 +6118,9 @@ fun aclSetuser(argv, hashes) {
         } else if (len(rule) > 0 and rule[0] == ">") {
             var hash = hashes[i];
             if (!hasPassword(u, hash)) {
+                if (len(u.passwords) >= PASSWORDS_MAX) {
+                    return errorReply("ERR the default user holds at most 256 passwords on this server");
+                }
                 u.passwords.append(hash);
             }
             u.nopass = false;

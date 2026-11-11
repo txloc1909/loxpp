@@ -180,8 +180,8 @@
  },
  {
   "name": "> stores a password two times",
-  "old": "            if (!hasPassword(u, hash)) {\n                u.passwords.append(hash);",
-  "new": "            if (true) {\n                u.passwords.append(hash);",
+  "old": "            if (!hasPassword(u, hash)) {\n                if (len(u.passwords) >= PASSWORDS_MAX) {",
+  "new": "            if (true) {\n                if (len(u.passwords) >= PASSWORDS_MAX) {",
   "cases": [
    "local: ACL SETUSER keeps one hash of a password"
   ]
@@ -276,23 +276,23 @@
  },
  {
   "name": "SETUSER has no limit on passwords",
-  "old": "            if (total > PASSWORD_MAX) {",
+  "old": "            if (total > HASH_BLOCKS_MAX) {",
   "new": "            if (false) {",
   "cases": [
-   "local: SETUSER refuses more than 65536 bytes of passwords"
+   "local: SETUSER refuses more than 1024 SHA-256 blocks of passwords"
   ]
  },
  {
-  "name": "the limit is one byte short",
-  "old": "var PASSWORD_MAX = 65536;",
-  "new": "var PASSWORD_MAX = 65535;",
+  "name": "the block limit is one short",
+  "old": "var HASH_BLOCKS_MAX = 1024;",
+  "new": "var HASH_BLOCKS_MAX = 1023;",
   "cases": [
-   "local: a password of 65536 bytes works"
+   "local: the longest password, 65527 bytes (1024 blocks), works"
   ]
  },
  {
   "name": "AUTH hashes a password of any length",
-  "old": "        if (len(password) <= PASSWORD_MAX) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
+  "old": "        if (hashBlocks(len(password)) <= HASH_BLOCKS_MAX) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
   "new": "        if (true) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
   "cases": [
    "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s"
@@ -303,7 +303,7 @@
   "old": "fun cmdAuth(ctx, argv) {\n    if (ctx == nil) {",
   "new": "fun cmdAuth(ctx, argv) {\n    if (true) {",
   "cases": [
-   "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"
+   "local: A3 EXEC of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s"
   ]
  },
  {
@@ -311,7 +311,7 @@
   "old": "        if (mayYield and base % 1024 == 0) {\n            yield nil;\n        }\n",
   "new": "",
   "cases": [
-   "local: A4 a pipeline of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"
+   "local: A4 a pipeline of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s"
   ]
  },
  {
@@ -344,6 +344,39 @@
   "new": "                if (startUser() != nil) {\n                    applyingFromMaster = true;\n                    execute(ctx, argv);\n                    applyingFromMaster = false;\n                }",
   "cases": [
    "local: a password on a replica does not stop the writes of its master"
+  ]
+ },
+ {
+  "name": "an empty password costs no block",
+  "old": "    return (n + 8 - (n + 8) % 64) / 64 + 1;",
+  "new": "    return (n - n % 64) / 64;",
+  "cases": [
+   "local: an empty password costs one SHA-256 block",
+   "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "short hashes do not yield",
+  "old": "            if (mayYield and sinceYield >= 16) {\n                sinceYield = 0;\n                yield nil;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: A5 a pipeline of 64 ACL SETUSER with 1000 empty passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "no cap on the passwords",
+  "old": "                if (len(u.passwords) >= PASSWORDS_MAX) {",
+  "new": "                if (false) {",
+  "cases": [
+   "local: the default user holds at most 256 passwords"
+  ]
+ },
+ {
+  "name": "the cap is one short",
+  "old": "var PASSWORDS_MAX = 256;",
+  "new": "var PASSWORDS_MAX = 255;",
+  "cases": [
+   "local: the default user holds at most 256 passwords"
   ]
  }
 ]

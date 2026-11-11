@@ -410,13 +410,18 @@ copy of the user and keeps the copy only when each rule is valid, as Redis
 does. A password is kept as the lowercase hex of its SHA-256, which
 `sha256Hex` computes in Lox++ with Int bit operators (FIPS 180-4; the tests
 check it against Python's `hashlib` at each padding border). A hash is Lox++
-work for each byte, so one command takes at most 65536 bytes of passwords
-(rule 3; 64 KB take about 90 ms). The parse of `AUTH` and `ACL` makes the
-hashes before the step of the command, also when `MULTI` queues it, so
-`EXEC` hashes nothing; and the hash yields after each 1024 bytes, because
-the commands of one pipeline run with no yield between them. An empty rule
-is skipped, as in Redis. `AUTH` with a longer password fails with no hash: no
-stored hash can come from it, so the reply is the reply of Redis.
+work for each SHA-256 block of 64 bytes, also for an empty password, so one
+command hashes at most 1024 blocks (64 KB: about 90 ms; rule 3). A password
+of n bytes is floor((n + 8) / 64) + 1 blocks, so the longest is 65527 bytes.
+The parse of `AUTH` and `ACL` makes the hashes before the step of the
+command, also when `MULTI` queues it, so `EXEC` hashes nothing. The
+commands of one pipeline run with no yield between them, so the work
+yields itself: a long hash after each 16 blocks, and the parse of `ACL`
+after each 16 blocks of short ones. The user keeps at most 256 passwords,
+so the scans of `ACL SETUSER`, `ACL GETUSER` and `AUTH` stay small (rule
+5). An empty rule is skipped, as in Redis. `AUTH` with a longer password
+fails with no hash: no stored hash can come from it, so the reply is the
+reply of Redis.
 
 ### Pub/Sub
 
@@ -581,8 +586,9 @@ printed.
   another name is an error, and `ACL GETUSER` of another name gives a null
   reply. `ACL SETUSER` takes only the rules `on`, `off`, `nopass`,
   `resetpass`, `>password` and `<password` (no `#hash`, no command, key or
-  channel rules), and at most 65536 bytes of passwords in one command; Redis
-  has no such limit. `ACL GETUSER` gives only `flags` and `passwords`, as
+  channel rules). One command takes at most 1024 SHA-256 blocks of
+  passwords (64 KB; the longest password is 65527 bytes), and the user
+  keeps at most 256 passwords; Redis has no such limits. `ACL GETUSER` gives only `flags` and `passwords`, as
   the stages ask: Redis 7.0 also gives `on` in the flags and the
   `commands`, `keys`, `channels` and `selectors` of the user. The other ACL
   subcommands (`LIST`, `USERS`, `DELUSER`, `CAT`, ...) are refused. There is
@@ -784,10 +790,12 @@ ruling on PR #1204. Every stage group keeps them.
 | S1 (on a server of its own): 32 connections each send `BITCOUNT` of its own new dense 1 MB at the same time | PING within 0.5 s (when the scan yields every 65536 bytes: 1.00 s) | 0.061–0.066 s |
 | C6 (on a server of its own): 10 connections each send `BITCOUNT` of a new dense 8 MB at the same time and close | server CPU at most 2 times one count; the connections end (when each scan reads the counts only at its start: 10 s or more, the wait limit of the case) | 1.35 s of CPU; one count 1.19 s |
 | C7: one connection sends 200 `BITCOUNT` of a new dense 8 MB and closes | server CPU at most 1.5 times one count; the connection ends; a second run that half-closes gets 200 replies (when the scan keeps no count: 2.38 s, and 8 replies) | 1.27 s of CPU; one count 1.19 s; 200 replies |
-| A1 (group `authentication`, on a server of its own): `ACL SETUSER` with a password of 65536 bytes (the limit) | PING within 0.5 s (rule 6 only) | 0.10 s |
+| A1 (group `authentication`, on a server of its own): `ACL SETUSER` with a password of 65527 bytes (the limit) | PING within 0.5 s (rule 6 only) | 0.02–0.10 s |
 | A2: `AUTH` with a password of 32 MB | PING within 0.5 s (when a password over the limit is hashed: 15 s or more, the limit of the measurer, and 2.1 GB of RSS) | 0.08–0.09 s |
-| A3: `EXEC` of 64 `AUTH` with a password of 65536 bytes | PING within 0.5 s (when `AUTH` hashes in the step of `EXEC`: 6.6 s) | 0.001 s |
-| A4: a pipeline of 64 `AUTH` with a password of 65536 bytes | PING within 0.5 s (when the hash does not yield: 5.9 s) | 0.023 s |
+| A3: `EXEC` of 64 `AUTH` with a password of 65527 bytes | PING within 0.5 s (when `AUTH` hashes in the step of `EXEC`: 6.6 s) | 0.001 s |
+| A4: a pipeline of 64 `AUTH` with a password of 65527 bytes | PING within 0.5 s (when the hash does not yield: 5.9 s) | 0.023–0.033 s |
+| A5: a pipeline of 64 `ACL SETUSER` with 1000 empty passwords and `nopass` (under 1024 arguments, so the hand-over of the arguments does not yield) | PING within 0.5 s (when the parse does not yield after short hashes: 8.2 s) | 0.018 s |
+| A6: `ACL SETUSER` with 20000 empty passwords | refused at the limit; PING within 0.5 s (when an empty password costs no block: 2.3 s, and it is not refused) | 0.016 s |
 | B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
 | B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
 | B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |

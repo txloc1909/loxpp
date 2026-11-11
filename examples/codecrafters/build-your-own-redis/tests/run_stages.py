@@ -6080,13 +6080,15 @@ def stages_auth_local(prog):
              "local: off keeps the connections that are authenticated",
              "local: only the default user exists",
              "local: SHA-256 of the padding borders and of binary passwords",
-             "local: a password of 65536 bytes works",
-             "local: SETUSER refuses more than 65536 bytes of passwords",
-             "local: AUTH with a password of more than 65536 bytes fails",
+             "local: the longest password, 65527 bytes (1024 blocks), works",
+             "local: SETUSER refuses more than 1024 SHA-256 blocks of passwords",
+             "local: AUTH with a password of more than 1024 blocks fails",
              "local: a subscribed connection stays authenticated",
              "local: a password on a replica does not stop the writes of its master",
              "local: commands sent before AUTH get NOAUTH, and after it run",
-             "local: ACL SETUSER skips an empty rule"]
+             "local: ACL SETUSER skips an empty rule",
+             "local: an empty password costs one SHA-256 block",
+             "local: the default user holds at most 256 passwords"]
 
     def body(srv):
         a = Asker(srv)
@@ -6138,11 +6140,26 @@ def stages_auth_local(prog):
         got = [a.call("ACL", "SETUSER", "default", "NoPass"), a.call("ACL", "GETUSER", "default"),
                a.call("ACL", "SETUSER", "default", "ResetPass"), a.call("ACL", "GETUSER", "default")]
         check(names[14], got == ["OK", ["flags", ["nopass"], "passwords", []], "OK", ["flags", [], "passwords", []]], repr(got))
-        got = [a.call("ACL", "SETUSER", "default", "", "resetpass", ""), a.call("ACL", "GETUSER", "default")]
-        check("local: ACL SETUSER skips an empty rule", got == ["OK", ["flags", [], "passwords", []]], repr(got))
         c = Asker(srv)
         got = [c.call("PING"), c.call("AUTH", "default", ""), c.call("AUTH", "default", "anything")]
         check(names[12], got == [Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(WRONGPASS_TEXT)], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", "", "resetpass", ""), a.call("ACL", "GETUSER", "default")]
+        check("local: ACL SETUSER skips an empty rule", got == ["OK", ["flags", [], "passwords", []]], repr(got))
+        empty_hash = hashlib.sha256(b"").hexdigest()
+        got = [a.call("ACL", "SETUSER", "default", *([">"] * 1025)), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", *([">"] * 1024)), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", "resetpass")]
+        check("local: an empty password costs one SHA-256 block", isinstance(got[0], Error) and "1024" in got[0]
+              and got[1] == ["flags", [], "passwords", []] and got[2] == "OK"
+              and got[3] == ["flags", [], "passwords", [empty_hash]] and got[4] == "OK", repr(got)[:300])
+        words = ["w%d" % i for i in range(257)]
+        got = [a.call("ACL", "SETUSER", "default", *[">" + w for w in words[:256]]), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", ">" + words[256]), a.call("ACL", "SETUSER", "default", ">" + words[0]),
+               a.call("ACL", "GETUSER", "default"), a.call("ACL", "SETUSER", "default", "resetpass")]
+        want = [hashlib.sha256(w.encode()).hexdigest() for w in words[:256]]
+        check("local: the default user holds at most 256 passwords", got[0] == "OK" and got[1] == ["flags", [], "passwords", want]
+              and isinstance(got[2], Error) and "256" in got[2] and got[3] == "OK" and got[4] == got[1] and got[5] == "OK",
+              repr(got)[:300])
         # off and on.
         a.call("ACL", "SETUSER", "default", ">pw")
         got = [a.call("ACL", "SETUSER", "default", "off"), a.call("ACL", "GETUSER", "default")]
@@ -6174,7 +6191,7 @@ def stages_auth_local(prog):
         want = [hashlib.sha256(w.encode("latin-1")).hexdigest() for w in words]
         check(names[18], got == ["flags", [], "passwords", want], repr(got)[:200])
         a.call("ACL", "SETUSER", "default", "nopass")
-        big = "p" * 65536
+        big = "p" * 65527
         got = [a.call("ACL", "SETUSER", "default", ">" + big)]
         f = Asker(srv)
         f.c.sock.settimeout(30)
@@ -6182,7 +6199,7 @@ def stages_auth_local(prog):
         check(names[19], got == ["OK", Error(NOAUTH_TEXT), "OK", "PONG"], repr(got))
         got = [a.call("ACL", "SETUSER", "default", ">" + big + "p"), a.call("ACL", "SETUSER", "default", ">" + "q" * 40000, ">" + "r" * 30000),
                a.call("ACL", "GETUSER", "default")]
-        check(names[20], isinstance(got[0], Error) and "65536" in got[0] and isinstance(got[1], Error) and "65536" in got[1]
+        check(names[20], isinstance(got[0], Error) and "1024" in got[0] and isinstance(got[1], Error) and "1024" in got[1]
               and got[2] == ["flags", [], "passwords", [hashlib.sha256(big.encode()).hexdigest()]], repr(got)[:300])
         g = Asker(srv)
         got = [g.call("AUTH", "default", big + "p"), g.call("PING")]
@@ -6228,10 +6245,12 @@ def stages_auth_local(prog):
 def stages_auth_limits(prog):
     # The measurer opens new connections, so default keeps nopass: the
     # parse hashes the passwords all the same.
-    names = ["local: A1 ACL SETUSER with 65536 bytes of passwords stalls PING at most 0.5 s",
+    names = ["local: A1 ACL SETUSER with a password of 65527 bytes stalls PING at most 0.5 s",
              "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s",
-             "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s",
-             "local: A4 a pipeline of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"]
+             "local: A3 EXEC of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s",
+             "local: A4 a pipeline of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s",
+             "local: A5 a pipeline of 64 ACL SETUSER with 1000 empty passwords stalls PING at most 0.5 s",
+             "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s"]
 
     def body(srv):
         c = Asker(srv)
@@ -6239,7 +6258,7 @@ def stages_auth_limits(prog):
         got = [None]
 
         def setuser():
-            got[0] = c.call("ACL", "SETUSER", "default", ">" + "s" * 65536, "nopass")
+            got[0] = c.call("ACL", "SETUSER", "default", ">" + "s" * 65527, "nopass")
         worst, wrong, _ = measure_while(srv, setuser)
         check(names[0], worst <= 0.5 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
         x = Client(srv.port)
@@ -6251,7 +6270,7 @@ def stages_auth_limits(prog):
         worst, wrong, _ = measure_while(srv, auth_big)
         check(names[1], worst <= 0.5 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
         # The queued AUTH hash at queue time, so EXEC hashes nothing.
-        password = "s" * 65536
+        password = "s" * 65527
         x.send_raw(encode("AUTH", "default", password) + encode("MULTI") + encode("AUTH", "default", password) * 64)
         queued = [x.try_read(60) for _ in range(66)]
 
@@ -6275,6 +6294,32 @@ def stages_auth_limits(prog):
         worst, wrong, _ = measure_while(srv, pipeline)
         y.close()
         check(names[3], worst <= 0.5 and not wrong and replies == ["OK"] * 64, "worst %.3f s, %r" % (worst, repr(replies)[:80]))
+        # Short passwords: a hash of one block does not reach the yield
+        # inside the hash, so the parse yields after each 16 blocks. Under
+        # 1024 arguments, so the hand-over of the arguments does not yield
+        # for it. Each command ends with nopass, so the measurer is
+        # authenticated.
+        z = Client(srv.port)
+        z.sock.settimeout(60)
+        replies = []
+
+        def short_pipeline():
+            z.send_raw(encode("ACL", "SETUSER", "default", *([">"] * 1000), "nopass") * 64)
+            for _ in range(64):
+                replies.append(z.try_read(60))
+        worst, wrong, _ = measure_while(srv, short_pipeline)
+        check(names[4], worst <= 0.5 and not wrong and replies == ["OK"] * 64, "worst %.3f s, %r" % (worst, repr(replies)[:80]))
+        # An empty password costs one block, so the parse stops at the
+        # limit and hashes no more.
+        replies = []
+
+        def many_empty():
+            z.send_raw(encode("ACL", "SETUSER", "default", *([">"] * 20000)))
+            replies.append(z.try_read(60))
+        worst, wrong, _ = measure_while(srv, many_empty)
+        z.close()
+        check(names[5], worst <= 0.5 and not wrong and isinstance(replies[0], Error) and "1024" in replies[0],
+              "worst %.3f s, %r" % (worst, replies))
     on_new_server(prog, names, body)
 
 
