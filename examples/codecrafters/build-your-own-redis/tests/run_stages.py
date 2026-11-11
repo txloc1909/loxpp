@@ -6145,11 +6145,16 @@ def stages_auth_local(prog):
         got = [a.call("ACL", "SETUSER", "default", "off"), a.call("ACL", "GETUSER", "default")]
         d = Asker(srv)
         got += [d.call("PING"), d.call("AUTH", "default", "pw"), d.call("PING")]
-        got += [a.call("ACL", "SETUSER", "default", "on", "nopass")]
+        # off with nopass: off alone refuses the new connection.
+        got += [a.call("ACL", "SETUSER", "default", "nopass")]
+        o = Asker(srv)
+        got += [o.call("PING"), o.call("AUTH", "default", "any")]
+        got += [a.call("ACL", "SETUSER", "default", "on")]
         e = Asker(srv)
         got += [e.call("PING"), d.call("AUTH", "default", "pw"), d.call("PING")]
         check(names[15], got == ["OK", ["flags", ["off"], "passwords", [hashlib.sha256(b"pw").hexdigest()]],
-                                 Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(NOAUTH_TEXT), "OK", "PONG", "OK", "PONG"], repr(got))
+                                 Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(NOAUTH_TEXT),
+                                 "OK", Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), "OK", "PONG", "OK", "PONG"], repr(got))
         got = [a.call("ACL", "SETUSER", "default", "off"), a.call("PING"), a.call("ACL", "WHOAMI"),
                a.call("ACL", "SETUSER", "default", "on")]
         check(names[16], got == ["OK", "PONG", "default", "OK"], repr(got))

@@ -35,7 +35,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | sorted-sets | 8 | pass |
 | geospatial | 8 | pass |
 | bitmaps | 9 | pass |
-| authentication | 8 | not started |
+| authentication | 8 | pass |
 
 ## Design
 
@@ -384,6 +384,38 @@ times the number of sources), and one `EXEC` does at most 1048576 units of
 bitmap work: the chunks that `SETBIT` adds or splits, the source bytes of
 `BITOP`, and the chunks that `GET` and `BITCOUNT` copy (rule 6).
 
+### Authentication
+
+The server has one user, `default`, as Redis has at start. It starts on,
+with `nopass`, so a new connection is authenticated. Each connection keeps
+the name of its user, or nil while it is not authenticated. A new
+connection starts authenticated only while `default` is on and has
+`nopass`; a connection that is already authenticated stays so when a
+password is set, or when the user goes off, as in Redis. `AUTH [user]
+password` authenticates the connection when the user is on and has
+`nopass` or that password; a failed `AUTH` leaves the connection as it was.
+
+A connection that is not authenticated gets `-NOAUTH Authentication
+required.` for each command but `AUTH`. As in Redis 7.0, an unknown
+command, a wrong number of arguments and an unknown ACL or CONFIG
+subcommand come first (`shapeError`, which the subscribed mode also uses),
+and `EXEC` gets the `EXECABORT` form. `AUTH` and `ACL` are queued in
+`MULTI`, and an unknown subcommand fails the transaction when it is queued.
+A replica applies the writes of its master on its own path, so a password on
+the replica does not stop them.
+
+`ACL SETUSER default` takes the rules `on`, `off`, `nopass`, `resetpass`,
+`>password` and `<password` (the words in any case). It applies them to a
+copy of the user and keeps the copy only when each rule is valid, as Redis
+does. A password is kept as the lowercase hex of its SHA-256, which
+`sha256Hex` computes in Lox++ with Int bit operators (FIPS 180-4; the tests
+check it against Python's `hashlib` at each padding border). A hash is Lox++
+work for each byte, so one command takes at most 65536 bytes of passwords
+(rule 3; 64 KB take about 80 ms), and the parse of `AUTH` and `ACL` makes
+the hashes before the step of the command, also when `MULTI` queues it:
+`EXEC` hashes nothing. `AUTH` with a longer password fails with no hash: no
+stored hash can come from it, so the reply is the reply of Redis.
+
 ### Pub/Sub
 
 `subscribers` maps each channel to the Conns that subscribe to it, and each
@@ -543,6 +575,17 @@ printed.
   The first `BITCOUNT` of data that has no count is much slower than in
   Redis (about 0.15 microseconds a byte, in steps of one chunk, with no
   stall); a later count of the same data is fast (#1214). There is no `BITPOS`, `BITFIELD` or `SETRANGE`.
+- Authentication: there is only the `default` user; `ACL SETUSER` of
+  another name is an error, and `ACL GETUSER` of another name gives a null
+  reply. `ACL SETUSER` takes only the rules `on`, `off`, `nopass`,
+  `resetpass`, `>password` and `<password` (no `#hash`, no command, key or
+  channel rules), and at most 65536 bytes of passwords in one command; Redis
+  has no such limit. `ACL GETUSER` gives only `flags` and `passwords`, as
+  the stages ask: Redis 7.0 also gives `on` in the flags and the
+  `commands`, `keys`, `channels` and `selectors` of the user. The other ACL
+  subcommands (`LIST`, `USERS`, `DELUSER`, `CAT`, ...) are refused. There is
+  no `HELLO`, and a replica has no `masterauth`: a replica of a master with a
+  password does not finish its handshake.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -739,6 +782,9 @@ ruling on PR #1204. Every stage group keeps them.
 | S1 (on a server of its own): 32 connections each send `BITCOUNT` of its own new dense 1 MB at the same time | PING within 0.5 s (when the scan yields every 65536 bytes: 1.00 s) | 0.061–0.066 s |
 | C6 (on a server of its own): 10 connections each send `BITCOUNT` of a new dense 8 MB at the same time and close | server CPU at most 2 times one count; the connections end (when each scan reads the counts only at its start: 10 s or more, the wait limit of the case) | 1.35 s of CPU; one count 1.19 s |
 | C7: one connection sends 200 `BITCOUNT` of a new dense 8 MB and closes | server CPU at most 1.5 times one count; the connection ends; a second run that half-closes gets 200 replies (when the scan keeps no count: 2.38 s, and 8 replies) | 1.27 s of CPU; one count 1.19 s; 200 replies |
+| A1 (group `authentication`, on a server of its own): `ACL SETUSER` with a password of 65536 bytes (the limit) | PING within 0.5 s (rule 6 only) | 0.10 s |
+| A2: `AUTH` with a password of 32 MB | PING within 0.5 s (when a password over the limit is hashed: 15 s or more, the limit of the measurer, and 2.1 GB of RSS) | 0.08–0.09 s |
+| A3: `EXEC` of 64 `AUTH` with a password of 65536 bytes | PING within 0.5 s (when `AUTH` hashes in the step of `EXEC`: 6.6 s) | 0.001 s |
 | B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
 | B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
 | B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |
@@ -772,8 +818,8 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/replication.json` or
 `tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
 `tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` or
-`tests/mutations/bitmaps.json` that removes
-its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4 and B5 hold rule 6 only: no single change removes their
+`tests/mutations/bitmaps.json` or `tests/mutations/authentication.json`
+that removes its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4, B5 and A1 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -847,7 +893,7 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
 # the same with tests/mutations/lists.json, streams.json, transactions.json
 # and optimistic-locking.json, persistence-rdb.json, replication.json,
 # persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json,
-# bitmaps.json
+# bitmaps.json, authentication.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
 

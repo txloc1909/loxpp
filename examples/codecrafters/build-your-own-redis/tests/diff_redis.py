@@ -818,11 +818,15 @@ def auth_checks(prog):
                     a.call("ACL", "SETUSER", "default", "off")]
             c = srv.client()
             out += [c.call("PING"), c.call("AUTH", "default", "mypassword"), a.call("ACL", "WHOAMI"),
-                    a.call("ACL", "SETUSER", "default", "on"), c.call("AUTH", "default", "mypassword"), c.call("PING")]
+                    a.call("ACL", "SETUSER", "default", "nopass")]
+            e = srv.client()
+            out += [e.call("PING"), e.call("AUTH", "default", "any"), a.call("ACL", "SETUSER", "default", "on")]
+            f = srv.client()
+            out += [f.call("PING"), c.call("AUTH", "default", "mypassword"), c.call("PING")]
             d = srv.client()
             d.send_raw(encode("PING") + encode("AUTH", "default", "mypassword") + encode("PING"))
             out += [d.read(), d.read(), d.read()]
-            for x in (a, s, b, c, d):
+            for x in (a, s, b, c, d, e, f):
                 x.close()
             results.append([normalize(r) for r in out])
         if results[0] == results[1]:
