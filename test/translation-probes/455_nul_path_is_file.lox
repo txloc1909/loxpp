@@ -1,0 +1,7 @@
+// A path that holds a NUL byte is a runtime error for is_file
+// (spec/05-stdlib.md, Paths).
+// STATUS: error
+// CHECK: before
+// COVERS: path is_file
+print "before";
+print is_file("/tmp" + chr(0) + "tail");

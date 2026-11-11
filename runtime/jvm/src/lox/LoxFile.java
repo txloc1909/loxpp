@@ -5,7 +5,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.util.Locale;
 
 /**
@@ -65,18 +65,29 @@ public final class LoxFile {
             throw new LoxError(
                     "open(): invalid mode. Expected \"r\", \"w\", \"a\", or \"r+\".");
         }
+        // A String that holds a NUL byte, or one the JDK refuses outright,
+        // names no path. RandomAccessFile resolves the String itself and
+        // throws InvalidPathException, a RuntimeException no Lox `try`
+        // catches, so the path is resolved here and the Path is what reaches
+        // it (spec/05-stdlib.md, Paths).
+        Path target = LoxRuntime.resolvePath("open", path);
+        if (target == null) {
+            throw new LoxError("open(): cannot open '" + path +
+                               "': the path cannot be resolved.");
+        }
         // Linux fopen(path, "r") succeeds on a directory; only a later read(2)
         // fails with EISDIR. RandomAccessFile throws at construction time for
         // a directory, so detect it first and defer to the read methods.
         // Only mode "r" can open a directory; "w", "a", "r+" still raise.
         if (mode.equals("r") && isLinux()) {
-            if (isDirectoryPath(path)) {
+            if (isDirectoryPath(target)) {
                 return new LoxFile(null, true, false, true);
             }
         }
         RandomAccessFile raf = null;
         try {
-            raf = new RandomAccessFile(path, readable && !writable ? "r" : "rw");
+            raf = new RandomAccessFile(target.toFile(),
+                                       readable && !writable ? "r" : "rw");
             if (truncate) {
                 raf.setLength(0);
             }
@@ -97,7 +108,7 @@ public final class LoxFile {
             // observes a position, so a stream handle gives the same result.
             if (writable && !readable) {
                 try {
-                    return new LoxFile(null, new FileOutputStream(path, append),
+                    return new LoxFile(null, new FileOutputStream(target.toFile(), append),
                                        readable, writable, false);
                 } catch (IOException fallback) {
                     throw new LoxError(
@@ -113,9 +124,9 @@ public final class LoxFile {
         return os.toLowerCase(Locale.ROOT).contains("linux");
     }
 
-    private static boolean isDirectoryPath(String path) {
+    private static boolean isDirectoryPath(Path path) {
         try {
-            return Files.isDirectory(Paths.get(path));
+            return Files.isDirectory(path);
         } catch (RuntimeException e) {
             return false;
         }

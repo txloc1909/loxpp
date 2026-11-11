@@ -1,4 +1,5 @@
 #include "os_api.h"
+#include "path_arg.h"
 #include "stdlib_context.h"
 #include "../poller.h"
 #include "../runtime.h"
@@ -139,6 +140,9 @@ static Value existsNative(int /*argc*/, Value* argv) {
     if (!asPathString(argv[0], p)) {
         return from<Nil>(Nil{});
     }
+    if (pathHoldsNul(p, "exists")) {
+        return from<bool>(false);
+    }
     std::error_code ec;
     return from<bool>(std::filesystem::exists(std::filesystem::path(p), ec));
 }
@@ -147,6 +151,9 @@ static Value isDirNative(int /*argc*/, Value* argv) {
     std::string p;
     if (!asPathString(argv[0], p)) {
         return from<Nil>(Nil{});
+    }
+    if (pathHoldsNul(p, "is_dir")) {
+        return from<bool>(false);
     }
     std::error_code ec;
     return from<bool>(
@@ -158,6 +165,9 @@ static Value isFileNative(int /*argc*/, Value* argv) {
     if (!asPathString(argv[0], p)) {
         return from<Nil>(Nil{});
     }
+    if (pathHoldsNul(p, "is_file")) {
+        return from<bool>(false);
+    }
     std::error_code ec;
     return from<bool>(
         std::filesystem::is_regular_file(std::filesystem::path(p), ec));
@@ -166,6 +176,9 @@ static Value isFileNative(int /*argc*/, Value* argv) {
 static Value statNative(int /*argc*/, Value* argv) {
     std::string p;
     if (!asPathString(argv[0], p)) {
+        return from<Nil>(Nil{});
+    }
+    if (pathHoldsNul(p, "stat")) {
         return from<Nil>(Nil{});
     }
     std::filesystem::path fs(p);
@@ -230,8 +243,7 @@ static Value mkdirNative(int argc, Value* argv) {
     // The C library reads a path up to its first NUL byte, so a NUL here would
     // silently name a shorter, different path. It cannot name a directory at
     // all, so it is a fault of the argument, like a non-String.
-    if (p.find('\0') != std::string::npos) {
-        nativeRuntimeError("mkdir() path must not contain a NUL byte.");
+    if (pathHoldsNul(p, "mkdir")) {
         return from<Nil>(Nil{});
     }
     bool parents = false;

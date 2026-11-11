@@ -52,6 +52,26 @@ public final class FileTest {
         check(all.endsWith("fourth\n"), "append mode adds after existing content");
         reader3.close();
 
+        // A path that holds a NUL byte names a shorter path at the JDK, so an
+        // unchecked open(path + "\0tail", "w") would truncate the shorter
+        // file and report that it opened the path the program named
+        // (spec/05-stdlib.md, Paths; issue #1158).
+        File shorter = File.createTempFile("lox-rt-file-nul", ".txt");
+        shorter.deleteOnExit();
+        Files.write(shorter.toPath(),
+                "keep me".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        try {
+            LoxFile nul = LoxFile.open(shorter.getAbsolutePath() + "\u0000tail", "w");
+            nul.close();
+            check(false, "open() of a path with a NUL byte must halt");
+        } catch (LoxError e) {
+            check(!e.isCatchable(), "open() of a path with a NUL byte is a halting fault");
+        }
+        checkEquals("keep me",
+                new String(Files.readAllBytes(shorter.toPath()),
+                           java.nio.charset.StandardCharsets.ISO_8859_1),
+                "open() of a NUL path does not truncate the shorter file");
+
         File rwTmp = File.createTempFile("lox-rt-file-rplus", ".txt");
         rwTmp.deleteOnExit();
         LoxFile seed = LoxFile.open(rwTmp.getAbsolutePath(), "w");
