@@ -345,8 +345,14 @@ public final class SocketTest {
                    "read_some(0) is fatal on a socket at EOF");
         LoxSocket ic = LoxSocket.connect("127.0.0.1", isPort);
         ic.close();
-        checkThrows(() -> ic.readBytesArg(Double.valueOf(1)), LoxError.class,
-                    "read_bytes on a closed socket is fatal");
+        LoxError closedFault = null;
+        try {
+            ic.readBytesArg(Double.valueOf(1));
+        } catch (LoxError e) {
+            closedFault = e;
+        }
+        check(closedFault != null && closedFault.isCatchable(),
+              "read_bytes on a closed socket is a catchable SocketClosedError");
         is.close();
 
         // The upper edge is accepted. read_some takes no buffer of n bytes, so
