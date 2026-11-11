@@ -5,4 +5,5 @@
 // CHECK: before
 // COVERS: host-string spawn
 print "before";
-spawn("/bin/echo" + chr(0) + "tail", []);
+try { spawn("/bin/echo" + chr(0) + "tail", []); } catch (e) { print "caught " + e.kind; }
+print "not caught";

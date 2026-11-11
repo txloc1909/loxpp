@@ -4,4 +4,5 @@
 // CHECK: before
 // COVERS: host-string listen
 print "before";
-listen("127.0.0.1" + chr(0) + "tail", 0);
+try { listen("127.0.0.1" + chr(0) + "tail", 0); } catch (e) { print "caught " + e.kind; }
+print "not caught";

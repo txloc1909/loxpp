@@ -777,7 +777,11 @@ TEST(NetProcessTest, ReadlinesOfOneLongLineHoldsNoExtraCopy) {
 
 TEST(NetProcessTest, Connect_HostWithNul_RuntimeError) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("connect(\"127.0.0.1\" + chr(0) + \"tail\", 1);"),
+    // A connection to port 1 is refused, and the catchable NetworkError of
+    // that failure is also a runtime error, so only the try form can tell the
+    // halting fault from a catchable one.
+    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\" + chr(0) + \"tail\", 1); } "
+                    "catch (e) { print e.kind; }"),
               InterpretResult::RUNTIME_ERROR);
 }
 

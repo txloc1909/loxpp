@@ -6,4 +6,5 @@
 // CHECK: before
 // COVERS: host-string env
 print "before";
-print env("LOXPP_PROBE_NUL" + chr(0) + "TAIL");
+try { print env("LOXPP_PROBE_NUL" + chr(0) + "TAIL"); } catch (e) { print "caught " + e.kind; }
+print "not caught";

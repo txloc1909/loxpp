@@ -4,4 +4,5 @@
 // CHECK: before
 // COVERS: host-string connect_within
 print "before";
-connect_within("127.0.0.1" + chr(0) + "tail", 1, 1);
+try { connect_within("127.0.0.1" + chr(0) + "tail", 1, 1); } catch (e) { print "caught " + e.kind; }
+print "not caught";

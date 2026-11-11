@@ -1,9 +1,11 @@
 // A host that holds a NUL byte is a runtime error for connect
 // (spec/05-stdlib.md, Strings the host reads): getaddrinfo() reads the name
-// only up to the NUL, so the call would connect to a different host. The port
-// is never reached.
+// only up to the NUL, so the call would connect to a different host. The
+// fault is not catchable, so a consumer that raises the catchable NetworkError
+// of a failed connection instead prints its kind and goes on.
 // STATUS: error
 // CHECK: before
 // COVERS: host-string connect
 print "before";
-connect("127.0.0.1" + chr(0) + "tail", 1);
+try { connect("127.0.0.1" + chr(0) + "tail", 1); } catch (e) { print "caught " + e.kind; }
+print "not caught";
