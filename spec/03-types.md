@@ -147,6 +147,12 @@ Closures let a function reach those bindings even after the scopes have exited.
 See [Binding Identity](04-semantics.md#binding-identity) for which binding a
 closure captures, and when a binding ends.
 
+A stdlib function, such as `clock` or `chr`, is also a Function, and a built-in
+method bound to its receiver, such as `m.keys`, is a BoundMethod. `type()` returns
+the same names for them as for a Lox++ closure (§05-stdlib, `type`). Where this
+specification asks for a Function or a BoundMethod, a stdlib function or a bound
+built-in method is accepted, as in `coroutine.create` and `task.spawn`.
+
 ### Class
 
 A class value produced by a `class` declaration. When called as a function, it
