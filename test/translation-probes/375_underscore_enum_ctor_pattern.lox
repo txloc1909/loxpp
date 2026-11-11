@@ -1,0 +1,28 @@
+// An enum named "_" is an ordinary enum name in a constructor pattern
+// (spec/02-syntax.md, ctorPat and armPat; issue #1076). Each form below binds
+// or tests the way the spec says, and a bare "_" stays the wildcard even
+// while an enum named "_" is declared.
+enum _ { A(x) B }
+
+print match _.A(7) { case _.A(y) => y case _.B => 0 };
+print match _.B() { case _.A(y) => y case _.B => 0 };
+print match _.A(8) {
+    case p @ _.A(y) => str(y) + "/" + str(match p { case _.A(z) => z case _.B => 0 })
+    case _ => "wild"
+};
+print match _.A(5) {
+    case p @ _.A => "tag " + str(match p { case _.A(z) => z case _.B => 0 })
+    case _ => "wild"
+};
+print match _.A(9) { case _.A{x} => x case _ => "wild" };
+print match 3 { case _ => "wild" };
+print match _.B() { case p @ _.A(y) => str(y) case _ => "other" };
+
+// STATUS: ok
+// CHECK: 7
+// CHECK: 0
+// CHECK: 8/8
+// CHECK: tag 5
+// CHECK: 9
+// CHECK: wild
+// CHECK: other

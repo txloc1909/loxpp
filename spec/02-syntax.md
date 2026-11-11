@@ -319,7 +319,8 @@ otherwise the pattern is a compile error. A bare identifier in a pattern is
 never a constructor pattern: it is the wildcard `_`, a binding, or a class
 test.
 `_` alone is the wildcard. `_` followed by `{` is the name of a class pattern
-and resolves like any other name.
+and resolves like any other name. `_` followed by `.` is the name of an enum
+in a constructor pattern, such as `_.A`, and resolves like any other enum name.
 A class pattern whose name is an enum name (`E{x}`) is a compile error.
 
 - `E.A` tests the constructor and binds no field.
