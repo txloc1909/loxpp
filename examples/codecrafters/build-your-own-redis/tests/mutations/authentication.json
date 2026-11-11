@@ -378,5 +378,38 @@
   "cases": [
    "local: the default user holds at most 256 passwords"
   ]
+ },
+ {
+  "name": "no ACL budget in EXEC",
+  "old": "    aclExecWork = ACL_EXEC_WORK;\n",
+  "new": "",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
+   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a rule of SETUSER spends nothing",
+  "old": "        if (!spendAclWork(cost)) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a scan of SETUSER costs one unit",
+  "old": "            cost = 1 + len(u.passwords);",
+  "new": "            cost = 1;",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "AUTH in EXEC spends nothing",
+  "old": "        if (!spendAclWork(1 + len(defaultUser.passwords))) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"
+  ]
  }
 ]

@@ -2119,6 +2119,7 @@ fun execQueued(tx) {
     zsetExecWork = ZSET_EXEC_WORK;
     geoExecCandidates = GEO_EXEC_CANDIDATES;
     bitmapExecWork = BITMAP_EXEC_WORK;
+    aclExecWork = ACL_EXEC_WORK;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2138,6 +2139,7 @@ fun execQueued(tx) {
     zsetExecWork = nil;
     geoExecCandidates = nil;
     bitmapExecWork = nil;
+    aclExecWork = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -5815,6 +5817,25 @@ var HASH_BLOCKS_MAX = 1024;
 // stay linear in a small list (rule 5). Redis has no such limit.
 var PASSWORDS_MAX = 256;
 
+// The scans of the password list in one EXEC: each rule of ACL SETUSER is
+// one unit, and a > or < rule and an AUTH also cost the length of the list
+// that they scan. The hashes are made when MULTI queues the command, but
+// EXEC runs the scans in one step (rule 6). nil outside EXEC.
+var ACL_EXEC_WORK = 524288;
+var aclExecWork = nil;
+var ACL_EXEC_TOO_MUCH = "-ERR the ACL work of this transaction is over its limit\r\n";
+
+fun spendAclWork(k) {
+    if (aclExecWork == nil) {
+        return true;
+    }
+    if (k > aclExecWork) {
+        return false;
+    }
+    aclExecWork = aclExecWork - k;
+    return true;
+}
+
 fun hashBlocks(n) {
     return (n + 8 - (n + 8) % 64) / 64 + 1;
 }
@@ -5980,6 +6001,9 @@ fun cmdAuth(ctx, argv) {
         return WRONGPASS;
     }
     if (!defaultUser.nopass) {
+        if (!spendAclWork(1 + len(defaultUser.passwords))) {
+            return ACL_EXEC_TOO_MUCH;
+        }
         var hash = ctx.hashes[len(argv) - 1];
         if (hash == nil or !hasPassword(defaultUser, hash)) {
             return WRONGPASS;
@@ -6103,6 +6127,13 @@ fun aclSetuser(argv, hashes) {
     while (i < len(argv)) {
         var rule = argv[i];
         var word = lower(rule);
+        var cost = 1;
+        if (len(rule) > 0 and (rule[0] == ">" or rule[0] == "<")) {
+            cost = 1 + len(u.passwords);
+        }
+        if (!spendAclWork(cost)) {
+            return ACL_EXEC_TOO_MUCH;
+        }
         if (rule == "") {
             // Redis skips an empty rule.
         } else if (word == "on") {

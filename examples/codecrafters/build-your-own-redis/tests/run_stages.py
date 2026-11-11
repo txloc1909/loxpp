@@ -351,10 +351,10 @@ def rss_kib(pid):
     return 0
 
 
-def measure_while(srv, action):
+def measure_while(srv, action, password=None):
     """Runs action() while a measurer opens a new connection every 20 ms and
-    times one PING on it. Returns (worst seconds, wrong replies, peak RSS in
-    KiB)."""
+    times one PING on it (after AUTH default password, when a password is
+    given). Returns (worst seconds, wrong replies, peak RSS in KiB)."""
     stop = threading.Event()
     worst = [0.0]
     wrong = []
@@ -365,15 +365,20 @@ def measure_while(srv, action):
             start = time.time()
             try:
                 m = socket.create_connection(("127.0.0.1", srv.port), timeout=15)
-                m.sendall(encode("PING"))
+                want = b"+PONG\r\n"
+                if password is None:
+                    m.sendall(encode("PING"))
+                else:
+                    m.sendall(encode("AUTH", "default", password) + encode("PING"))
+                    want = b"+OK\r\n" + want
                 data = b""
-                while not data.endswith(b"\r\n"):
+                while len(data) < len(want) and not data.startswith(b"-"):
                     chunk = m.recv(64)
                     if not chunk:
                         break
                     data += chunk
                 m.close()
-                if data != b"+PONG\r\n":
+                if data != want:
                     wrong.append(data)
             except OSError as e:
                 wrong.append(repr(e))
@@ -6250,7 +6255,9 @@ def stages_auth_limits(prog):
              "local: A3 EXEC of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s",
              "local: A4 a pipeline of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s",
              "local: A5 a pipeline of 64 ACL SETUSER with 1000 empty passwords stalls PING at most 0.5 s",
-             "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s"]
+             "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s",
+             "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
+             "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"]
 
     def body(srv):
         c = Asker(srv)
@@ -6320,6 +6327,39 @@ def stages_auth_limits(prog):
         z.close()
         check(names[5], worst <= 0.5 and not wrong and isinstance(replies[0], Error) and "1024" in replies[0],
               "worst %.3f s, %r" % (worst, replies))
+        # EXEC runs the scans of the password list in one step: 256 stored
+        # passwords, and rules that each scan them all. The measurer
+        # authenticates first.
+        q = Client(srv.port)
+        q.sock.settimeout(120)
+        q.call("ACL", "SETUSER", "default", "resetpass", *[">p%d" % i for i in range(256)])
+        q.send_raw(encode("MULTI") + encode("ACL", "SETUSER", "default", *([">p255"] * 1020)) * 256)
+        queued = [q.try_read(60) for _ in range(257)]
+        replies = []
+
+        def exec_setusers():
+            q.send_raw(encode("EXEC"))
+            replies.append(q.try_read(120))
+        worst, wrong, _ = measure_while(srv, exec_setusers, password="p0")
+        r = replies[0]
+        check(names[6], worst <= 0.5 and not wrong and queued == ["OK"] + ["QUEUED"] * 256 and isinstance(r, list)
+              and r[:2] == ["OK", "OK"] and r[2] == Error("ERR the ACL work of this transaction is over its limit"),
+              "worst %.3f s, %r" % (worst, repr(r)[:120]))
+        q.send_raw(encode("MULTI") + encode("AUTH", "default", "p255") * 65535)
+        for _ in range(65536):
+            q.try_read(60)
+        replies = []
+
+        def exec_auths():
+            q.send_raw(encode("EXEC"))
+            replies.append(q.try_read(120))
+        worst, wrong, _ = measure_while(srv, exec_auths, password="p0")
+        q.close()
+        r = replies[0]
+        # 1 + 256 units an AUTH: 2040 run in the budget of 524288.
+        check(names[7], worst <= 0.5 and not wrong and isinstance(r, list) and len(r) == 65535 and r[2039] == "OK"
+              and r[2040] == Error("ERR the ACL work of this transaction is over its limit"),
+              "worst %.3f s, %r" % (worst, repr(r)[:120]))
     on_new_server(prog, names, body)
 
 
