@@ -85,7 +85,7 @@ class FaultRow:
     id: str
     kind: str | None  # the Error.kind of a catchable fault, None for a halting one
     example: str  # appears in the Example cell of the spec table
-    per_function: str | None = None  # EVERY_FUNCTION DIVIDING or ROTATING: one probe for each function
+    per_function: str | None = None  # EVERY_FUNCTION, DIVIDING or ROTATING: one probe for each function
 
 
 CATCHABLE = "catchable"
