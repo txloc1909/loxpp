@@ -6085,7 +6085,8 @@ def stages_auth_local(prog):
              "local: AUTH with a password of more than 65536 bytes fails",
              "local: a subscribed connection stays authenticated",
              "local: a password on a replica does not stop the writes of its master",
-             "local: commands sent before AUTH get NOAUTH, and after it run"]
+             "local: commands sent before AUTH get NOAUTH, and after it run",
+             "local: ACL SETUSER skips an empty rule"]
 
     def body(srv):
         a = Asker(srv)
@@ -6137,6 +6138,8 @@ def stages_auth_local(prog):
         got = [a.call("ACL", "SETUSER", "default", "NoPass"), a.call("ACL", "GETUSER", "default"),
                a.call("ACL", "SETUSER", "default", "ResetPass"), a.call("ACL", "GETUSER", "default")]
         check(names[14], got == ["OK", ["flags", ["nopass"], "passwords", []], "OK", ["flags", [], "passwords", []]], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", "", "resetpass", ""), a.call("ACL", "GETUSER", "default")]
+        check("local: ACL SETUSER skips an empty rule", got == ["OK", ["flags", [], "passwords", []]], repr(got))
         c = Asker(srv)
         got = [c.call("PING"), c.call("AUTH", "default", ""), c.call("AUTH", "default", "anything")]
         check(names[12], got == [Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(WRONGPASS_TEXT)], repr(got))
@@ -6227,7 +6230,8 @@ def stages_auth_limits(prog):
     # parse hashes the passwords all the same.
     names = ["local: A1 ACL SETUSER with 65536 bytes of passwords stalls PING at most 0.5 s",
              "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s",
-             "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"]
+             "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s",
+             "local: A4 a pipeline of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"]
 
     def body(srv):
         c = Asker(srv)
@@ -6258,6 +6262,19 @@ def stages_auth_limits(prog):
         x.close()
         check(names[2], worst <= 0.5 and not wrong and queued == ["OK", "OK"] + ["QUEUED"] * 64 and got[0] == ["OK"] * 64,
               "worst %.3f s, %r" % (worst, repr(got[0])[:80]))
+        # The commands of one pipeline run with no yield between them, so
+        # the hash yields itself.
+        y = Client(srv.port)
+        y.sock.settimeout(60)
+        replies = []
+
+        def pipeline():
+            y.send_raw(encode("AUTH", "default", password) * 64)
+            for _ in range(64):
+                replies.append(y.try_read(60))
+        worst, wrong, _ = measure_while(srv, pipeline)
+        y.close()
+        check(names[3], worst <= 0.5 and not wrong and replies == ["OK"] * 64, "worst %.3f s, %r" % (worst, repr(replies)[:80]))
     on_new_server(prog, names, body)
 
 

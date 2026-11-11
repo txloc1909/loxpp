@@ -5844,8 +5844,11 @@ fun rotr(x, n) {
     return ((x >>> n) | (x << (32i - n))) & 0xFFFFFFFF;
 }
 
-// The lowercase hex text of the SHA-256 of the bytes of s.
-fun sha256Hex(s) {
+// The lowercase hex text of the SHA-256 of the bytes of s. With mayYield,
+// it yields after each 1024 bytes of blocks (about 1.4 ms): the commands of
+// one pipeline run with no yield between them, so a long hash must yield
+// itself (rule 6).
+fun sha256Hex(s, mayYield) {
     var bytes = [];
     for (var i = 0; i < len(s); i = i + 1) {
         bytes.append(int(ord(s[i])));
@@ -5909,6 +5912,9 @@ fun sha256Hex(s) {
         h[6] = (h[6] + g) & 0xFFFFFFFF;
         h[7] = (h[7] + hh) & 0xFFFFFFFF;
         base = base + 64;
+        if (mayYield and base % 1024 == 0) {
+            yield nil;
+        }
     }
     var out = "";
     for (var word in h) {
@@ -5934,7 +5940,7 @@ fun parseAuth(argv, mayYield) {
     if (len(argv) == 2 or len(argv) == 3) {
         var password = argv[len(argv) - 1];
         if (len(password) <= PASSWORD_MAX) {
-            hashes[len(argv) - 1] = sha256Hex(password);
+            hashes[len(argv) - 1] = sha256Hex(password, mayYield);
         }
     }
     return PasswordHashes(hashes);
@@ -5992,7 +5998,7 @@ var ACL_SUBCOMMANDS = {"cat": -2, "deluser": -3, "dryrun": -4, "genpass": -2, "g
 
 // The hashes of the > and < rules of ACL SETUSER. Returns an error when the
 // passwords are over PASSWORD_MAX bytes in all, so the hashes of one
-// command take at most about 80 ms.
+// command take at most about 90 ms, in steps.
 fun parseAcl(argv, mayYield) {
     var hashes = {};
     if (len(argv) < 3 or lower(argv[1]) != "setuser") {
@@ -6007,7 +6013,7 @@ fun parseAcl(argv, mayYield) {
             if (total > PASSWORD_MAX) {
                 return errorReply("ERR the passwords of one ACL SETUSER are over 65536 bytes, the limit of this server");
             }
-            hashes[i] = sha256Hex(rule[1:len(rule)]);
+            hashes[i] = sha256Hex(rule[1:len(rule)], mayYield);
         }
         i = i + 1;
     }
@@ -6080,7 +6086,9 @@ fun aclSetuser(argv, hashes) {
     while (i < len(argv)) {
         var rule = argv[i];
         var word = lower(rule);
-        if (word == "on") {
+        if (rule == "") {
+            // Redis skips an empty rule.
+        } else if (word == "on") {
             u.on = true;
         } else if (word == "off") {
             u.on = false;

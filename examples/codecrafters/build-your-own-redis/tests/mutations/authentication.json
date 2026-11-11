@@ -292,8 +292,8 @@
  },
  {
   "name": "AUTH hashes a password of any length",
-  "old": "        if (len(password) <= PASSWORD_MAX) {\n            hashes[len(argv) - 1] = sha256Hex(password);",
-  "new": "        if (true) {\n            hashes[len(argv) - 1] = sha256Hex(password);",
+  "old": "        if (len(password) <= PASSWORD_MAX) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
+  "new": "        if (true) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
   "cases": [
    "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s"
   ]
@@ -304,6 +304,46 @@
   "new": "fun cmdAuth(ctx, argv) {\n    if (true) {",
   "cases": [
    "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "the hash does not yield",
+  "old": "        if (mayYield and base % 1024 == 0) {\n            yield nil;\n        }\n",
+  "new": "",
+  "cases": [
+   "local: A4 a pipeline of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "an empty rule is a syntax error",
+  "old": "        if (rule == \"\") {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: ACL SETUSER skips an empty rule"
+  ]
+ },
+ {
+  "name": "off ends the connections that are authenticated",
+  "old": "        if (conn.user == nil and name != \"AUTH\") {",
+  "new": "        if ((conn.user == nil or startUser() == nil) and name != \"AUTH\") {",
+  "cases": [
+   "local: off keeps the connections that are authenticated"
+  ]
+ },
+ {
+  "name": "a subscribed connection runs AUTH",
+  "old": "var SUBSCRIBED_ALLOWED = {\"SUBSCRIBE\": true, \"UNSUBSCRIBE\": true, \"PING\": true};",
+  "new": "var SUBSCRIBED_ALLOWED = {\"SUBSCRIBE\": true, \"UNSUBSCRIBE\": true, \"PING\": true, \"AUTH\": true};",
+  "cases": [
+   "local: a subscribed connection stays authenticated"
+  ]
+ },
+ {
+  "name": "a replica with a password drops the writes of its master",
+  "old": "                applyingFromMaster = true;\n                execute(ctx, argv);\n                applyingFromMaster = false;",
+  "new": "                if (startUser() != nil) {\n                    applyingFromMaster = true;\n                    execute(ctx, argv);\n                    applyingFromMaster = false;\n                }",
+  "cases": [
+   "local: a password on a replica does not stop the writes of its master"
   ]
  }
 ]

@@ -411,9 +411,11 @@ does. A password is kept as the lowercase hex of its SHA-256, which
 `sha256Hex` computes in Lox++ with Int bit operators (FIPS 180-4; the tests
 check it against Python's `hashlib` at each padding border). A hash is Lox++
 work for each byte, so one command takes at most 65536 bytes of passwords
-(rule 3; 64 KB take about 80 ms), and the parse of `AUTH` and `ACL` makes
-the hashes before the step of the command, also when `MULTI` queues it:
-`EXEC` hashes nothing. `AUTH` with a longer password fails with no hash: no
+(rule 3; 64 KB take about 90 ms). The parse of `AUTH` and `ACL` makes the
+hashes before the step of the command, also when `MULTI` queues it, so
+`EXEC` hashes nothing; and the hash yields after each 1024 bytes, because
+the commands of one pipeline run with no yield between them. An empty rule
+is skipped, as in Redis. `AUTH` with a longer password fails with no hash: no
 stored hash can come from it, so the reply is the reply of Redis.
 
 ### Pub/Sub
@@ -785,6 +787,7 @@ ruling on PR #1204. Every stage group keeps them.
 | A1 (group `authentication`, on a server of its own): `ACL SETUSER` with a password of 65536 bytes (the limit) | PING within 0.5 s (rule 6 only) | 0.10 s |
 | A2: `AUTH` with a password of 32 MB | PING within 0.5 s (when a password over the limit is hashed: 15 s or more, the limit of the measurer, and 2.1 GB of RSS) | 0.08–0.09 s |
 | A3: `EXEC` of 64 `AUTH` with a password of 65536 bytes | PING within 0.5 s (when `AUTH` hashes in the step of `EXEC`: 6.6 s) | 0.001 s |
+| A4: a pipeline of 64 `AUTH` with a password of 65536 bytes | PING within 0.5 s (when the hash does not yield: 5.9 s) | 0.023 s |
 | B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
 | B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
 | B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |
