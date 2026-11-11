@@ -911,7 +911,7 @@ FATAL_ROWS = [
 
 # --- Error-as-receiver reflection rows -------------------------------------
 #
-# spec/03-types.md's Error section (lines 223-225) makes a write to any name
+# spec/03-types.md's Error section makes a write to any name
 # on an Error value a runtime error; the reflection natives are a second
 # door onto the same restriction, separate from `.` property access. `e` is
 # bound the same way in every row: a caught IndexOutOfBoundsError, captured
