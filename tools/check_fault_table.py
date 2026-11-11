@@ -885,6 +885,16 @@ FATAL_ROWS = [
         "integer.udiv(1i, 0i);",
     ),
     Row(
+        "integer_rotate_count",
+        "fatal",
+        "integer.rotl(1i, 64i);",
+    ),
+    Row(
+        "integer_popcount_bytes_range",
+        "fatal",
+        'integer.popcount_bytes("ab", 1i, 5i);',
+    ),
+    Row(
         "integer_parse_unsigned_invalid",
         "fatal",
         'integer.parse_unsigned("18446744073709551616");',

@@ -3077,7 +3077,9 @@ class InterpIntegerFn {
     arity() {
         if (this.name == "min" or this.name == "max" or
             this.name == "udiv" or this.name == "urem" or
-            this.name == "ult") return 2;
+            this.name == "ult" or this.name == "rotl" or
+            this.name == "rotr") return 2;
+        if (this.name == "popcount_bytes") return -1;
         return 1;
     }
     call(interp, args) { return interp.integerModuleCall(this.name, args); }
@@ -5289,6 +5291,14 @@ class Interpreter {
         this.setError("IntegerModuleDivisionByZeroError", "integer unsigned division by zero.", 0);
     }
 
+    integerCountFault() {
+        this.setError("IntegerModuleCountError", "integer rotate count must be from 0 to 63.", 0);
+    }
+
+    integerRangeFault() {
+        this.setError("IntegerModuleRangeError", "integer.popcount_bytes() range must lie within the String.", 0);
+    }
+
     integerParseFault() {
         this.setError("IntegerModuleParseError", "integer.parse_unsigned() cannot read this String.", 0);
     }
@@ -5372,6 +5382,7 @@ class Interpreter {
 
     integerModuleCall(name, args) {
         if (name == "parse_unsigned") return this.integerParseUnsigned(args[0]);
+        if (name == "popcount_bytes") return this.integerPopcountBytes(args);
         if (!isIntValue(args[0])) { this.integerArgumentFault(); return nil; }
         if (name == "abs") {
             // The negation of the smallest Int is itself, so abs() wraps.
@@ -5379,6 +5390,9 @@ class Interpreter {
             return args[0];
         }
         if (name == "ustr") return integer.ustr(args[0]);
+        if (name == "popcount") return integer.popcount(args[0]);
+        if (name == "clz") return integer.clz(args[0]);
+        if (name == "ctz") return integer.ctz(args[0]);
         if (!isIntValue(args[1])) { this.integerArgumentFault(); return nil; }
         if (name == "min") {
             if (args[0] < args[1]) return args[0];
@@ -5389,9 +5403,38 @@ class Interpreter {
             return args[1];
         }
         if (name == "ult") return integer.ult(args[0], args[1]);
+        if (name == "rotl" or name == "rotr") {
+            if (args[1] < 0i or args[1] > 63i) { this.integerCountFault(); return nil; }
+            if (name == "rotl") return integer.rotl(args[0], args[1]);
+            return integer.rotr(args[0], args[1]);
+        }
         if (args[1] == 0i) { this.integerDivisionByZeroFault(); return nil; }
         if (name == "udiv") return integer.udiv(args[0], args[1]);
         return integer.urem(args[0], args[1]);
+    }
+
+    // popcount_bytes(s), (s, start), (s, start, end): a bound outside the
+    // String, or start above end, is a fault, not a clamp.
+    integerPopcountBytes(args) {
+        if (len(args) < 1 or len(args) > 3) {
+            this.fatalError("Expected 1 to 3 arguments.");
+            return nil;
+        }
+        if (!isLoxStr(args[0])) { this.integerArgumentFault(); return nil; }
+        var i = 1;
+        while (i < len(args)) {
+            if (!isIntValue(args[i])) { this.integerArgumentFault(); return nil; }
+            i = i + 1;
+        }
+        var start = 0i;
+        var end = int(len(args[0]));
+        if (len(args) > 1) start = args[1];
+        if (len(args) > 2) end = args[2];
+        if (start < 0i or start > end or end > int(len(args[0]))) {
+            this.integerRangeFault();
+            return nil;
+        }
+        return integer.popcount_bytes(args[0], start, end);
     }
 
     // One or more decimal digits with no sign and nothing else, at most
@@ -5833,7 +5876,10 @@ class Interpreter {
             if (name == "max_value") return 9223372036854775807i;
             if (name == "abs" or name == "min" or name == "max" or
                 name == "udiv" or name == "urem" or name == "ult" or
-                name == "ustr" or name == "parse_unsigned") return InterpIntegerFn(name);
+                name == "ustr" or name == "parse_unsigned" or
+                name == "popcount" or name == "clz" or name == "ctz" or
+                name == "rotl" or name == "rotr" or
+                name == "popcount_bytes") return InterpIntegerFn(name);
             this.fatalError("Undefined property '" + name + "'.");
             return nil;
         }

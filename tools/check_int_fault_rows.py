@@ -67,12 +67,17 @@ SCRIPT = "check_int_fault_rows.py"
 # The functions of the `integer` module, as docs/decisions/integer-kind.md
 # lists them, and the two of them that divide. The member table of the spec is
 # the source of the names; these sets say what the decision requires of it.
-MODULE_FUNCTIONS = {"abs", "min", "max", "udiv", "urem", "ult", "ustr", "parse_unsigned"}
+MODULE_FUNCTIONS = {
+    "abs", "min", "max", "udiv", "urem", "ult", "ustr", "parse_unsigned",
+    "popcount", "clz", "ctz", "rotl", "rotr", "popcount_bytes",
+}
 DIVIDING_FUNCTIONS = {"udiv", "urem"}
+ROTATING_FUNCTIONS = {"rotl", "rotr"}
 INTEGER_HEADING = "## `integer` — Int functions and constants"
 
 EVERY_FUNCTION = "every function"
 DIVIDING = "every dividing function"
+ROTATING = "every rotating function"
 
 
 @dataclass
@@ -80,7 +85,7 @@ class FaultRow:
     id: str
     kind: str | None  # the Error.kind of a catchable fault, None for a halting one
     example: str  # appears in the Example cell of the spec table
-    per_function: str | None = None  # EVERY_FUNCTION or DIVIDING: one probe for each function
+    per_function: str | None = None  # EVERY_FUNCTION, DIVIDING or ROTATING: one probe for each function
 
 
 CATCHABLE = "catchable"
@@ -119,6 +124,12 @@ ROWS = [
     # the integer module
     FaultRow("integer_module_non_int", None, "integer.abs(1);", EVERY_FUNCTION),
     FaultRow("integer_unsigned_division_by_zero", None, "integer.udiv(1i, 0i);", DIVIDING),
+    FaultRow("integer_rotate_count", None, "integer.rotl(1i, 64i);", ROTATING),
+    FaultRow(
+        "integer_popcount_bytes_range",
+        None,
+        'integer.popcount_bytes("ab", 1i, 5i);',
+    ),
     FaultRow(
         "integer_parse_unsigned_invalid",
         None,
@@ -153,17 +164,21 @@ def statement(line: str) -> str:
     return line.removeprefix("print ").removesuffix(";").strip()
 
 
-def module_functions(stdlib: str) -> tuple[set[str], set[str]]:
-    """Returns the functions of the member table of `integer`, and those whose
-    Meaning cell says that a zero divisor is a runtime error."""
+def module_functions(stdlib: str) -> tuple[set[str], set[str], set[str]]:
+    """Returns the functions of the member table of `integer`, those whose
+    Meaning cell says that a zero divisor is a runtime error, and those whose
+    Meaning cell says that a count outside 0 to 63 is one."""
     functions: set[str] = set()
     dividing: set[str] = set()
+    rotating: set[str] = set()
     for member in table(section(stdlib, INTEGER_HEADING), "Member"):
         names = set(re.findall(r"integer\.(\w+)\(", member["Member"]))
         functions |= names
         if "zero" in member["Meaning"].lower():
             dividing |= names
-    return functions, dividing
+        if "outside 0 to 63" in member["Meaning"]:
+            rotating |= names
+    return functions, dividing, rotating
 
 
 def main() -> None:
@@ -178,7 +193,7 @@ def main() -> None:
         semantics = spec_path("04-semantics.md", args.semantics).read_text(encoding="utf-8")
         catchable_rows = table(section(semantics, "## Runtime Errors"), "Cause")
         halting_rows = table(section(semantics, "### Halting Faults"), "Cause")
-        functions, dividing = module_functions(spec_path("05-stdlib.md", args.stdlib).read_text(encoding="utf-8"))
+        functions, dividing, rotating = module_functions(spec_path("05-stdlib.md", args.stdlib).read_text(encoding="utf-8"))
         covers = probe_covers(Path(args.probes))
         import check_fault_table as cft
 
@@ -196,7 +211,18 @@ def main() -> None:
             f"the member table of `integer` says that {name!r} faults on a zero divisor, "
             f"and DIVIDING_FUNCTIONS does not name it"
         )
-    scope = {EVERY_FUNCTION: functions | MODULE_FUNCTIONS, DIVIDING: dividing | DIVIDING_FUNCTIONS}
+    for name in sorted(ROTATING_FUNCTIONS - rotating):
+        problems.append(f"the member table of `integer` does not say that {name!r} faults on a count outside 0 to 63")
+    for name in sorted(rotating - ROTATING_FUNCTIONS):
+        problems.append(
+            f"the member table of `integer` says that {name!r} faults on a count outside 0 to 63, "
+            f"and ROTATING_FUNCTIONS does not name it"
+        )
+    scope = {
+        EVERY_FUNCTION: functions | MODULE_FUNCTIONS,
+        DIVIDING: dividing | DIVIDING_FUNCTIONS,
+        ROTATING: rotating | ROTATING_FUNCTIONS,
+    }
     known: set[tuple[str, ...]] = set()
 
     for row in ROWS:
@@ -275,7 +301,8 @@ def main() -> None:
         f"{len(ROWS)} rows ({sum(1 for r in ROWS if r.kind)} catchable, "
         f"{sum(1 for r in ROWS if not r.kind)} halting), each in the spec, in the fault table "
         f"check, and in a probe; {len(scope[EVERY_FUNCTION])} functions of the `integer` module "
-        f"each with a non-Int probe, {len(scope[DIVIDING])} of them each with a zero-divisor probe",
+        f"each with a non-Int probe, {len(scope[DIVIDING])} of them each with a zero-divisor probe, "
+        f"{len(scope[ROTATING])} each with a rotate-count probe",
     )
 
 

@@ -2361,8 +2361,10 @@ run before the program ends is implementation-defined, as for every halt.
 | `int(x)` where `x` is not an Int, a Number, or a String | `int(nil);` |
 | `float(s)` where `s` is a String that is not a decimal number | `float("abc");` |
 | `float(x)` where `x` is not an Int, a Number, or a String | `float(nil);` |
-| A function of the `integer` module called with an argument that is not an Int (a String for `parse_unsigned`) | `integer.abs(1);` |
+| A function of the `integer` module called with an argument that is not an Int (a String for `parse_unsigned` and the first argument of `popcount_bytes`) | `integer.abs(1);` |
 | `integer.udiv(a, b)` or `integer.urem(a, b)` with `b == 0i` | `integer.udiv(1i, 0i);` |
+| `integer.rotl(x, n)` or `integer.rotr(x, n)` with `n` outside 0 to 63 | `integer.rotl(1i, 64i);` |
+| `integer.popcount_bytes(s, start, end)` with `start` or `end` outside `s`, or `start` above `end` | `integer.popcount_bytes("ab", 1i, 5i);` |
 | `integer.parse_unsigned(s)` where `s` is not an unsigned decimal integer, or is above 18446744073709551615 | `integer.parse_unsigned("18446744073709551616");` |
 
 ---

@@ -86,12 +86,15 @@ REVIEWED_NON_TABLE_KINDS = {
     # do: halting there, catchable here by design, and one kind per function.
     "IntegerConversionError",
     "FloatConversionError",
-    # The `integer` module has three own-fault causes: a wrong argument kind, a
-    # zero divisor of udiv/urem, and a parse_unsigned String that does not
-    # parse.
+    # The `integer` module has five own-fault causes: a wrong argument kind, a
+    # zero divisor of udiv/urem, a parse_unsigned String that does not parse,
+    # a rotate count outside 0 to 63, and a popcount_bytes range outside its
+    # String.
     "IntegerModuleArgumentError",
     "IntegerModuleDivisionByZeroError",
     "IntegerModuleParseError",
+    "IntegerModuleCountError",
+    "IntegerModuleRangeError",
 }
 
 # The reviewed baseline: one (kind, message, status) entry per `.setError(`
@@ -184,6 +187,8 @@ EXPECTED_CALLS = [
     ('FloatConversionError', '"float() cannot convert this value."', JUDGED),
     ('IntegerModuleArgumentError', '"integer function argument must be an Int."', JUDGED),
     ('IntegerModuleDivisionByZeroError', '"integer unsigned division by zero."', JUDGED),
+    ('IntegerModuleCountError', '"integer rotate count must be from 0 to 63."', JUDGED),
+    ('IntegerModuleRangeError', '"integer.popcount_bytes() range must lie within the String."', JUDGED),
     ('IntegerModuleParseError', '"integer.parse_unsigned() cannot read this String."', JUDGED),
     ('BitwiseTypeError', '"Operands must be Ints."', JUDGED),
     ('ShiftCountError', '"Shift count must be from 0 to 63."', JUDGED),

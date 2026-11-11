@@ -750,6 +750,65 @@ TEST_F(IntegerModuleTest, MinAndMaxCompareAsSigned) {
     expect_global_int(h, "d", -1);
 }
 
+TEST_F(IntegerModuleTest, BitCountsAndRotates) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.popcount(0xFFFFFFFFFFFFFFFF);"
+                    "var b = integer.clz(0i);"
+                    "var c = integer.ctz(0i);"
+                    "var d = integer.clz(1i);"
+                    "var e = integer.ctz(integer.min_value);"
+                    "var f = integer.rotl(integer.min_value, 1i);"
+                    "var g = integer.rotr(1i, 1i);"
+                    "var i = integer.rotl(5i, 0i);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 64);
+    expect_global_int(h, "b", 64);
+    expect_global_int(h, "c", 64);
+    expect_global_int(h, "d", 63);
+    expect_global_int(h, "e", 63);
+    expect_global_int(h, "f", 1);
+    expect_global_int(h, "g", std::numeric_limits<Int>::min());
+    expect_global_int(h, "i", 5);
+}
+
+TEST_F(IntegerModuleTest, RotateCountOutOfRangeFaults) {
+    VMTestHarness lo;
+    EXPECT_EQ(lo.run("integer.rotr(1i, -1i);"), InterpretResult::RUNTIME_ERROR);
+    VMTestHarness hi;
+    EXPECT_EQ(hi.run("integer.rotl(1i, 64i);"), InterpretResult::RUNTIME_ERROR);
+}
+
+TEST_F(IntegerModuleTest, PopcountBytesCountsARange) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var a = integer.popcount_bytes(\"abc\");"
+                    "var b = integer.popcount_bytes(\"abc\", 1i);"
+                    "var c = integer.popcount_bytes(\"abc\", 1i, 2i);"
+                    "var d = integer.popcount_bytes(\"abc\", 3i);"
+                    "var e = integer.popcount_bytes(chr(255) + chr(0) + "
+                    "chr(1), 0i, 3i);"),
+              InterpretResult::OK);
+    expect_global_int(h, "a", 3 + 3 + 4);
+    expect_global_int(h, "b", 3 + 4);
+    expect_global_int(h, "c", 3);
+    expect_global_int(h, "d", 0);
+    expect_global_int(h, "e", 9);
+}
+
+TEST_F(IntegerModuleTest, PopcountBytesFaultsOutsideTheString) {
+    VMTestHarness a;
+    EXPECT_EQ(a.run("integer.popcount_bytes(\"ab\", 0i, 3i);"),
+              InterpretResult::RUNTIME_ERROR);
+    VMTestHarness b;
+    EXPECT_EQ(b.run("integer.popcount_bytes(\"ab\", 2i, 1i);"),
+              InterpretResult::RUNTIME_ERROR);
+    VMTestHarness c;
+    EXPECT_EQ(c.run("integer.popcount_bytes(\"ab\", -1i);"),
+              InterpretResult::RUNTIME_ERROR);
+    VMTestHarness d;
+    EXPECT_EQ(d.run("integer.popcount_bytes(\"ab\", 0);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
 TEST_F(IntegerModuleTest, UnsignedDivisionAndRemainder) {
     VMTestHarness h;
     ASSERT_EQ(h.run("var a = integer.udiv(0xFFFFFFFFFFFFFFFF, 2i);"
