@@ -515,7 +515,11 @@ def main() -> None:
             "LOXPP_BOOTSTRAP_TRACE_ENABLED=1 is in the environment"
         ),
     )
-    args = parser.parse_args()
+    # A path may follow an option, as the usage line shows and as
+    # `--other-check RUNNER program.lox` does. With `paths` as `nargs="*"`,
+    # argparse before 3.13 reports that path as an unrecognized argument, so a
+    # Python 3.12 (the dev image's) cannot run a call the checks make.
+    args = parser.parse_intermixed_args()
 
     if args.skip_on_trace and os.environ.get("LOXPP_BOOTSTRAP_TRACE_ENABLED") == "1":
         print("SKIP: the build under test traces execution (release preset required)")
