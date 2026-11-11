@@ -8,6 +8,7 @@
 #
 # Usage: tests/run_stages.py [your_program.sh]
 
+import hashlib
 import os
 import random
 import re
@@ -5972,6 +5973,289 @@ def stages_bitmaps_replication(prog):
         m.close()
 
 
+MYPASSWORD_HASH = "89e01536ac207279409d4de1e5253e01f4a1769e696db0d6062ca9b8f56767c8"
+NOAUTH_TEXT = "NOAUTH Authentication required."
+WRONGPASS_TEXT = "WRONGPASS invalid username-password pair or user is disabled."
+
+
+def on_new_server(prog, names, body):
+    """Runs body(srv) on a server of its own: the users are global state."""
+    srv = Server(prog, [])
+    try:
+        if aof_started(srv, names):
+            body(srv)
+    finally:
+        srv.stop()
+
+
+def stages_auth(prog):
+    def s01(srv):
+        sock = socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+        sock.sendall(encode("ACL", "WHOAMI"))
+        data = b""
+        while len(data) < 13:
+            chunk = sock.recv(64)
+            if not chunk:
+                break
+            data += chunk
+        sock.close()
+        check("auth-01 ACL WHOAMI gives the bulk string default", data == b"$7\r\ndefault\r\n", repr(data))
+    on_new_server(prog, ["auth-01 ACL WHOAMI gives the bulk string default"], s01)
+
+    def s02_04(srv):
+        got = Asker(srv).call("ACL", "GETUSER", "default")
+        # auth-02 asks for an empty flags array; auth-03, a later stage,
+        # makes it ["nopass"].
+        check("auth-02 ACL GETUSER gives flags and an array", isinstance(got, list) and got[:1] == ["flags"]
+              and isinstance(got[1], list), repr(got))
+        check("auth-03 the default user has the nopass flag", isinstance(got, list) and got[:2] == ["flags", ["nopass"]], repr(got))
+        check("auth-04 the default user has no passwords", got == ["flags", ["nopass"], "passwords", []], repr(got))
+    on_new_server(prog, ["auth-02 ACL GETUSER gives flags and an array", "auth-03 the default user has the nopass flag",
+                         "auth-04 the default user has no passwords"], s02_04)
+
+    def s05(srv):
+        c = Asker(srv)
+        before = c.call("ACL", "GETUSER", "default")
+        ok = c.call("ACL", "SETUSER", "default", ">mypassword")
+        after = c.call("ACL", "GETUSER", "default")
+        check("auth-05 SETUSER >mypassword stores its SHA-256 and clears nopass",
+              before == ["flags", ["nopass"], "passwords", []] and ok == "OK"
+              and after == ["flags", [], "passwords", [MYPASSWORD_HASH]], repr((before, ok, after)))
+    on_new_server(prog, ["auth-05 SETUSER >mypassword stores its SHA-256 and clears nopass"], s05)
+
+    def s06(srv):
+        c = Asker(srv)
+        ok = c.call("ACL", "SETUSER", "default", ">mypassword")
+        bad = c.call("AUTH", "default", "wrongpassword")
+        good = c.call("AUTH", "default", "mypassword")
+        check("auth-06 AUTH gives WRONGPASS for a wrong password and OK for the right one",
+              ok == "OK" and isinstance(bad, Error) and bad.startswith("WRONGPASS") and good == "OK", repr((ok, bad, good)))
+    on_new_server(prog, ["auth-06 AUTH gives WRONGPASS for a wrong password and OK for the right one"], s06)
+
+    def s07(srv):
+        c1 = Asker(srv)
+        ok = c1.call("ACL", "SETUSER", "default", ">newpassword")
+        who = c1.call("ACL", "WHOAMI")
+        c2 = Asker(srv)
+        refused = c2.call("ACL", "WHOAMI")
+        check("auth-07 a new connection is not authenticated after a password is set",
+              ok == "OK" and who == "default" and isinstance(refused, Error) and refused.startswith("NOAUTH"),
+              repr((ok, who, refused)))
+    on_new_server(prog, ["auth-07 a new connection is not authenticated after a password is set"], s07)
+
+    def s08(srv):
+        c1 = Asker(srv)
+        ok = c1.call("ACL", "SETUSER", "default", ">newpassword")
+        who = c1.call("ACL", "WHOAMI")
+        c2 = Asker(srv)
+        refused = c2.call("PING")
+        auth = c2.call("AUTH", "default", "newpassword")
+        pong = c2.call("PING")
+        check("auth-08 AUTH authenticates the connection",
+              ok == "OK" and who == "default" and isinstance(refused, Error) and refused.startswith("NOAUTH")
+              and auth == "OK" and pong == "PONG", repr((ok, who, refused, auth, pong)))
+    on_new_server(prog, ["auth-08 AUTH authenticates the connection"], s08)
+
+    stages_auth_local(prog)
+    stages_auth_limits(prog)
+
+
+def stages_auth_local(prog):
+    names = ["local: AUTH with only a password and no password set is an error",
+             "local: AUTH with only a password checks the default user",
+             "local: AUTH with more than two arguments is a syntax error",
+             "local: a failed AUTH keeps the connection as it was",
+             "local: an unknown command and a wrong number of arguments come before NOAUTH",
+             "local: an unknown or short ACL subcommand comes before NOAUTH",
+             "local: MULTI gives NOAUTH and EXEC gives EXECABORT with NOAUTH",
+             "local: AUTH and ACL are queued in MULTI and run in EXEC",
+             "local: a wrong ACL subcommand in MULTI fails the transaction",
+             "local: ACL SETUSER changes nothing when one rule is wrong",
+             "local: ACL SETUSER keeps one hash of a password",
+             "local: nopass clears the passwords, and > clears nopass",
+             "local: resetpass leaves no password and no nopass",
+             "local: < removes a password, and an unknown one is an error",
+             "local: rule words have no case",
+             "local: off refuses new connections and AUTH; on gives them back",
+             "local: off keeps the connections that are authenticated",
+             "local: only the default user exists",
+             "local: SHA-256 of the padding borders and of binary passwords",
+             "local: a password of 65536 bytes works",
+             "local: SETUSER refuses more than 65536 bytes of passwords",
+             "local: AUTH with a password of more than 65536 bytes fails",
+             "local: a subscribed connection stays authenticated",
+             "local: a password on a replica does not stop the writes of its master",
+             "local: commands sent before AUTH get NOAUTH, and after it run"]
+
+    def body(srv):
+        a = Asker(srv)
+        got = a.call("AUTH", "x")
+        check(names[0], isinstance(got, Error) and got.startswith("ERR AUTH <password> called without any password configured"), repr(got))
+        got = [a.call("AUTH"), a.call("AUTH", "a", "b", "c"), a.call("AUTH", "default", "pw", "x")]
+        check(names[2], got[0] == Error("ERR wrong number of arguments for 'auth' command")
+              and got[1] == Error("ERR syntax error") and got[2] == Error("ERR syntax error"), repr(got))
+        # Atomic SETUSER: a later wrong rule leaves the user as it was.
+        got = [a.call("ACL", "SETUSER", "default", ">a", "bogus"), a.call("ACL", "SETUSER", "default", ">a", "<b"),
+               a.call("ACL", "GETUSER", "default")]
+        check(names[9], isinstance(got[0], Error) and "'bogus': Syntax error" in got[0] and isinstance(got[1], Error)
+              and got[2] == ["flags", ["nopass"], "passwords", []], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", ">a", ">a"), a.call("ACL", "GETUSER", "default")]
+        a_hash = hashlib.sha256(b"a").hexdigest()
+        check(names[10], got == ["OK", ["flags", [], "passwords", [a_hash]]], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", "nopass"), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", ">x"), a.call("ACL", "GETUSER", "default")]
+        x_hash = hashlib.sha256(b"x").hexdigest()
+        check(names[11], got == ["OK", ["flags", ["nopass"], "passwords", []], "OK", ["flags", [], "passwords", [x_hash]]], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", ">y", "<x"), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", "<nothere"), a.call("ACL", "GETUSER", "default")]
+        check(names[13], got[0] == "OK" and got[1] == ["flags", [], "passwords", [hashlib.sha256(b"y").hexdigest()]]
+              and got[2] == Error("ERR Error in ACL SETUSER modifier '<nothere': The password you are trying to remove from the user does not exist")
+              and got[3] == got[1], repr(got))
+        # AUTH with only a password, now that default has one.
+        got = [a.call("AUTH", "wrong"), a.call("AUTH", "y")]
+        check(names[1], got == [Error(WRONGPASS_TEXT), "OK"], repr(got))
+        # The order of the checks for a connection that is not authenticated.
+        b = Asker(srv)
+        got = [b.call("FOO"), b.call("GET"), b.call("GET", "k")]
+        check(names[4], got[0] == Error("ERR unknown command 'FOO', with args beginning with: ")
+              and got[1] == Error("ERR wrong number of arguments for 'get' command") and got[2] == Error(NOAUTH_TEXT), repr(got))
+        got = [b.call("ACL", "FOO"), b.call("ACL", "GETUSER"), b.call("ACL", "WHOAMI")]
+        check(names[5], got == [Error("ERR unknown subcommand 'FOO'. Try ACL HELP."),
+                                Error("ERR wrong number of arguments for 'acl|getuser' command"), Error(NOAUTH_TEXT)], repr(got))
+        got = [b.call("MULTI"), b.call("SET", "k", "v"), b.call("EXEC")]
+        check(names[6], got == [Error(NOAUTH_TEXT), Error(NOAUTH_TEXT),
+                                Error("EXECABORT Transaction discarded because of: " + NOAUTH_TEXT)], repr(got))
+        # A failed AUTH: b stays unauthenticated, a stays authenticated.
+        got = [b.call("AUTH", "default", "bad"), b.call("PING"), a.call("AUTH", "default", "bad"), a.call("PING")]
+        check(names[3], got == [Error(WRONGPASS_TEXT), Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), "PONG"], repr(got))
+        got = [a.call("MULTI"), a.call("AUTH", "default", "bad"), a.call("ACL", "WHOAMI"), a.call("AUTH", "default", "y"), a.call("EXEC")]
+        check(names[7], got == ["OK", "QUEUED", "QUEUED", "QUEUED", [Error(WRONGPASS_TEXT), "default", "OK"]], repr(got))
+        got = [a.call("MULTI"), a.call("ACL", "FOO"), a.call("ACL", "WHOAMI", "x"), a.call("EXEC")]
+        check(names[8], got == ["OK", Error("ERR unknown subcommand 'FOO'. Try ACL HELP."),
+                                Error("ERR wrong number of arguments for 'acl|whoami' command"),
+                                Error("EXECABORT Transaction discarded because of previous errors.")], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", "NoPass"), a.call("ACL", "GETUSER", "default"),
+               a.call("ACL", "SETUSER", "default", "ResetPass"), a.call("ACL", "GETUSER", "default")]
+        check(names[14], got == ["OK", ["flags", ["nopass"], "passwords", []], "OK", ["flags", [], "passwords", []]], repr(got))
+        c = Asker(srv)
+        got = [c.call("PING"), c.call("AUTH", "default", ""), c.call("AUTH", "default", "anything")]
+        check(names[12], got == [Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(WRONGPASS_TEXT)], repr(got))
+        # off and on.
+        a.call("ACL", "SETUSER", "default", ">pw")
+        got = [a.call("ACL", "SETUSER", "default", "off"), a.call("ACL", "GETUSER", "default")]
+        d = Asker(srv)
+        got += [d.call("PING"), d.call("AUTH", "default", "pw"), d.call("PING")]
+        got += [a.call("ACL", "SETUSER", "default", "on", "nopass")]
+        e = Asker(srv)
+        got += [e.call("PING"), d.call("AUTH", "default", "pw"), d.call("PING")]
+        check(names[15], got == ["OK", ["flags", ["off"], "passwords", [hashlib.sha256(b"pw").hexdigest()]],
+                                 Error(NOAUTH_TEXT), Error(WRONGPASS_TEXT), Error(NOAUTH_TEXT), "OK", "PONG", "OK", "PONG"], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", "off"), a.call("PING"), a.call("ACL", "WHOAMI"),
+               a.call("ACL", "SETUSER", "default", "on")]
+        check(names[16], got == ["OK", "PONG", "default", "OK"], repr(got))
+        got = [a.call("ACL", "SETUSER", "alice", ">pw"), a.call("ACL", "SETUSER", "Default", "on"),
+               a.call("ACL", "GETUSER", "alice"), a.call("ACL", "GETUSER", "Default"), a.call("AUTH", "alice", "pw"),
+               a.call("ACL", "SETUSER", "default", ">pw"), a.call("AUTH", "Default", "pw")]
+        check(names[17], isinstance(got[0], Error) and isinstance(got[1], Error) and got[2] is None and got[3] is None
+              and got[4] == Error(WRONGPASS_TEXT) and got[5] == "OK" and got[6] == Error(WRONGPASS_TEXT), repr(got))
+        # SHA-256 at the padding borders (55, 56, 63, 64, 119 bytes), the
+        # empty password and binary bytes.
+        words = ["", "\x00\xff\x80\r\n"] + ["".join(chr((7 * i + n) % 256) for i in range(n)) for n in (55, 56, 63, 64, 119)]
+        a.call("ACL", "SETUSER", "default", "resetpass", *[">" + w for w in words])
+        got = a.call("ACL", "GETUSER", "default")
+        want = [hashlib.sha256(w.encode("latin-1")).hexdigest() for w in words]
+        check(names[18], got == ["flags", [], "passwords", want], repr(got)[:200])
+        a.call("ACL", "SETUSER", "default", "nopass")
+        big = "p" * 65536
+        got = [a.call("ACL", "SETUSER", "default", ">" + big)]
+        f = Asker(srv)
+        f.c.sock.settimeout(30)
+        got += [f.call("PING"), f.call("AUTH", "default", big), f.call("PING")]
+        check(names[19], got == ["OK", Error(NOAUTH_TEXT), "OK", "PONG"], repr(got))
+        got = [a.call("ACL", "SETUSER", "default", ">" + big + "p"), a.call("ACL", "SETUSER", "default", ">" + "q" * 40000, ">" + "r" * 30000),
+               a.call("ACL", "GETUSER", "default")]
+        check(names[20], isinstance(got[0], Error) and "65536" in got[0] and isinstance(got[1], Error) and "65536" in got[1]
+              and got[2] == ["flags", [], "passwords", [hashlib.sha256(big.encode()).hexdigest()]], repr(got)[:300])
+        g = Asker(srv)
+        got = [g.call("AUTH", "default", big + "p"), g.call("PING")]
+        check(names[21], got == [Error(WRONGPASS_TEXT), Error(NOAUTH_TEXT)], repr(got))
+        a.call("ACL", "SETUSER", "default", "nopass")
+        s = Client(srv.port)
+        s.call("SUBSCRIBE", "ch")
+        a.call("ACL", "SETUSER", "default", ">pw")
+        got = [s.call("PING"), s.call("AUTH", "default", "pw")]
+        s.close()
+        check(names[22], got[0] == ["pong", ""] and isinstance(got[1], Error)
+              and got[1].startswith("ERR Can't execute 'auth': only (P|S)SUBSCRIBE"), repr(got))
+        h = Client(srv.port)
+        h.send_raw(encode("PING") + encode("AUTH", "default", "pw") + encode("PING") + encode("ACL", "WHOAMI"))
+        got = [h.try_read(5) for _ in range(4)]
+        h.close()
+        check(names[24], got == [Error(NOAUTH_TEXT), "OK", "PONG", "default"], repr(got))
+
+    on_new_server(prog, names[:23] + names[24:], body)
+    # A replica applies the writes of its master on another path than a
+    # client's commands, so its own password does not stop them.
+    m = Server(prog, [])
+    r = Server(prog, ["--replicaof", "127.0.0.1 %d" % m.port])
+    try:
+        if aof_started(m, [names[23]]) and aof_started(r, []):
+            rc = Asker(r)
+            mc = Asker(m)
+            deadline = time.time() + 10
+            while time.time() < deadline and mc.call("SET", "probe", "1") == "OK" and rc.call("GET", "probe") != "1":
+                time.sleep(0.1)
+            got = [rc.call("ACL", "SETUSER", "default", ">pw"), mc.call("SET", "k", "v")]
+            deadline = time.time() + 5
+            seen = rc.call("GET", "k")
+            while seen != "v" and time.time() < deadline:
+                time.sleep(0.1)
+                seen = rc.call("GET", "k")
+            check(names[23], got == ["OK", "OK"] and seen == "v", repr((got, seen)))
+    finally:
+        r.stop()
+        m.stop()
+
+
+def stages_auth_limits(prog):
+    # The measurer opens new connections, so default keeps nopass: the
+    # parse hashes the passwords all the same.
+    names = ["local: A1 ACL SETUSER with 65536 bytes of passwords stalls PING at most 0.5 s",
+             "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s",
+             "local: A3 EXEC of 64 AUTH with a password of 65536 bytes stalls PING at most 0.5 s"]
+
+    def body(srv):
+        c = Asker(srv)
+        c.c.sock.settimeout(60)
+        got = [None]
+
+        def setuser():
+            got[0] = c.call("ACL", "SETUSER", "default", ">" + "s" * 65536, "nopass")
+        worst, wrong, _ = measure_while(srv, setuser)
+        check(names[0], worst <= 0.5 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        x = Client(srv.port)
+        x.sock.settimeout(60)
+
+        def auth_big():
+            x.send_raw(encode("AUTH", "default", "a" * (32 << 20)))
+            got[0] = x.try_read(60)
+        worst, wrong, _ = measure_while(srv, auth_big)
+        check(names[1], worst <= 0.5 and not wrong and got[0] == "OK", "worst %.3f s, %r" % (worst, got[0]))
+        # The queued AUTH hash at queue time, so EXEC hashes nothing.
+        password = "s" * 65536
+        x.send_raw(encode("AUTH", "default", password) + encode("MULTI") + encode("AUTH", "default", password) * 64)
+        queued = [x.try_read(60) for _ in range(66)]
+
+        def exec_auths():
+            x.send_raw(encode("EXEC"))
+            got[0] = x.try_read(60)
+        worst, wrong, _ = measure_while(srv, exec_auths)
+        x.close()
+        check(names[2], worst <= 0.5 and not wrong and queued == ["OK", "OK"] + ["QUEUED"] * 64 and got[0] == ["OK"] * 64,
+              "worst %.3f s, %r" % (worst, repr(got[0])[:80]))
+    on_new_server(prog, names, body)
+
+
 GROUPS = [
     ("base", stages_base),
     ("lists", stages_lists),
@@ -5985,6 +6269,7 @@ GROUPS = [
     ("sorted-sets", stages_zset),
     ("geospatial", stages_geo),
     ("bitmaps", stages_bitmaps),
+    ("authentication", stages_auth),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
 ]

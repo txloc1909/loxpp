@@ -2082,10 +2082,7 @@ fun inTransaction(conn, name, argv, nbytes) {
         if (watchBroken(conn)) {
             return NULL_ARRAY;
         }
-        commandConn = conn;
-        var replies = execQueued(tx);
-        commandConn = nil;
-        return replies;
+        return execQueued(tx);
     }
     if (REPL_ROLE != "master" and WRITES.has(name)) {
         tx.dirty = true;
@@ -5824,9 +5821,10 @@ fun startUser() {
     return nil;
 }
 
-// The Conn of the command that runs now, for AUTH and ACL WHOAMI. A command
-// has no suspend point, so runCommand sets it before the command and clears
-// it after. It is nil for the AOF replay and the commands of a master.
+// The Conn of the command that runs now, for AUTH. A command has no suspend
+// point, so runCommand sets it before the command and clears it after. It is
+// nil in EXEC (a connection in MULTI is already authenticated), in the AOF
+// replay and for the commands of a master.
 var commandConn = nil;
 
 // SHA-256 (FIPS 180-4) with 32-bit words kept in Ints: each sum is masked
@@ -5992,8 +5990,9 @@ fun hasPassword(user, hash) {
 var ACL_SUBCOMMANDS = {"cat": -2, "deluser": -3, "dryrun": -4, "genpass": -2, "getuser": 3, "list": 2,
                        "load": 2, "log": -2, "save": 2, "setuser": -3, "users": 2, "whoami": 2, "help": 2};
 
-// The hashes of the > and < rules of ACL SETUSER, with a yield after each.
-// Returns an error when the passwords are over PASSWORD_MAX bytes in all.
+// The hashes of the > and < rules of ACL SETUSER. Returns an error when the
+// passwords are over PASSWORD_MAX bytes in all, so the hashes of one
+// command take at most about 80 ms.
 fun parseAcl(argv, mayYield) {
     var hashes = {};
     if (len(argv) < 3 or lower(argv[1]) != "setuser") {
@@ -6009,9 +6008,6 @@ fun parseAcl(argv, mayYield) {
                 return errorReply("ERR the passwords of one ACL SETUSER are over 65536 bytes, the limit of this server");
             }
             hashes[i] = sha256Hex(rule[1:len(rule)]);
-            if (mayYield) {
-                yield nil;
-            }
         }
         i = i + 1;
     }
@@ -6034,10 +6030,9 @@ fun cmdAcl(ctx, argv) {
     }
     var sub = lower(argv[1]);
     if (sub == "whoami") {
-        if (commandConn == nil) {
-            return bulk("default");
-        }
-        return bulk(commandConn.user);
+        // A command runs only on an authenticated connection, and default
+        // is the only user.
+        return bulk("default");
     }
     if (sub == "getuser") {
         return aclGetuser(argv[2]);
@@ -6113,7 +6108,6 @@ fun aclSetuser(argv, hashes) {
                 }
             }
             u.passwords = kept;
-            u.nopass = false;
         } else {
             return errorReply("ERR Error in ACL SETUSER modifier '" + rule + "': Syntax error");
         }
