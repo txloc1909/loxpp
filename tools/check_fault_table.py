@@ -539,13 +539,30 @@ FATAL_ROWS = [
         "fatal",
         'open("/no/such/path", "r");',
     ),
-    # Issue #1158: a path that holds a NUL byte names a shorter path at the
-    # host's file-system interface, so it is a fault of the argument on every
-    # consumer, not the shorter path's answer.
+    # Issue #1158: a String that the host reads and that holds a NUL byte
+    # names a shorter, different thing, so it is a fault of the argument on
+    # every consumer, not the shorter thing's answer. The spec row names the
+    # path case; issues #1217 and #1220 add the environment, the program, and
+    # the host, one row each below, through a different host interface.
     Row(
         "path_holds_nul",
         "fatal",
         'exists("/tmp" + chr(0) + "tail");',
+    ),
+    Row(
+        "name_holds_nul",
+        "fatal",
+        'env("PATH" + chr(0) + "tail");',
+    ),
+    Row(
+        "program_holds_nul",
+        "fatal",
+        'spawn("/bin/echo" + chr(0) + "tail", []);',
+    ),
+    Row(
+        "host_holds_nul",
+        "fatal",
+        'connect("127.0.0.1" + chr(0) + "tail", 1);',
     ),
     # Issue #375: unlike an index read/write, a map/set literal, or `in`
     # (the catchable table's NaNKeyError/InvalidMapKeyError rows above),
@@ -1095,6 +1112,11 @@ FATAL_REGRESSION_ROWS = {
     # value. Both share stdlib_native_arity's spec row.
     "bound_native_arity",
     "bound_native_value_arity",
+    # Issues #1217, #1220: the same spec row as path_holds_nul, through the
+    # environment, the program, and the host instead of the file system.
+    "name_holds_nul",
+    "program_holds_nul",
+    "host_holds_nul",
     # Issue #748: a class pattern and an object destructuring both read a
     # property through GET_PROPERTY, so they share the spec rows of
     # undefined_property_on_instance and property_get_non_instance. The math

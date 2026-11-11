@@ -4,6 +4,6 @@
 // asked for another path.
 // STATUS: error
 // CHECK: before
-// COVERS: path stat
+// COVERS: host-string stat
 print "before";
 print stat("/tmp/loxpp_probe_nul_stat" + chr(0) + "tail");

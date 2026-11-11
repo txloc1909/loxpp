@@ -1,0 +1,9 @@
+// A host that holds a NUL byte is a runtime error for connect
+// (spec/05-stdlib.md, Strings the host reads): getaddrinfo() reads the name
+// only up to the NUL, so the call would connect to a different host. The port
+// is never reached.
+// STATUS: error
+// CHECK: before
+// COVERS: host-string connect
+print "before";
+connect("127.0.0.1" + chr(0) + "tail", 1);

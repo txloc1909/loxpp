@@ -2315,7 +2315,7 @@ run before the program ends is implementation-defined, as for every halt.
 | A stdlib native function is called with an argument count other than its arity, where no [Runtime Errors](#runtime-errors) row gives that fault | `clock(1);` |
 | A `defer`red call holds a value that is not a Closure, Native, BoundMethod, or BoundNative | `fun g() { var x = 42; defer x(); } g();` (a static check cannot see that the variable holds a value that is not callable) |
 | A stdlib native function reports its own error while running, except a fault that a [Runtime Errors](#runtime-errors) row or a [Worker and Task Faults](#worker-and-task-faults) row gives it | `open("/no/such/path", "r");` |
-| A file-system call takes a `path` that holds a NUL byte ([§05-stdlib, Paths](05-stdlib.md#paths)) | `exists("/tmp" + chr(0) + "tail");` |
+| A String the host reads holds a NUL byte ([§05-stdlib, Strings the host reads](05-stdlib.md#strings-the-host-reads)) | `exists("/tmp" + chr(0) + "tail");` |
 | `Map.has(key)` or `Map.del(key)` called with an invalid key | `var m = {}; m.has([1, 2]);` |
 | Undefined property read on a File value | `var f = open("/tmp/f.txt", "w"); f.write("x"); var g = open("/tmp/f.txt", "r"); g.bogus;` (a missing path fails first with the stdlib-error row above) |
 | Undefined property read on a Socket value | `var l = listen("127.0.0.1", 0); var s = connect("127.0.0.1", l.port()); s.bogus;` |

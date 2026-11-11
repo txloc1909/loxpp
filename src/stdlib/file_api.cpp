@@ -1,5 +1,5 @@
 #include "file_api.h"
-#include "path_arg.h"
+#include "host_string_arg.h"
 #include "stdlib_context.h"
 #include "../container_objects.h"
 #include "../vm_allocator.h"
@@ -211,7 +211,7 @@ static Value openNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     std::string pathS(pathStr->chars.data(), pathStr->chars.size());
-    if (pathHoldsNul(pathS, "open")) {
+    if (stringHoldsNul(pathS, "open")) {
         return from<Nil>(Nil{});
     }
     FILE* fp = std::fopen(pathS.c_str(), cmode);

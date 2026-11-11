@@ -4,6 +4,6 @@
 // A consumer that passes the String through prints that answer and exits 0.
 // STATUS: error
 // CHECK: before
-// COVERS: path exists
+// COVERS: host-string exists
 print "before";
 print exists("/tmp/loxpp_probe_nul_exists" + chr(0) + "tail");

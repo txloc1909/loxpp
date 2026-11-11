@@ -2,6 +2,6 @@
 // (spec/05-stdlib.md, Paths).
 // STATUS: error
 // CHECK: before
-// COVERS: path is_file
+// COVERS: host-string is_file
 print "before";
 print is_file("/tmp" + chr(0) + "tail");

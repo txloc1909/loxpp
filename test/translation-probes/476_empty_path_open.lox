@@ -1,0 +1,7 @@
+// An empty path names no file, so open raises the runtime error its section
+// gives for a file it cannot open (spec/05-stdlib.md, Strings the host reads).
+// STATUS: error
+// CHECK: before
+// COVERS: host-string open
+print "before";
+open("", "w");

@@ -1,0 +1,7 @@
+// A host that holds a NUL byte is a runtime error for connect_within
+// (spec/05-stdlib.md, Strings the host reads).
+// STATUS: error
+// CHECK: before
+// COVERS: host-string connect_within
+print "before";
+connect_within("127.0.0.1" + chr(0) + "tail", 1, 1);

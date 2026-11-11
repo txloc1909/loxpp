@@ -108,13 +108,14 @@ jobs:
       - name: Check integer argument rows
         run: tools/check_integer_arg_rows.py
 
-      # Every standard-library function that takes a `path`, its rule for a
-      # NUL byte, its spec probe, its native check, and its JVM resolve must
-      # stay in lockstep (spec/05-stdlib.md, "Paths"). A path-taking function
+      # Every standard-library call that takes a String the host reads — a
+      # path, an environment variable, a program, or a host — its rule for a
+      # NUL byte, its spec probe, its native check, and its JVM refusal must
+      # stay in lockstep (spec/05-stdlib.md, "Strings the host reads"). A call
       # left out of the rule fails, and so does a rule sentence, a probe, or a
       # call site that is missing. Pure Python, so it needs no build.
-      - name: Check path argument rows
-        run: tools/check_path_arg_rows.py
+      - name: Check host string rows
+        run: tools/check_host_string_rows.py
 
       # Lox++ has no import, so the credit channel library of
       # examples/credit_channel.lox is also in each probe that tests it. This

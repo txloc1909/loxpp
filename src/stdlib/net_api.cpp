@@ -1,4 +1,5 @@
 #include "net_api.h"
+#include "host_string_arg.h"
 #include "integer_arg.h"
 #include "stdlib_context.h"
 #include "stream_io.h"
@@ -138,12 +139,10 @@ void setConnectTestHooks(const ConnectTestHooks* hooks) {
 
 // Resolves the name on the worker, and runs the connect from the first
 // address. The TCP connect is nonblocking: the call suspends its task where it
-// can. `withLimit` says that argv[2] is the limit of connect_within.
-static Value connectCommon(Value* argv, bool withLimit) {
-    std::string host;
-    if (!asStringArg(argv[0], host)) {
-        return from<Nil>(Nil{});
-    }
+// can. `withLimit` says that argv[2] is the limit of connect_within. The caller
+// has already read and checked `host`.
+static Value connectCommon(const std::string& host, Value* argv,
+                           bool withLimit) {
     int port = 0;
     if (!asPort(argv[1], 1, port)) {
         return from<Nil>(Nil{});
@@ -211,17 +210,28 @@ static Value connectCommon(Value* argv, bool withLimit) {
     return runIo(std::move(io));
 }
 
+// getaddrinfo() reads the host up to its first NUL byte, so a host that holds
+// one would connect to a different host from the one the program named
+// (spec/05-stdlib.md, Strings the host reads).
 static Value connectNative(int /*argc*/, Value* argv) {
-    return connectCommon(argv, false);
+    std::string host;
+    if (!asStringArg(argv[0], host) || stringHoldsNul(host, "connect")) {
+        return from<Nil>(Nil{});
+    }
+    return connectCommon(host, argv, false);
 }
 
 static Value connectWithinNative(int /*argc*/, Value* argv) {
-    return connectCommon(argv, true);
+    std::string host;
+    if (!asStringArg(argv[0], host) || stringHoldsNul(host, "connect_within")) {
+        return from<Nil>(Nil{});
+    }
+    return connectCommon(host, argv, true);
 }
 
 static Value listenNative(int /*argc*/, Value* argv) {
     std::string host;
-    if (!asStringArg(argv[0], host)) {
+    if (!asStringArg(argv[0], host) || stringHoldsNul(host, "listen")) {
         return from<Nil>(Nil{});
     }
     int port = 0;

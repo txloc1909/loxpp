@@ -105,6 +105,19 @@ TEST_F(OsApiTest, Env_NonString_RuntimeError) {
     EXPECT_EQ(h.run("env(42);"), InterpretResult::RUNTIME_ERROR);
 }
 
+TEST_F(OsApiTest, Env_NameWithNul_RuntimeError) {
+    ::setenv("LOXPP_OS_API_NUL", "other", 1);
+    VMTestHarness h;
+    // getenv() reads the name only up to the NUL, so this call would return
+    // the value of LOXPP_OS_API_NUL, a variable the program did not name
+    // (spec/05-stdlib.md, Strings the host reads). A `try` does not catch it.
+    EXPECT_EQ(h.run("env(\"LOXPP_OS_API_NUL\" + chr(0) + \"TAIL\");"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("try { env(\"LOXPP_OS_API_NUL\" + chr(0) + \"TAIL\"); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
 // ---------------------------------------------------------------------------
 // exit()
 // ---------------------------------------------------------------------------

@@ -1,0 +1,9 @@
+// A name that holds a NUL byte is a runtime error for env
+// (spec/05-stdlib.md, Strings the host reads): getenv() reads the name only up
+// to the NUL, so the call would return another variable's value. A consumer
+// that passes the String through prints that value, or nil, and exits 0.
+// STATUS: error
+// CHECK: before
+// COVERS: host-string env
+print "before";
+print env("LOXPP_PROBE_NUL" + chr(0) + "TAIL");

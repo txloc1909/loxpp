@@ -2,7 +2,7 @@
 // of mkdir (spec/05-stdlib.md, mkdir): the C library would read the path only
 // up to the NUL and name a shorter directory. A consumer that passes the
 // String to its host unchanged creates that shorter directory instead.
-// COVERS: path mkdir
+// COVERS: host-string mkdir
 // STATUS: error
 // CHECK: before
 print "before";
