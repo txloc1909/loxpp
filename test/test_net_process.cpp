@@ -359,12 +359,17 @@ TEST(NetProcessTest, SocketReadBytesZero) {
 // inside a `try` that catches every fault. A fatal fault passes through the
 // `try`, so the run stops with RUNTIME_ERROR. A catchable fault would be
 // caught, and the program would reach its last expression and finish with OK.
+// The setup runs first, in the same session, and must finish with OK. Without
+// that, a setup that fails (a refused connect, say) would end in RUNTIME_ERROR
+// and pass as the fatal fault this check looks for.
 static void expectFatalCountUnderTry(const char* setup,
                                      const std::string& call) {
     VMTestHarness h;
-    const std::string src =
-        std::string(setup) + "try { " + call + " } catch (e) { } 1;";
+    h.setSession(true);
+    ASSERT_EQ(h.run(setup), InterpretResult::OK) << setup;
+    const std::string src = "try { " + call + " } catch (e) { } 1;";
     EXPECT_EQ(h.run(src.c_str()), InterpretResult::RUNTIME_ERROR) << call;
+    h.endSession();
 }
 
 // The server side is accepted and closed, so a read that wrongly accepts a bad
@@ -425,6 +430,31 @@ TEST(NetProcessTest, SocketReadSomeUpperEdgeAccepted) {
                     "l.close(); "
                     "(a == \"ab\") and (e == \"\");"),
               InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+// The upper edge is accepted for both process readers. Each reader reads only
+// up to EOF, so 2147483647 returns the child's output, then "".
+TEST(NetProcessTest, ProcessReadBytesUpperEdgeAccepted) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var p = spawn(\"/bin/sh\", [\"-c\", \"printf hello\"]); "
+                    "var a = p.read_bytes(2147483647); "
+                    "var e = p.read_bytes(2147483647); "
+                    "p.wait(); "
+                    "(a == \"hello\") and (e == \"\");"),
+              InterpretResult::OK);
+    EXPECT_EQ(as<bool>(h.lastResult()), true);
+}
+
+TEST(NetProcessTest, ProcessErrReadBytesUpperEdgeAccepted) {
+    VMTestHarness h;
+    ASSERT_EQ(
+        h.run("var p = spawn(\"/bin/sh\", [\"-c\", \"printf boom 1>&2\"]); "
+              "var a = p.err_read_bytes(2147483647); "
+              "var e = p.err_read_bytes(2147483647); "
+              "p.wait(); "
+              "(a == \"boom\") and (e == \"\");"),
+        InterpretResult::OK);
     EXPECT_EQ(as<bool>(h.lastResult()), true);
 }
 

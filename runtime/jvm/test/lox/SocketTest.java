@@ -351,7 +351,8 @@ public final class SocketTest {
         } catch (LoxError e) {
             closedFault = e;
         }
-        check(closedFault != null && closedFault.isCatchable(),
+        check(closedFault != null && closedFault.isCatchable()
+                  && closedFault.getMessage().contains("closed socket"),
               "read_bytes on a closed socket is a catchable SocketClosedError");
         is.close();
 
