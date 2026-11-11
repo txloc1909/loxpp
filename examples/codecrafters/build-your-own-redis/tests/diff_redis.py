@@ -15,7 +15,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from run_stages import DEFAULT_PROG, Client, Error, Server, free_port  # noqa: E402
+from run_stages import DEFAULT_PROG, Client, Error, Server, encode, free_port  # noqa: E402
 
 import subprocess  # noqa: E402
 import random  # noqa: E402
@@ -395,6 +395,22 @@ SCRIPTS = {
             ["TYPE", "l"],
         ]),
     ],
+    "authentication": [
+        ("acl-commands", [
+            ["ACL", "WHOAMI"], ["acl", "whoami"], ["ACL"], ["ACL", "WHOAMI", "x"], ["ACL", "GETUSER"], ["ACL", "SETUSER"],
+            ["ACL", "FOO"], ["ACL", "GETUSER", "nobody"], ["ACL", "GETUSER", "Default"], ["AUTH", "x"], ["AUTH", "default", "x"],
+            ["AUTH"], ["AUTH", "a", "b", "c"], ["AUTH", "default", "x", "y"], ["ACL", "SETUSER", "default", "bogus"],
+            ["ACL", "SETUSER", "default", "<nothere"], ["ACL", "SETUSER", "default", ">a", "bogus"],
+            ["ACL", "SETUSER", "default", ">a", "<b"], ["ACL", "SETUSER", "default", "NOPASS"], ["ACL", "SETUSER", "default", "on"], ["ACL", "SETUSER", "default", ""],
+            ["ACL", "SETUSER", "default", "", "nopass", ""],
+            ["MULTI"], ["ACL", "FOO"], ["EXEC"], ["MULTI"], ["CONFIG", "FOO"], ["EXEC"], ["MULTI"], ["ACL", "WHOAMI"], ["AUTH", "default", "x"], ["EXEC"],
+            ["ACL", "SETUSER", "default", ">mypassword", ">two", ">two"], ["AUTH", "default", "wrong"], ["AUTH", "wrong"],
+            ["AUTH", "mypassword"], ["AUTH", "default", "two"], ["AUTH", "nobody", "two"], ["ACL", "SETUSER", "default", "<two"],
+            ["AUTH", "default", "two"], ["ACL", "SETUSER", "default", "resetpass"], ["AUTH", "default", ""],
+            ["ACL", "SETUSER", "default", ">", "off"], ["AUTH", "default", ""], ["ACL", "SETUSER", "default", "on"],
+            ["AUTH", "default", ""], ["MULTI"], ["AUTH", "default", "bad"], ["ACL", "WHOAMI"], ["EXEC"], ["PING"],
+        ]),
+    ],
     "pub-sub": [
         ("subscribed-mode", [
             ["UNSUBSCRIBE"], ["UNSUBSCRIBE", "x"], ["PUBLISH", "ch", "m"], ["PUBLISH", "a"], ["SUBSCRIBE"],
@@ -499,6 +515,7 @@ def main():
     replication_checks(prog)
     aof_checks(prog)
     pubsub_checks(prog)
+    auth_checks(prog)
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1
 
@@ -775,6 +792,56 @@ def pubsub_checks(prog):
     except (OSError, EOFError, ValueError) as e:
         FAIL += 1
         print("  FAIL pub-sub delivery  %r" % e)
+    finally:
+        oracle.stop()
+        ours.stop()
+
+
+def auth_checks(prog):
+    """Clients that are and are not authenticated, on each server: the
+    replies must agree."""
+    global PASS, FAIL
+    print("== authentication (several clients)")
+    oracle = RedisServer()
+    ours = Server(prog, [])
+    try:
+        results = []
+        for srv in (oracle, ours):
+            a, s = srv.client(), srv.client()
+            out = [s.call("SUBSCRIBE", "ch"), a.call("ACL", "SETUSER", "default", ">mypassword")]
+            b = srv.client()
+            for cmd in (["PING"], ["ACL", "WHOAMI"], ["FOO"], ["GET"], ["GET", "k"], ["ACL", "FOO"], ["ACL", "GETUSER"],
+                        ["CONFIG", "FOO"], ["MULTI"], ["SET", "k", "v"], ["EXEC"], ["DISCARD"], ["SUBSCRIBE", "x"],
+                        ["AUTH", "x"], ["PING"], ["AUTH", "mypassword"], ["ACL", "WHOAMI"], ["SET", "k", "v"],
+                        ["AUTH", "default", "bad"], ["GET", "k"]):
+                out.append(b.call(*cmd))
+            out += [s.call("PING"), s.call("AUTH", "default", "mypassword"), a.call("PING"),
+                    a.call("ACL", "SETUSER", "default", "off")]
+            c = srv.client()
+            out += [c.call("PING"), c.call("AUTH", "default", "mypassword"), a.call("ACL", "WHOAMI"),
+                    a.call("ACL", "SETUSER", "default", "nopass")]
+            e = srv.client()
+            out += [e.call("PING"), e.call("AUTH", "default", "any"), a.call("ACL", "SETUSER", "default", "on")]
+            f = srv.client()
+            out += [f.call("PING"), c.call("AUTH", "default", "mypassword"), c.call("PING")]
+            d = srv.client()
+            d.send_raw(encode("PING") + encode("AUTH", "default", "mypassword") + encode("PING"))
+            out += [d.read(), d.read(), d.read()]
+            for x in (a, s, b, c, d, e, f):
+                x.close()
+            results.append([normalize(r) for r in out])
+        if results[0] == results[1]:
+            PASS += 1
+            print("  ok   authentication with several clients")
+        else:
+            FAIL += 1
+            print("  FAIL authentication with several clients")
+            for i, (w, g) in enumerate(zip(*results)):
+                if w != g:
+                    print("       step %d: redis %r, lox %r" % (i, w, g))
+    except (OSError, EOFError, ValueError) as e:
+        FAIL += 1
+        print("  FAIL authentication with several clients  %r" % e)
     finally:
         oracle.stop()
         ours.stop()

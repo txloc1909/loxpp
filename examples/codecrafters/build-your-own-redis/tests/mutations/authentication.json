@@ -1,0 +1,441 @@
+[
+ {
+  "name": "WHOAMI gives another name",
+  "old": "        return bulk(\"default\");\n    }\n    if (sub == \"getuser\") {",
+  "new": "        return bulk(\"Default\");\n    }\n    if (sub == \"getuser\") {",
+  "cases": [
+   "auth-01 ACL WHOAMI gives the bulk string default"
+  ]
+ },
+ {
+  "name": "GETUSER drops the nopass flag",
+  "old": "    if (defaultUser.nopass) {\n        flags.append(bulk(\"nopass\"));\n    }",
+  "new": "",
+  "cases": [
+   "auth-03 the default user has the nopass flag"
+  ]
+ },
+ {
+  "name": "GETUSER drops the passwords pair",
+  "old": "    return \"*4\\r\\n\" + bulk(\"flags\") + arrayReply(flags) + bulk(\"passwords\") + arrayReply(parts);",
+  "new": "    return \"*2\\r\\n\" + bulk(\"flags\") + arrayReply(flags);",
+  "cases": [
+   "auth-04 the default user has no passwords"
+  ]
+ },
+ {
+  "name": "> keeps nopass",
+  "old": "                u.passwords.append(hash);\n            }\n            u.nopass = false;",
+  "new": "                u.passwords.append(hash);\n            }",
+  "cases": [
+   "auth-05 SETUSER >mypassword stores its SHA-256 and clears nopass"
+  ]
+ },
+ {
+  "name": "a round constant of SHA-256 is wrong",
+  "old": "    0x428a2f98, 0x71374491,",
+  "new": "    0x428a2f99, 0x71374491,",
+  "cases": [
+   "auth-05 SETUSER >mypassword stores its SHA-256 and clears nopass",
+   "local: SHA-256 of the padding borders and of binary passwords"
+  ]
+ },
+ {
+  "name": "the choose function of SHA-256 is wrong",
+  "old": "            var ch = (e & f) ^ (~e & g);",
+  "new": "            var ch = (e & f) ^ (e & g);",
+  "cases": [
+   "auth-05 SETUSER >mypassword stores its SHA-256 and clears nopass"
+  ]
+ },
+ {
+  "name": "the padding ends one byte early",
+  "old": "    while (len(bytes) % 64 != 56) {",
+  "new": "    while (len(bytes) % 64 != 55) {",
+  "cases": [
+   "local: SHA-256 of the padding borders and of binary passwords"
+  ]
+ },
+ {
+  "name": "the length in the padding is in bytes",
+  "old": "    var bitLen = int(len(s)) * 8i;",
+  "new": "    var bitLen = int(len(s));",
+  "cases": [
+   "local: SHA-256 of the padding borders and of binary passwords"
+  ]
+ },
+ {
+  "name": "AUTH takes any password",
+  "old": "        if (hash == nil or !hasPassword(defaultUser, hash)) {\n            return WRONGPASS;\n        }",
+  "new": "",
+  "cases": [
+   "auth-06 AUTH gives WRONGPASS for a wrong password and OK for the right one"
+  ]
+ },
+ {
+  "name": "a new connection is authenticated with a password set",
+  "old": "    if (defaultUser.on and defaultUser.nopass) {\n        return \"default\";",
+  "new": "    if (true) {\n        return \"default\";",
+  "cases": [
+   "auth-07 a new connection is not authenticated after a password is set"
+  ]
+ },
+ {
+  "name": "no gate",
+  "old": "        if (conn.user == nil and name != \"AUTH\") {",
+  "new": "        if (false) {",
+  "cases": [
+   "auth-07 a new connection is not authenticated after a password is set",
+   "auth-08 AUTH authenticates the connection"
+  ]
+ },
+ {
+  "name": "AUTH does not authenticate the connection",
+  "old": "        commandConn.user = name;",
+  "new": "        commandConn.user = nil;",
+  "cases": [
+   "auth-08 AUTH authenticates the connection"
+  ]
+ },
+ {
+  "name": "runCommand gives AUTH no connection",
+  "old": "    commandConn = conn;\n    var reply = execute(ctx, argv);",
+  "new": "    var reply = execute(ctx, argv);",
+  "cases": [
+   "auth-08 AUTH authenticates the connection"
+  ]
+ },
+ {
+  "name": "AUTH with only a password and nopass is OK",
+  "old": "        if (defaultUser.nopass) {\n            return errorReply(\"ERR AUTH <password> called",
+  "new": "        if (false) {\n            return errorReply(\"ERR AUTH <password> called",
+  "cases": [
+   "local: AUTH with only a password and no password set is an error"
+  ]
+ },
+ {
+  "name": "AUTH with only a password reads no password",
+  "old": "    var password = argv[len(argv) - 1];\n    if (len(argv) == 2) {",
+  "new": "    var password = argv[len(argv) - 1];\n    if (len(argv) == 2) {\n        return WRONGPASS;\n    }\n    if (len(argv) == 2) {",
+  "cases": [
+   "local: AUTH with only a password checks the default user"
+  ]
+ },
+ {
+  "name": "AUTH takes three arguments",
+  "old": "    if (len(argv) > 3) {\n        return errorReply(\"ERR syntax error\");",
+  "new": "    if (len(argv) > 4) {\n        return errorReply(\"ERR syntax error\");",
+  "cases": [
+   "local: AUTH with more than two arguments is a syntax error"
+  ]
+ },
+ {
+  "name": "a failed AUTH ends the authentication",
+  "old": "        if (hash == nil or !hasPassword(defaultUser, hash)) {\n            return WRONGPASS;\n        }",
+  "new": "        if (hash == nil or !hasPassword(defaultUser, hash)) {\n            commandConn.user = nil;\n            return WRONGPASS;\n        }",
+  "cases": [
+   "local: a failed AUTH keeps the connection as it was"
+  ]
+ },
+ {
+  "name": "NOAUTH before the shape of the command",
+  "old": "            var refused = shapeError(name, argv);\n            if (refused == nil and name == \"EXEC\") {",
+  "new": "            var refused = nil;\n            if (refused == nil and name == \"EXEC\") {",
+  "cases": [
+   "local: an unknown command and a wrong number of arguments come before NOAUTH",
+   "local: an unknown or short ACL subcommand comes before NOAUTH"
+  ]
+ },
+ {
+  "name": "the gate checks no subcommand",
+  "old": "    return subcommandError(name, argv);\n}",
+  "new": "    return nil;\n}",
+  "cases": [
+   "local: an unknown or short ACL subcommand comes before NOAUTH"
+  ]
+ },
+ {
+  "name": "EXEC gets plain NOAUTH",
+  "old": "            if (refused == nil and name == \"EXEC\") {",
+  "new": "            if (refused == nil and name == \"NOTEXEC\") {",
+  "cases": [
+   "local: MULTI gives NOAUTH and EXEC gives EXECABORT with NOAUTH"
+  ]
+ },
+ {
+  "name": "MULTI does not check the subcommand",
+  "old": "    var subError = subcommandError(name, argv);\n    if (subError != nil) {\n        tx.dirty = true;\n        return subError;\n    }",
+  "new": "",
+  "cases": [
+   "local: a wrong ACL subcommand in MULTI fails the transaction"
+  ]
+ },
+ {
+  "name": "SETUSER is not atomic",
+  "old": "    var u = AclUser(defaultUser.on, defaultUser.nopass, defaultUser.passwords[0:len(defaultUser.passwords)]);",
+  "new": "    var u = defaultUser;",
+  "cases": [
+   "local: ACL SETUSER changes nothing when one rule is wrong"
+  ]
+ },
+ {
+  "name": "> stores a password two times",
+  "old": "            if (!hasPassword(u, hash)) {\n                if (len(u.passwords) >= PASSWORDS_MAX) {",
+  "new": "            if (true) {\n                if (len(u.passwords) >= PASSWORDS_MAX) {",
+  "cases": [
+   "local: ACL SETUSER keeps one hash of a password"
+  ]
+ },
+ {
+  "name": "nopass keeps the passwords",
+  "old": "            u.nopass = true;\n            u.passwords = [];",
+  "new": "            u.nopass = true;",
+  "cases": [
+   "local: nopass clears the passwords, and > clears nopass"
+  ]
+ },
+ {
+  "name": "resetpass keeps nopass",
+  "old": "            u.nopass = false;\n            u.passwords = [];\n        } else if (len(rule) > 0 and rule[0] == \">\") {",
+  "new": "            u.passwords = [];\n        } else if (len(rule) > 0 and rule[0] == \">\") {",
+  "cases": [
+   "local: resetpass leaves no password and no nopass"
+  ]
+ },
+ {
+  "name": "< removes nothing",
+  "old": "            u.passwords = kept;\n",
+  "new": "",
+  "cases": [
+   "local: < removes a password, and an unknown one is an error"
+  ]
+ },
+ {
+  "name": "< of an unknown password is OK",
+  "old": "            var hash = hashes[i];\n            if (!hasPassword(u, hash)) {\n                return errorReply(\"ERR Error in ACL SETUSER modifier '\" + rule + \"': The password",
+  "new": "            var hash = hashes[i];\n            if (false) {\n                return errorReply(\"ERR Error in ACL SETUSER modifier '\" + rule + \"': The password",
+  "cases": [
+   "local: < removes a password, and an unknown one is an error"
+  ]
+ },
+ {
+  "name": "rule words have case",
+  "old": "        var word = lower(rule);",
+  "new": "        var word = rule;",
+  "cases": [
+   "local: rule words have no case"
+  ]
+ },
+ {
+  "name": "AUTH ignores off",
+  "old": "    if (name != \"default\" or !defaultUser.on) {",
+  "new": "    if (name != \"default\") {",
+  "cases": [
+   "local: off refuses new connections and AUTH; on gives them back"
+  ]
+ },
+ {
+  "name": "a new connection ignores off",
+  "old": "    if (defaultUser.on and defaultUser.nopass) {\n        return \"default\";",
+  "new": "    if (defaultUser.nopass) {\n        return \"default\";",
+  "cases": [
+   "local: off refuses new connections and AUTH; on gives them back"
+  ]
+ },
+ {
+  "name": "GETUSER shows no off",
+  "old": "    if (!defaultUser.on) {\n        flags.append(bulk(\"off\"));\n    }",
+  "new": "",
+  "cases": [
+   "local: off refuses new connections and AUTH; on gives them back"
+  ]
+ },
+ {
+  "name": "SETUSER takes any user",
+  "old": "    if (argv[2] != \"default\") {\n        return errorReply(\"ERR this server has only the default user\");\n    }",
+  "new": "",
+  "cases": [
+   "local: only the default user exists"
+  ]
+ },
+ {
+  "name": "AUTH takes any user name",
+  "old": "    if (name != \"default\" or !defaultUser.on) {",
+  "new": "    if (!defaultUser.on) {",
+  "cases": [
+   "local: only the default user exists"
+  ]
+ },
+ {
+  "name": "GETUSER gives the default user for any name",
+  "old": "    if (name != \"default\") {\n        return NULL_BULK;\n    }",
+  "new": "",
+  "cases": [
+   "local: only the default user exists"
+  ]
+ },
+ {
+  "name": "SETUSER has no limit on passwords",
+  "old": "            if (total > HASH_BLOCKS_MAX) {",
+  "new": "            if (false) {",
+  "cases": [
+   "local: SETUSER refuses more than 1024 SHA-256 blocks of passwords"
+  ]
+ },
+ {
+  "name": "the block limit is one short",
+  "old": "var HASH_BLOCKS_MAX = 1024;",
+  "new": "var HASH_BLOCKS_MAX = 1023;",
+  "cases": [
+   "local: the longest password, 65527 bytes (1024 blocks), works"
+  ]
+ },
+ {
+  "name": "AUTH hashes a password of any length",
+  "old": "        if (hashBlocks(len(password)) <= HASH_BLOCKS_MAX) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
+  "new": "        if (true) {\n            hashes[len(argv) - 1] = sha256Hex(password, mayYield);",
+  "cases": [
+   "local: A2 AUTH with a password of 32 MB stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "AUTH hashes in the step of EXEC",
+  "old": "fun cmdAuth(ctx, argv) {\n    if (ctx == nil) {",
+  "new": "fun cmdAuth(ctx, argv) {\n    if (true) {",
+  "cases": [
+   "local: A3 EXEC of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "the hash does not yield",
+  "old": "        if (mayYield and base % 1024 == 0) {\n            yield nil;\n        }\n",
+  "new": "",
+  "cases": [
+   "local: A4 a pipeline of 64 AUTH with a password of 65527 bytes stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "an empty rule is a syntax error",
+  "old": "        if (rule == \"\") {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: ACL SETUSER skips an empty rule"
+  ]
+ },
+ {
+  "name": "off ends the connections that are authenticated",
+  "old": "        if (conn.user == nil and name != \"AUTH\") {",
+  "new": "        if ((conn.user == nil or startUser() == nil) and name != \"AUTH\") {",
+  "cases": [
+   "local: off keeps the connections that are authenticated"
+  ]
+ },
+ {
+  "name": "a subscribed connection runs AUTH",
+  "old": "var SUBSCRIBED_ALLOWED = {\"SUBSCRIBE\": true, \"UNSUBSCRIBE\": true, \"PING\": true};",
+  "new": "var SUBSCRIBED_ALLOWED = {\"SUBSCRIBE\": true, \"UNSUBSCRIBE\": true, \"PING\": true, \"AUTH\": true};",
+  "cases": [
+   "local: a subscribed connection stays authenticated"
+  ]
+ },
+ {
+  "name": "a replica with a password drops the writes of its master",
+  "old": "                applyingFromMaster = true;\n                execute(ctx, argv);\n                applyingFromMaster = false;",
+  "new": "                if (startUser() != nil) {\n                    applyingFromMaster = true;\n                    execute(ctx, argv);\n                    applyingFromMaster = false;\n                }",
+  "cases": [
+   "local: a password on a replica does not stop the writes of its master"
+  ]
+ },
+ {
+  "name": "an empty password costs no block",
+  "old": "    return (n + 8 - (n + 8) % 64) / 64 + 1;",
+  "new": "    return (n - n % 64) / 64;",
+  "cases": [
+   "local: an empty password costs one SHA-256 block",
+   "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "short hashes do not yield",
+  "old": "            if (mayYield and sinceYield >= 16) {\n                sinceYield = 0;\n                yield nil;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: A5 a pipeline of 64 ACL SETUSER with 1000 empty passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "no cap on the passwords",
+  "old": "                if (len(u.passwords) >= PASSWORDS_MAX) {",
+  "new": "                if (false) {",
+  "cases": [
+   "local: the default user holds at most 256 passwords"
+  ]
+ },
+ {
+  "name": "the cap is one short",
+  "old": "var PASSWORDS_MAX = 256;",
+  "new": "var PASSWORDS_MAX = 255;",
+  "cases": [
+   "local: the default user holds at most 256 passwords"
+  ]
+ },
+ {
+  "name": "no ACL budget in EXEC",
+  "old": "    aclExecWork = ACL_EXEC_WORK;\n",
+  "new": "",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
+   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s",
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s",
+   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a rule of SETUSER spends nothing",
+  "old": "        if (!spendAclWork(cost)) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a scan of SETUSER costs one unit",
+  "old": "            cost = 1 + len(u.passwords);",
+  "new": "            cost = 1;",
+  "cases": [
+   "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "AUTH in EXEC spends nothing",
+  "old": "        if (!spendAclWork(1 + len(defaultUser.passwords))) {",
+  "new": "        if (false) {",
+  "cases": [
+   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "GETUSER spends nothing",
+  "old": "    if (!spendAclWork(1 + GETUSER_UNITS * len(defaultUser.passwords))) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a password of GETUSER costs one unit",
+  "old": "var GETUSER_UNITS = 16;",
+  "new": "var GETUSER_UNITS = 1;",
+  "cases": [
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "the copy of SETUSER spends nothing",
+  "old": "    if (!spendAclWork(1 + len(defaultUser.passwords))) {\n        return ACL_EXEC_TOO_MUCH;\n    }\n    var u = AclUser(",
+  "new": "    var u = AclUser(",
+  "cases": [
+   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"
+  ]
+ }
+]

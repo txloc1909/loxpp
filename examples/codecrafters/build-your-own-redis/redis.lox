@@ -2006,7 +2006,8 @@ var ARITY = {
     "CONFIG": -2, "KEYS": 2, "PUBLISH": 3, "SUBSCRIBE": -2, "UNSUBSCRIBE": -1,
     "ZADD": -4, "ZREM": -3, "ZCARD": 2, "ZSCORE": 3, "ZRANK": 3, "ZRANGE": -4,
     "GEOADD": -5, "GEOPOS": -2, "GEODIST": -4, "GEOSEARCH": -7,
-    "SETBIT": 4, "GETBIT": 3, "STRLEN": 2, "BITCOUNT": -2, "BITOP": -4
+    "SETBIT": 4, "GETBIT": 3, "STRLEN": 2, "BITCOUNT": -2, "BITOP": -4,
+    "AUTH": -2, "ACL": -2
 };
 
 fun arityOk(name, count) {
@@ -2051,6 +2052,11 @@ fun inTransaction(conn, name, argv, nbytes) {
         }
         tx.dirty = true;
         return wrongArgs(lower(name));
+    }
+    var subError = subcommandError(name, argv);
+    if (subError != nil) {
+        tx.dirty = true;
+        return subError;
     }
     if (name == "MULTI") {
         return errorReply("ERR MULTI calls can not be nested");
@@ -2113,6 +2119,7 @@ fun execQueued(tx) {
     zsetExecWork = ZSET_EXEC_WORK;
     geoExecCandidates = GEO_EXEC_CANDIDATES;
     bitmapExecWork = BITMAP_EXEC_WORK;
+    aclExecWork = ACL_EXEC_WORK;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2132,6 +2139,7 @@ fun execQueued(tx) {
     zsetExecWork = nil;
     geoExecCandidates = nil;
     bitmapExecWork = nil;
+    aclExecWork = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -5781,6 +5789,398 @@ fun cmdBitop(ctx, argv) {
 }
 
 // ===========================================================================
+// Authentication
+// ===========================================================================
+
+// The default user, the only user of this server. A connection starts as
+// this user while it is on and has nopass; else it starts unauthenticated,
+// and AUTH authenticates it. passwords holds the lowercase hex SHA-256 of
+// each password, in the order they were added, as Redis keeps them.
+class AclUser {
+    init(on, nopass, passwords) {
+        this.on = on;
+        this.nopass = nopass;
+        this.passwords = passwords;
+    }
+}
+
+var defaultUser = AclUser(true, true, []);
+
+// The most SHA-256 blocks of 64 bytes that one command hashes (64 KB): a
+// hash is Lox++ work for each block, also for an empty password, so it is
+// bounded as an inline line is (rule 3). A password of n bytes is
+// hashBlocks(n) blocks, so the longest one is 65527 bytes. Redis has no
+// such limit. SETUSER refuses more, so no stored hash comes from a longer
+// password, and AUTH with one fails with no hash, as it fails in Redis.
+var HASH_BLOCKS_MAX = 1024;
+// The most passwords that the user keeps, so that SETUSER, GETUSER and AUTH
+// stay linear in a small list (rule 5). Redis has no such limit.
+var PASSWORDS_MAX = 256;
+
+// The work on the password list in one EXEC: each rule of ACL SETUSER is
+// one unit, and a > or < rule, an AUTH and the copy that SETUSER makes also
+// cost the length of the list. GETUSER encodes each password, which costs
+// about GETUSER_UNITS units of scan time. The hashes are made when MULTI queues the command, but
+// EXEC runs the scans in one step (rule 6). nil outside EXEC.
+var ACL_EXEC_WORK = 524288;
+var GETUSER_UNITS = 16;
+var aclExecWork = nil;
+var ACL_EXEC_TOO_MUCH = "-ERR the ACL work of this transaction is over its limit\r\n";
+
+fun spendAclWork(k) {
+    if (aclExecWork == nil) {
+        return true;
+    }
+    if (k > aclExecWork) {
+        return false;
+    }
+    aclExecWork = aclExecWork - k;
+    return true;
+}
+
+fun hashBlocks(n) {
+    return (n + 8 - (n + 8) % 64) / 64 + 1;
+}
+
+var NOAUTH = "-NOAUTH Authentication required.\r\n";
+var WRONGPASS = "-WRONGPASS invalid username-password pair or user is disabled.\r\n";
+
+// The user of a new connection.
+fun startUser() {
+    if (defaultUser.on and defaultUser.nopass) {
+        return "default";
+    }
+    return nil;
+}
+
+// The Conn of the command that runs now, for AUTH. A command has no suspend
+// point, so runCommand sets it before the command and clears it after. It is
+// nil in EXEC (a connection in MULTI is already authenticated), in the AOF
+// replay and for the commands of a master.
+var commandConn = nil;
+
+// SHA-256 (FIPS 180-4) with 32-bit words kept in Ints: each sum is masked
+// with 0xFFFFFFFF, and a right rotation is two shifts.
+var SHA_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+var HEX_DIGITS = "0123456789abcdef";
+
+fun rotr(x, n) {
+    return ((x >>> n) | (x << (32i - n))) & 0xFFFFFFFF;
+}
+
+// The lowercase hex text of the SHA-256 of the bytes of s. With mayYield,
+// it yields after each 1024 bytes of blocks (about 1.4 ms): the commands of
+// one pipeline run with no yield between them, so a long hash must yield
+// itself (rule 6).
+fun sha256Hex(s, mayYield) {
+    var bytes = [];
+    for (var i = 0; i < len(s); i = i + 1) {
+        bytes.append(int(ord(s[i])));
+    }
+    var bitLen = int(len(s)) * 8i;
+    bytes.append(0x80);
+    while (len(bytes) % 64 != 56) {
+        bytes.append(0i);
+    }
+    for (var k = 7; k >= 0; k = k - 1) {
+        bytes.append((bitLen >>> (int(k) * 8i)) & 0xFF);
+    }
+    var h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var w = [];
+    for (var i = 0; i < 64; i = i + 1) {
+        w.append(0i);
+    }
+    var base = 0;
+    while (base < len(bytes)) {
+        for (var t = 0; t < 16; t = t + 1) {
+            var j = base + t * 4;
+            w[t] = (bytes[j] << 24i) | (bytes[j + 1] << 16i) | (bytes[j + 2] << 8i) | bytes[j + 3];
+        }
+        for (var t = 16; t < 64; t = t + 1) {
+            var x = w[t - 15];
+            var y = w[t - 2];
+            var s0 = rotr(x, 7i) ^ rotr(x, 18i) ^ (x >>> 3i);
+            var s1 = rotr(y, 17i) ^ rotr(y, 19i) ^ (y >>> 10i);
+            w[t] = (w[t - 16] + s0 + w[t - 7] + s1) & 0xFFFFFFFF;
+        }
+        var a = h[0];
+        var b = h[1];
+        var c = h[2];
+        var d = h[3];
+        var e = h[4];
+        var f = h[5];
+        var g = h[6];
+        var hh = h[7];
+        for (var t = 0; t < 64; t = t + 1) {
+            var S1 = rotr(e, 6i) ^ rotr(e, 11i) ^ rotr(e, 25i);
+            var ch = (e & f) ^ (~e & g);
+            var t1 = (hh + S1 + ch + SHA_K[t] + w[t]) & 0xFFFFFFFF;
+            var S0 = rotr(a, 2i) ^ rotr(a, 13i) ^ rotr(a, 22i);
+            var maj = (a & b) ^ (a & c) ^ (b & c);
+            var t2 = (S0 + maj) & 0xFFFFFFFF;
+            hh = g;
+            g = f;
+            f = e;
+            e = (d + t1) & 0xFFFFFFFF;
+            d = c;
+            c = b;
+            b = a;
+            a = (t1 + t2) & 0xFFFFFFFF;
+        }
+        h[0] = (h[0] + a) & 0xFFFFFFFF;
+        h[1] = (h[1] + b) & 0xFFFFFFFF;
+        h[2] = (h[2] + c) & 0xFFFFFFFF;
+        h[3] = (h[3] + d) & 0xFFFFFFFF;
+        h[4] = (h[4] + e) & 0xFFFFFFFF;
+        h[5] = (h[5] + f) & 0xFFFFFFFF;
+        h[6] = (h[6] + g) & 0xFFFFFFFF;
+        h[7] = (h[7] + hh) & 0xFFFFFFFF;
+        base = base + 64;
+        if (mayYield and base % 1024 == 0) {
+            yield nil;
+        }
+    }
+    var out = "";
+    for (var word in h) {
+        for (var sh = 28; sh >= 0; sh = sh - 4) {
+            out = out + HEX_DIGITS[float((word >>> int(sh)) & 0xF)];
+        }
+    }
+    return out;
+}
+
+// The hashes of the passwords of a command, made by its parse. The parse
+// reads no state, so it runs before the step of the command (and when MULTI
+// queues it): EXEC then hashes nothing. hashes[i] is the hash of the
+// password in argv[i], or nil for a password over HASH_BLOCKS_MAX blocks.
+class PasswordHashes {
+    init(hashes) {
+        this.hashes = hashes;
+    }
+}
+
+fun parseAuth(argv, mayYield) {
+    var hashes = {};
+    if (len(argv) == 2 or len(argv) == 3) {
+        var password = argv[len(argv) - 1];
+        if (hashBlocks(len(password)) <= HASH_BLOCKS_MAX) {
+            hashes[len(argv) - 1] = sha256Hex(password, mayYield);
+        }
+    }
+    return PasswordHashes(hashes);
+}
+
+// AUTH [username] password. A failed AUTH leaves the connection as it was,
+// as in Redis.
+fun cmdAuth(ctx, argv) {
+    if (ctx == nil) {
+        ctx = parseAuth(argv, false);
+    }
+    if (len(argv) < 2) {
+        return wrongArgs("auth");
+    }
+    if (len(argv) > 3) {
+        return errorReply("ERR syntax error");
+    }
+    var name = "default";
+    var password = argv[len(argv) - 1];
+    if (len(argv) == 2) {
+        if (defaultUser.nopass) {
+            return errorReply("ERR AUTH <password> called without any password configured for the default user. Are you sure your configuration is correct?");
+        }
+    } else {
+        name = argv[1];
+    }
+    if (name != "default" or !defaultUser.on) {
+        return WRONGPASS;
+    }
+    if (!defaultUser.nopass) {
+        if (!spendAclWork(1 + len(defaultUser.passwords))) {
+            return ACL_EXEC_TOO_MUCH;
+        }
+        var hash = ctx.hashes[len(argv) - 1];
+        if (hash == nil or !hasPassword(defaultUser, hash)) {
+            return WRONGPASS;
+        }
+    }
+    if (commandConn != nil) {
+        commandConn.user = name;
+    }
+    return simple("OK");
+}
+
+fun hasPassword(user, hash) {
+    for (var p in user.passwords) {
+        if (p == hash) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The ACL subcommands of Redis 7.0, with their arity. This server runs
+// WHOAMI, GETUSER and SETUSER.
+var ACL_SUBCOMMANDS = {"cat": -2, "deluser": -3, "dryrun": -4, "genpass": -2, "getuser": 3, "list": 2,
+                       "load": 2, "log": -2, "save": 2, "setuser": -3, "users": 2, "whoami": 2, "help": 2};
+
+// The hashes of the > and < rules of ACL SETUSER. Returns an error when the
+// passwords are over HASH_BLOCKS_MAX blocks in all, so the hashes of one
+// command take at most about 90 ms. A long hash yields itself; short ones
+// yield here, after each 16 blocks.
+fun parseAcl(argv, mayYield) {
+    var hashes = {};
+    if (len(argv) < 3 or lower(argv[1]) != "setuser") {
+        return PasswordHashes(hashes);
+    }
+    var total = 0;
+    var sinceYield = 0;
+    var i = 3;
+    while (i < len(argv)) {
+        var rule = argv[i];
+        if (len(rule) > 0 and (rule[0] == ">" or rule[0] == "<")) {
+            var blocks = hashBlocks(len(rule) - 1);
+            total = total + blocks;
+            if (total > HASH_BLOCKS_MAX) {
+                return errorReply("ERR the passwords of one ACL SETUSER are over 1024 SHA-256 blocks (64 KB), the limit of this server");
+            }
+            hashes[i] = sha256Hex(rule[1:len(rule)], mayYield);
+            sinceYield = sinceYield + blocks;
+            if (mayYield and sinceYield >= 16) {
+                sinceYield = 0;
+                yield nil;
+            }
+        }
+        i = i + 1;
+    }
+    return PasswordHashes(hashes);
+}
+
+fun cmdAcl(ctx, argv) {
+    if (len(argv) < 2) {
+        return wrongArgs("acl");
+    }
+    var shape = subcommandError("ACL", argv);
+    if (shape != nil) {
+        return shape;
+    }
+    if (ctx == nil) {
+        ctx = parseAcl(argv, false);
+    }
+    if (type(ctx) == "String") {
+        return ctx;
+    }
+    var sub = lower(argv[1]);
+    if (sub == "whoami") {
+        // A command runs only on an authenticated connection, and default
+        // is the only user.
+        return bulk("default");
+    }
+    if (sub == "getuser") {
+        return aclGetuser(argv[2]);
+    }
+    if (sub == "setuser") {
+        return aclSetuser(argv, ctx.hashes);
+    }
+    return errorReply("ERR ACL " + upper(sub) + " is not supported by this server");
+}
+
+// The properties that the stages read: flags and passwords. Redis 7.0 also
+// gives "on" in the flags and the commands, keys, channels and selectors
+// of the user.
+fun aclGetuser(name) {
+    if (name != "default") {
+        return NULL_BULK;
+    }
+    if (!spendAclWork(1 + GETUSER_UNITS * len(defaultUser.passwords))) {
+        return ACL_EXEC_TOO_MUCH;
+    }
+    var flags = [];
+    if (!defaultUser.on) {
+        flags.append(bulk("off"));
+    }
+    if (defaultUser.nopass) {
+        flags.append(bulk("nopass"));
+    }
+    var parts = [];
+    for (var p in defaultUser.passwords) {
+        parts.append(bulk(p));
+    }
+    return "*4\r\n" + bulk("flags") + arrayReply(flags) + bulk("passwords") + arrayReply(parts);
+}
+
+// ACL SETUSER default rule... with the rules on, off, nopass, resetpass,
+// >password and <password. As in Redis, the rules apply to a copy, and the
+// user changes only when each rule is valid.
+fun aclSetuser(argv, hashes) {
+    if (argv[2] != "default") {
+        return errorReply("ERR this server has only the default user");
+    }
+    if (!spendAclWork(1 + len(defaultUser.passwords))) {
+        return ACL_EXEC_TOO_MUCH;
+    }
+    var u = AclUser(defaultUser.on, defaultUser.nopass, defaultUser.passwords[0:len(defaultUser.passwords)]);
+    var i = 3;
+    while (i < len(argv)) {
+        var rule = argv[i];
+        var word = lower(rule);
+        var cost = 1;
+        if (len(rule) > 0 and (rule[0] == ">" or rule[0] == "<")) {
+            cost = 1 + len(u.passwords);
+        }
+        if (!spendAclWork(cost)) {
+            return ACL_EXEC_TOO_MUCH;
+        }
+        if (rule == "") {
+            // Redis skips an empty rule.
+        } else if (word == "on") {
+            u.on = true;
+        } else if (word == "off") {
+            u.on = false;
+        } else if (word == "nopass") {
+            u.nopass = true;
+            u.passwords = [];
+        } else if (word == "resetpass") {
+            u.nopass = false;
+            u.passwords = [];
+        } else if (len(rule) > 0 and rule[0] == ">") {
+            var hash = hashes[i];
+            if (!hasPassword(u, hash)) {
+                if (len(u.passwords) >= PASSWORDS_MAX) {
+                    return errorReply("ERR the default user holds at most 256 passwords on this server");
+                }
+                u.passwords.append(hash);
+            }
+            u.nopass = false;
+        } else if (len(rule) > 0 and rule[0] == "<") {
+            var hash = hashes[i];
+            if (!hasPassword(u, hash)) {
+                return errorReply("ERR Error in ACL SETUSER modifier '" + rule + "': The password you are trying to remove from the user does not exist");
+            }
+            var kept = [];
+            for (var p in u.passwords) {
+                if (p != hash) {
+                    kept.append(p);
+                }
+            }
+            u.passwords = kept;
+        } else {
+            return errorReply("ERR Error in ACL SETUSER modifier '" + rule + "': Syntax error");
+        }
+        i = i + 1;
+    }
+    defaultUser = u;
+    return simple("OK");
+}
+
+// ===========================================================================
 // Pub/Sub
 // ===========================================================================
 
@@ -6008,6 +6408,30 @@ fun subscribedCheck(name, argv) {
         }
         return "*2\r\n" + bulk("pong") + bulk(arg);
     }
+    var shape = shapeError(name, argv);
+    if (shape != nil) {
+        return shape;
+    }
+    var shown = lower(name);
+    if (SUBCOMMANDS[name] != nil) {
+        shown = shown + "|" + lower(argv[1]);
+    }
+    // As in Redis, a replica refuses a write before the context.
+    if (REPL_ROLE != "master" and WRITES.has(name)) {
+        return READONLY;
+    }
+    var text = "Can't execute '" + shown + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context";
+    if (name == "EXEC") {
+        return errorReply("EXECABORT Transaction discarded because of: " + text);
+    }
+    return errorReply("ERR " + text);
+}
+
+// The checks that Redis makes before the context of a command (a
+// subscribed client, a client that is not authenticated): an unknown
+// command, the number of arguments, and an unknown subcommand and its
+// number of arguments. Returns the error, or nil.
+fun shapeError(name, argv) {
     if (COMMANDS[name] == nil and ARITY[name] == nil and CONN_ARITY[name] == nil) {
         return unknownCommand(argv);
     }
@@ -6021,29 +6445,25 @@ fun subscribedCheck(name, argv) {
         }
         return wrongArgs(lower(name));
     }
-    var shown = lower(name);
-    if (name == "CONFIG") {
-        // Redis names a subcommand as config|get, and checks an unknown
-        // one, and the arity of a known one, before the context.
-        var sub = lower(argv[1]);
-        var subArity = CONFIG_SUBCOMMANDS[sub];
-        if (subArity == nil) {
-            return errorReply("ERR unknown subcommand '" + argv[1][0:128] + "'. Try CONFIG HELP.");
-        }
-        shown = "config|" + sub;
-        if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {
-            return wrongArgs(shown);
-        }
+    return subcommandError(name, argv);
+}
+
+// Redis names a subcommand as config|get, and checks an unknown one, and
+// the arity of a known one, with the command.
+fun subcommandError(name, argv) {
+    var subs = SUBCOMMANDS[name];
+    if (subs == nil) {
+        return nil;
     }
-    // As in Redis, a replica refuses a write before the context.
-    if (REPL_ROLE != "master" and WRITES.has(name)) {
-        return READONLY;
+    var sub = lower(argv[1]);
+    var subArity = subs[sub];
+    if (subArity == nil) {
+        return errorReply("ERR unknown subcommand '" + argv[1][0:128] + "'. Try " + name + " HELP.");
     }
-    var text = "Can't execute '" + shown + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context";
-    if (name == "EXEC") {
-        return errorReply("EXECABORT Transaction discarded because of: " + text);
+    if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {
+        return wrongArgs(lower(name) + "|" + sub);
     }
-    return errorReply("ERR " + text);
+    return nil;
 }
 
 // The arity of the commands that runCommand runs with the Conn, outside
@@ -6051,6 +6471,7 @@ fun subscribedCheck(name, argv) {
 var CONN_ARITY = {"REPLCONF": -1, "PSYNC": -3, "WAIT": 3};
 // The CONFIG subcommands of Redis 7.0, with their arity.
 var CONFIG_SUBCOMMANDS = {"get": -3, "set": -4, "resetstat": 2, "rewrite": 2, "help": 2};
+var SUBCOMMANDS = {"CONFIG": CONFIG_SUBCOMMANDS, "ACL": ACL_SUBCOMMANDS};
 
 // ===========================================================================
 // Command table
@@ -6121,7 +6542,9 @@ var COMMANDS = {
     "GETBIT": cmdGetbit,
     "STRLEN": cmdStrlen,
     "BITCOUNT": cmdBitcount,
-    "BITOP": cmdBitop
+    "BITOP": cmdBitop,
+    "AUTH": cmdAuth,
+    "ACL": cmdAcl
 };
 
 // Commands whose arguments the session parses before the command runs
@@ -6131,7 +6554,9 @@ var PARSERS = {
     "XREAD": parseXread,
     "ZADD": parseZadd,
     "ZRANGE": parseZrange,
-    "GEOADD": parseGeoadd
+    "GEOADD": parseGeoadd,
+    "AUTH": parseAuth,
+    "ACL": parseAcl
 };
 
 // Returns an encoded reply, "" for no reply, or a Block.
@@ -6273,6 +6698,9 @@ class Conn {
         this.blocked = false;
         // The Transaction after MULTI, or nil.
         this.tx = nil;
+        // The name of the user, or nil while the connection is not
+        // authenticated.
+        this.user = startUser();
         // WATCH: key -> true for each watched key, or "expired" for a key
         // that a replica keeps but that had expired at WATCH; watchDirty turns true
         // when a command writes one of them. expiring lists the watched
@@ -6436,6 +6864,19 @@ fun runCommand(conn, argv, nbytes) {
     writeQueuedMessages(conn, conn.pubQueued);
     if (len(argv) > 0) {
         var name = upper(argv[0]);
+        if (conn.user == nil and name != "AUTH") {
+            // As in Redis, after the shape of the command and before all
+            // other checks.
+            var refused = shapeError(name, argv);
+            if (refused == nil and name == "EXEC") {
+                refused = errorReply("EXECABORT Transaction discarded because of: NOAUTH Authentication required.");
+            } else if (refused == nil) {
+                refused = NOAUTH;
+            }
+            conn.sock.write(refused);
+            giveCredit(conn);
+            return true;
+        }
         if (conn.subCount > 0) {
             var refused = subscribedCheck(name, argv);
             if (refused != nil) {
@@ -6528,7 +6969,9 @@ fun runCommand(conn, argv, nbytes) {
         }
     }
     var before = replOffset;
+    commandConn = conn;
     var reply = execute(ctx, argv);
+    commandConn = nil;
     if (type(reply) == "Instance" and hasField(reply, "timeout")) {
         reply = waitForElement(conn, reply);
         if (reply == nil) {
