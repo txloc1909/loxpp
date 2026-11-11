@@ -8,11 +8,39 @@
 // the C library's getaddrinfo resolves no address for it. The name "a b"
 // holds a space, so no resolver answers it.
 //
-// This probe does not name the other direction of the same question: the C
-// library answers "*", "0x7f000001" and "0177.0.0.1", and the JVM's
-// resolver refuses each one, so native binds the wildcard address or a
-// loopback address where the JVM raises NetworkError. A probe must pass on
-// every consumer, so that difference is recorded in issue #1095, not here.
+// The second part names each spelling that two resolvers answer differently.
+// Which spellings resolve, and which address each names, is
+// implementation-defined (spec/README.md, Conformance, Host-name resolution),
+// so that part binds no answer of the resolver: the call either succeeds or
+// raises a catchable NetworkError, and it prints a line only when a backend
+// fails another way — an uncaught fault fails the probe, and another kind
+// prints its name. Both directions of the difference are covered, measured
+// with listen, connect and connect_within on glibc 2.39 and on a JVM:
+//
+//   host                   native, QBE, bootstrap   JVM
+//   "*"                    wildcard bind, and       NetworkError
+//                          connect to the loopback
+//                          addresses
+//   "0x7f000001"           127.0.0.1                NetworkError
+//   "0177.0.0.1"           127.0.0.1 (octal)        177.0.0.1 (decimal)
+//   "[::1]"                NetworkError             ::1
+//   "[::ffff:127.0.0.1]"   NetworkError             ::ffff:127.0.0.1
+//   "[::]"                 NetworkError             the wildcard address
+//   "::1%lo"               NetworkError             ::1 on lo
+//
+// The octal spelling is the one case whose loop below names two calls and not
+// three. Each resolver reads the same digits its own way, so the two calls
+// answer at once: the C library binds 127.0.0.1, and a JVM fails to bind
+// 177.0.0.1 because no local address names it, and ends connect_within at its
+// limit because 177.0.0.1 does not answer. A plain connect has no limit, so on
+// the JVM it waits for the operating system's limit on a connection attempt
+// (136 s measured). 05-stdlib does not bind that limit and item 6, Speed,
+// covers it, so a case here would fail the differential gate's own clock and
+// never an answer of the language.
+//
+// "localhost" differs the same way in the order of its addresses, which the
+// same rule covers (docs/decisions/blocking-call-suspension.md, "connect and
+// name resolution"; issue #1095).
 // STATUS: ok
 // CHECK: listen with an unresolved name: NetworkError
 // CHECK: listen with an empty name: NetworkError
@@ -20,6 +48,8 @@
 // CHECK: connect with an empty name: NetworkError
 // CHECK: connect_within with an unresolved name: NetworkError
 // CHECK: connect_within with an empty name: NetworkError
+// CHECK: spellings checked: 6
+// CHECK: octal spelling checked: 2
 // CHECK: after
 var srv = listen("127.0.0.1", 0);
 var port = srv.port();
@@ -72,6 +102,57 @@ try {
 } catch (e) {
     print "connect_within with an empty name: " + e.kind;
 }
+
+var spellings = ["*", "0x7f000001", "[::1]", "[::ffff:127.0.0.1]", "[::]",
+                 "::1%lo"];
+var checked = 0;
+
+for (var host in spellings) {
+    checked = checked + 1;
+
+    try {
+        var s = listen(host, 0);
+        s.close();
+    } catch (e) {
+        if (e.kind != "NetworkError") print "listen " + host + ": " + e.kind;
+    }
+
+    try {
+        var c = connect(host, port);
+        c.close();
+    } catch (e) {
+        if (e.kind != "NetworkError") print "connect " + host + ": " + e.kind;
+    }
+
+    try {
+        var c = connect_within(host, port, 1);
+        c.close();
+    } catch (e) {
+        if (e.kind != "NetworkError") {
+            print "connect_within " + host + ": " + e.kind;
+        }
+    }
+}
+
+print "spellings checked: " + str(checked);
+
+try {
+    var s = listen("0177.0.0.1", 0);
+    s.close();
+} catch (e) {
+    if (e.kind != "NetworkError") print "listen 0177.0.0.1: " + e.kind;
+}
+
+try {
+    var c = connect_within("0177.0.0.1", port, 1);
+    c.close();
+} catch (e) {
+    if (e.kind != "NetworkError") {
+        print "connect_within 0177.0.0.1: " + e.kind;
+    }
+}
+
+print "octal spelling checked: 2";
 
 srv.close();
 print "after";
