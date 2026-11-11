@@ -1,0 +1,16 @@
+// `integer.popcount_bytes` with a start above the end (spec/05-stdlib.md).
+//
+// A halting fault halts the program, so a probe holds one, and no `try` is
+// around it, because an implementation may make a halting fault catchable
+// (spec/README.md, Conformance). The first line is a control: the function
+// runs on a valid argument. A consumer that does not have the function fails
+// at the control, not at the fault, so a missing function cannot pass this
+// probe.
+
+print integer.popcount_bytes("ab", 1i, 2i);
+integer.popcount_bytes("ab", 2i, 1i);
+print "unreachable";
+
+// STATUS: error
+// CHECK: 3
+// COVERS: fault integer_popcount_bytes_range

@@ -447,6 +447,12 @@ each has an off-the-shelf solution.
 | `460_integer_fault_rotl_count` | `integer.rotl` with a count of 64 is a halting fault | none (spec probe) |
 | `461_integer_fault_rotr_count` | `integer.rotr` with a negative count is a halting fault | none (spec probe) |
 | `462_integer_fault_popcount_bytes_range` | `integer.popcount_bytes` with an end beyond the String is a halting fault | none (spec probe) |
+| `463_integer_fault_rotl_count_negative` | `integer.rotl` with a negative count is a halting fault | none (spec probe) |
+| `464_integer_fault_rotr_count_above` | `integer.rotr` with a count of 64 is a halting fault | none (spec probe) |
+| `465_integer_fault_popcount_bytes_start_negative` | `integer.popcount_bytes` with a negative start is a halting fault | none (spec probe) |
+| `466_integer_fault_popcount_bytes_start_above_end` | `integer.popcount_bytes` with a start above the end is a halting fault | none (spec probe) |
+| `467_integer_fault_popcount_bytes_start_above_length` | `integer.popcount_bytes` with a start above the length of the String is a halting fault | none (spec probe) |
+| `468_integer_fault_popcount_bytes_end_number` | `integer.popcount_bytes` with a Number end is a halting fault | none (spec probe) |
 | `430_mkdir_empty_path` | an empty path names no directory, in both forms of `mkdir`, so the call raises the catchable `DirectoryError` on every consumer; the JVM's own resolver makes the empty path the working directory, so a JVM-side backend that passes the String through creates something and raises nothing (spec/05-stdlib.md, mkdir; issue #1147) — a spec probe | none (spec probe) |
 | `431_mkdir_nul_path` | a path that holds a NUL byte halts in both forms of `mkdir`; a consumer that passes the String to its host unchanged makes a shorter directory instead, because the C library reads the path only up to the NUL (spec/05-stdlib.md, mkdir; issue #1147) — a spec probe | none (spec probe) |
 | `340_socket_read_some_two_arguments_fatal` | `read_some` with two arguments halts (spec/05-stdlib.md, Socket; issue #938) — a spec probe | none (spec probe) |
