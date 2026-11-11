@@ -5655,9 +5655,11 @@ var CHR = [];
     }
 }
 
-// The table of op (AND, OR or XOR) on two bytes: entry a * 256 + b. Each
-// entry comes from the entry of a / 2 and b / 2, which is before it, and
-// the op of the low bits: one step for each entry.
+// The table of op (AND, OR or XOR) on two bytes: the byte at a * 256 + b.
+// Each entry comes from the entry of a / 2 and b / 2, which is before it,
+// and the op of the low bits: one step for each entry. It is kept as one
+// String: a List of 65536 values that lives for the whole run makes every
+// GC mark longer, and so the stalls of the other commands.
 fun bitopTable(op) {
     var t = [];
     var a = 0;
@@ -5681,7 +5683,11 @@ fun bitopTable(op) {
         }
         a = a + 1;
     }
-    return t;
+    var chars = [];
+    for (var v in t) {
+        chars.append(CHR[v]);
+    }
+    return joinRange(chars, 0, len(chars));
 }
 
 var BITOP_TABLES = {"AND": bitopTable("AND"), "OR": bitopTable("OR"), "XOR": bitopTable("XOR")};
@@ -5754,7 +5760,7 @@ fun cmdBitop(ctx, argv) {
                 if (j < len(texts[k])) {
                     b = ord(texts[k][j]);
                 }
-                acc = table[acc * 256 + b];
+                acc = ord(table[acc * 256 + b]);
                 k = k + 1;
             }
         }
