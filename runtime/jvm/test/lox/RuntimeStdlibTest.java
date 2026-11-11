@@ -286,7 +286,7 @@ public final class RuntimeStdlibTest {
 
             // A path that holds a NUL byte names a shorter path at the JDK
             // too, and Paths.get() refuses one with an InvalidPathException
-            // that no Lox try catches (spec/05-stdlib.md, Paths; issue #1158).
+            // that no Lox try catches (spec/05-stdlib.md, Strings the host reads; issue #1158).
             // A metadata call that passed the String through would answer
             // with the shorter path's result instead.
             String nulFile = tmpFile.getAbsolutePath() + "\u0000tail";

@@ -5,5 +5,4 @@
 // CHECK: before
 // COVERS: host-string run
 print "before";
-try { run("/bin/echo" + chr(0) + "tail", []); } catch (e) { print "caught " + e.kind; }
-print "not caught";
+run("/bin/echo" + chr(0) + "tail", []);

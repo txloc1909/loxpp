@@ -469,7 +469,7 @@ TEST_F(OsApiTest, PathWithNul_MetadataCalls_RuntimeError) {
     // Each metadata call names a shorter path at the C library, and reports
     // that shorter path's answer as if the program had named it. A path the
     // program cannot name back is a runtime error instead
-    // (spec/05-stdlib.md, Paths).
+    // (spec/05-stdlib.md, Strings the host reads).
     const std::string nul = "\" + chr(0) + \"tail";
     EXPECT_EQ(h.run("exists(\"" + m_dir.string() + nul + "\");"),
               InterpretResult::RUNTIME_ERROR);

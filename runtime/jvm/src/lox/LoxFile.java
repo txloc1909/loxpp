@@ -69,7 +69,7 @@ public final class LoxFile {
         // names no path. RandomAccessFile resolves the String itself and
         // throws InvalidPathException, a RuntimeException no Lox `try`
         // catches, so the path is resolved here and the Path is what reaches
-        // it (spec/05-stdlib.md, Paths).
+        // it (spec/05-stdlib.md, Strings the host reads).
         Path target = LoxRuntime.resolvePath("open", path);
         if (target == null) {
             throw new LoxError("open(): cannot open '" + path +

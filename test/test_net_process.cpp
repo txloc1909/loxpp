@@ -787,8 +787,12 @@ TEST(NetProcessTest, Connect_HostWithNul_RuntimeError) {
 
 TEST(NetProcessTest, ConnectWithin_HostWithNul_RuntimeError) {
     VMTestHarness h;
-    EXPECT_EQ(h.run("connect_within(\"127.0.0.1\" + chr(0) + \"tail\", 1, 1);"),
-              InterpretResult::RUNTIME_ERROR);
+    // As above: only the try form can tell the halting fault from the
+    // catchable NetworkError of a connection that fails anyway.
+    EXPECT_EQ(
+        h.run("try { connect_within(\"127.0.0.1\" + chr(0) + \"tail\", 1, "
+              "1); } catch (e) { print e.kind; }"),
+        InterpretResult::RUNTIME_ERROR);
 }
 
 TEST(NetProcessTest, Listen_HostWithNul_RuntimeError) {

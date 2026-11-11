@@ -425,6 +425,13 @@ therefore a runtime error, and the call reaches nothing outside the program
 and changes nothing. It is a halting fault
 ([§04-semantics, Halting Faults](04-semantics.md#halting-faults)).
 
+A NUL byte is not one of the failures each call gives its own section for, so
+it is not the catchable `NetworkError` that `connect`, `connect_within`, and
+`listen` raise when a name resolves to no address or a connection fails: the
+call refuses the String before it asks the host, and a `try` that catches
+`NetworkError` does not catch this fault
+([Conformance](README.md#conformance), Host-name resolution).
+
 An empty String names no thing, and each call gives that the outcome its own
 section gives for the thing it cannot find: `exists`, `is_dir`, and `is_file`
 return `false`, `stat` returns `nil`, `mkdir` raises `DirectoryError`, and

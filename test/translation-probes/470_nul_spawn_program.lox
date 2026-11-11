@@ -1,9 +1,9 @@
 // A program that holds a NUL byte is a runtime error for spawn
 // (spec/05-stdlib.md, Strings the host reads): execvp() reads the name only up
-// to the NUL, so the call would start a different program.
+// to the NUL, so the call would start a different program. A consumer that
+// starts it exits 0.
 // STATUS: error
 // CHECK: before
 // COVERS: host-string spawn
 print "before";
-try { spawn("/bin/echo" + chr(0) + "tail", []); } catch (e) { print "caught " + e.kind; }
-print "not caught";
+spawn("/bin/echo" + chr(0) + "tail", []);

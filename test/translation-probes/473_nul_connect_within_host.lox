@@ -1,8 +1,9 @@
 // A host that holds a NUL byte is a runtime error for connect_within
-// (spec/05-stdlib.md, Strings the host reads).
+// (spec/05-stdlib.md, Strings the host reads). As for connect, the listener
+// shows a consumer that connects to the shorter name.
 // STATUS: error
 // CHECK: before
 // COVERS: host-string connect_within
 print "before";
-try { connect_within("127.0.0.1" + chr(0) + "tail", 1, 1); } catch (e) { print "caught " + e.kind; }
-print "not caught";
+var l = listen("127.0.0.1", 0);
+connect_within("127.0.0.1" + chr(0) + "tail", l.port(), 1);

@@ -147,7 +147,10 @@ them:
    names no address raises is not implementation-defined: it is the
    catchable `NetworkError` that [§05-stdlib](05-stdlib.md#connecthost-port---socket)
    names for `connect`, `connect_within` and `listen`, and so is the fault
-   of a connection that fails.
+   of a connection that fails. A `host` that holds a NUL byte is not such a
+   name: the call refuses it as a fault of the argument, before it resolves
+   anything ([§05-stdlib, Strings the host
+   reads](05-stdlib.md#strings-the-host-reads)).
 
 Map iteration order is unspecified ([§03-types](03-types.md)), which is a
 separate rule.

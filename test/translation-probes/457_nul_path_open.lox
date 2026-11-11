@@ -1,5 +1,5 @@
 // A path that holds a NUL byte is a runtime error for open
-// (spec/05-stdlib.md, Paths). Mode "w" is the dangerous one: a consumer that
+// (spec/05-stdlib.md, Strings the host reads). Mode "w" is the dangerous one: a consumer that
 // truncates the String creates and truncates the shorter file, then reports
 // that it opened the path the program named.
 // STATUS: error

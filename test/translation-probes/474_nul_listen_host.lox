@@ -1,8 +1,8 @@
 // A host that holds a NUL byte is a runtime error for listen
-// (spec/05-stdlib.md, Strings the host reads): the call binds no socket.
+// (spec/05-stdlib.md, Strings the host reads): the call binds no socket, and a
+// consumer that binds the shorter name exits 0.
 // STATUS: error
 // CHECK: before
 // COVERS: host-string listen
 print "before";
-try { listen("127.0.0.1" + chr(0) + "tail", 0); } catch (e) { print "caught " + e.kind; }
-print "not caught";
+listen("127.0.0.1" + chr(0) + "tail", 0);

@@ -1,5 +1,5 @@
 // A path that holds a NUL byte is a runtime error for exists
-// (spec/05-stdlib.md, Paths): the host reads a path only up to its first NUL
+// (spec/05-stdlib.md, Strings the host reads): the host reads a path only up to its first NUL
 // byte, so the call would answer for a shorter path than the program named.
 // A consumer that passes the String through prints that answer and exits 0.
 // STATUS: error
