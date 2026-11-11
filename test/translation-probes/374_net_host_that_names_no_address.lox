@@ -29,10 +29,10 @@
 //   "::1%lo"               NetworkError             ::1 on lo
 //
 // The octal spelling is the one case whose loop below names two calls and not
-// three. Each resolver reads the same digits its own way, so the two calls
-// answer at once: the C library binds 127.0.0.1, and a JVM fails to bind
-// 177.0.0.1 because no local address names it, and ends connect_within at its
-// limit because 177.0.0.1 does not answer. A plain connect has no limit, so on
+// three. Each resolver reads the same digits its own way, and both calls end
+// quickly: the C library binds 127.0.0.1, and a JVM fails to bind 177.0.0.1 at
+// once because no local address names it, and ends connect_within at its own
+// limit (1 s) because 177.0.0.1 does not answer. A plain connect has no limit, so on
 // the JVM it waits for the operating system's limit on a connection attempt
 // (136 s measured). 05-stdlib does not bind that limit and item 6, Speed,
 // covers it, so a case here would fail the differential gate's own clock and

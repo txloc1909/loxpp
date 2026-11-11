@@ -145,9 +145,9 @@ them:
    that names more than one. Resolution is the answer of the platform's
    resolver, so two implementations may answer differently. What a name that
    names no address raises is not implementation-defined: it is the
-   catchable `NetworkError` that [§05-stdlib,
-   connect](05-stdlib.md#connecthost-port---socket) names, and so is the
-   fault of a connection that fails.
+   catchable `NetworkError` that [§05-stdlib](05-stdlib.md#connecthost-port---socket)
+   names for `connect`, `connect_within` and `listen`, and so is the fault
+   of a connection that fails.
 
 Map iteration order is unspecified ([§03-types](03-types.md)), which is a
 separate rule.
