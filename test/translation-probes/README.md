@@ -535,7 +535,10 @@ The `66` to `96` probes are **spec probes** for the workers and tasks of
 `// STATUS: error` line and one `// CHECK:` line per line of the stdout the
 spec defines for it. A probe that ends through `exit(code)` also carries
 `// EXIT: <code>`, and a probe that fails by hanging carries
-`// TIMEOUT: <seconds>`. A probe never pins stderr text: every report and
+`// TIMEOUT: <seconds>`. The time limit, on that line or on the tool's
+`--timeout`, is a finite number of seconds greater than zero and at most a
+day; any other value is a usage error, so a typo cannot run for the default.
+A probe never pins stderr text: every report and
 message is implementation-defined (`spec/README.md`, Conformance), and
 `tools/check_spec_probes.py` rejects a `// STDERR:` line. For a
 `STATUS: ok` probe the whole stdout must equal the CHECK lines. For a
