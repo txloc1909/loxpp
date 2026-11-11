@@ -25,8 +25,8 @@
  },
  {
   "name": "INCR ignores the key kind",
-  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    var n = parseInteger(entry.value);",
-  "new": "    var n = parseInteger(entry.value);",
+  "old": "    if (entry.kind != \"string\") {\n        return WRONGTYPE;\n    }\n    // An integer has at most 16 bytes",
+  "new": "    // An integer has at most 16 bytes",
   "cases": [
    "local: INCR of a list is WRONGTYPE"
   ]
@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "    geoExecCandidates = nil;\n    endExecReplication();\n    serveReady();",
-  "new": "    geoExecCandidates = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "old": "    bitmapExecWork = nil;\n    endExecReplication();\n    serveReady();",
+  "new": "    bitmapExecWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]
@@ -241,8 +241,8 @@
  },
  {
   "name": "T4 GET copies its value",
-  "old": "    return Bulk(entry.value);\n}",
-  "new": "    return bulk(entry.value);\n}",
+  "old": "    return stringReply(entry.value);\n}",
+  "new": "    return bulk(stringOf(entry.value));\n}",
   "cases": [
    "local: T4 EXEC of 8 GET of a 64 MB value stalls PING at most 0.3 s"
   ]

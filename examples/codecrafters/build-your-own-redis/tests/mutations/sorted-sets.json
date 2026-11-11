@@ -266,8 +266,8 @@
  },
  {
   "name": "a replica takes ZADD from a client",
-  "old": "\"DEL\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true};",
-  "new": "\"DEL\": true, \"ZREM\": true, \"GEOADD\": true};",
+  "old": "\"DEL\": true, \"ZADD\": true, \"ZREM\": true, \"GEOADD\": true, \"SETBIT\": true, \"BITOP\": true};",
+  "new": "\"DEL\": true, \"ZREM\": true, \"GEOADD\": true, \"SETBIT\": true, \"BITOP\": true};",
   "cases": [
    "local: a replica refuses ZADD and ZREM from a client"
   ]

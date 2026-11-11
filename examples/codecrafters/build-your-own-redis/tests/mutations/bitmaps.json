@@ -1,0 +1,508 @@
+[
+ {
+  "name": "SETBIT gives the new bit",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(1);",
+  "cases": [
+   "bitmaps-01 SETBIT gives the old bit"
+  ]
+ },
+ {
+  "name": "the bits of a byte go the other way",
+  "old": "var BIT_WEIGHT = [128, 64, 32, 16, 8, 4, 2, 1];",
+  "new": "var BIT_WEIGHT = [1, 2, 4, 8, 16, 32, 64, 128];",
+  "cases": [
+   "bitmaps-04 GET reads a bitmap"
+  ]
+ },
+ {
+  "name": "GETBIT past the end gives 1",
+  "old": "    if (i >= valueLength(value)) {\n        return 0;\n    }",
+  "new": "    if (i >= valueLength(value)) {\n        return 255;\n    }",
+  "cases": [
+   "local: GETBIT past the end gives 0"
+  ]
+ },
+ {
+  "name": "SETBIT 0 does not clear",
+  "old": "    } else if (argv[3] == \"0\" and was == 1) {\n        now = old - weight;\n    }",
+  "new": "    }",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "the last chunk does not grow",
+  "old": "        b.chunks[count - 1] = last + ZERO_CHUNK[0:room];\n        b.length = b.length + room;",
+  "new": "        b.length = b.length + room;",
+  "cases": [
+   "bitmaps-05 GETBIT of the new bit gives 1"
+  ]
+ },
+ {
+  "name": "a zero chunk too few",
+  "old": "        while (k < full) {\n            b.chunks.append(ZERO_CHUNK);",
+  "new": "        while (k + 1 < full) {\n            b.chunks.append(ZERO_CHUNK);",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "the chunk of a byte is wrong",
+  "old": "    var c = (i - i % BYTES_CHUNK) / BYTES_CHUNK;\n    return ord(value.chunks[c][i % BYTES_CHUNK]);",
+  "new": "    var c = 0;\n    return ord(value.chunks[c][i % BYTES_CHUNK]);",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "STRLEN of a bitmap is the chunks",
+  "old": "    return integerReply(valueLength(entry.value));\n}",
+  "new": "    return integerReply(len(entry.value.chunks));\n}",
+  "cases": [
+   "bitmaps-05 STRLEN after the growth gives 2"
+  ]
+ },
+ {
+  "name": "BITCOUNT counts each byte as 1",
+  "old": "            n = n + POPCOUNT[b];",
+  "new": "            n = n + 1;",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "BITCOUNT in bits counts whole bytes",
+  "old": "            n = n + maskedBits(b, bitLo, bitHi);",
+  "new": "            n = n + POPCOUNT[b];",
+  "cases": [
+   "local: BITCOUNT with negative indexes and in bits"
+  ]
+ },
+ {
+  "name": "BITCOUNT takes no negative start",
+  "old": "        if (start < 0) {\n            start = total + start;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT with negative indexes and in bits"
+  ]
+ },
+ {
+  "name": "BITCOUNT skips every inner chunk",
+  "old": "    if (text == ZERO_CHUNK) {\n        return 0;",
+  "new": "    if (true) {\n        return 0;",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "BITCOUNT skips no zero chunk",
+  "old": "    if (text == ZERO_CHUNK) {\n        return 0;",
+  "new": "    if (false) {\n        return 0;",
+  "cases": [
+   "local: B3b BITCOUNT of a SET string that SETBIT grew to 512 MB replies within 2 s"
+  ]
+ },
+ {
+  "name": "BITCOUNT counts the live chunks",
+  "old": "        value = Bytes(value.chunks[0:len(value.chunks)], value.length);",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT counts the bitmap as it was when it ran"
+  ]
+ },
+ {
+  "name": "BITCOUNT reads the arguments first",
+  "old": "    if (entry == nil) {\n        return integerReply(0);\n    }\n    if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {",
+  "new": "    if (len(argv) != 2 and len(argv) != 4 and len(argv) != 5) {",
+  "cases": [
+   "local: BITCOUNT of a missing key gives 0 before it reads the arguments, as Redis does"
+  ]
+ },
+ {
+  "name": "BITOP AND is OR",
+  "old": "var BITOP_TABLES = {\"AND\": bitopTable(\"AND\"), \"OR\": bitopTable(\"OR\"), \"XOR\": bitopTable(\"XOR\")};",
+  "new": "var BITOP_TABLES = {\"AND\": bitopTable(\"OR\"), \"OR\": bitopTable(\"OR\"), \"XOR\": bitopTable(\"XOR\")};",
+  "cases": [
+   "bitmaps-07 BITOP AND keeps the common bits"
+  ]
+ },
+ {
+  "name": "BITOP reads a missing byte as 255",
+  "old": "                var b = 0;\n                if (j < len(texts[k])) {",
+  "new": "                var b = 255;\n                if (j < len(texts[k])) {",
+  "cases": [
+   "bitmaps-08 BITOP AND reads a missing byte as 0"
+  ]
+ },
+ {
+  "name": "BITOP NOT keeps the byte",
+  "old": "            acc = 255 - acc;",
+  "new": "            acc = acc;",
+  "cases": [
+   "local: BITOP XOR and NOT"
+  ]
+ },
+ {
+  "name": "BITOP of missing keys keeps the destination",
+  "old": "        if (store.has(dest)) {\n            store.del(dest);",
+  "new": "        if (false) {\n            store.del(dest);",
+  "cases": [
+   "local: BITOP of missing keys only removes the destination"
+  ]
+ },
+ {
+  "name": "no limit on BITOP",
+  "old": "    if (work > BITOP_MAX_WORK) {\n        return BITOP_TOO_LARGE;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITOP over 1048576 source bytes is refused"
+  ]
+ },
+ {
+  "name": "no bitmap work limit in EXEC",
+  "old": "    if (!spendBitmapWork(made)) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses bitmap work over 1048576"
+  ]
+ },
+ {
+  "name": "GET of a bitmap drops its last chunk",
+  "old": "    for (var c in reply.bulkChunks) {\n        out.add(c);\n    }",
+  "new": "    var ci = 0;\n    while (ci + 1 < len(reply.bulkChunks)) {\n        out.add(reply.bulkChunks[ci]);\n        ci = ci + 1;\n    }",
+  "cases": [
+   "local: a bitmap over several chunks reads back as written"
+  ]
+ },
+ {
+  "name": "INCR joins a large bitmap",
+  "old": "    if (valueLength(entry.value) <= 16) {\n        n = parseInteger(stringOf(entry.value));\n    }",
+  "new": "    n = parseInteger(stringOf(entry.value));",
+  "cases": [
+   "local: B6 INCR of a bitmap of 512 MB stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "SETBIT does not mark the watchers",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    replicate(argv, nil);\n    return integerReply(was);",
+  "cases": [
+   "local: SETBIT fails EXEC of a client that watches the key"
+  ]
+ },
+ {
+  "name": "BITOP does not mark the watchers",
+  "old": "    store[dest] = Entry(\"string\", Bytes(parts, maxLen), nil);\n    touch(dest);",
+  "new": "    store[dest] = Entry(\"string\", Bytes(parts, maxLen), nil);",
+  "cases": [
+   "local: BITOP fails EXEC of a client that watches the destination"
+  ]
+ },
+ {
+  "name": "SETBIT is not propagated",
+  "old": "    touch(key);\n    replicate(argv, nil);\n    return integerReply(was);",
+  "new": "    touch(key);\n    return integerReply(was);",
+  "cases": [
+   "local: SETBIT and BITOP are propagated"
+  ]
+ },
+ {
+  "name": "a replica takes SETBIT from a client",
+  "old": "\"GEOADD\": true, \"SETBIT\": true, \"BITOP\": true};",
+  "new": "\"GEOADD\": true, \"BITOP\": true};",
+  "cases": [
+   "local: a replica refuses SETBIT and BITOP from a client"
+  ]
+ },
+ {
+  "name": "SETBIT takes any bit",
+  "old": "    if (argv[3] != \"0\" and argv[3] != \"1\") {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: SETBIT x 1 2 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "SETBIT takes an offset of 2^32",
+  "old": "    if (n == nil or n < 0 or n > BIT_OFFSET_MAX) {",
+  "new": "    if (n == nil or n < 0) {",
+  "cases": [
+   "local: SETBIT x 4294967296 1 gives the error of Redis"
+  ]
+ },
+ {
+  "name": "a list is read as a string",
+  "old": "    if (entry.kind != \"string\") {\n        return false;\n    }\n    return entry;\n}\n\nfun cmdSetbit",
+  "new": "    return entry;\n}\n\nfun cmdSetbit",
+  "cases": [
+   "local: STRLEN of a list gives WRONGTYPE"
+  ]
+ },
+ {
+  "name": "no 0 for two negative indexes with start after end",
+  "old": "        if (start < 0 and end < 0 and start > end) {\n            return integerReply(0);\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT with two negative indexes and start after end gives 0, as Redis 7.0 does"
+  ]
+ },
+ {
+  "name": "BITCOUNT does not clamp a negative end",
+  "old": "        if (end < 0) {\n            end = 0;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT clamps a negative end to 0"
+  ]
+ },
+ {
+  "name": "BITCOUNT in bits counts to the end of the byte",
+  "old": "            if (i == reply.last) {\n                bitHi = reply.lastMask;\n            }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT in bits stops at the last bit"
+  ]
+ },
+ {
+  "name": "BITCOUNT does not clamp an end past the string",
+  "old": "        if (end >= total) {\n            end = total - 1;\n        }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once"
+  ]
+ },
+ {
+  "name": "BITCOUNT takes no index of 16 digits",
+  "old": "    if (len(digits) < 16 or len(digits) > 19 or !isDigits(digits) or digits[0] == \"0\") {",
+  "new": "    if (true) {",
+  "cases": [
+   "local: BITCOUNT clamps an end past the string, also of 19 digits, and replies at once"
+  ]
+ },
+ {
+  "name": "BITOP that removes the destination is not propagated",
+  "old": "            store.del(dest);\n            touch(dest);\n            replicate(argv, nil);",
+  "new": "            store.del(dest);\n            touch(dest);",
+  "cases": [
+   "local: SETBIT and BITOP are propagated"
+  ]
+ },
+ {
+  "name": "BITOP that removes the destination does not mark",
+  "old": "            store.del(dest);\n            touch(dest);",
+  "new": "            store.del(dest);",
+  "cases": [
+   "local: a BITOP that removes the destination fails EXEC of a client that watches it"
+  ]
+ },
+ {
+  "name": "GET shares the live chunks",
+  "old": "    return ChunkedBulk(value.chunks[0:len(value.chunks)], value.length);",
+  "new": "    return ChunkedBulk(value.chunks, value.length);",
+  "cases": [
+   "local: GET of a bitmap writes it as it was when it ran"
+  ]
+ },
+ {
+  "name": "the split of a string spends no work",
+  "old": "            made = (have - have % BYTES_CHUNK) / BYTES_CHUNK + 1;",
+  "new": "            made = 0;",
+  "cases": [
+   "local: the split of a string by SETBIT spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "BITOP spends no work",
+  "old": "    if (!spendBitmapWork(work)) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITOP spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "the copy of GET spends no work",
+  "old": "    // The copy of the List is one unit of bitmap work for each chunk.\n    if (!spendBitmapWork(len(value.chunks))) {\n        return BITMAP_EXEC_TOO_MUCH;\n    }",
+  "new": "",
+  "cases": [
+   "local: the copy of GET spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "the copy of BITCOUNT spends no work",
+  "old": "        // of bitmap work for each chunk.\n        if (!spendBitmapWork(len(value.chunks))) {\n            return BITMAP_EXEC_TOO_MUCH;\n        }",
+  "new": "        // of bitmap work for each chunk.",
+  "cases": [
+   "local: the copy of BITCOUNT spends the bitmap work of EXEC"
+  ]
+ },
+ {
+  "name": "SET GET over the budget writes",
+  "old": "            if (reply == BITMAP_EXEC_TOO_MUCH) {\n                return reply;\n            }",
+  "new": "",
+  "cases": [
+   "local: SET GET over the bitmap work of EXEC does not write"
+  ]
+ },
+ {
+  "name": "a negative index of 16 digits is positive",
+  "old": "    if (neg) {\n        return -1000000000000000000;\n    }",
+  "new": "",
+  "cases": [
+   "local: BITCOUNT reads a negative index of 17 digits as before the start"
+  ]
+ },
+ {
+  "name": "the least 64-bit index is refused",
+  "old": "        limit = \"9223372036854775808\";",
+  "new": "        limit = \"9223372036854775807\";",
+  "cases": [
+   "local: BITCOUNT reads the least 64-bit index"
+  ]
+ },
+ {
+  "name": "an index with a leading zero is taken",
+  "old": " or !isDigits(digits) or digits[0] == \"0\") {",
+  "new": " or !isDigits(digits)) {",
+  "cases": [
+   "local: BITCOUNT refuses an index of 19 digits with a leading zero, and one past the 64-bit range"
+  ]
+ },
+ {
+  "name": "M1 BITCOUNT stops at the end of the stream",
+  "edits": [
+   [
+    "        this.pubQueued = 0;\n    }\n}",
+    "        this.pubQueued = 0;\n        this.eof = false;\n    }\n}"
+   ],
+   [
+    "            if (cmd == nil) {\n                break;\n            }",
+    "            if (cmd == nil) {\n                conn.eof = true;\n                break;\n            }"
+   ],
+   [
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }",
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }\n        if (conn.eof) {\n            return;\n        }"
+   ]
+  ],
+  "cases": [
+   "local: H1 BITCOUNT, PING and a half-close get both replies, then the close",
+   "local: H2 BITCOUNT and a half-close get the reply, then the close"
+  ]
+ },
+ {
+  "name": "M2 BITCOUNT stops after a protocol error",
+  "edits": [
+   [
+    "        this.pubQueued = 0;\n    }\n}",
+    "        this.pubQueued = 0;\n        this.eof = false;\n    }\n}"
+   ],
+   [
+    "        if (kind == \"ProtocolError\") {\n            try {",
+    "        if (kind == \"ProtocolError\") {\n            conn.eof = true;\n            try {"
+   ],
+   [
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }",
+    "                cache.total = cache.total + got;\n            }\n            yield nil;\n        }\n        if (conn.eof) {\n            return;\n        }"
+   ]
+  ],
+  "cases": [
+   "local: H3 BITCOUNT and a protocol error get the count, the error, then the close"
+  ]
+ },
+ {
+  "name": "M4 the scan does not keep the counts",
+  "old": "            if (live) {\n                cache.counts[c] = got;",
+  "new": "            if (false) {\n                cache.counts[c] = got;",
+  "cases": [
+   "local: C1 a second BITCOUNT of the same data replies within 0.2 s",
+   "local: C7 200 counts that close cost at most 1.5 counts"
+  ]
+ },
+ {
+  "name": "M5 SETBIT does not change the count of its chunk",
+  "old": "        cache.counts[c] = v + now - was;\n",
+  "new": "",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M6 SETBIT does not change the total",
+  "old": "        cache.total = cache.total + now - was;\n",
+  "new": "",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M7 SETBIT changes the count when the bit does not change",
+  "old": "        b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];\n        cacheBitChanged(entry, c, was, 1 - was);\n    }",
+  "new": "        b.chunks[c] = chunk[0:j] + chr(now) + chunk[j + 1:len(chunk)];\n    }\n    cacheBitChanged(entry, c, was, 1 - was);",
+  "cases": [
+   "local: C2 SETBIT keeps the counts right, and each count replies within 0.2 s"
+  ]
+ },
+ {
+  "name": "M8 a range count takes the cached count of an end chunk",
+  "old": "        var live = whole and chunkLive(reply, c, snap);",
+  "new": "        var live = chunkLive(reply, c, snap);",
+  "cases": [
+   "local: C3 a range count scans only its end chunks, within 0.2 s"
+  ]
+ },
+ {
+  "name": "M9 the scan writes back with no check of the chunk",
+  "old": "            if (live) {\n                cache.counts[c] = got;",
+  "new": "            if (whole) {\n                cache.counts[c] = got;",
+  "cases": [
+   "local: C4a a SETBIT during a count does not leave a wrong count"
+  ]
+ },
+ {
+  "name": "M10 the step of the scan is 65536 bytes",
+  "old": "            yield nil;\n        }\n        c = c + 1;",
+  "new": "            if (c % 16 == 15) {\n                yield nil;\n            }\n        }\n        c = c + 1;",
+  "cases": [
+   "local: S1 32 counts of 1 MB at the same time stall PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "M11 the scan reads the cache only at its start",
+  "edits": [
+   [
+    "    var cheap = 0;\n    while (c <= lastChunk) {",
+    "    var cheap = 0;\n    var seen = cache.counts[0:len(cache.counts)];\n    while (c <= lastChunk) {"
+   ],
+   [
+    "        if (live and cache.counts[c] != nil) {\n            n = n + cache.counts[c];",
+    "        if (live and seen[c] != nil) {\n            n = n + seen[c];"
+   ]
+  ],
+  "cases": [
+   "local: C6 ten counts that close at the same time cost at most two counts"
+  ]
+ },
+ {
+  "name": "INCR keeps the counts of the old value",
+  "old": "    entry.value = str(n);\n    entry.cache = nil;",
+  "new": "    entry.value = str(n);",
+  "cases": [
+   "local: INCR drops the counts of the value"
+  ]
+ },
+ {
+  "name": "growth counts a new zero chunk as 1",
+  "old": "        cache.counts.append(0);",
+  "new": "        cache.counts.append(1);",
+  "cases": [
+   "local: B3 a range count of the sparse 512 MB adds the counts of its new chunks"
+  ]
+ },
+ {
+  "name": "M12 the write-back does not check that the cache is still the cache of the key",
+  "old": "    return reply.entry.cache == reply.cache and chunkOf(reply.entry.value, c) == snap;",
+  "new": "    return chunkOf(reply.entry.value, c) == snap;",
+  "cases": [
+   "local: a count after INCR does not take a count of the cache that INCR dropped"
+  ]
+ }
+]

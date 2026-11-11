@@ -34,7 +34,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | pub-sub | 7 | pass |
 | sorted-sets | 8 | pass |
 | geospatial | 8 | pass |
-| bitmaps | 9 | not started |
+| bitmaps | 9 | pass |
 | authentication | 8 | not started |
 
 ## Design
@@ -322,7 +322,8 @@ neighbours, with the boxes outside the search area left out, in the same
 order. In its step it takes the members and scores of those boxes, a walk
 from the first score of each box; the session keeps the members within the
 radius in steps (`writeGeoSearch`), so the command stays atomic and the
-other clients go on. The order of the reply is the order of Redis: a fuzz
+other clients go on. It answers every command read before the end of the
+stream, also after a half-close (rule 7). The order of the reply is the order of Redis: a fuzz
 of 2400 searches and distances against redis-server 7.0 gave no
 difference. As in Redis 7.0, it reads the key first, decodes a
 `FROMMEMBER` member while it parses, and takes the last of an option that
@@ -330,6 +331,58 @@ comes again. In `EXEC`, `GEOSEARCH` spends the element budget for each
 member of its boxes, and one `EXEC` walks at most 2097152 members of boxes
 (rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
 work of `EXEC`.
+
+### Bitmaps
+
+A String cannot be changed in place, so a string that `SETBIT` writes is
+kept as `Bytes`: chunks of 4096 bytes and the length. `SETBIT` copies one
+chunk, so it costs O(1) as in Redis; the growth appends a shared chunk of
+zero bytes, so `SETBIT` at the largest offset (2^32 - 1, 512 MB) is fast.
+The type stays `string`, and `GET`, `SET ... GET`, `STRLEN`, `INCR` and
+`GETBIT` read both forms: `GET` writes the chunks in steps, from a copy of
+their List taken in its step (`ChunkedBulk`), with no join. The bits of a
+byte go from the most significant, as in Redis.
+
+The key of a string value keeps a count cache (`CountCache` on its
+`Entry`): the number of 1 bits of each chunk of 4096 bytes, and a total
+when each chunk has a count. A String and its `Bytes` have the same chunk
+borders, so the counts stay valid when `SETBIT` splits a String. `SETBIT`
+changes the count of its chunk and the total in O(1), and only when the bit
+changes; a chunk of zero bytes that growth adds counts 0, and a key that
+`SETBIT` makes starts with counts. A count of the whole value is then O(1).
+Any other count takes a snapshot in its step (the String, or a copy of the
+List of chunks), and the session counts from it in steps
+(`writeBitcount`), so the command stays atomic and the other clients go
+on. A count of a range adds the counts of its whole chunks and scans at
+most its two end chunks. A chunk that no count has read since it was
+written (a large String that `SET` wrote, the result of `BITOP`) is
+scanned at about 0.15 microseconds a byte, one chunk a step, and its count
+is written back if the live value still holds the same chunk. So each
+byte is scanned at most one time after each write, and counts at the same
+time share the scan. A whole chunk of zero bytes is one native compare.
+`SET`, `BITOP` and the RDB load make a new `Entry` with no counts, and
+`INCR` drops them. A scan uses or writes back a count only while its cache
+is still the cache of the `Entry` and the live value holds the same chunk:
+in one `EXEC`, a `SETBIT` and an `INCR` can give the old bytes back while
+the old cache counts the bytes between them.
+
+As in Redis, the session answers each command that it read before the end
+of the stream, also after a half-close or a protocol error (rule 7). So a
+client that sends a `BITCOUNT` of data that has no count and then closes
+leaves the server counting until that scan ends: at most one scan of each
+byte that a client wrote (8 MB: about 1.2 s of CPU; 512 MB: about
+78 s, measured). The other clients go on. A native count of the 1 bits
+of a String (#1214) would remove that first scan. As in Redis 7.0, it reads the
+key before its arguments, gives 0 for two negative indexes with the start
+after the end, takes `BYTE` and `BIT` ranges, and takes an index of up to
+19 digits.
+
+`BITOP AND | OR | XOR | NOT` runs in one step with tables of 65536 entries
+(each built from an earlier one at start). Each source byte is Lox++ code,
+so one `BITOP` reads at most 1048576 source bytes (the length of the result
+times the number of sources), and one `EXEC` does at most 1048576 units of
+bitmap work: the chunks that `SETBIT` adds or splits, the source bytes of
+`BITOP`, and the chunks that `GET` and `BITCOUNT` copy (rule 6).
 
 ### Pub/Sub
 
@@ -485,6 +538,11 @@ printed.
   place of a tie can round the other way from `printf`, and a coordinate
   of 1e15 or more is not written with all its digits. There is no
   `GEOHASH`, `GEORADIUS` or `GEOSEARCHSTORE`.
+- Bitmaps: one `BITOP` reads at most 1048576 source bytes, and one `EXEC`
+  does at most 1048576 units of bitmap work; Redis has no such limits.
+  The first `BITCOUNT` of data that has no count is much slower than in
+  Redis (about 0.15 microseconds a byte, in steps of one chunk, with no
+  stall); a later count of the same data is fast (#1214). There is no `BITPOS`, `BITFIELD` or `SETRANGE`.
 - Pub/Sub: `SUBSCRIBE` and `UNSUBSCRIBE` cannot be queued in `MULTI`.
   `UNSUBSCRIBE` with no channel leaves the channels in the order of the
   client's Map; Redis gives the order of its hash table. A `PUBLISH` that
@@ -554,8 +612,9 @@ printed.
 
 All tasks run on one worker, and a command has no suspend point. So one
 client could stop every other client by a fault, by a long command, by a
-long pipeline, or by input that it never ends. Six rules prevent this. They
-come from the referee ruling on PR #1125, and every stage group keeps them.
+long pipeline, or by input that it never ends. Seven rules prevent this.
+Rules 1 to 6 come from the referee ruling on PR #1125, and rule 7 from the
+ruling on PR #1204. Every stage group keeps them.
 
 1. **No halting fault from client input.** See "Faults" above.
 2. **Suspend points in the reader.** The reader yields after every 64
@@ -593,6 +652,16 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
    documentation of the command. `upper` gives a word longer than any
    keyword back unchanged, and `splitWords` slices.
 6. **Each limit and its measured stall** are in the table below.
+7. **Work after the step of the command.** Work that a command gives to the
+   session (a count, a filter, the write of a large reply) reads only a
+   snapshot that the step of the command took, so the command stays
+   atomic. It yields after at most about 2 ms of Lox++ work: 4096 bytes of
+   work for each byte, or `ELEMENTS_PER_YIELD` elements. It always ends
+   with its reply, in order: the end of the stream and a protocol error do
+   not stop it; only a write fault or the end of the session does, and then
+   no later reply is written. It does Lox++ work for each byte only on data
+   that the 65536-byte limit of rule 3 bounds, or at most one time after
+   each write of that data (a cache, as the counts of `BITCOUNT`).
 
 | Probe (`tests/run_stages.py`, group `fairness`) | Limit | Measured |
 |---|---|---|
@@ -651,7 +720,7 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | PS5: a subscriber that reads 40 messages of 1 MB | not closed (when the session does not give back the cost: closed) | as required |
 | PS6: 600000 empty messages to a subscriber that does not read | closed (when a message costs only its bytes, or 64 more: not closed; 500000 such messages took 104 MB of RSS) | as required |
 | PS7 (with `--pubsub-soft-seconds 2`): 12 MB, read, 2.5 s, 12 MB more | not closed: the soft time starts again | as required |
-| PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 60 MB from round 3 to 5 (without the drop of empty channels: 447 to 763 MB) | 221, 299, 447, 447, 447 MB |
+| PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 300 MB from round 2 to 5 (without the drop of empty channels: 380–470 MB). The growth with the drop moves with the baseline heap (#1206) | 241, 290, 394, 433, 498 MB |
 | Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
 | Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
 | Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
@@ -663,6 +732,17 @@ come from the referee ruling on PR #1125, and every stage group keeps them.
 | G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
 | G3: `EXEC` of 64 `GEOSEARCH` of that set with one member more (524289, which does not divide the limit) | 3 run and 61 are refused; the walk of the fourth stops as soon as it passes the limit and spends what is left, so the others walk no more; PING within 1.0 s (when the limit is checked after the walk: 5.3 s; when a refused walk spends nothing: 6.9–7.1 s). On a host with every CPU busy it can fail. | 0.45–0.50 s |
 | G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s). Its margin is small: on a host with every CPU busy it can fail. | 0.04–0.05 s |
+| B1 (group `bitmaps`, on a server of its own): `SETBIT` at offset 2^32 - 1 | a string of 512 MB with the bit set; PING within 1.0 s (rule 6 only) | 0.01–0.02 s |
+| B2: `BITCOUNT` of a dense 8 MB | PING within 1.0 s; the scan yields after each chunk of 4096 bytes (rule 6 only) | 0.003–0.027 s (1.2 s of CPU in all) |
+| B3: `BITCOUNT` of the sparse 512 MB of B1 | a reply within 2 s (the counts of a key that `SETBIT` makes: O(1)) | 0.000 s (O(1)) |
+| B3b: `BITCOUNT` of a String that `SET` wrote and `SETBIT` grew to 512 MB, which has no counts | a reply within 2 s (when a zero chunk is scanned: minutes) | 0.12 s |
+| S1 (on a server of its own): 32 connections each send `BITCOUNT` of its own new dense 1 MB at the same time | PING within 0.5 s (when the scan yields every 65536 bytes: 1.00 s) | 0.061–0.066 s |
+| C6 (on a server of its own): 10 connections each send `BITCOUNT` of a new dense 8 MB at the same time and close | server CPU at most 2 times one count; the connections end (when each scan reads the counts only at its start: 10 s or more, the wait limit of the case) | 1.35 s of CPU; one count 1.19 s |
+| C7: one connection sends 200 `BITCOUNT` of a new dense 8 MB and closes | server CPU at most 1.5 times one count; the connection ends; a second run that half-closes gets 200 replies (when the scan keeps no count: 2.38 s, and 8 replies) | 1.27 s of CPU; one count 1.19 s; 200 replies |
+| B4: `BITOP AND` of two sources of 512 KB (the limit) | PING within 1.0 s (rule 6 only) | 0.30–0.48 s |
+| B5: `GET` of a bitmap of 64 MB | every byte; PING within 1.0 s (rule 6 only) | 0.12–0.19 s |
+| B6: `INCR` of the 512 MB of B1 | an error; PING within 1.0 s (when the value is joined first: far over) | 0.00 s |
+| Not in the suite: `SETBIT` on a String of 512 MB, which splits it into chunks | PING within 1.0 s; the split is once for each String | 0.62–0.63 s |
 | AOF3: 40 writes of 16 MB to one key with the AOF | RSS under 300 MB (without the trim by cost: 632 MB) | 86 MB |
 | AOF2: `RPUSH` of 1048573 elements with the AOF | the file has every element; PING within 1.0 s (when a command that wrote nothing waits for the file: 2.1 s) | 0.22–0.27 s |
 | RP2: `RPUSH` of 1048573 elements with a replica that reads | every byte reaches the replica; PING within 1.0 s (rule 6 only) | 0.22–0.25 s |
@@ -691,8 +771,9 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/persistence-rdb.json` or
 `tests/mutations/replication.json` or
 `tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
-`tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` that removes
-its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1 and G2 hold rule 6 only: no single change removes their
+`tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` or
+`tests/mutations/bitmaps.json` that removes
+its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4 and B5 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
@@ -765,13 +846,15 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
     examples/codecrafters/build-your-own-redis/tests/mutations/base.json
 # the same with tests/mutations/lists.json, streams.json, transactions.json
 # and optimistic-locking.json, persistence-rdb.json, replication.json,
-# persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json
+# persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json,
+# bitmaps.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
 ```
 
 `REDIS_STAGE_GROUPS` (names split by commas) runs only those groups, also
 under `mutate.py`. A mutation is killed only when its named cases fail, so
-it needs only the group of those cases.
+it needs only the group of those cases. A mutation is one `old`/`new` replacement, or an
+`edits` list of such pairs when it must change more than one site.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.
