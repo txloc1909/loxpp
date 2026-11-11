@@ -307,10 +307,12 @@ not bind that order.
 
 **The whole of name resolution is the platform's answer (2026-11-10, #1095).**
 The order is not the only thing the two resolvers answer differently: they also
-accept different spellings. The C library accepts the wildcard `*` and the
-`inet_aton` numeric forms (`0x7f000001`, `0177.0.0.1`), which the JVM refuses;
-the JVM accepts the bracketed IPv6 literal and a scope identifier
-(`[::1]`, `::1%lo`), which the C library refuses. Neither set is the language: a
+accept different spellings, and read one spelling as different addresses. The C
+library accepts the wildcard `*` and the `inet_aton` numeric forms
+(`0x7f000001`, and `0177.0.0.1` as octal 127.0.0.1). The JVM refuses `*` and
+`0x7f000001`, and reads `0177.0.0.1` as the decimal address 177.0.0.1. The JVM
+accepts the bracketed IPv6 literal and a scope identifier (`[::1]`, `::1%lo`),
+which the C library refuses. Neither set is the language: a
 backend that copied one C library's parsing would bind the language to that
 library and refuse a spelling every other resolver answers. So the spec names
 the accepted spellings, the address each names, and the order of the addresses

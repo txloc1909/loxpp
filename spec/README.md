@@ -157,8 +157,9 @@ depend on the text of a message, stays within the limits of each
 implementation, does not need two workers to run at the same time, does not
 make calls on one side of a Socket or a Server from two tasks (see
 [§04-semantics, The Task Machine](04-semantics.md#the-task-machine)), does
-not depend on connection loss on read, and does not depend on which `host`
-strings a resolver answers. Every
+not depend on connection loss on read, and does not depend on how a resolver
+answers a `host` string: the strings it accepts, the address or addresses that
+each one names, and the order in which a call tries them. Every
 conforming implementation gives a portable program the same output and the
 same exit status.
 
