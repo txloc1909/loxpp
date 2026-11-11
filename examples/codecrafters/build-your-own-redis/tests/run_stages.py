@@ -6257,7 +6257,9 @@ def stages_auth_limits(prog):
              "local: A5 a pipeline of 64 ACL SETUSER with 1000 empty passwords stalls PING at most 0.5 s",
              "local: A6 ACL SETUSER with 20000 empty passwords stalls PING at most 0.5 s",
              "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
-             "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"]
+             "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s",
+             "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s",
+             "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"]
 
     def body(srv):
         c = Asker(srv)
@@ -6342,8 +6344,10 @@ def stages_auth_limits(prog):
             replies.append(q.try_read(120))
         worst, wrong, _ = measure_while(srv, exec_setusers, password="p0")
         r = replies[0]
+        # Each costs 257 for its copy and 1020 * 257 for its rules, so only
+        # the first runs in the budget of 524288.
         check(names[6], worst <= 0.5 and not wrong and queued == ["OK"] + ["QUEUED"] * 256 and isinstance(r, list)
-              and r[:2] == ["OK", "OK"] and r[2] == Error("ERR the ACL work of this transaction is over its limit"),
+              and r[0] == "OK" and r[1] == Error("ERR the ACL work of this transaction is over its limit"),
               "worst %.3f s, %r" % (worst, repr(r)[:120]))
         q.send_raw(encode("MULTI") + encode("AUTH", "default", "p255") * 65535)
         for _ in range(65536):
@@ -6360,6 +6364,31 @@ def stages_auth_limits(prog):
         check(names[7], worst <= 0.5 and not wrong and isinstance(r, list) and len(r) == 65535 and r[2039] == "OK"
               and r[2040] == Error("ERR the ACL work of this transaction is over its limit"),
               "worst %.3f s, %r" % (worst, repr(r)[:120]))
+        # 1 + 16 * 256 units a GETUSER: 127 run. 257 units a SETUSER with no
+        # rule, for its copy of the list: 2040 run.
+        results = []
+        for cmd in (("ACL", "GETUSER", "default"), ("ACL", "SETUSER", "default")):
+            q = Client(srv.port)
+            q.sock.settimeout(120)
+            q.call("AUTH", "default", "p0")
+            q.send_raw(encode("MULTI") + encode(*cmd) * 4096)
+            for _ in range(4097):
+                q.try_read(60)
+            replies = []
+
+            def exec_queued():
+                q.send_raw(encode("EXEC"))
+                replies.append(q.try_read(120))
+            worst, wrong, _ = measure_while(srv, exec_queued, password="p0")
+            q.close()
+            results.append((worst, wrong, replies[0]))
+        too_much = Error("ERR the ACL work of this transaction is over its limit")
+        worst, wrong, r = results[0]
+        check(names[8], worst <= 0.5 and not wrong and isinstance(r, list) and len(r) == 4096
+              and isinstance(r[126], list) and r[127] == too_much, "worst %.3f s, %r" % (worst, repr(r[125:129])[:160]))
+        worst, wrong, r = results[1]
+        check(names[9], worst <= 0.5 and not wrong and isinstance(r, list) and len(r) == 4096
+              and r[2039] == "OK" and r[2040] == too_much, "worst %.3f s, %r" % (worst, repr(r)[:120]))
     on_new_server(prog, names, body)
 
 

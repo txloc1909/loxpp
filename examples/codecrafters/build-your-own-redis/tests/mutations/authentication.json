@@ -17,8 +17,8 @@
  },
  {
   "name": "GETUSER drops the passwords pair",
-  "old": "    out = out + bulk(\"passwords\") + \"*\" + str(len(defaultUser.passwords)) + \"\\r\\n\";\n    for (var p in defaultUser.passwords) {\n        out = out + bulk(p);\n    }",
-  "new": "",
+  "old": "    return \"*4\\r\\n\" + bulk(\"flags\") + arrayReply(flags) + bulk(\"passwords\") + arrayReply(parts);",
+  "new": "    return \"*2\\r\\n\" + bulk(\"flags\") + arrayReply(flags);",
   "cases": [
    "auth-04 the default user has no passwords"
   ]
@@ -385,7 +385,9 @@
   "new": "",
   "cases": [
    "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
-   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"
+   "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s",
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s",
+   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"
   ]
  },
  {
@@ -410,6 +412,30 @@
   "new": "        if (false) {",
   "cases": [
    "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "GETUSER spends nothing",
+  "old": "    if (!spendAclWork(1 + GETUSER_UNITS * len(defaultUser.passwords))) {",
+  "new": "    if (false) {",
+  "cases": [
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "a password of GETUSER costs one unit",
+  "old": "var GETUSER_UNITS = 16;",
+  "new": "var GETUSER_UNITS = 1;",
+  "cases": [
+   "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s"
+  ]
+ },
+ {
+  "name": "the copy of SETUSER spends nothing",
+  "old": "    if (!spendAclWork(1 + len(defaultUser.passwords))) {\n        return ACL_EXEC_TOO_MUCH;\n    }\n    var u = AclUser(",
+  "new": "    var u = AclUser(",
+  "cases": [
+   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"
   ]
  }
 ]

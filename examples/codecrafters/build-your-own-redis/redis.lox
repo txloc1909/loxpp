@@ -5817,11 +5817,13 @@ var HASH_BLOCKS_MAX = 1024;
 // stay linear in a small list (rule 5). Redis has no such limit.
 var PASSWORDS_MAX = 256;
 
-// The scans of the password list in one EXEC: each rule of ACL SETUSER is
-// one unit, and a > or < rule and an AUTH also cost the length of the list
-// that they scan. The hashes are made when MULTI queues the command, but
+// The work on the password list in one EXEC: each rule of ACL SETUSER is
+// one unit, and a > or < rule, an AUTH and the copy that SETUSER makes also
+// cost the length of the list. GETUSER encodes each password, which costs
+// about GETUSER_UNITS units of scan time. The hashes are made when MULTI queues the command, but
 // EXEC runs the scans in one step (rule 6). nil outside EXEC.
 var ACL_EXEC_WORK = 524288;
+var GETUSER_UNITS = 16;
 var aclExecWork = nil;
 var ACL_EXEC_TOO_MUCH = "-ERR the ACL work of this transaction is over its limit\r\n";
 
@@ -6097,6 +6099,9 @@ fun aclGetuser(name) {
     if (name != "default") {
         return NULL_BULK;
     }
+    if (!spendAclWork(1 + GETUSER_UNITS * len(defaultUser.passwords))) {
+        return ACL_EXEC_TOO_MUCH;
+    }
     var flags = [];
     if (!defaultUser.on) {
         flags.append(bulk("off"));
@@ -6104,15 +6109,11 @@ fun aclGetuser(name) {
     if (defaultUser.nopass) {
         flags.append(bulk("nopass"));
     }
-    var out = "*4\r\n" + bulk("flags") + "*" + str(len(flags)) + "\r\n";
-    for (var f in flags) {
-        out = out + f;
-    }
-    out = out + bulk("passwords") + "*" + str(len(defaultUser.passwords)) + "\r\n";
+    var parts = [];
     for (var p in defaultUser.passwords) {
-        out = out + bulk(p);
+        parts.append(bulk(p));
     }
-    return out;
+    return "*4\r\n" + bulk("flags") + arrayReply(flags) + bulk("passwords") + arrayReply(parts);
 }
 
 // ACL SETUSER default rule... with the rules on, off, nopass, resetpass,
@@ -6121,6 +6122,9 @@ fun aclGetuser(name) {
 fun aclSetuser(argv, hashes) {
     if (argv[2] != "default") {
         return errorReply("ERR this server has only the default user");
+    }
+    if (!spendAclWork(1 + len(defaultUser.passwords))) {
+        return ACL_EXEC_TOO_MUCH;
     }
     var u = AclUser(defaultUser.on, defaultUser.nopass, defaultUser.passwords[0:len(defaultUser.passwords)]);
     var i = 3;
