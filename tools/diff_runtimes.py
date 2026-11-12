@@ -297,9 +297,15 @@ def classify_opcode_family(source: str) -> list[str]:
 
 def parse_exclude_file(path: Path) -> dict[str, str]:
     """Reads a 'name  reason' exclusion list. Blank lines and lines starting
-    with '#' are comments."""
+    with '#' are comments. An unreadable list is a misuse: exit 2, not a
+    traceback that reads as a failed run."""
     reasons: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"error: cannot read --exclude list {path}: {exc.strerror}", file=sys.stderr)
+        sys.exit(2)
+    for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
