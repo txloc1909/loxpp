@@ -65,6 +65,11 @@ struct ObjFile : public Obj {
     FILE* handle{nullptr}; // null when closed
     bool readable{false};
     bool writable{false};
+    // The bytes read from the stream and not yet returned to the program. A
+    // block read takes more than the one line `readline` returns, and a
+    // stream that cannot seek cannot give those bytes back: on a FIFO, a
+    // pipe, or /dev/stdin the seek fails, so they must be kept here.
+    std::string inbuf;
 
     explicit ObjFile(ObjClass* k) : Obj(ObjType::FILE), klass(k) {}
     // Do NOT rely on this destructor to close file handles. GC timing is

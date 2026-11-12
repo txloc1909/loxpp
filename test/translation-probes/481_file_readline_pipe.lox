@@ -1,0 +1,21 @@
+// A read method continues where the last read method on that File stopped,
+// also on a path that cannot seek (spec/05-stdlib.md, File methods): /dev/stdin
+// here is a pipe, so a seek cannot put back the bytes that a block read took
+// past the line it returned. The File keeps them.
+var f = open("/dev/stdin", "r");
+var a = f.readline();
+var b = f.readline();
+print str(a) + "|" + str(b);
+print f.read();
+f.close();
+
+// The bootstrap interpreter cannot run this probe: its wrapper feeds the
+// program's source through standard input's own FIFO and forwards the caller's
+// input behind it, so a program it runs cannot open /dev/stdin. The probe
+// below checks what the bootstrap can reach: its File value is its host's File,
+// so it reads lines one by one from a file it opens itself.
+// NOT-BINDING: bootstrap bootstrap-only/file_readline_keeps_lines.lox
+// STATUS: ok
+// CHECK: alpha|beta
+// CHECK: gamma
+// CHECK: rest
