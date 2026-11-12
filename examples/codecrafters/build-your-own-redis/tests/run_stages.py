@@ -121,8 +121,16 @@ class Error(str):
 
 
 class Client:
-    def __init__(self, port):
-        self.sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    def __init__(self, port, rcvbuf=None):
+        # rcvbuf is set before connect, so the window is small from the first
+        # byte. A probe must not change it on a connection that carries data:
+        # on some kernels the window then reopens only after a long wait.
+        if rcvbuf is None:
+            self.sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        else:
+            self.sock = socket.socket()
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+            self.sock.connect(("127.0.0.1", port))
         self.sock.settimeout(5)
         self.buf = b""
 
@@ -4231,8 +4239,7 @@ def stages_pubsub_on(srv):
     # before the reply of that command, also when the reader has already
     # sent the command: the session of a subscriber that does not read is
     # behind its reader.
-    late = Client(srv.port)
-    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    late = Client(srv.port, rcvbuf=4096)
     late.call("SUBSCRIBE", "late-ch")
     pub = Asker(srv)
     big = "b" * (1 << 20)
@@ -4241,8 +4248,6 @@ def stages_pubsub_on(srv):
     late.send_raw(encode("UNSUBSCRIBE", "late-ch") + encode("PING"))
     time.sleep(0.3)
     counted = pub.call("PUBLISH", "late-ch", "late")
-    # A large buffer again for the read: 8 MB through 4 KB takes minutes.
-    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
     late.sock.settimeout(10)
     stream = []
     try:
@@ -4262,8 +4267,7 @@ def stages_pubsub_on(srv):
 
     # The same with PING in subscribed mode: the message goes before the
     # pong.
-    late = Client(srv.port)
-    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    late = Client(srv.port, rcvbuf=4096)
     late.call("SUBSCRIBE", "late-ping")
     pub = Asker(srv)
     for _ in range(8):
@@ -4271,7 +4275,6 @@ def stages_pubsub_on(srv):
     late.send_raw(encode("PING"))
     time.sleep(0.3)
     counted = pub.call("PUBLISH", "late-ping", "late")
-    late.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
     late.sock.settimeout(10)
     stream = []
     try:
@@ -4292,18 +4295,16 @@ def stages_pubsub_on(srv):
     # UNSUBSCRIBE of 3000 long channels to a client that does not read: its
     # session is held in the loop, and a message to the last channel, which
     # it has not left yet, goes before the reply that leaves it.
-    det = Client(srv.port)
+    det = Client(srv.port, rcvbuf=4096)
     det.sock.settimeout(30)
     names = ["%04d" % i + "n" * 3996 for i in range(3000)]
     det.send_raw(encode("SUBSCRIBE", *names))
     for _ in range(3000):
         det.read()
-    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
     det.send_raw(encode("UNSUBSCRIBE", *names))
     time.sleep(0.5)
     pub = Asker(srv)
     counted = pub.call("PUBLISH", names[-1], "late")
-    det.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
     seq = []
     try:
         det.sock.settimeout(5)
@@ -5679,14 +5680,13 @@ def stages_bitmaps_limits(prog):
                       isinstance(reply, list) and reply[0] == 524288 and isinstance(reply[1], Error)
                       and "bitmap work" in reply[1], repr(reply)[-80:])
             # GET writes a copy of the chunks: a SETBIT while the reply waits
-            # does not change it.
+            # does not change it. The reply is 64 MB, more than the socket
+            # buffers hold, so it is still being written when the SETBIT runs.
             x = Client(srv.port)
-            x.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
             x.sock.settimeout(60)
             x.send_raw(encode("GET", "b64"))
             time.sleep(0.3)
             c.call("SETBIT", "b64", str(64 * 8 * 1024 * 1024 - 1000), "1")
-            x.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
             val = x.read()
             x.close()
             check("local: GET of a bitmap writes it as it was when it ran",
