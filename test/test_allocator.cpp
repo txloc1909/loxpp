@@ -68,7 +68,8 @@ TEST(MemoryManagerTest, MakeString_HashIsTheHashOfTheBytes) {
     EXPECT_EQ(fromStd->hash, otherHash);
 
     LoxString lox{text + " (LoxString)", VmAllocator<char>{&mm}};
-    const uint32_t loxHash = hashString(std::string_view{lox.data(), lox.size()});
+    const uint32_t loxHash =
+        hashString(std::string_view{lox.data(), lox.size()});
     ObjString* fromLox = mm.makeString(std::move(lox));
     mm.pushTempRoot(fromLox);
     EXPECT_EQ(fromLox->hash, loxHash);
@@ -89,7 +90,8 @@ TEST(MemoryManagerTest, MakeString_LoxStringKeepsItsBuffer) {
 // and frees the LoxString.
 TEST(MemoryManagerTest, MakeString_LoxStringOfAnInternedText) {
     MemoryManager mm;
-    ObjString* first = rootedString(mm, "an interned string, longer than the inline buffer");
+    ObjString* first =
+        rootedString(mm, "an interned string, longer than the inline buffer");
     const std::size_t before = mm.bytesAllocated;
     ObjString* again;
     {
