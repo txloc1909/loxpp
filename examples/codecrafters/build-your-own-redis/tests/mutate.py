@@ -113,7 +113,7 @@ def main():
     default_jobs = max(1, (os.cpu_count() or 1) // 4)
     ap = argparse.ArgumentParser(description="Run each mutation of a group against the stage suite.")
     ap.add_argument("-j", dest="jobs", type=int, default=default_jobs, metavar="N",
-                    help="mutations to run at once (default: %(default)s, a quarter of the CPU cores)")
+                    help="mutations to run at once (default: %(default)s, a quarter of the CPU cores, at least 1)")
     ap.add_argument("loxpp")
     ap.add_argument("source")
     ap.add_argument("suite")
