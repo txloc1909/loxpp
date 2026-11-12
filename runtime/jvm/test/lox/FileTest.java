@@ -242,6 +242,21 @@ public final class FileTest {
         checkEquals(0, nulLines.elements.size(), "readlines() on empty file returns empty list");
         check(nulLines != null, "readlines() on empty file returns list, not nil");
 
+        // flush() hands the bytes to the operating system while the handle
+        // stays open (spec/05-stdlib.md, f.flush()), and a closed file
+        // rejects it as it rejects every method but close().
+        File flushTmp = File.createTempFile("lox-rt-file-flush", ".txt");
+        flushTmp.deleteOnExit();
+        LoxFile flushing = LoxFile.open(flushTmp.getAbsolutePath(), "w");
+        flushing.write("flushed");
+        flushing.flush();
+        LoxFile flushedReader = LoxFile.open(flushTmp.getAbsolutePath(), "r");
+        checkEquals("flushed", flushedReader.read(),
+                "flush() makes the writes visible to a second handle");
+        flushedReader.close();
+        flushing.close();
+        checkThrows(flushing::flush, LoxError.class, "a closed file rejects flush");
+
         System.exit(TestSupport.finish("FileTest"));
     }
 }

@@ -1,0 +1,31 @@
+// flush() gives a File's written bytes to the operating system, so a second
+// open() on the same path sees them while the first handle stays open
+// (spec/05-stdlib.md, File methods, f.flush() and Visibility and durability).
+var path = "test/translation-probes/479_file_flush_visible_while_open.tmp";
+var w = open(path, "w");
+w.write("first");
+w.flush();
+print "flushed";
+var r = open(path, "r");
+print "seen=" + r.read();
+r.close();
+// A second flush carries the writes made after the first one.
+w.write("second");
+w.flush();
+var r2 = open(path, "r");
+print "seen_again=" + r2.read();
+r2.close();
+// flush() on a File that is open for reading only does nothing, and reading
+// continues from where it was: a read, a flush, then the rest of the file.
+var reader = open(path, "r");
+var firstLine = reader.readline();
+reader.flush();
+print "read_mode_flush=" + firstLine + "|" + reader.read();
+reader.close();
+w.close();
+
+// STATUS: ok
+// CHECK: flushed
+// CHECK: seen=first
+// CHECK: seen_again=firstsecond
+// CHECK: read_mode_flush=first|second
