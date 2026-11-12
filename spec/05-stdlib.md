@@ -614,7 +614,7 @@ Writes `text` followed by one newline character. `text` must be a String.
 
 Gives everything written through the File so far to the operating system, so
 that a later `open()` and other processes see it while the File stays open.
-On a File that is not open for writing the call does nothing.
+On an open File that was opened for reading only, the call does nothing.
 
 `flush()` does not force the bytes to the disk. A power loss after it returns
 may still lose them, and no method of this chapter forces them.

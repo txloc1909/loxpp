@@ -242,18 +242,16 @@ public final class FileTest {
         checkEquals(0, nulLines.elements.size(), "readlines() on empty file returns empty list");
         check(nulLines != null, "readlines() on empty file returns list, not nil");
 
-        // flush() hands the bytes to the operating system while the handle
-        // stays open (spec/05-stdlib.md, f.flush()), and a closed file
-        // rejects it as it rejects every method but close().
+        // A closed file rejects flush() as it rejects every method but
+        // close() (spec/05-stdlib.md, File methods). The visibility half of
+        // f.flush() has no check here: RandomAccessFile writes straight
+        // through, so a JVM flush is not observable from a Lox++ program and
+        // no unit check of it can fail. Probe 477 carries that half, where
+        // the native VM's buffered stream makes it real.
         File flushTmp = File.createTempFile("lox-rt-file-flush", ".txt");
         flushTmp.deleteOnExit();
         LoxFile flushing = LoxFile.open(flushTmp.getAbsolutePath(), "w");
-        flushing.write("flushed");
         flushing.flush();
-        LoxFile flushedReader = LoxFile.open(flushTmp.getAbsolutePath(), "r");
-        checkEquals("flushed", flushedReader.read(),
-                "flush() makes the writes visible to a second handle");
-        flushedReader.close();
         flushing.close();
         checkThrows(flushing::flush, LoxError.class, "a closed file rejects flush");
 

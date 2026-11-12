@@ -177,8 +177,13 @@ static Value fileFlushNative(int /*argc*/, Value* args) {
     if (!file) {
         return from<Nil>(Nil{});
     }
-    // A stream not opened for writing has nothing buffered, so fflush is a
-    // no-op there, as spec/05-stdlib.md's f.flush() says.
+    // fflush on a stream opened for reading alone has no defined behavior in
+    // C, and musl drops the stream's buffered read bytes when it is called.
+    // A File opened for reading alone has nothing to give, so this matches
+    // spec/05-stdlib.md's f.flush() by not calling it.
+    if (!file->writable) {
+        return from<Nil>(Nil{});
+    }
     if (std::fflush(file->handle) != 0) {
         nativeRuntimeError("flush(): cannot flush the file.");
         return from<Nil>(Nil{});
