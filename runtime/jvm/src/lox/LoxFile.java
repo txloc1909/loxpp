@@ -1,5 +1,6 @@
 package lox;
 
+import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -149,9 +150,17 @@ public final class LoxFile {
             return "";
         }
         try {
-            byte[] buf = new byte[(int) (raf.length() - raf.getFilePointer())];
-            raf.readFully(buf);
-            return new String(buf, LoxRuntime.CHARSET);
+            // Read to the end of the stream, not to the length the stream
+            // reports: a pipe or a FIFO has no length, and asking for one
+            // seeks, which such a stream rejects (spec/05-stdlib.md, File
+            // methods: a read continues on a path that cannot seek).
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = raf.read(buf)) != -1) {
+                bytes.write(buf, 0, n);
+            }
+            return new String(bytes.toByteArray(), LoxRuntime.CHARSET);
         } catch (IOException e) {
             throw new LoxError("read(): " + e.getMessage());
         }
