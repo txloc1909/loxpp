@@ -41,7 +41,7 @@
  },
  {
   "name": "INCR drops the expiry",
-  "old": "    entry.value = str(n);\n    touch(argv[1]);",
+  "old": "    entry.value = str(n);\n    entry.cache = nil;\n    touch(argv[1]);",
   "new": "    store[argv[1]] = Entry(\"string\", str(n), nil);\n    touch(argv[1]);",
   "cases": [
    "local: INCR keeps the expiry"
@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "    bitmapExecWork = nil;\n    endExecReplication();\n    serveReady();",
-  "new": "    bitmapExecWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreams = nil;",
+  "old": "    aclExecWork = nil;\n    endExecReplication();\n    serveReady();",
+  "new": "    aclExecWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreamList = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]
