@@ -924,6 +924,12 @@ under `mutate.py`. A mutation is killed only when its named cases fail, so
 it needs only the group of those cases. A mutation is one `old`/`new` replacement, or an
 `edits` list of such pairs when it must change more than one site.
 
+`mutate.py -j N` runs N mutations at once. The default N is a quarter of the
+CPU cores, so `-j 1` runs them one at a time. The stall probes have 1 s limits,
+and a high load can fail a named case with no real defect, which `mutate.py`
+counts as a kill. Keep N low on a busy machine. The output keeps the order of
+the mutation file for every N.
+
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.
 Binary resolution: `build/loxpp` beside this checkout first, then `loxpp` on
