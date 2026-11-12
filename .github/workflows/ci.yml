@@ -1057,6 +1057,11 @@ jobs:
       - name: Check that the shards cover every stage group
         run: python3 examples/codecrafters/build-your-own-redis/tests/shards.py
 
+      # No suite runs: a change to redis.lox that makes a mutation stale fails here.
+      - name: Check the Redis mutation texts
+        working-directory: examples/codecrafters/build-your-own-redis
+        run: python3 tests/mutate.py --check redis.lox tests/mutations/*.json
+
       - id: plan
         name: Print the shard matrix
         run: echo "matrix=$(python3 examples/codecrafters/build-your-own-redis/tests/shards.py --matrix)" >> "$GITHUB_OUTPUT"
