@@ -926,6 +926,10 @@ under `mutate.py`. A mutation is killed only when its named cases fail, so
 it needs only the group of those cases. A mutation is one `old`/`new` replacement, or an
 `edits` list of such pairs when it must change more than one site.
 
+CI runs the groups in four shard jobs. `tests/shards.py` lists the shards and
+checks that each group is in exactly one. A new group must be added to a shard
+there, or the `redis-shard-plan` job fails.
+
 `mutate.py -j N` runs N mutations at once. The default N is a quarter of the
 CPU cores, and at least 1, so `-j 1` runs them one at a time. Some stall
 probes have time limits of 0.1 to 2 s, and a high load can fail a named case
