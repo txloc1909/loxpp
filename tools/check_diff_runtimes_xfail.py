@@ -48,8 +48,8 @@ Sixteen cases, each on an explicit program list, so no corpus is walked:
      path that does not exist, and a file that exists and is executable whose
      shebang names a missing interpreter.
   15. a --exclude list that does not exist, or is not UTF-8, is a misuse: exit
-     2, one line naming the path, and no traceback. A missing --xfail list is still no gap (case 12), so the
-     two flags are pinned apart.
+     2, one line naming the path, and no traceback. A missing --xfail list is
+     still no gap (case 12), so the two flags are pinned apart.
 
 Cases 1 to 6, 12 and 15 run native against itself, so they need no managed
 toolchain and no runtime jar. Cases 7 to 11 and 13 use a stub script as a
