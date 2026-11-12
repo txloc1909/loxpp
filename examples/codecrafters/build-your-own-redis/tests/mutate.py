@@ -73,12 +73,16 @@ def main():
     text = open(args.source).read()
     mutations = json.load(open(args.spec))
     bad = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs)
+    try:
         futures = [pool.submit(run_mutation, m, text, args.loxpp, args.suite) for m in mutations]
         for future in futures:
             line, is_bad = future.result()
             print(line)
             bad += is_bad
+    finally:
+        # An interrupt must not start the queued mutations: they would run for minutes after Ctrl-C.
+        pool.shutdown(wait=True, cancel_futures=True)
     sys.exit(1 if bad else 0)
 
 
