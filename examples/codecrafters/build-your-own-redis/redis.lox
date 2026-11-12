@@ -270,7 +270,7 @@ fun wrongArgs(name) {
 // one worker, so the arguments of a command travel as an enum list.
 // ===========================================================================
 
-enum Args { Cons(head, tail) Empty }
+enum Args { Cons(head, tail) Cons8(a, b, c, d, e, f, g, h, tail) Empty }
 // Reader to session: Cmd, Fail, Closed. Fail(text) carries a protocol error:
 // the session replies with it and ends the connection, as Redis does.
 // Session to reader: Credit after each command it has done, Blocked when it
@@ -290,11 +290,18 @@ enum Msg { Cmd(args, nbytes) Fail(text) Closed Credit Blocked Stop Served(key, v
 // session before the command starts, so the command stays atomic.
 fun toArgs(list) {
     var out = Args.Empty();
-    var i = len(list) - 1;
-    while (i >= 0) {
+    var n = len(list);
+    var i = n - 1;
+    // The last n % 8 go in Cons cells, so the rest is whole Cons8 cells.
+    while (i >= n - n % 8) {
         out = Args.Cons(list[i], out);
         i = i - 1;
-        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {
+    }
+    while (i >= 0) {
+        out = Args.Cons8(list[i - 7], list[i - 6], list[i - 5], list[i - 4],
+                         list[i - 3], list[i - 2], list[i - 1], list[i], out);
+        i = i - 8;
+        if (i > 0 and (i + 1) % ELEMENTS_PER_YIELD == 0) {
             yield nil;
         }
     }
@@ -316,6 +323,18 @@ fun fromArgs(args) {
     var done = false;
     while (!done) {
         done = match rest {
+            case Args.Cons8(a, b, c, d, e, f, g, h, tail) => {
+                out.append(a);
+                out.append(b);
+                out.append(c);
+                out.append(d);
+                out.append(e);
+                out.append(f);
+                out.append(g);
+                out.append(h);
+                rest = tail;
+                yieldEvery(len(out))
+            }
             case Args.Cons(head, tail) => {
                 out.append(head);
                 rest = tail;

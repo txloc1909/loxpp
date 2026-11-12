@@ -195,10 +195,10 @@
  },
  {
   "name": "M8 no yield in toArgs",
-  "old": "        i = i - 1;\n        if (i > 0 and i % ELEMENTS_PER_YIELD == 0) {",
-  "new": "        i = i - 1;\n        if (false) {",
+  "old": "        i = i - 8;\n        if (i > 0 and (i + 1) % ELEMENTS_PER_YIELD == 0) {",
+  "new": "        i = i - 8;\n        if (false) {",
   "cases": [
-   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.1 s)"
   ]
  },
  {
@@ -206,7 +206,7 @@
   "old": "    if (count % ELEMENTS_PER_YIELD == 0) {\n        yield nil;\n    }\n    return false;",
   "new": "    return false;",
   "cases": [
-   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)"
+   "local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.1 s)"
   ]
  },
  {
