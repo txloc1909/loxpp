@@ -928,8 +928,9 @@ it needs only the group of those cases. A mutation is one `old`/`new` replacemen
 CPU cores, and at least 1, so `-j 1` runs them one at a time. Some stall
 probes have time limits of 0.1 to 2 s, and a high load can fail a named case
 with no real defect, which `mutate.py` counts as a kill. Keep N low on a busy
-machine. The output keeps the order of the mutation file for every N. Ctrl-C
-cancels the mutations that have not started and kills the running suites.
+machine. The output keeps the order of the mutation file for every N, so one
+slow mutation delays the lines after it. Ctrl-C cancels the mutations that
+have not started and kills the running suites.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.
