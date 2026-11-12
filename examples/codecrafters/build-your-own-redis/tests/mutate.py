@@ -10,17 +10,72 @@
 # mutation and takes minutes. Set REDIS_STAGE_GROUPS (see run_stages.py) to
 # run only the group of the named cases.
 #
-# -j N runs N mutations at once. The default is a quarter of the CPU cores:
-# the stall probes have 1 s limits and measure CPU time, so a high load can
-# fail a named case with no real defect, and a failing named case is a kill.
+# -j N runs N mutations at once. The default is a quarter of the CPU cores
+# (at least 1): some stall probes have limits of 0.1 to 2 s and measure CPU
+# time, so a high load can fail a named case with no real defect, and a
+# failing named case is a kill.
 # The lines print in the order of the mutation file, whatever N is.
+#
+# An interrupt cancels the mutations that have not started and kills the
+# suites that are running, so the script exits at once.
 import argparse
 import concurrent.futures
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
+
+_lock = threading.Lock()
+_live = set()  # suite processes that are running now
+_stopping = False
+
+
+class Stopping(Exception):
+    """Raised in a worker that would start a suite after an interrupt."""
+
+
+def start_suite(argv):
+    # Each suite leads its own session, so one kill also ends the servers it started.
+    # The lock makes the check and the start atomic with stop_all().
+    with _lock:
+        if _stopping:
+            raise Stopping()
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True)
+        _live.add(p)
+    return p
+
+
+def kill_group(p):
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        pass  # the group has already ended
+
+
+def run_suite(argv):
+    """Returns (stdout, timed_out) for one suite run, with a 420 s limit."""
+    p = start_suite(argv)
+    try:
+        try:
+            return p.communicate(timeout=420)[0], False
+        except subprocess.TimeoutExpired:
+            kill_group(p)
+            return p.communicate()[0], True
+    finally:
+        with _lock:
+            _live.discard(p)
+
+
+def stop_all():
+    global _stopping
+    with _lock:
+        _stopping = True
+        for p in list(_live):
+            kill_group(p)
 
 
 def run_mutation(m, text, loxpp, suite):
@@ -43,11 +98,8 @@ def run_mutation(m, text, loxpp, suite):
     with open(wrap, "w") as f:
         f.write('#!/bin/sh\nexec %s %s "$@"\n' % (loxpp, lox))
     os.chmod(wrap, 0o755)
-    try:
-        out = subprocess.run([sys.executable, "-u", suite, wrap], capture_output=True,
-                             text=True, timeout=420).stdout
-    except subprocess.TimeoutExpired as e:
-        out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+    out, timed_out = run_suite([sys.executable, "-u", suite, wrap])
+    if timed_out:
         out += "\n(timeout)"
     failed = [c for c in cases if ("FAIL " + c) in out]
     missing = [c for c in cases if c not in failed]
@@ -81,8 +133,10 @@ def main():
             print(line)
             bad += is_bad
     finally:
-        # An interrupt must not start the queued mutations: they would run for minutes after Ctrl-C.
-        pool.shutdown(wait=True, cancel_futures=True)
+        # Runs on an interrupt too: cancel the queue, then kill the running suites.
+        pool.shutdown(wait=False, cancel_futures=True)
+        stop_all()
+        pool.shutdown(wait=True)
     sys.exit(1 if bad else 0)
 
 
