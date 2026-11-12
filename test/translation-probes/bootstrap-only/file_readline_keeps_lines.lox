@@ -1,0 +1,23 @@
+// The bootstrap interpreter's File value is its host's File, so it keeps the
+// bytes a block read took past the line it returned (spec/05-stdlib.md, File
+// methods). Probe 481 cannot run here: the bootstrap wrapper feeds the
+// program's source through standard input's own FIFO, so a program it runs
+// cannot open /dev/stdin. This probe checks the line-by-line reading the
+// bootstrap can reach; probe 481 checks the path that cannot seek.
+var path = "test/translation-probes/file_readline_keeps_lines.tmp";
+var w = open(path, "w");
+w.write("one\ntwo\nthree\n");
+w.close();
+
+var f = open(path, "r");
+print str(f.readline());
+print str(f.readline());
+print str(f.readline());
+print str(f.readline());
+f.close();
+
+// STATUS: ok
+// CHECK: one
+// CHECK: two
+// CHECK: three
+// CHECK: nil
