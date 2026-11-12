@@ -2224,7 +2224,6 @@ def stages_optimistic_locking(prog):
         got1, got2 = a.call("EXEC"), c2.call("EXEC")
         check("local: a write marks every client that watches the key",
               got1 is None and got2 is None, "%r %r" % (got1, got2))
-        c2.close()
 
         # A client that goes while it watches keys ends its tasks.
         def clients_now():
@@ -2233,7 +2232,13 @@ def stages_optimistic_locking(prog):
                 if line.startswith("connected_clients:"):
                     return int(line.split(":")[1])
             return -1
-        base = clients_now()
+        # The server ends the tasks of c2 a little after the close, so the
+        # count before the next client is the count with c2, less one.
+        base = clients_now() - 1
+        c2.close()
+        deadline = time.time() + 5
+        while time.time() < deadline and clients_now() != base:
+            time.sleep(0.05)
         gone = srv.client()
         gone.send_raw(encode("WATCH", *["g%d" % i for i in range(5000)]))
         gone.try_read(5)
