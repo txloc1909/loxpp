@@ -6,8 +6,8 @@
 # it writes a copy of redis.lox with that replacement (or edits), runs the stage
 # suite against the copy, and checks that each named case fails. A suite
 # that crashes or times out on the copy also counts as a kill. Prints one
-# line per mutation, and exits 1 when a mutation stays alive or its old text
-# is not found exactly once. CI does not run a suite for each mutation: it
+# line per mutation, and exits 1 when a mutation stays alive, when its suite
+# prints no check (ERROR), or when its old text is not found exactly once. CI does not run a suite for each mutation: it
 # starts one server per mutation and takes minutes. Set REDIS_STAGE_GROUPS (see run_stages.py) to
 # run only the group of the named cases.
 #
@@ -117,6 +117,12 @@ def run_mutation(m, text, loxpp, suite):
         out, timed_out = run_suite([sys.executable, "-u", suite, wrap])
     if timed_out:
         out += "\n(timeout)"
+    # When none of the named cases printed a result, the copy was not tested
+    # (for example, the program never started). That is an error, not a kill
+    # and not an alive mutation.
+    ran = [c for c in cases if ("FAIL " + c) in out or ("ok   " + c) in out]
+    if not ran and not timed_out:
+        return ("ERROR %-40s no named case ran" % m["name"], True)
     failed = [c for c in cases if ("FAIL " + c) in out]
     missing = [c for c in cases if c not in failed]
     if missing and "(timeout)" not in out and "group ran to the end" not in out:
@@ -166,6 +172,10 @@ def main():
     args = ap.parse_args()
     if args.jobs < 1:
         ap.error("-j needs N >= 1")
+    # The suites run in other directories, so a relative path would name another file there.
+    args.loxpp = os.path.abspath(args.loxpp)
+    if not (os.path.isfile(args.loxpp) and os.access(args.loxpp, os.X_OK)):
+        ap.error("loxpp is not an executable file: %s" % args.loxpp)
 
     text = open(args.source).read()
     mutations = json.load(open(args.spec))
