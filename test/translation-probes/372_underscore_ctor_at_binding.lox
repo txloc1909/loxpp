@@ -6,8 +6,6 @@
 //    `E._(y)` and `E._{x}` bind fields.
 // 3. A "_" followed by none of "(", "{" and "." is the wildcard.
 //
-// An enum named "_" is not in this probe's set: `_.A(y)` is rejected on every
-// consumer today, and issue #1076 tracks that defect.
 enum E { _(x) B }
 
 print match E._(7) {

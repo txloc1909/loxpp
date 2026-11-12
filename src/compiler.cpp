@@ -1308,12 +1308,13 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
                 Token subTok = m_parser->m_current;
                 m_parser->advance();
                 std::string subName(subTok.lexeme);
-                // A bare "_" is the wildcard. With "(" or "{" it is the head
-                // of a structural pattern, so it may name a constructor or
-                // class.
+                // A bare "_" is the wildcard. With "(", "{" or "." it is the
+                // head of a structural pattern, so it may name a constructor,
+                // class, or enum.
                 bool isWildcardSub = subName == "_" &&
                                      !m_parser->check(TokenType::LEFT_BRACE) &&
-                                     !m_parser->check(TokenType::LEFT_PAREN);
+                                     !m_parser->check(TokenType::LEFT_PAREN) &&
+                                     !m_parser->check(TokenType::DOT);
                 bool subHeadFailed = false;
                 const ConstructorInfo* subInfo =
                     isWildcardSub
@@ -1381,11 +1382,12 @@ Compiler::compileMatchArm(int subjectSlot, int armLocalBase, int armHandlerBase,
         std::string ctorName;
 
         // A bare "_" is the wildcard pattern (spec/02-syntax.md, armPat). A
-        // "_" followed by "(" or "{" is the head of a structural pattern, so
-        // it may name a constructor or class.
+        // "_" followed by "(", "{" or "." is the head of a structural
+        // pattern, so it may name a constructor, class, or enum.
         bool isWildcard = patName == "_" &&
                           !m_parser->check(TokenType::LEFT_BRACE) &&
-                          !m_parser->check(TokenType::LEFT_PAREN);
+                          !m_parser->check(TokenType::LEFT_PAREN) &&
+                          !m_parser->check(TokenType::DOT);
         bool headFailed = false;
         const ConstructorInfo* info =
             isWildcard ? nullptr : patternHeadConstructor(patTok, headFailed);
@@ -1992,9 +1994,10 @@ Compiler::JumpTableCandidate Compiler::previewEnumArms() {
         m_parser->advance();
 
         // A bare wildcard arm is not a tag arm, so the jump table is not
-        // eligible. "_" with "(" or "{" is a structural pattern head.
+        // eligible. "_" with "(", "{" or "." is a structural pattern head.
         if (ctorName == "_" && !m_parser->check(TokenType::LEFT_PAREN) &&
-            !m_parser->check(TokenType::LEFT_BRACE)) {
+            !m_parser->check(TokenType::LEFT_BRACE) &&
+            !m_parser->check(TokenType::DOT)) {
             ok = false;
             break;
         }
