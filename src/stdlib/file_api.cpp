@@ -178,9 +178,9 @@ static Value fileFlushNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     // fflush on a stream opened for reading alone has no defined behavior in
-    // C, and musl drops the stream's buffered read bytes when it is called.
-    // A File opened for reading alone has nothing to give, so this matches
-    // spec/05-stdlib.md's f.flush() by not calling it.
+    // C (C11 7.21.5.2p2), so the call is skipped rather than made harmless.
+    // A File opened for reading alone has nothing to give: this is the
+    // answer spec/05-stdlib.md's f.flush() gives for that File.
     if (!file->writable) {
         return from<Nil>(Nil{});
     }
