@@ -1388,6 +1388,10 @@ public final class LoxOps {
             requireArity(args, 1, "writeline");
             file.writeline(checkStringArg(args[0], "writeline"));
             return null;
+        case "flush":
+            requireArity(args, 0, "flush");
+            file.flush();
+            return null;
         case "close":
             requireArity(args, 0, "close");
             file.close();

@@ -610,6 +610,20 @@ Writes `text` followed by one newline character. `text` must be a String.
 **Arity:** 1  
 **Returns:** Nil
 
+### `f.flush() → Nil`
+
+Gives everything written through the File so far to the operating system, so
+that a later `open()` and other processes see it while the File stays open.
+On a File that is not open for writing the call does nothing.
+
+`flush()` does not force the bytes to the disk. A power loss after it returns
+may still lose them, and no method of this chapter forces them.
+
+A failure to flush is a runtime error.
+
+**Arity:** 0  
+**Returns:** Nil
+
 ### `f.close() → Nil`
 
 Closes the file. A second call on a File that is already closed does nothing.
@@ -620,10 +634,14 @@ Closes the file. A second call on a File that is already closed does nothing.
 ### Visibility and durability
 
 Writes may buffer. `close()` makes everything written through that File
-visible to every later `open()` and to other processes. What another handle
-sees before `close()` is implementation-defined and may be none, part, or all
-of the data. A program that needs a second handle to see the data closes the
-File first, or uses `defer f.close()`.
+visible to every later `open()` and to other processes. `flush()` makes them
+visible in the same way, while the File stays open. What another handle sees
+before `flush()` or `close()` is implementation-defined and may be none,
+part, or all of the data. A program that needs a second handle to see the
+data calls `flush()`, closes the File, or uses `defer f.close()`.
+
+Neither `flush()` nor `close()` forces the bytes to the disk, so a power loss
+may still lose them.
 
 When the program ends — by the end of the script, by `exit()`, or by an
 uncaught `throw` — every File that is still open is flushed as if `close()`

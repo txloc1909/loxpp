@@ -3230,7 +3230,7 @@ class InterpFileMethod {
         this.loxTag = "filemethod";
     }
     arity() {
-        if (this.name == "read" or this.name == "readline" or this.name == "readlines" or this.name == "close") return 0;
+        if (this.name == "read" or this.name == "readline" or this.name == "readlines" or this.name == "flush" or this.name == "close") return 0;
         return 1;
     }
     call(interp, args) {
@@ -3245,6 +3245,7 @@ class InterpFileMethod {
         }
         if (this.name == "write")     { this.file.handle.write(args[0]); return nil; }
         if (this.name == "writeline") { this.file.handle.writeline(args[0]); return nil; }
+        if (this.name == "flush")     { this.file.handle.flush(); return nil; }
         if (this.name == "close")     { this.file.handle.close(); return nil; }
         return nil;
     }
@@ -5903,7 +5904,7 @@ class Interpreter {
             return nil;
         }
         if (loxTag(object) == "file") {
-            if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "close") return InterpFileMethod(name, object);
+            if (name == "read" or name == "readline" or name == "readlines" or name == "write" or name == "writeline" or name == "flush" or name == "close") return InterpFileMethod(name, object);
             if (isCallTarget) this.fatalError("Undefined method '" + name + "' on file.");
             this.fatalError("Undefined property '" + name + "' on file.");
             return nil;

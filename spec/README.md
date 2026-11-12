@@ -183,7 +183,7 @@ variant) and adds the following:
 | `str()` built-in | Added in Lox++ |
 | `len()` built-in | Added in Lox++ |
 | `math` global object (unary and binary numeric functions, constants `pi` `e` `inf` `nan`) | Added in Lox++ |
-| `open()` built-in + File methods (`read`, `readline`, `readlines`, `write`, `writeline`, `close`) | Added in Lox++ |
+| `open()` built-in + File methods (`read`, `readline`, `readlines`, `write`, `writeline`, `flush`, `close`) | Added in Lox++ |
 | List type with `[...]` literal, indexing, and methods (`append`, `pop`, `remove`) | Added in Lox++ |
 | String indexing `s[i]` (read-only, single-character) | Added in Lox++ |
 | `seq[start:end]` slice syntax for List and String | Added in Lox++ |

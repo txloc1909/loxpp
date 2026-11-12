@@ -219,6 +219,24 @@ public final class LoxFile {
         write("\n");
     }
 
+    /**
+     * Gives the bytes written so far to the operating system, so a second
+     * open() sees them while this handle stays open (spec/05-stdlib.md,
+     * f.flush()). RandomAccessFile writes straight through, so only the
+     * stream fallback holds a buffer to flush.
+     */
+    public void flush() {
+        checkOpen("flush");
+        if (out == null) {
+            return;
+        }
+        try {
+            out.flush();
+        } catch (IOException e) {
+            throw new LoxError("flush(): " + e.getMessage());
+        }
+    }
+
     public void close() {
         if (raf != null) {
             try {
@@ -274,6 +292,11 @@ public final class LoxFile {
         case "writeline":
             return new LoxNative("writeline", 1, a -> {
                 writeline(checkStringArg(a[0], "writeline"));
+                return null;
+            });
+        case "flush":
+            return new LoxNative("flush", 0, a -> {
+                flush();
                 return null;
             });
         case "close":

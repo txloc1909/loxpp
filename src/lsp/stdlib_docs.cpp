@@ -171,7 +171,7 @@ constexpr std::array<StdlibEntry, 16> kInteger = {{
 // (src/stdlib/file_api.cpp), and the Socket/Server/Process method names that
 // do not already appear here (src/stdlib/net_api.cpp, process_api.cpp).
 // Descriptions from spec/05-stdlib.md and spec/03-types.md.
-constexpr std::array<StdlibEntry, 26> kMethods = {{
+constexpr std::array<StdlibEntry, 27> kMethods = {{
     {"has", "map.has(key) -> Boolean", 1, "True when the map contains `key`."},
     {"del", "map.del(key) -> Boolean", 1,
      "Removes `key` from the map; true when it was present."},
@@ -194,6 +194,9 @@ constexpr std::array<StdlibEntry, 26> kMethods = {{
      "Writes `text` to the file. No newline is added."},
     {"writeline", "file.writeline(text) -> Nil", 1,
      "Writes `text` followed by one newline."},
+    {"flush", "file.flush() -> Nil", 0,
+     "Gives the buffered writes to the operating system, so another handle "
+     "sees them."},
     {"close", "file.close() -> Nil", 0,
      "Closes the file. A second call does nothing."},
     {"accept", "server.accept() -> Socket", 0,
