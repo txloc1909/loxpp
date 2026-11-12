@@ -292,7 +292,10 @@ fun toArgs(list) {
     var out = Args.Empty();
     var n = len(list);
     var i = n - 1;
-    // The last n % 8 go in Cons cells, so the rest is whole Cons8 cells.
+    // The last n % 8 go in Cons cells, so the rest is whole Cons8 cells, and
+    // each Cons8 cell comes before every Cons cell. Then the yields of
+    // toArgs and fromArgs fall on multiples of ELEMENTS_PER_YIELD, which
+    // must be a multiple of 8.
     while (i >= n - n % 8) {
         out = Args.Cons(list[i], out);
         i = i - 1;

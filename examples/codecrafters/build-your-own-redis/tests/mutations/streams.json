@@ -292,7 +292,7 @@
   "old": "    while (i >= n - n % 8) {",
   "new": "    while (i >= 0) {",
   "cases": [
-   "local: S10 XRANGE of 1048004 arguments has at most 600000 heap objects at a collection"
+   "local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection"
   ]
  }
 ]

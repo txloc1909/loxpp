@@ -1572,8 +1572,8 @@ def stages_streams_large(prog):
                     fields = dict(x.split("=", 1) for x in line.split()[1:])
                     peak = max(peak, int(fields["objs_before"]))
         os.unlink(trace.name)
-        check("local: S10 XRANGE of 1048004 arguments has at most 600000 heap objects at a collection",
-              got[0] == [["1-1", ["f", "v"]]] and 0 < peak <= 600000, "peak %d objects, %r" % (peak, got[0]))
+        check("local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection",
+              got[0] == [["1-1", ["f", "v"]]] and 0 < peak <= 400000, "peak %d objects, %r" % (peak, got[0]))
     finally:
         srv.stop()
 
