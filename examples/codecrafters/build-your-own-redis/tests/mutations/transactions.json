@@ -233,8 +233,8 @@
  },
  {
   "name": "a $ reader gets only the last entry of an EXEC",
-  "old": "    if (mark == nil or mark.stream != stream) {\n        readyStreams[key] = StreamMark(stream, stream.size() - 1);\n    }",
-  "new": "    readyStreams[key] = StreamMark(stream, stream.size() - 1);",
+  "old": "    if (stream.readyFirst == -1) {\n        stream.readyFirst = stream.size() - 1;\n        readyStreamKeys.append(key);\n        readyStreamList.append(stream);\n    }",
+  "new": "    if (stream.readyFirst == -1) {\n        readyStreamKeys.append(key);\n        readyStreamList.append(stream);\n    }\n    stream.readyFirst = stream.size() - 1;",
   "cases": [
    "local: an XREAD BLOCK $ reader gets every entry of an EXEC"
   ]
@@ -273,8 +273,8 @@
  },
  {
   "name": "a replaced stream still wakes its $ reader",
-  "old": "        if (streamEntry(key) == mark.stream) {",
-  "new": "        if (true) {",
+  "old": "        if (streamEntry(key) == stream) {\n            wakeReaders(key, stream, first);",
+  "new": "        if (true) {\n            wakeReaders(key, stream, first);",
   "cases": [
    "local: a stream that EXEC replaces does not serve its $ reader"
   ]
@@ -285,6 +285,14 @@
   "new": "    var reply = Segments(\"*1\\r\\n\");",
   "cases": [
    "local: COUNT 1 caps what a $ reader gets from an EXEC"
+  ]
+ },
+ {
+  "name": "a ready mark is not reset after EXEC",
+  "old": "        stream.readyFirst = -1;\n        if (streamEntry(key) == stream) {",
+  "new": "        if (streamEntry(key) == stream) {",
+  "cases": [
+   "local: a second EXEC on the same stream wakes its reader again"
   ]
  }
 ]

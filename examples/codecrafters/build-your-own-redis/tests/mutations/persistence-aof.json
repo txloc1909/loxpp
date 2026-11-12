@@ -97,8 +97,8 @@
  },
  {
   "name": "a write without replicas is not logged",
-  "old": "    if (len(replicas) == 0 and !aofOn) {\n        return;\n    }\n    if (replInExec",
-  "new": "    if (len(replicas) == 0) {\n        return;\n    }\n    if (replInExec",
+  "old": "    return len(replicas) > 0 or aofOn;",
+  "new": "    return len(replicas) > 0;",
   "cases": [
    "persistence-aof-06 SET goes to the file that the manifest names before the reply"
   ]

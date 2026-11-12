@@ -1708,6 +1708,18 @@ def stages_transactions(prog):
         check("local: an XREAD BLOCK $ reader gets every entry of an EXEC",
               got == [[skey, [["2-1", ["f", "a"]], ["3-1", ["f", "b"]]]]], repr(got))
         reader.close()
+        # The mark of a ready Stream ends with its EXEC, so the next EXEC on
+        # the same Stream serves its reader again.
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "4-1", "f", "c")
+        c.call("EXEC")
+        got = reader.try_read(3)
+        check("local: a second EXEC on the same stream wakes its reader again",
+              got == [[skey, [["4-1", ["f", "c"]]]]], repr(got))
+        reader.close()
 
         # A key that EXEC pushes to and then replaces wakes nobody.
         key = rand_word()

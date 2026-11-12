@@ -17,7 +17,7 @@
  },
  {
   "name": "XADD 0-0 accepted",
-  "old": "    if (id.ms == 0 and seq == 0) {\n        return ID_ZERO;",
+  "old": "    if (id.ms == 0 and id.seq == 0) {\n        return ID_ZERO;",
   "new": "    if (false) {\n        return ID_ZERO;",
   "cases": [
    "streams-03 XADD 0-0 is an error"
@@ -25,8 +25,8 @@
  },
  {
   "name": "XADD of the top ID accepted",
-  "old": "(id.ms == topMs and seq <= topSeq)",
-  "new": "(id.ms == topMs and seq < topSeq)",
+  "old": "(id.ms == topMs and id.seq <= topSeq)",
+  "new": "(id.ms == topMs and id.seq < topSeq)",
   "cases": [
    "streams-03 XADD of the top ID is an error"
   ]
@@ -281,7 +281,7 @@
  },
  {
   "name": "XADD in EXEC wakes the readers at once",
-  "old": "    if (readyStreams == nil) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
+  "old": "    if (readyStreamKeys == nil) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
   "new": "    if (true) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
   "cases": [
    "local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s"
