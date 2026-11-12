@@ -81,11 +81,11 @@ takes the arguments of the command out of its message first (this step
 yields, see rule 2), and the socket write comes after the command. So each
 command is atomic, as in Redis.
 
-Two commands have a step before them: the session parses the arguments of
-`XRANGE` and `XREAD` (`PARSERS`) before the command runs, and yields every
-1024 options or IDs, because one command can hold about 524287 of them. The
-parse reads no key, so the command stays atomic. `XADD` also parses its ID
-there, so `EXEC` parses no ID: in one `EXEC` of 65535 `XADD`, the parse was
+Some commands have a step before them (`PARSERS`): the session parses
+their arguments before the command runs, also when `MULTI` queues the
+command. The parse of `XRANGE` and `XREAD` yields every 1024 options or IDs,
+because one command can hold about 524287 of them. The parse reads no key,
+so the command stays atomic. `XADD` parses its ID there, so `EXEC` parses no ID: in one `EXEC` of 65535 `XADD`, the parse was
 almost half of the step (T7).
 
 ### Lists and BLPOP

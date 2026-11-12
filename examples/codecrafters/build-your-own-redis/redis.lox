@@ -1438,10 +1438,8 @@ fun cmdType(ctx, argv) {
     return simple(entry.kind);
 }
 
-// The ID of a new entry, from the ID argument of XADD and the top ID of the
-// stream. Returns a StreamId, or an error reply.
 // The ID argument of XADD, parsed with no key: "*" (auto), an explicit ID
-// (seq is a number, nil or "*"), or an error reply. The session runs it
+// (seq is a number, or "*"; a missing seq is 0), or an error reply. The session runs it
 // before the command, also when MULTI queues the command, so EXEC parses
 // no ID.
 fun parseXadd(argv, mayYield) {
@@ -1461,8 +1459,9 @@ fun parseXadd(argv, mayYield) {
     return id;
 }
 
-// id is a result of parseXadd that is not an error. It returns an explicit
-// id itself, which only this command reads.
+// The ID of a new entry, from a result of parseXadd that is not an error and
+// the top ID of the stream. Returns a StreamId, or an error reply. It
+// returns an explicit id itself, which only this command reads.
 fun nextParsedId(id, topMs, topSeq) {
     if (id == "*") {
         var now = nowMs();
@@ -3010,8 +3009,6 @@ fun respLength(parts) {
     return total;
 }
 
-// Notes a write for the replicas: head and tail are Lists of arguments,
-// tail can be nil. It runs in the step of the command that writes.
 // True when a write goes anywhere: to a replica or to the AOF. During the
 // replay aofOn is still false, so the replay adds nothing. A hot command
 // checks it before it builds the arguments of replicate.
@@ -3019,6 +3016,8 @@ fun replicating() {
     return len(replicas) > 0 or aofOn;
 }
 
+// Notes a write for the replicas: head and tail are Lists of arguments,
+// tail can be nil. It runs in the step of the command that writes.
 fun replicate(head, tail) {
     if (!replicating()) {
         return;
