@@ -1018,21 +1018,7 @@ jobs:
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
 
-      - name: Build your own Redis - mutation texts
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace/examples/codecrafters/build-your-own-redis \
-            loxpp-dev:latest \
-            sh -c 'python3 tests/mutate.py --check redis.lox tests/mutations/*.json'
-
-      - name: Build your own Redis - transcribed stage suite
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
+      # The Redis stage suite runs in the redis-stage-shards jobs below.
 
       - name: Build your own Redis - differential vs redis-server
         run: |
@@ -1057,6 +1043,81 @@ jobs:
             -w /workspace \
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-kafka/tests/check_format.py
+
+  # The Redis stage groups run in four shard jobs, one runner each. The shards
+  # are listed in tests/shards.py, which also checks that they cover every group.
+  redis-shard-plan:
+    name: Redis stage shards (plan)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the shards cover every stage group
+        run: python3 examples/codecrafters/build-your-own-redis/tests/shards.py
+
+      # No suite runs: a change to redis.lox that makes a mutation stale fails here.
+      - name: Check the Redis mutation texts
+        working-directory: examples/codecrafters/build-your-own-redis
+        run: python3 tests/mutate.py --check redis.lox tests/mutations/*.json
+
+      - id: plan
+        name: Print the shard matrix
+        run: echo "matrix=$(python3 examples/codecrafters/build-your-own-redis/tests/shards.py --matrix)" >> "$GITHUB_OUTPUT"
+
+  redis-stage-shards:
+    name: Redis stage suite (${{ matrix.name }})
+    needs: redis-shard-plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.redis-shard-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # Restore only: the codecrafters job saves the ccache entry.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-redis-shard-${{ github.sha }}
+          restore-keys: |
+            ccache-codecrafters-
+            ccache-release-
+
+      - name: Build loxpp
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-dev:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      # -u: the log shows each check when it runs, not in bursts at the end.
+      - name: Build your own Redis - transcribed stage suite
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e "REDIS_STAGE_GROUPS=${{ matrix.groups }}" \
+            loxpp-dev:latest \
+            python3 -u examples/codecrafters/build-your-own-redis/tests/run_stages.py
 
   managed-toolchains:
     name: Managed toolchains (JVM)

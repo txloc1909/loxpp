@@ -931,6 +931,10 @@ the name of the file: a case of another group does not run, and its
 mutation shows as alive. A mutation is one `old`/`new` replacement, or an
 `edits` list of such pairs when it must change more than one site.
 
+CI runs the groups in four shard jobs. `tests/shards.py` lists the shards and
+checks that each group is in exactly one. A new group must be added to a shard
+there, or the `redis-shard-plan` job fails.
+
 `mutate.py -j N` runs N mutations at once. The default N is a quarter of the
 CPU cores, and at least 1, so `-j 1` runs them one at a time. Some stall
 probes have time limits of 0.1 to 2 s, and a high load can fail a named case
@@ -942,8 +946,9 @@ have not started and kills the running suites.
 `mutate.py --check` runs no suite. It applies the edits of each mutation to
 `redis.lox` and fails when an `old` text is not found exactly once (the
 mutation can no longer run), or a mutation names no case or changes nothing
-(it cannot be killed). CI runs it on every mutation file, so a change to `redis.lox` that
-makes a mutation stale must update that mutation in the same pull request.
+(it cannot be killed). CI runs it on every mutation file in the
+`redis-shard-plan` job, so a change to `redis.lox` that makes a mutation
+stale must update that mutation in the same pull request.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.
