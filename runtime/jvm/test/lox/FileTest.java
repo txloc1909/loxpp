@@ -246,7 +246,7 @@ public final class FileTest {
         // close() (spec/05-stdlib.md, File methods). The visibility half of
         // f.flush() has no check here: RandomAccessFile writes straight
         // through, so a JVM flush is not observable from a Lox++ program and
-        // no unit check of it can fail. Probe 477 carries that half, where
+        // no unit check of it can fail. Probe 479 carries that half, where
         // the native VM's buffered stream makes it real.
         File flushTmp = File.createTempFile("lox-rt-file-flush", ".txt");
         flushTmp.deleteOnExit();
