@@ -214,12 +214,13 @@ static Value openNative(int /*argc*/, Value* args) {
     if (stringHoldsNul(pathS, "open")) {
         return from<Nil>(Nil{});
     }
-    FILE* fp = std::fopen(pathS.c_str(), cmode);
+    // An empty path names no file on any host, so no fopen is tried for it.
+    FILE* fp = pathS.empty() ? nullptr : std::fopen(pathS.c_str(), cmode);
     if (!fp) {
         std::string msg = "open(): cannot open '";
         msg += pathS;
         msg += "': ";
-        msg += std::strerror(errno);
+        msg += pathS.empty() ? "the path is empty" : std::strerror(errno);
         nativeRuntimeError(msg.c_str());
         return from<Nil>(Nil{});
     }
