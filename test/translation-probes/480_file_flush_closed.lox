@@ -1,0 +1,11 @@
+// Every File method except close() on a closed File is a runtime error
+// (spec/05-stdlib.md, File methods). flush() is bound by that sentence too.
+// STATUS: error
+// CHECK: before
+print "before";
+var path = "test/translation-probes/480_file_flush_closed.tmp";
+var f = open(path, "w");
+f.write("x");
+f.close();
+f.flush();
+print "after";

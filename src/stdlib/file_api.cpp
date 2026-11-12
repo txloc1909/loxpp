@@ -172,6 +172,25 @@ static Value fileWritelineNative(int /*argc*/, Value* args) {
     return from<Nil>(Nil{});
 }
 
+static Value fileFlushNative(int /*argc*/, Value* args) {
+    ObjFile* file = checkFile(args, "flush");
+    if (!file) {
+        return from<Nil>(Nil{});
+    }
+    // fflush on a stream opened for reading alone has no defined behavior in
+    // C (C11 7.21.5.2p2), so the call is skipped rather than made harmless.
+    // A File opened for reading alone has nothing to give: this is the
+    // answer spec/05-stdlib.md's f.flush() gives for that File.
+    if (!file->writable) {
+        return from<Nil>(Nil{});
+    }
+    if (std::fflush(file->handle) != 0) {
+        nativeRuntimeError("flush(): cannot flush the file.");
+        return from<Nil>(Nil{});
+    }
+    return from<Nil>(Nil{});
+}
+
 static Value fileCloseNative(int /*argc*/, Value* args) {
     // Idempotent — no error if already closed.
     ObjFile* file = asObjFile(as<Obj*>(args[-1]));
@@ -243,6 +262,7 @@ ObjClass* registerFileAPI(StdlibRegistrar& reg) {
     reg.addMethod(klass, "readlines", fileReadlinesNative, 0);
     reg.addMethod(klass, "write", fileWriteNative, 1);
     reg.addMethod(klass, "writeline", fileWritelineNative, 1);
+    reg.addMethod(klass, "flush", fileFlushNative, 0);
     reg.addMethod(klass, "close", fileCloseNative, 0);
 
     s_fileClass = klass;
