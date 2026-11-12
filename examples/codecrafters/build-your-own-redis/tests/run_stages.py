@@ -2240,13 +2240,24 @@ def stages_optimistic_locking(prog):
                 if line.startswith("connected_clients:"):
                     return int(line.split(":")[1])
             return -1
-        # The server ends the tasks of c2 a little after the close, so the
-        # count before the next client is the count with c2, less one.
-        base = clients_now() - 1
+        # The server drops a closed client a little after the close, so a
+        # count read at once can still include a client that is going. The
+        # baseline is the count once it has stopped changing.
+        def settled_clients():
+            deadline = time.time() + 5
+            last = clients_now()
+            stable_since = time.time()
+            while time.time() < deadline:
+                time.sleep(0.05)
+                now = clients_now()
+                if now != last:
+                    last, stable_since = now, time.time()
+                elif time.time() - stable_since >= 0.3:
+                    break
+            return last
+
         c2.close()
-        deadline = time.time() + 5
-        while time.time() < deadline and clients_now() != base:
-            time.sleep(0.05)
+        base = settled_clients()
         gone = srv.client()
         gone.send_raw(encode("WATCH", *["g%d" % i for i in range(5000)]))
         gone.try_read(5)
