@@ -1466,7 +1466,6 @@ fun parseXadd(argv, mayYield) {
 fun nextParsedId(id, topMs, topSeq) {
     if (id == "*") {
         var now = nowMs();
-        now = now - now % 1;
         if (now > topMs) {
             return StreamId(now, 0);
         }

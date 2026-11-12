@@ -40,9 +40,9 @@
   ]
  },
  {
-  "name": "XADD * keeps the fraction of the milliseconds",
-  "old": "        now = now - now % 1;\n",
-  "new": "",
+  "name": "nowMs keeps the fraction of the milliseconds",
+  "old": "    var t = time() * 1000;\n    return t - t % 1;",
+  "new": "    var t = time() * 1000;\n    return t;",
   "cases": [
    "streams-05 XADD * gives <ms>-0 with the time now"
   ]
@@ -284,7 +284,7 @@
   "old": "    if (readyStreamKeys == nil) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
   "new": "    if (true) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
   "cases": [
-   "local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s"
+   "local: T3 EXEC of 10000 XADD with 400 readers above the top stalls PING at most 0.5 s"
   ]
  }
 ]
