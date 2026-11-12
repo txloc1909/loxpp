@@ -2,6 +2,7 @@ package lox;
 
 import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
+import static lox.TestSupport.checkFatal;
 import static lox.TestSupport.checkThrows;
 
 import java.io.IOException;
@@ -79,6 +80,27 @@ public final class ProcessTest {
         check(stateMessage != null && stateMessage.contains("after wait()"),
               "process write checks the stream state before the argument type");
 
+        // A bad count is fatal, and it consumes nothing: the good read after
+        // the bad counts still gets every byte. Both readers share one count
+        // check, so both get the same bad values. The lower edge 0 is accepted.
+        LoxProcess bad = LoxProcess.spawn("/bin/sh", args("-c", "printf hello"));
+        checkFatal(() -> bad.readBytesArg(Double.valueOf(-1)), "read_bytes(-1) is fatal");
+        checkFatal(() -> bad.readBytesArg(Double.valueOf(1.5)), "read_bytes(1.5) is fatal");
+        checkFatal(() -> bad.readBytesArg("x"), "read_bytes(\"x\") is fatal");
+        checkFatal(() -> bad.readBytesArg("3"), "read_bytes(\"3\") is fatal");
+        checkFatal(() -> bad.readBytesArg(null), "read_bytes(nil) is fatal");
+        checkFatal(() -> bad.readBytesArg(Double.valueOf(2147483648.0)),
+                   "read_bytes(2147483648) is fatal");
+        checkFatal(() -> bad.errReadBytesArg(Double.valueOf(-1)), "err_read_bytes(-1) is fatal");
+        checkFatal(() -> bad.errReadBytesArg(Double.valueOf(1.5)), "err_read_bytes(1.5) is fatal");
+        checkFatal(() -> bad.errReadBytesArg("x"), "err_read_bytes(\"x\") is fatal");
+        checkFatal(() -> bad.errReadBytesArg(Double.valueOf(2147483648.0)),
+                   "err_read_bytes(2147483648) is fatal");
+        checkEquals("", bad.readBytesArg(Double.valueOf(0)), "read_bytes(0) returns \"\"");
+        checkEquals("hello", bad.readBytesArg(Double.valueOf(5)),
+                    "read_bytes after the bad counts returns all five bytes");
+        bad.waitStatus();
+
         // read_bytes(n) / err_read_bytes(n): bounded child-pipe reads.
         LoxProcess out = LoxProcess.spawn("/bin/sh", args("-c", "printf hello"));
         checkEquals("he", out.readBytesArg(Double.valueOf(2)),
@@ -98,8 +120,6 @@ public final class ProcessTest {
         checkEquals("", err.errReadBytesArg(Double.valueOf(1)),
                     "err_read_bytes(1) returns \"\" at EOF");
         err.waitStatus();
-        checkThrows(() -> out.readBytesArg(Double.valueOf(-1)), LoxError.class,
-                    "a negative byte count is fatal");
 
         System.exit(TestSupport.finish("ProcessTest"));
     }

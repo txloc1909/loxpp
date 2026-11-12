@@ -2,6 +2,7 @@ package lox;
 
 import static lox.TestSupport.check;
 import static lox.TestSupport.checkEquals;
+import static lox.TestSupport.checkFatal;
 import static lox.TestSupport.checkThrows;
 
 import java.io.IOException;
@@ -28,6 +29,16 @@ public final class SocketTest {
         } catch (IOException | InterruptedException e) {
             return e.getMessage();
         }
+    }
+
+    /**
+     * A connected socket whose peer has closed, so reads return "" at once.
+     * The listener's pending connection is accepted here, then closed.
+     */
+    private static LoxSocket eofSocket(LoxServer server) {
+        LoxSocket client = LoxSocket.connect("127.0.0.1", (int)server.port());
+        ((LoxSocket)server.accept()).close();
+        return client;
     }
 
     public static void main(String[] args) throws IOException {
@@ -279,8 +290,8 @@ public final class SocketTest {
                     "read_some(100) returns the rest, not more");
         checkEquals("", speer.readSomeArg(Double.valueOf(1)),
                     "read_some returns \"\" at EOF");
-        checkThrows(() -> speer.readSomeArg(Double.valueOf(0)), LoxError.class,
-                    "read_some(0) is fatal");
+        checkFatal(() -> speer.readSomeArg(Double.valueOf(0)),
+                   "read_some(0) is fatal");
         speer.close();
         sc.close();
         ss.close();
@@ -309,19 +320,56 @@ public final class SocketTest {
         wc.close();
         ws.close();
 
-        // A bad count is fatal, and the closed-stream check precedes it.
+        // A bad count is fatal, and the closed-stream check precedes it. Each
+        // bad count gets a socket of its own: a read enters its side before it
+        // checks the count, so a fault leaves the side entered for the next call.
+        // The peer has closed, so a read that wrongly accepts a bad count
+        // returns "" at once instead of blocking the run.
         LoxServer is = LoxServer.listen("127.0.0.1", 0);
-        LoxSocket ic = LoxSocket.connect("127.0.0.1", (int)is.port());
-        checkThrows(() -> ic.readBytesArg(Double.valueOf(-1)), LoxError.class,
-                    "read_bytes(-1) is fatal");
-        checkThrows(() -> ic.readBytesArg(Double.valueOf(1.5)), LoxError.class,
-                    "read_bytes(1.5) is fatal");
-        checkThrows(() -> ic.readBytesArg("x"), LoxError.class,
-                    "read_bytes(\"x\") is fatal");
+        int isPort = (int)is.port();
+        checkFatal(() -> eofSocket(is).readBytesArg(Double.valueOf(-1)),
+                   "read_bytes(-1) is fatal");
+        checkFatal(() -> eofSocket(is).readBytesArg(Double.valueOf(1.5)),
+                   "read_bytes(1.5) is fatal");
+        checkFatal(() -> eofSocket(is).readBytesArg("x"),
+                   "read_bytes(\"x\") is fatal");
+        checkFatal(() -> eofSocket(is).readBytesArg("3"),
+                   "read_bytes(\"3\") is fatal");
+        checkFatal(() -> eofSocket(is).readBytesArg(null),
+                   "read_bytes(nil) is fatal");
+        checkFatal(() -> eofSocket(is).readBytesArg(Double.valueOf(2147483648.0)),
+                   "read_bytes(2147483648) is fatal");
+        checkFatal(() -> eofSocket(is).readSomeArg(Double.valueOf(2147483648.0)),
+                   "read_some(2147483648) is fatal");
+        checkFatal(() -> eofSocket(is).readSomeArg(Double.valueOf(0)),
+                   "read_some(0) is fatal on a socket at EOF");
+        LoxSocket ic = LoxSocket.connect("127.0.0.1", isPort);
         ic.close();
-        checkThrows(() -> ic.readBytesArg(Double.valueOf(1)), LoxError.class,
-                    "read_bytes on a closed socket is fatal");
+        LoxError closedFault = null;
+        try {
+            ic.readBytesArg(Double.valueOf(1));
+        } catch (LoxError e) {
+            closedFault = e;
+        }
+        check(closedFault != null && closedFault.isCatchable()
+                  && closedFault.getMessage().contains("closed socket"),
+              "read_bytes on a closed socket is a catchable SocketClosedError");
         is.close();
+
+        // The upper edge is accepted. read_some takes no buffer of n bytes, so
+        // 2147483647 costs nothing: it returns what is there, then "".
+        LoxServer us = LoxServer.listen("127.0.0.1", 0);
+        LoxSocket uc = LoxSocket.connect("127.0.0.1", (int)us.port());
+        uc.write("ab");
+        uc.closeWrite();
+        LoxSocket upeer = (LoxSocket)us.accept();
+        checkEquals("ab", upeer.readSomeArg(Double.valueOf(2147483647)),
+                    "read_some(2147483647) is accepted and returns the bytes there");
+        checkEquals("", upeer.readSomeArg(Double.valueOf(2147483647)),
+                    "read_some(2147483647) returns \"\" at EOF");
+        upeer.close();
+        uc.close();
+        us.close();
 
         // A name that names no address is a catchable NetworkError from
         // listen, connect and connect_within, never a JVM exception that runs
