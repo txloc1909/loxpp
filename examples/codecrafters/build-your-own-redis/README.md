@@ -67,7 +67,12 @@ connection.
 
 A List is not a message (`spec/03-types.md`, Messages), also between two
 tasks of one worker. So the arguments of a command travel as an enum list,
-`Args.Cons(head, tail)` / `Args.Empty`.
+`Args.Cons8(a, ..., h, tail)` / `Args.Cons(head, tail)` / `Args.Empty`. A
+`Cons8` cell holds 8 arguments: a pause of the native VM grows with the
+number of objects in the heap, and one cell for each argument made about
+1050000 objects for one command of 1048004 arguments. With `Cons8` it is
+about 130000 (probe S10). When S5 and S6 run three times in a row, the
+largest pause goes from about 60 ms to 12 ms.
 
 `nbytes` counts every byte of the command on the wire. `readline()` drops
 the `\n`, so each line adds one. Replication needs this count for its
@@ -731,7 +736,7 @@ ruling on PR #1204. Every stage group keeps them.
 | P3: an inline line of 65537 bytes | protocol error, connection closed | as required |
 | P3: an inline line of 64 MB | PING within 1.0 s | 0.43–0.69 s |
 | P4: an array of 1048576 empty bulks | PING within 1.0 s | 0.016–0.024 s |
-| P4: four such arrays at the same time | PING within 0.2 s, which holds the yield of `toArgs` and the yield of `fromArgs` one by one (without one of them: 0.38–0.68 s) | 0.054–0.074 s |
+| P4: four such arrays at the same time | PING within 0.1 s, which holds the yield of `toArgs` and the yield of `fromArgs` one by one (without the yield of `toArgs`: 0.12–0.21 s, so a fast host can pass that mutant; with one cell for each argument the limit was 0.2 s) | 0.018–0.038 s |
 | P5: an inline line of 65536 bytes (the limit) | PING within 0.5 s | 0.016–0.020 s |
 | P6: 4 clients send only empty lines for 3 s | PING within 0.5 s | 0.002 s |
 | P7: `LRANGE 0 -1` of a list of 2097146 elements | every byte of the reply; PING within 0.2 s (without the yield of `writeBulks`: about 1.1 s) | as required; 0.004–0.005 s |
@@ -751,10 +756,11 @@ ruling on PR #1204. Every stage group keeps them.
 | S2: `XRANGE` of that entry | every field; PING within 0.15 s (without the yield of `Output.add`: 0.27 s) | as required; 0.056–0.067 s |
 | S3: `XREAD` of 524286 missing streams | PING within 0.5 s (when the IDs are parsed in the step of the command: 0.93 s) | 0.23–0.27 s |
 | S4: `XREAD BLOCK 1000` on 524286 streams | PING within 1.0 s, while it joins the queue of each stream in one step | 0.45–0.49 s |
-| S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.010 s / 0.04–0.09 s |
+| S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.007–0.010 s (with one cell for each argument: 0.04–0.05 s, and 0.16–0.23 s on CI) |
 | S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.5 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
+| S10 (on a new server with `LOXPP_GC_TRACE`): `XRANGE` of 1048004 arguments | at most 400000 heap objects at a collection, a count that does not depend on the speed of the host (with one cell for each argument: 1050219) | 129504 |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
 | T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 400 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 1.0 s; with 200 readers only 0.54 s, too near the limit, #1230) | 0.04 s |
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |

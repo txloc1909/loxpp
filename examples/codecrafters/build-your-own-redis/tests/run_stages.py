@@ -57,13 +57,14 @@ def rand_word(n=8):
 
 
 class Server:
-    def __init__(self, prog, args, cwd=None):
+    def __init__(self, prog, args, cwd=None, env=None):
         self.port = free_port()
         self.log = tempfile.NamedTemporaryFile(
             prefix="loxpp-redis-", suffix=".log", delete=False)
         self.proc = subprocess.Popen(
             [prog, "--port", str(self.port)] + args,
-            stdout=self.log, stderr=subprocess.STDOUT, cwd=cwd)
+            stdout=self.log, stderr=subprocess.STDOUT, cwd=cwd,
+            env=None if env is None else dict(os.environ, **env))
         self.up = self._wait_up()
 
     def _wait_up(self):
@@ -579,11 +580,13 @@ def stages_fairness(prog):
               worst <= 1.0 and not wrong, "worst %.3f s" % worst)
         # The ruling's limit is 1.0 s. Four such arrays at the same time hold
         # the yields of toArgs and fromArgs one by one: with both yields the
-        # stall is about 0.05-0.07 s, with one of them removed 0.38-0.68 s.
+        # stall is about 0.02-0.04 s, and with the yield of toArgs removed
+        # 0.15-0.20 s. toArgs makes one cell for 8 arguments, so its part is
+        # small, and the limit is low enough to see it.
         worst, wrong, _ = measure_while(srv, parallel(
             [send_all(srv.port, b"*1048576\r\n" + b"$0\r\n\r\n" * 1048576)] * 4))
-        check("local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.2 s)",
-              worst <= 0.2 and not wrong, "worst %.3f s" % worst)
+        check("local: P4 four such arrays at once, the arguments are handed over in steps (at most 0.1 s)",
+              worst <= 0.1 and not wrong, "worst %.3f s" % worst)
 
         worst, wrong, _ = measure_while(
             srv, send_all(srv.port, b"PING " + b"a" * 65529 + b"\r\n"))
@@ -1544,6 +1547,33 @@ def stages_streams_large(prog):
         check("local: S8 XREAD of 131072 streams with entries stalls PING at most 0.45 s",
               worst <= 0.45 and not wrong, "worst %.3f s" % worst)
         c.close()
+
+        # S10, on a new server with the GC trace of the VM: a pause of the
+        # native VM grows with the objects in the heap, so the hand-over of
+        # the arguments from the reader to the session must not make an
+        # object for each argument. The count of objects does not depend on
+        # the speed of the host, as a time limit does.
+        srv.stop()
+        trace = tempfile.NamedTemporaryFile(prefix="loxpp-redis-gc-", suffix=".trace", delete=False)
+        trace.close()
+        srv = Server(prog, [], env={"LOXPP_GC_TRACE": trace.name})
+        check("streams (S10): server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        c.call("XADD", "one", "1-1", "f", "v")
+        got[0] = c.call("XRANGE", "one", "-", "+", *(["COUNT", "1"] * 524000))
+        c.close()
+        srv.stop()
+        peak = 0
+        with open(trace.name) as f:
+            for line in f:
+                if line.startswith("gc "):
+                    fields = dict(x.split("=", 1) for x in line.split()[1:])
+                    peak = max(peak, int(fields["objs_before"]))
+        os.unlink(trace.name)
+        check("local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection",
+              got[0] == [["1-1", ["f", "v"]]] and 0 < peak <= 400000, "peak %d objects, %r" % (peak, got[0]))
     finally:
         srv.stop()
 
@@ -2194,7 +2224,6 @@ def stages_optimistic_locking(prog):
         got1, got2 = a.call("EXEC"), c2.call("EXEC")
         check("local: a write marks every client that watches the key",
               got1 is None and got2 is None, "%r %r" % (got1, got2))
-        c2.close()
 
         # A client that goes while it watches keys ends its tasks.
         def clients_now():
@@ -2203,7 +2232,13 @@ def stages_optimistic_locking(prog):
                 if line.startswith("connected_clients:"):
                     return int(line.split(":")[1])
             return -1
-        base = clients_now()
+        # The server ends the tasks of c2 a little after the close, so the
+        # count before the next client is the count with c2, less one.
+        base = clients_now() - 1
+        c2.close()
+        deadline = time.time() + 5
+        while time.time() < deadline and clients_now() != base:
+            time.sleep(0.05)
         gone = srv.client()
         gone.send_raw(encode("WATCH", *["g%d" % i for i in range(5000)]))
         gone.try_read(5)

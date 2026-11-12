@@ -286,5 +286,13 @@
   "cases": [
    "local: T3 EXEC of 10000 XADD with 400 readers above the top stalls PING at most 0.5 s"
   ]
+ },
+ {
+  "name": "the hand-over makes one cell for each argument",
+  "old": "    while (i >= n - n % 8) {",
+  "new": "    while (i >= 0) {",
+  "cases": [
+   "local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection"
+  ]
  }
 ]
