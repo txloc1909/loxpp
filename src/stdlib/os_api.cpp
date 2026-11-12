@@ -149,6 +149,9 @@ static Value existsNative(int /*argc*/, Value* argv) {
     if (stringHoldsNul(p, "exists")) {
         return from<bool>(false);
     }
+    if (p.empty()) {
+        return from<bool>(false);
+    }
     std::error_code ec;
     return from<bool>(std::filesystem::exists(std::filesystem::path(p), ec));
 }
@@ -159,6 +162,9 @@ static Value isDirNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     if (stringHoldsNul(p, "is_dir")) {
+        return from<bool>(false);
+    }
+    if (p.empty()) {
         return from<bool>(false);
     }
     std::error_code ec;
@@ -174,6 +180,9 @@ static Value isFileNative(int /*argc*/, Value* argv) {
     if (stringHoldsNul(p, "is_file")) {
         return from<bool>(false);
     }
+    if (p.empty()) {
+        return from<bool>(false);
+    }
     std::error_code ec;
     return from<bool>(
         std::filesystem::is_regular_file(std::filesystem::path(p), ec));
@@ -185,6 +194,9 @@ static Value statNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     if (stringHoldsNul(p, "stat")) {
+        return from<Nil>(Nil{});
+    }
+    if (p.empty()) {
         return from<Nil>(Nil{});
     }
     std::filesystem::path fs(p);

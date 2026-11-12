@@ -1,0 +1,9 @@
+// An empty path names no file, so open in mode "r" raises the runtime error its
+// section gives for a file it cannot open (spec/05-stdlib.md, Strings the host
+// reads). A consumer that resolves the empty path to the working directory opens
+// that directory in mode "r" and goes on.
+// STATUS: error
+// CHECK: before
+// COVERS: host-string open
+print "before";
+open("", "r");

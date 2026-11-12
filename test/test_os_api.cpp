@@ -453,6 +453,28 @@ TEST_F(OsApiTest, Mkdir_EmptyPath_IsADirectoryError) {
     EXPECT_EQ(stringify(h.lastResult()), "DirectoryError");
 }
 
+TEST_F(OsApiTest, EmptyPath_MetadataCalls_NameNothing) {
+    // An empty path names no file or directory (spec/05-stdlib.md, Strings
+    // the host reads), so no answer depends on what the host makes of an
+    // empty name.
+    VMTestHarness h;
+    ASSERT_EQ(h.run("var k = true; k = exists(\"\"); k;"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "false");
+    ASSERT_EQ(h.run("var k = true; k = is_dir(\"\"); k;"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "false");
+    ASSERT_EQ(h.run("var k = true; k = is_file(\"\"); k;"),
+              InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "false");
+    ASSERT_EQ(h.run("var k = 1; k = stat(\"\"); k;"), InterpretResult::OK);
+    EXPECT_EQ(stringify(h.lastResult()), "nil");
+}
+
+TEST_F(OsApiTest, EmptyPath_Open_IsARuntimeError) {
+    // open() of an empty path is the runtime error of a file it cannot open.
+    VMTestHarness h;
+    EXPECT_EQ(h.run("open(\"\", \"r\");"), InterpretResult::RUNTIME_ERROR);
+}
+
 TEST_F(OsApiTest, Mkdir_PathWithNul_RuntimeError) {
     VMTestHarness h;
     // A NUL would end the path at the C library call, so the call would make a
