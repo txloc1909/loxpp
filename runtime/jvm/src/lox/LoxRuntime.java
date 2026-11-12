@@ -423,8 +423,8 @@ public final class LoxRuntime {
                 if (!(args[0] instanceof String)) {
                     throw new LoxError("Expected a string argument.");
                 }
-                return System.getenv(
-                    (String)args[0]); // null -> Lox nil, matching getenv(3)
+                // null -> Lox nil, matching getenv(3)
+                return System.getenv(requireName("env", (String)args[0]));
             }));
         globals.define(
             "exit", new LoxNative("exit", 1, args -> {
@@ -540,17 +540,16 @@ public final class LoxRuntime {
                                parents = true;
                            }
                            try {
-                               // An empty path names no directory. The JDK
-                               // resolves it to the working directory and
-                               // creates that, which no other consumer does.
-                               // A path the JDK refuses outright names no
-                               // directory either.
-                               if (path.isEmpty() || p == null) {
+                               // A path that names no directory — the empty
+                               // path, which the JDK would resolve to the
+                               // working directory, and a path the JDK
+                               // refuses — is a DirectoryError as any other
+                               // path the call cannot create (spec/05-stdlib.md,
+                               // mkdir).
+                               if (p == null) {
                                    throw new java.nio.file.NoSuchFileException(
                                        path, null,
-                                       path.isEmpty()
-                                           ? "the path is empty"
-                                           : "the path cannot be resolved");
+                                       "the path names no directory");
                                }
                                if (parents) {
                                    Files.createDirectories(p);
@@ -571,29 +570,35 @@ public final class LoxRuntime {
         globals.define(
             "connect",
             new LoxNative("connect", 2,
-                          args -> LoxSocket.connect(requireString(args[0]),
-                                                    requirePort(args[1], 1))));
+                          args -> LoxSocket.connect(
+                              requireName("connect", requireString(args[0])),
+                              requirePort(args[1], 1))));
         globals.define(
             "connect_within",
             new LoxNative("connect_within", 3,
-                          args -> LoxSocket.connect(requireString(args[0]),
-                                                    requirePort(args[1], 1),
-                                                    requireLimitNanos(args[2]))));
+                          args -> LoxSocket.connect(
+                              requireName("connect_within",
+                                          requireString(args[0])),
+                              requirePort(args[1], 1),
+                              requireLimitNanos(args[2]))));
         globals.define(
             "listen",
             new LoxNative("listen", 2,
-                          args -> LoxServer.listen(requireString(args[0]),
-                                                   requirePort(args[1], 0))));
+                          args -> LoxServer.listen(
+                              requireName("listen", requireString(args[0])),
+                              requirePort(args[1], 0))));
         globals.define(
             "spawn",
             new LoxNative("spawn", 2,
-                          args -> LoxProcess.spawn(requireString(args[0]),
-                                                   requireStringList(args[1]))));
+                          args -> LoxProcess.spawn(
+                              requireName("spawn", requireString(args[0])),
+                              requireStringList(args[1]))));
         globals.define(
             "run",
             new LoxNative("run", 2,
-                          args -> LoxProcess.run(requireString(args[0]),
-                                                 requireStringList(args[1]))));
+                          args -> LoxProcess.run(
+                              requireName("run", requireString(args[0])),
+                              requireStringList(args[1]))));
     }
 
     private static String requireString(Object v) {
@@ -604,20 +609,37 @@ public final class LoxRuntime {
     }
 
     /**
+     * Refuses a String that the host would read only up to its first NUL byte
+     * (spec/05-stdlib.md, Strings the host reads): a name, a program, or a
+     * host. Such a String would name a shorter, different thing, so it is the
+     * spec's halting fault on every consumer.
+     */
+    static String requireName(String function, String value) {
+        if (value.indexOf('\0') >= 0) {
+            throw new LoxError(
+                function + "() argument must not contain a NUL byte.");
+        }
+        return value;
+    }
+
+    /**
      * Resolves a path String for a filesystem native (spec/05-stdlib.md,
-     * Paths).
+     * Strings the host reads).
      *
      * A String that holds a NUL byte cannot name a path on any consumer, so
      * it is the spec's halting fault, checked before the JDK sees it. A
-     * String the JDK refuses for another reason throws InvalidPathException
-     * at the resolve, which is a RuntimeException no Lox `try` catches; this
-     * returns null for it, and the caller gives it the outcome its own spec
-     * section gives for a path it cannot use.
+     * String that names no file — the empty String, which the JDK resolves to
+     * the working directory, and any String the JDK refuses, which it throws
+     * InvalidPathException for — returns null, and the caller gives it the
+     * outcome its own spec section gives for a path it cannot use.
      */
     static Path resolvePath(String function, String path) {
         if (path.indexOf('\0') >= 0) {
             throw new LoxError(
-                function + "() path must not contain a NUL byte.");
+                function + "() argument must not contain a NUL byte.");
+        }
+        if (path.isEmpty()) {
+            return null;
         }
         try {
             return Paths.get(path);

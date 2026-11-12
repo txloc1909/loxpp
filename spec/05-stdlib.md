@@ -344,6 +344,9 @@ print args();   // [alpha, beta]
 Returns the value of the environment variable `name` as a String. Returns `nil`
 if the variable is not defined.
 
+A `name` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
+
 **Arity:** 1  
 **Returns:** String on success, Nil if undefined
 
@@ -400,18 +403,41 @@ returns at once, with no suspension.
 
 ---
 
-## Paths
+## Strings the host reads
 
-`exists`, `is_dir`, `is_file`, `stat`, `mkdir`, and `open` each take a
-`path`. The String names a file or directory only when every byte of it
-reaches the host: the interfaces a host offers to the file system read a path
-only up to its first NUL byte, so a path that holds one would name a shorter
-path, which the program cannot name back and did not ask for. A `path` that
-holds a NUL byte is therefore a runtime error, and the call reaches no file
-or directory and changes none. It is a halting fault
+Some calls take a String that names something outside the program, and the
+host reads that String to find the thing. The table lists every such
+argument.
+
+| Call | Argument | Names |
+|---|---|---|
+| `exists(path)`, `is_dir(path)`, `is_file(path)`, `stat(path)`, `mkdir(path)`, `open(path, mode)` | `path` | a file or a directory |
+| `env(name)` | `name` | an environment variable |
+| `spawn(program, args)`, `run(program, args)` | `program` | a program to start |
+| `connect(host, port)`, `connect_within(host, port, seconds)`, `listen(host, port)` | `host` | a host |
+
+The String names the thing only when every byte of it reaches the host: the
+interfaces a host offers to its file system, its environment, its processes,
+and its network read such a String only up to its first NUL byte, so a String
+that holds one would name a shorter, different thing, which the program
+cannot name back and did not ask for. A String that holds a NUL byte is
+therefore a runtime error, and the call reaches nothing outside the program
+and changes nothing. It is a halting fault
 ([§04-semantics, Halting Faults](04-semantics.md#halting-faults)).
 
-A path a host refuses for any other reason — a name too long for its file
+A NUL byte is not one of the failures each call gives its own section for, so
+it is not the catchable `NetworkError` that `connect`, `connect_within`, and
+`listen` raise when a name resolves to no address or a connection fails: the
+call refuses the String before it asks the host, and a `try` that catches
+`NetworkError` does not catch this fault
+([Conformance](README.md#conformance), Host-name resolution).
+
+An empty String names no thing, and each call gives that the outcome its own
+section gives for the thing it cannot find: `exists`, `is_dir`, and `is_file`
+return `false`, `stat` returns `nil`, `mkdir` raises `DirectoryError`, and
+`open` raises the runtime error its section gives for a file it cannot open.
+
+A `path` a host refuses for any other reason — a name too long for its file
 system, for example — is not a fault of the argument. Each function above
 gives it the outcome its own section gives for a path it cannot use:
 `exists`, `is_dir`, and `is_file` return `false`, `stat` returns `nil`,
@@ -424,7 +450,8 @@ section gives for a file it cannot open.
 
 Returns `true` if the file or directory at `path` exists.
 
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 1  
 **Returns:** Bool
@@ -435,7 +462,8 @@ A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 Returns `true` if `path` exists and is a directory.
 
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 1  
 **Returns:** Bool
@@ -446,7 +474,8 @@ A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
 
 Returns `true` if `path` exists and is a regular file.
 
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 1  
 **Returns:** Bool
@@ -467,7 +496,8 @@ does not exist. The Map contains the following keys:
 The precision of `mtime` is not part of the contract; an implementation may
 report whole seconds, milliseconds, or finer.
 
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 1  
 **Returns:** Map on success, Nil if `path` does not exist
@@ -494,7 +524,8 @@ for any other reason — the call raises a catchable fault of kind
 `DirectoryError` ([§04-semantics, Runtime
 Errors](04-semantics.md#runtime-errors)). An empty `path` names no
 directory, so it raises the same fault.
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 ```lox
 mkdir("/tmp/loxpp-cache/objects", "p");   // makes /tmp/loxpp-cache too
@@ -526,7 +557,8 @@ Strings; any other type is a runtime error.
 
 Any other mode string is a runtime error. If the file cannot be opened, for
 example a missing file in mode `"r"`, `open` raises a runtime error.
-A `path` that holds a NUL byte is a runtime error (see [Paths](#paths)).
+A `path` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 2  
 **Returns:** File
@@ -614,6 +646,9 @@ Host-name resolution). So is the order in which the call tries the addresses
 of a name that names more than one, and which of them it reports the failure
 of. What that failure raises is not: it is the `NetworkError` above.
 
+A `host` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
+
 The call suspends its task while it waits for the connection. When `host` is a
 host name, the worker blocks while the name resolves, and then the task
 suspends to wait for the connection. When `host` is a numeric address, no
@@ -640,6 +675,9 @@ has its own limit on a connection attempt, and this specification does not bind
 that limit. Whether `seconds` covers the time to resolve a host name is
 implementation-defined.
 
+A `host` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
+
 **Arity:** 3  
 **Returns:** Socket  
 **Suspends:** yes
@@ -664,6 +702,9 @@ Host-name resolution). When a name names more than one address, so is the
 address that the call binds; it binds one of them, or raises the
 `NetworkError` above.
 
+A `host` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
+
 **Arity:** 2  
 **Returns:** Server
 
@@ -679,6 +720,9 @@ program name itself.
 No shell runs between the program and the child. `program` is executed
 directly, and the operating system's own search path is used when it is not an
 absolute path.
+
+A `program` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 A failure to start the program is a runtime error. A child that starts and then
 exits with a non-zero status is not an error.
@@ -703,6 +747,9 @@ writes a large amount to both cannot deadlock. `run` does not feed the child
 standard input; it closes the child's standard input at once, so a child that
 reads it sees an end-of-file. A failure to start the program is a runtime
 error. A non-zero exit status is not an error.
+
+A `program` that holds a NUL byte is a runtime error.
+See [Strings the host reads](#strings-the-host-reads).
 
 **Arity:** 2  
 **Returns:** Map  

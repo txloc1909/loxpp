@@ -1,4 +1,5 @@
 #include "process_api.h"
+#include "host_string_arg.h"
 #include "integer_arg.h"
 #include "stdlib_context.h"
 #include "stream_io.h"
@@ -224,6 +225,12 @@ static Value spawnNative(int /*argc*/, Value* argv) {
     if (!asStringArg(argv[0], program)) {
         return from<Nil>(Nil{});
     }
+    // execvp() reads the program name up to its first NUL byte, so a NUL here
+    // would start a different program from the one the program named
+    // (spec/05-stdlib.md, Strings the host reads).
+    if (stringHoldsNul(program, "spawn")) {
+        return from<Nil>(Nil{});
+    }
     std::vector<std::string> args;
     if (!asStringList(argv[1], args)) {
         return from<Nil>(Nil{});
@@ -245,6 +252,9 @@ static Value spawnNative(int /*argc*/, Value* argv) {
 static Value runNative(int /*argc*/, Value* argv) {
     std::string program;
     if (!asStringArg(argv[0], program)) {
+        return from<Nil>(Nil{});
+    }
+    if (stringHoldsNul(program, "run")) {
         return from<Nil>(Nil{});
     }
     std::vector<std::string> args;

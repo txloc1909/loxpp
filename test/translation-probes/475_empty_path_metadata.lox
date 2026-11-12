@@ -1,0 +1,17 @@
+// An empty path names no file, so the metadata calls answer for no file
+// (spec/05-stdlib.md, Strings the host reads). A consumer that resolves the
+// empty path to the working directory, as the JDK does, answers true, true,
+// and a Map instead.
+// STATUS: ok
+// CHECK: false
+// CHECK: false
+// CHECK: false
+// CHECK: true
+// COVERS: host-string exists
+// COVERS: host-string is_dir
+// COVERS: host-string is_file
+// COVERS: host-string stat
+print exists("");
+print is_dir("");
+print is_file("");
+print stat("") == nil;

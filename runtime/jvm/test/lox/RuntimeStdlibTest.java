@@ -286,7 +286,7 @@ public final class RuntimeStdlibTest {
 
             // A path that holds a NUL byte names a shorter path at the JDK
             // too, and Paths.get() refuses one with an InvalidPathException
-            // that no Lox try catches (spec/05-stdlib.md, Paths; issue #1158).
+            // that no Lox try catches (spec/05-stdlib.md, Strings the host reads; issue #1158).
             // A metadata call that passed the String through would answer
             // with the shorter path's result instead.
             String nulFile = tmpFile.getAbsolutePath() + "\u0000tail";
@@ -295,6 +295,35 @@ public final class RuntimeStdlibTest {
             checkHalting(() -> call(globals, "is_dir", nulDir), "is_dir() rejects a NUL byte");
             checkHalting(() -> call(globals, "is_file", nulFile), "is_file() rejects a NUL byte");
             checkHalting(() -> call(globals, "stat", nulFile), "stat() rejects a NUL byte");
+
+            // An empty path names no file (spec/05-stdlib.md, Strings the host
+            // reads; issue #1220). The JDK resolves it to the working
+            // directory, which no other consumer does.
+            check(Boolean.FALSE.equals(call(globals, "exists", "")),
+                  "exists(\"\") is false");
+            check(Boolean.FALSE.equals(call(globals, "is_dir", "")),
+                  "is_dir(\"\") is false");
+            check(Boolean.FALSE.equals(call(globals, "is_file", "")),
+                  "is_file(\"\") is false");
+            check(call(globals, "stat", "") == null, "stat(\"\") is nil");
+
+            // A name, a program, or a host that holds a NUL byte is the same
+            // halting fault (spec/05-stdlib.md, Strings the host reads; issue
+            // #1217). None of these may reach the environment, a child
+            // process, or the network.
+            String nulTail = "\u0000tail";
+            checkHalting(() -> call(globals, "env", "PATH" + nulTail),
+                         "env() rejects a NUL byte");
+            checkHalting(() -> call(globals, "spawn", "/bin/echo" + nulTail, listOf()),
+                         "spawn() rejects a NUL byte");
+            checkHalting(() -> call(globals, "run", "/bin/echo" + nulTail, listOf()),
+                         "run() rejects a NUL byte");
+            checkHalting(() -> call(globals, "connect", "127.0.0.1" + nulTail, 1.0),
+                         "connect() rejects a NUL byte");
+            checkHalting(() -> call(globals, "connect_within", "127.0.0.1" + nulTail, 1.0, 1.0),
+                         "connect_within() rejects a NUL byte");
+            checkHalting(() -> call(globals, "listen", "127.0.0.1" + nulTail, 0.0),
+                         "listen() rejects a NUL byte");
 
             check(call(globals, "mkdir", tmpDir.getAbsolutePath() + "/one") == null,
                     "mkdir() creates one directory and returns nil");

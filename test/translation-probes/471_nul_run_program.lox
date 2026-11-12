@@ -1,0 +1,8 @@
+// A program that holds a NUL byte is a runtime error for run
+// (spec/05-stdlib.md, Strings the host reads). A consumer that starts the
+// shorter program prints its output and exits 0.
+// STATUS: error
+// CHECK: before
+// COVERS: host-string run
+print "before";
+run("/bin/echo" + chr(0) + "tail", []);

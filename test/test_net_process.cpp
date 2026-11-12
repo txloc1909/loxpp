@@ -767,3 +767,54 @@ TEST(NetProcessTest, ReadlinesOfOneLongLineHoldsNoExtraCopy) {
     EXPECT_LT(many, one + kLongLine / 2)
         << "readline peak " << one << ", readlines peak " << many;
 }
+
+// ---------------------------------------------------------------------------
+// A String the host reads that holds a NUL byte (spec/05-stdlib.md, Strings
+// the host reads; issue #1217). getaddrinfo() and execvp() read such a String
+// only up to the NUL, so an unchecked call would reach a different host from
+// the one the program named, or start a different program.
+// ---------------------------------------------------------------------------
+
+TEST(NetProcessTest, Connect_HostWithNul_RuntimeError) {
+    VMTestHarness h;
+    // A connection to port 1 is refused, and the catchable NetworkError of
+    // that failure is also a runtime error, so only the try form can tell the
+    // halting fault from a catchable one.
+    EXPECT_EQ(h.run("try { connect(\"127.0.0.1\" + chr(0) + \"tail\", 1); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, ConnectWithin_HostWithNul_RuntimeError) {
+    VMTestHarness h;
+    // As above: only the try form can tell the halting fault from the
+    // catchable NetworkError of a connection that fails anyway.
+    EXPECT_EQ(
+        h.run("try { connect_within(\"127.0.0.1\" + chr(0) + \"tail\", 1, "
+              "1); } catch (e) { print e.kind; }"),
+        InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, Listen_HostWithNul_RuntimeError) {
+    VMTestHarness h;
+    // The fault comes before any socket binds, so nothing holds a port.
+    EXPECT_EQ(h.run("listen(\"127.0.0.1\" + chr(0) + \"tail\", 0);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, Spawn_ProgramWithNul_RuntimeError) {
+    VMTestHarness h;
+    EXPECT_EQ(h.run("spawn(\"/bin/echo\" + chr(0) + \"tail\", []);"),
+              InterpretResult::RUNTIME_ERROR);
+}
+
+TEST(NetProcessTest, Run_ProgramWithNul_RuntimeError) {
+    VMTestHarness h;
+    // The child would print "hi" if the call ran /bin/echo, so a `try` that
+    // caught the fault and went on would still show up in the result.
+    EXPECT_EQ(h.run("run(\"/bin/echo\" + chr(0) + \"tail\", [\"hi\"]);"),
+              InterpretResult::RUNTIME_ERROR);
+    EXPECT_EQ(h.run("try { run(\"/bin/echo\" + chr(0) + \"tail\", [\"hi\"]); } "
+                    "catch (e) { print e.kind; }"),
+              InterpretResult::RUNTIME_ERROR);
+}

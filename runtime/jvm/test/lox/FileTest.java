@@ -55,7 +55,7 @@ public final class FileTest {
         // A path that holds a NUL byte names a shorter path at the JDK, so an
         // unchecked open(path + "\0tail", "w") would truncate the shorter
         // file and report that it opened the path the program named
-        // (spec/05-stdlib.md, Paths; issue #1158).
+        // (spec/05-stdlib.md, Strings the host reads; issue #1158).
         File shorter = File.createTempFile("lox-rt-file-nul", ".txt");
         shorter.deleteOnExit();
         Files.write(shorter.toPath(),

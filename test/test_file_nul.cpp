@@ -199,7 +199,8 @@ TEST(FileNul, ReadlinesEmptyFileReturnsEmptyList) {
 TEST(FileNul, OpenPathWithNulHaltsAndKeepsTheShorterFile) {
     // A path that holds a NUL byte names only its text up to the NUL at the C
     // library call, so an unchecked open() in mode "w" would truncate that
-    // shorter file and report success (spec/05-stdlib.md, Paths).
+    // shorter file and report success (spec/05-stdlib.md, Strings the host
+    // reads).
     std::string path = "test_file_nul_open_shorter.bin";
     ASSERT_TRUE(write_test_file(path, "keep me"));
 

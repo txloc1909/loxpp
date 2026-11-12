@@ -1,9 +1,9 @@
 // A path that holds a NUL byte is a runtime error for stat
-// (spec/05-stdlib.md, Paths). A consumer that truncates the String returns
+// (spec/05-stdlib.md, Strings the host reads). A consumer that truncates the String returns
 // nil, as for a path that does not exist, so a program cannot tell that it
 // asked for another path.
 // STATUS: error
 // CHECK: before
-// COVERS: path stat
+// COVERS: host-string stat
 print "before";
 print stat("/tmp/loxpp_probe_nul_stat" + chr(0) + "tail");

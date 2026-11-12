@@ -1,0 +1,11 @@
+// A host that holds a NUL byte is a runtime error for connect
+// (spec/05-stdlib.md, Strings the host reads): getaddrinfo() reads the name
+// only up to the NUL, so the call would connect to a different host. The
+// listener makes that difference visible: a consumer that truncates the String
+// connects to it, and the program then exits 0.
+// STATUS: error
+// CHECK: before
+// COVERS: host-string connect
+print "before";
+var l = listen("127.0.0.1", 0);
+connect("127.0.0.1" + chr(0) + "tail", l.port());
