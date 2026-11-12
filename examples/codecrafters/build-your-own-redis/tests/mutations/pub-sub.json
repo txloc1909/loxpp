@@ -273,8 +273,8 @@
  },
  {
   "name": "CONFIG in subscribed mode is named config",
-  "old": "        return wrongArgs(lower(name) + \"|\" + sub);",
-  "new": "        return wrongArgs(lower(name));",
+  "old": "        shown = shown + \"|\" + lower(argv[1]);\n",
+  "new": "",
   "cases": [
    "local: in subscribed mode CONFIG GET gives the error of Redis"
   ]
