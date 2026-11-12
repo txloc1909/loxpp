@@ -350,5 +350,13 @@
   "cases": [
    "local: a message that came before PING ran goes before the pong"
   ]
+ },
+ {
+  "name": "the arity error of a CONFIG subcommand is named config",
+  "old": "        return wrongArgs(lower(name) + \"|\" + sub);",
+  "new": "        return wrongArgs(lower(name));",
+  "cases": [
+   "local: in subscribed mode CONFIG GET with no name gives the error of Redis"
+  ]
  }
 ]

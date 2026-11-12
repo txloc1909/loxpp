@@ -941,8 +941,8 @@ have not started and kills the running suites.
 
 `mutate.py --check` runs no suite. It applies the edits of each mutation to
 `redis.lox` and fails when an `old` text is not found exactly once (the
-mutation can no longer run) or a mutation names no case (it cannot be
-killed). CI runs it on every mutation file, so a change to `redis.lox` that
+mutation can no longer run), or a mutation names no case or changes nothing
+(it cannot be killed). CI runs it on every mutation file, so a change to `redis.lox` that
 makes a mutation stale must update that mutation in the same pull request.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the

@@ -18,9 +18,10 @@
 # The lines print in the order of the mutation file, whatever N is.
 #
 # --check runs no suite. It applies the edits of each mutation to the text,
-# as a run does, and exits 1 when an old text is not found exactly once or a
-# mutation names no case. CI runs it: a change to redis.lox that makes a
-# mutation stale fails in the same pull request, not at the next run.
+# as a run does, and exits 1 when an old text is not found exactly once, a
+# mutation names no case, or a mutation changes nothing. CI runs it: a
+# change to redis.lox that makes a mutation stale fails in the same pull
+# request, not at the next run.
 #
 # An interrupt cancels the mutations that have not started and kills the
 # suites that are running, so the script exits at once.
@@ -138,6 +139,9 @@ def check(source, specs):
             elif not m.get("cases"):
                 print("%s: NOCASE %s names no case, so it cannot be killed" % (spec, m["name"]))
                 bad += 1
+            elif all(old == new for old, new in (m.get("edits") or [[m["old"], m["new"]]])):
+                print("%s: NOOP  %s changes nothing, so it cannot be killed" % (spec, m["name"]))
+                bad += 1
     print("%d mutations, %d bad" % (count, bad))
     return bad
 
@@ -148,7 +152,10 @@ def main():
             sys.exit("usage: mutate.py --check <redis.lox> <mutations/GROUP.json>...")
         sys.exit(1 if check(sys.argv[2], sys.argv[3:]) else 0)
     default_jobs = max(1, (os.cpu_count() or 1) // 4)
-    ap = argparse.ArgumentParser(description="Run each mutation of a group against the stage suite.")
+    ap = argparse.ArgumentParser(
+        description="Run each mutation of a group against the stage suite.",
+        epilog="mutate.py --check <redis.lox> <mutations/GROUP.json>... "
+               "checks the mutation texts and runs no suite.")
     ap.add_argument("-j", dest="jobs", type=int, default=default_jobs, metavar="N",
                     help="mutations to run at once (default: %(default)s, a quarter of the CPU cores, rounded down, at least 1)")
     ap.add_argument("loxpp")
