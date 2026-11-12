@@ -9,7 +9,7 @@ that reads as satisfied, and a gate that runs only this script stays green over
 the gap the list claims to record. tools/check_spec_probes.py already rejects
 that shape; this pins the same rule on the sibling tool (#858, #862).
 
-Fifteen cases, each on an explicit program list, so no corpus is walked:
+Sixteen cases, each on an explicit program list, so no corpus is walked:
   1. a name no program has, in --xfail, exits 2 and names the file and the
      entry, and prints no comparison first;
   2. the same name in --oracle-xfail exits 2 the same way;
@@ -47,8 +47,11 @@ Fifteen cases, each on an explicit program list, so no corpus is walked:
      traceback: a setup mistake must not read as a failed case. Two shapes: a
      path that does not exist, and a file that exists and is executable whose
      shebang names a missing interpreter.
+  15. a --exclude list that does not exist, or is not UTF-8, is a misuse: exit
+     2, one line naming the path, and no traceback. A missing --xfail list is
+     still no gap (case 12), so the two flags are pinned apart.
 
-Cases 1 to 6 and 12 run native against itself, so they need no managed
+Cases 1 to 6, 12 and 15 run native against itself, so they need no managed
 toolchain and no runtime jar. Cases 7 to 11 and 13 use a stub script as a
 runner, because they need one side to pass, to fail, or to hang where the other
 side does not. Case 14 gives both tools a path that does not exist, so it needs
@@ -64,7 +67,7 @@ red or a false green.
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all fourteen cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all sixteen cases hold, 1 with a report per failed case otherwise,
 2 when a precondition fails (the probe this script needs is missing, the binary
 path does not exist, or the binary does not run a trivial program and print its
 line), and 125 when the build traces execution so that cases 10 and 11 cannot
@@ -695,6 +698,70 @@ def main() -> int:
                 "Traceback" not in err,
                 f"stderr holds a Python traceback: {err.strip()!r}",
             )
+
+        # Case 15: a missing --exclude list is a misuse (exit 2, names the path,
+        # no traceback). A missing --xfail list is no gap (exit 0, a NOTE). The
+        # two flags read absent files differently on purpose, so both are pinned
+        # here: a later edit cannot make the two lists agree.
+        missing_exclude = work / "no_such_exclude_list.txt"
+        code, out, err = run(args.native, [real_probe], [("--exclude", missing_exclude)])
+        expects(
+            failures,
+            "an absent --exclude list",
+            code == 2,
+            f"exit {code}, expected 2 (a misuse): stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "an absent --exclude list",
+            err.strip().splitlines() == [
+                f"error: cannot read --exclude list {missing_exclude}: "
+                "No such file or directory"
+            ],
+            f"stderr is not the one-line misuse report: {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "an absent --exclude list",
+            "Traceback" not in err,
+            f"stderr holds a Python traceback: {err.strip()!r}",
+        )
+        # An --exclude list that exists but is not UTF-8 is a misuse too, and it
+        # is a different branch of parse_exclude_file from the missing file above.
+        bad_utf8 = work / "bad_utf8_exclude_list.txt"
+        bad_utf8.write_bytes(b"\xff\xfe not_utf8\n")
+        code, out, err = run(args.native, [real_probe], [("--exclude", bad_utf8)])
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
+            code == 2,
+            f"exit {code}, expected 2 (a misuse): stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
+            err.strip().splitlines() == [
+                f"error: cannot read --exclude list {bad_utf8}: not UTF-8 "
+                "(invalid start byte)"
+            ],
+            f"stderr is not the one-line misuse report: {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
+            "Traceback" not in err,
+            f"stderr holds a Python traceback: {err.strip()!r}",
+        )
+        code, out, err = run(args.native, [real_probe], [("--xfail", work / "absent_xfail.txt")])
+        expects(
+            failures,
+            "an absent --xfail list next to an absent --exclude list",
+            code == 0 and "NOTE:" in out,
+            f"exit {code}, expected 0 with a NOTE (an absent xfail list is no gap): "
+            f"stdout {out.strip()!r}, stderr {err.strip()!r}",
+        )
 
         # A file that passes every path check and still cannot be spawned,
         # because the interpreter in its shebang is missing. The kernel fails

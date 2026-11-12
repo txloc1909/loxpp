@@ -451,7 +451,7 @@ if(LOXPP_PYTHON3)
     # explains the run.
     # A dead or ungraded entry is otherwise silent, so a gate that runs only
     # tools/diff_runtimes.py stays green over the gap the entry claims to record.
-    # Cases 1 to 6 and 12 need only the native binary; 7 to 11 and 13 add a stub
+    # Cases 1 to 6, 12 and 15 need only the native binary; 7 to 11 and 13 add a stub
     # runner, and 14 names a path that does not exist, so the test needs no
     # managed toolchain and no jar either way.
     add_test(NAME DiffRuntimesXfailNames
