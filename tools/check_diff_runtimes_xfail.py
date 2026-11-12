@@ -67,7 +67,7 @@ red or a false green.
 Usage:
     tools/check_diff_runtimes_xfail.py --native build/loxpp [--probes DIR]
 
-Exits 0 when all fifteen cases hold, 1 with a report per failed case otherwise,
+Exits 0 when all sixteen cases hold, 1 with a report per failed case otherwise,
 2 when a precondition fails (the probe this script needs is missing, the binary
 path does not exist, or the binary does not run a trivial program and print its
 line), and 125 when the build traces execution so that cases 10 and 11 cannot
@@ -715,8 +715,11 @@ def main() -> int:
         expects(
             failures,
             "an absent --exclude list",
-            f"{missing_exclude}" in err,
-            f"stderr does not name the missing list: {err.strip()!r}",
+            err.strip().splitlines() == [
+                f"error: cannot read --exclude list {missing_exclude}: "
+                "No such file or directory"
+            ],
+            f"stderr is not the one-line misuse report: {err.strip()!r}",
         )
         expects(
             failures,

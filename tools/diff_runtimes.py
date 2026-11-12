@@ -305,6 +305,9 @@ def parse_exclude_file(path: Path) -> dict[str, str]:
     except OSError as exc:
         print(f"error: cannot read --exclude list {path}: {exc.strerror}", file=sys.stderr)
         sys.exit(2)
+    except UnicodeDecodeError as exc:
+        print(f"error: cannot read --exclude list {path}: not UTF-8 ({exc.reason})", file=sys.stderr)
+        sys.exit(2)
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
