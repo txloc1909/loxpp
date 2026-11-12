@@ -47,8 +47,8 @@ Sixteen cases, each on an explicit program list, so no corpus is walked:
      traceback: a setup mistake must not read as a failed case. Two shapes: a
      path that does not exist, and a file that exists and is executable whose
      shebang names a missing interpreter.
-  15. a --exclude list that does not exist is a misuse: exit 2, names the path,
-     and no traceback. A missing --xfail list is still no gap (case 12), so the
+  15. a --exclude list that does not exist, or is not UTF-8, is a misuse: exit
+     2, one line naming the path, and no traceback. A missing --xfail list is still no gap (case 12), so the
      two flags are pinned apart.
 
 Cases 1 to 6, 12 and 15 run native against itself, so they need no managed
@@ -724,6 +724,33 @@ def main() -> int:
         expects(
             failures,
             "an absent --exclude list",
+            "Traceback" not in err,
+            f"stderr holds a Python traceback: {err.strip()!r}",
+        )
+        # An --exclude list that exists but is not UTF-8 is a misuse too, and it
+        # is a different branch of parse_exclude_file from the missing file above.
+        bad_utf8 = work / "bad_utf8_exclude_list.txt"
+        bad_utf8.write_bytes(b"\xff\xfe not_utf8\n")
+        code, out, err = run(args.native, [real_probe], [("--exclude", bad_utf8)])
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
+            code == 2,
+            f"exit {code}, expected 2 (a misuse): stdout {out.strip()!r}, "
+            f"stderr {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
+            err.strip().splitlines() == [
+                f"error: cannot read --exclude list {bad_utf8}: not UTF-8 "
+                "(invalid start byte)"
+            ],
+            f"stderr is not the one-line misuse report: {err.strip()!r}",
+        )
+        expects(
+            failures,
+            "a non-UTF-8 --exclude list",
             "Traceback" not in err,
             f"stderr holds a Python traceback: {err.strip()!r}",
         )
