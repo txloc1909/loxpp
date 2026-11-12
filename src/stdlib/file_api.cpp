@@ -28,6 +28,40 @@ static ObjFile* checkFile(Value* args, const char* method) {
     return file;
 }
 
+// Reads one line from the stream into `line`, taking the bytes an earlier
+// call read ahead first. Returns false at the end of the input, where `line`
+// is left empty. A trailing line with no newline still counts as a line.
+static bool readStreamLine(ObjFile* file, std::string& line) {
+    std::string& buf = file->inbuf;
+    size_t scanned = 0;
+    size_t nl = std::string::npos;
+    char chunk[4096];
+    while (true) {
+        nl = buf.find('\n', scanned);
+        if (nl != std::string::npos) {
+            break;
+        }
+        scanned = buf.size();
+        size_t got = std::fread(chunk, 1, sizeof(chunk), file->handle);
+        if (got == 0) {
+            break;
+        }
+        buf.append(chunk, got);
+    }
+    if (buf.empty()) {
+        return false;
+    }
+    if (nl != std::string::npos) {
+        line.assign(buf, 0, nl);
+        buf.erase(0, nl + 1);
+    } else {
+        // No newline left: the rest of the input is the last line.
+        line.swap(buf);
+        buf.clear();
+    }
+    return true;
+}
+
 static Value fileReadNative(int /*argc*/, Value* args) {
     ObjFile* file = checkFile(args, "read");
     if (!file) {
@@ -38,6 +72,7 @@ static Value fileReadNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     std::string buf;
+    buf.swap(file->inbuf); // bytes an earlier readline read ahead
     char chunk[4096];
     size_t got;
     while ((got = std::fread(chunk, 1, sizeof(chunk), file->handle)) > 0) {
@@ -56,28 +91,7 @@ static Value fileReadlineNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     std::string line;
-    char chunk[4096];
-    bool sawByte = false;
-    while (true) {
-        size_t got = std::fread(chunk, 1, sizeof(chunk), file->handle);
-        if (got == 0) {
-            break;
-        }
-        sawByte = true;
-        size_t i = 0;
-        while (i < got) {
-            if (chunk[i] == '\n') {
-                line.append(chunk, i);
-                long offset = static_cast<long>(i + 1) - static_cast<long>(got);
-                std::fseek(file->handle, offset, SEEK_CUR);
-                return Value{static_cast<Obj*>(
-                    getActiveMM()->makeString(std::move(line)))};
-            }
-            i++;
-        }
-        line.append(chunk, got);
-    }
-    if (!sawByte) {
+    if (!readStreamLine(file, line)) {
         return from<Nil>(Nil{});
     }
     return Value{static_cast<Obj*>(getActiveMM()->makeString(std::move(line)))};
@@ -95,44 +109,31 @@ static Value fileReadlinesNative(int /*argc*/, Value* args) {
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
-    char chunk[4096];
     std::string line;
-    auto flush = [&]() {
+    while (readStreamLine(file, line)) {
         ObjString* s = mm->makeString(line);
         // Protect s across push_back, which can GC on vector resize.
         mm->pushTempRoot(s);
         list->elements.push_back(Value{static_cast<Obj*>(s)});
         mm->popTempRoot();
-        line.clear();
-    };
-    bool sawByte = false;
-    while (true) {
-        size_t got = std::fread(chunk, 1, sizeof(chunk), file->handle);
-        if (got == 0) {
-            break;
-        }
-        sawByte = true;
-        size_t i = 0;
-        while (i < got) {
-            if (chunk[i] == '\n') {
-                line.append(chunk, i);
-                flush();
-                long offset = static_cast<long>(i + 1) - static_cast<long>(got);
-                std::fseek(file->handle, offset, SEEK_CUR);
-                break;
-            }
-            i++;
-        }
-        if (i == got) {
-            line.append(chunk, got);
-        }
-    }
-    if (!line.empty()) {
-        flush(); // trailing line with no newline
     }
     mm->popTempRoot();
-    // Return empty list for empty file (sawByte == false), not nil.
+    // An empty file gives an empty list, not nil.
     return Value{static_cast<Obj*>(list)};
+}
+
+// Puts back the bytes a readline or readlines read past, so that a write
+// lands where the program's reads stopped. The call also serves the rule C
+// gives an update stream: input may not go directly to output without a file
+// positioning call. A File opened for writing alone has neither, and a
+// stream that cannot seek cannot hold read-ahead bytes because it can only be
+// opened for reading.
+static void prepareWrite(ObjFile* file) {
+    if (!file->readable) {
+        return;
+    }
+    std::fseek(file->handle, -static_cast<long>(file->inbuf.size()), SEEK_CUR);
+    file->inbuf.clear();
 }
 
 static Value fileWriteNative(int /*argc*/, Value* args) {
@@ -149,6 +150,7 @@ static Value fileWriteNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* s = asObjString(as<Obj*>(args[0]));
+    prepareWrite(file);
     std::fwrite(s->chars.data(), 1, s->chars.size(), file->handle);
     return from<Nil>(Nil{});
 }
@@ -167,6 +169,7 @@ static Value fileWritelineNative(int /*argc*/, Value* args) {
         return from<Nil>(Nil{});
     }
     auto* s = asObjString(as<Obj*>(args[0]));
+    prepareWrite(file);
     std::fwrite(s->chars.data(), 1, s->chars.size(), file->handle);
     std::fputc('\n', file->handle);
     return from<Nil>(Nil{});

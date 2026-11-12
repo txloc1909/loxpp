@@ -573,6 +573,11 @@ A read method on a File that is not open for reading, and a write method on a
 File that is not open for writing, are runtime errors. Every method except
 `close`, called on a closed File, is a runtime error.
 
+A read method continues where the last read method on that File stopped. This
+holds also on a path that cannot seek, such as a FIFO or a pipe: the File
+keeps the bytes that it read past the line it returned, and the next call
+returns them.
+
 ### `f.read() → String`
 
 Reads the rest of the file content and returns it as one String.
