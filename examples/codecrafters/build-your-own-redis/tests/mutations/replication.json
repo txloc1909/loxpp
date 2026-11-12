@@ -49,8 +49,8 @@
  },
  {
   "name": "writes are not propagated",
-  "old": "    // During the replay aofOn is still false, so the replay adds nothing.\n    if (len(replicas) == 0 and !aofOn) {",
-  "new": "    // During the replay aofOn is still false, so the replay adds nothing.\n    if (true) {",
+  "old": "    if (!replicating()) {\n        return;\n    }",
+  "new": "    if (true) {\n        return;\n    }",
   "cases": [
    "replication-11 the writes reach the replica, in order"
   ]
@@ -73,8 +73,8 @@
  },
  {
   "name": "XADD propagates *",
-  "old": "    replicate([\"XADD\", key, idText(id.ms, id.seq)], stream.fields[stream.size() - 1]);",
-  "new": "    replicate(argv, nil);",
+  "old": "        replicate([\"XADD\", key, text], stream.fields[stream.size() - 1]);",
+  "new": "        replicate(argv, nil);",
   "cases": [
    "local: XADD * is propagated with the ID that the master gave"
   ]

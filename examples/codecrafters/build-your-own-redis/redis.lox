@@ -1351,6 +1351,9 @@ class Stream {
         this.ms = [];
         this.seq = [];
         this.fields = [];
+        // During EXEC, the index of the first entry that the EXEC added, or
+        // -1 (see readyStreamKeys).
+        this.readyFirst = -1;
     }
 
     size() {
@@ -1435,20 +1438,37 @@ fun cmdType(ctx, argv) {
     return simple(entry.kind);
 }
 
-// The ID of a new entry, from the ID argument of XADD and the top ID of the
-// stream. Returns a StreamId, or an error reply.
-fun nextStreamId(text, topMs, topSeq) {
-    if (text == "*") {
+// The ID argument of XADD, parsed with no key: "*" (auto), an explicit ID
+// (seq is a number, or "*"; a missing seq is 0), or an error reply. The session runs it
+// before the command, also when MULTI queues the command, so EXEC parses
+// no ID.
+fun parseXadd(argv, mayYield) {
+    if (len(argv) < 5 or len(argv) % 2 == 0) {
+        return wrongArgs("xadd");
+    }
+    if (argv[2] == "*") {
+        return "*";
+    }
+    var id = parseStreamId(argv[2], true);
+    if (id == nil) {
+        return INVALID_ID;
+    }
+    if (id.seq == nil) {
+        id.seq = 0;
+    }
+    return id;
+}
+
+// The ID of a new entry, from a result of parseXadd that is not an error and
+// the top ID of the stream. Returns a StreamId, or an error reply. It
+// returns an explicit id itself, which only this command reads.
+fun nextParsedId(id, topMs, topSeq) {
+    if (id == "*") {
         var now = nowMs();
-        now = now - now % 1;
         if (now > topMs) {
             return StreamId(now, 0);
         }
         return StreamId(topMs, topSeq + 1);
-    }
-    var id = parseStreamId(text, true);
-    if (id == nil) {
-        return INVALID_ID;
     }
     if (id.seq == "*") {
         if (id.ms < topMs) {
@@ -1459,22 +1479,22 @@ fun nextStreamId(text, topMs, topSeq) {
         }
         return StreamId(id.ms, 0);
     }
-    var seq = id.seq;
-    if (seq == nil) {
-        seq = 0;
-    }
-    if (id.ms == 0 and seq == 0) {
+    if (id.ms == 0 and id.seq == 0) {
         return ID_ZERO;
     }
-    if (id.ms < topMs or (id.ms == topMs and seq <= topSeq)) {
+    if (id.ms < topMs or (id.ms == topMs and id.seq <= topSeq)) {
         return ID_NOT_ABOVE_TOP;
     }
-    return StreamId(id.ms, seq);
+    return id;
 }
 
 fun cmdXadd(ctx, argv) {
+    var parsed = ctx;
+    if (parsed == nil) {
+        parsed = parseXadd(argv, false);
+    }
     if (len(argv) < 5 or len(argv) % 2 == 0) {
-        return wrongArgs("xadd");
+        return parsed;
     }
     var key = argv[1];
     var stream = streamEntry(key);
@@ -1483,11 +1503,14 @@ fun cmdXadd(ctx, argv) {
     }
     var topMs = 0;
     var topSeq = 0;
-    if (stream != nil) {
-        topMs = stream.topMs();
-        topSeq = stream.topSeq();
+    if (stream != nil and len(stream.ms) > 0) {
+        topMs = stream.ms[len(stream.ms) - 1];
+        topSeq = stream.seq[len(stream.seq) - 1];
     }
-    var id = nextStreamId(argv[2], topMs, topSeq);
+    if (type(parsed) == "String" and parsed != "*") {
+        return parsed;
+    }
+    var id = nextParsedId(parsed, topMs, topSeq);
     if (type(id) == "String") {
         return id;
     }
@@ -1498,9 +1521,12 @@ fun cmdXadd(ctx, argv) {
     stream.add(id.ms, id.seq, argv[3:len(argv)]);
     touch(key);
     // The ID that this server gave, not "*", so the replicas add the same.
-    replicate(["XADD", key, idText(id.ms, id.seq)], stream.fields[stream.size() - 1]);
+    var text = idText(id.ms, id.seq);
+    if (replicating()) {
+        replicate(["XADD", key, text], stream.fields[stream.size() - 1]);
+    }
     streamReady(key, stream);
-    return bulk(idText(id.ms, id.seq));
+    return bulk(text);
 }
 
 // The bounds of an XRANGE argument: "-" is the least ID and "+" the
@@ -1856,10 +1882,12 @@ fun serveReader(w, key, stream, from) {
 // these are nil, and a push serves at once.
 var readyLists = nil;
 var readyListSeen = nil;
+// readyStreamKeys[i] held readyStreamList[i] at the first XADD of this EXEC
+// on that Stream, and the Stream keeps the index of that first new entry in
+// readyFirst. A Stream stays under one key (no command moves it), so one
+// mark on the Stream is one mark for its key, with no Map of marks.
 var readyStreamKeys = nil;
-// key -> StreamMark: the Stream that the key held at the first XADD of this
-// EXEC on it, and the index of that first new entry.
-var readyStreams = nil;
+var readyStreamList = nil;
 
 // During EXEC, how many more list elements the replies of the transaction
 // may copy (LRANGE, LPOP with a count). EXEC keeps every reply until its
@@ -1882,13 +1910,6 @@ fun spendElements(k) {
     return true;
 }
 
-class StreamMark {
-    init(stream, first) {
-        this.stream = stream;
-        this.first = first;
-    }
-}
-
 fun listReady(key) {
     if (readyLists == nil) {
         serveWaiters(key);
@@ -1901,16 +1922,14 @@ fun listReady(key) {
 }
 
 fun streamReady(key, stream) {
-    if (readyStreams == nil) {
+    if (readyStreamKeys == nil) {
         wakeReaders(key, stream, stream.size() - 1);
         return;
     }
-    var mark = readyStreams[key];
-    if (mark == nil) {
+    if (stream.readyFirst == -1) {
+        stream.readyFirst = stream.size() - 1;
         readyStreamKeys.append(key);
-    }
-    if (mark == nil or mark.stream != stream) {
-        readyStreams[key] = StreamMark(stream, stream.size() - 1);
+        readyStreamList.append(stream);
     }
 }
 
@@ -1920,19 +1939,24 @@ fun streamReady(key, stream) {
 fun serveReady() {
     var lists = readyLists;
     var streamKeys = readyStreamKeys;
-    var marks = readyStreams;
+    var streams = readyStreamList;
     readyLists = nil;
     readyListSeen = nil;
     readyStreamKeys = nil;
-    readyStreams = nil;
+    readyStreamList = nil;
     for (var key in lists) {
         serveWaiters(key);
     }
-    for (var key in streamKeys) {
-        var mark = marks[key];
-        if (streamEntry(key) == mark.stream) {
-            wakeReaders(key, mark.stream, mark.first);
+    var i = 0;
+    while (i < len(streams)) {
+        var key = streamKeys[i];
+        var stream = streams[i];
+        var first = stream.readyFirst;
+        stream.readyFirst = -1;
+        if (streamEntry(key) == stream) {
+            wakeReaders(key, stream, first);
         }
+        i = i + 1;
     }
 }
 
@@ -2124,7 +2148,7 @@ fun execQueued(tx) {
     readyLists = [];
     readyListSeen = {};
     readyStreamKeys = [];
-    readyStreams = {};
+    readyStreamList = [];
     var replies = [];
     var i = 0;
     for (var argv in tx.queued) {
@@ -2985,11 +3009,17 @@ fun respLength(parts) {
     return total;
 }
 
+// True when a write goes anywhere: to a replica or to the AOF. During the
+// replay aofOn is still false, so the replay adds nothing. A hot command
+// checks it before it builds the arguments of replicate.
+fun replicating() {
+    return len(replicas) > 0 or aofOn;
+}
+
 // Notes a write for the replicas: head and tail are Lists of arguments,
 // tail can be nil. It runs in the step of the command that writes.
 fun replicate(head, tail) {
-    // During the replay aofOn is still false, so the replay adds nothing.
-    if (len(replicas) == 0 and !aofOn) {
+    if (!replicating()) {
         return;
     }
     if (replInExec) {
@@ -6550,6 +6580,7 @@ var COMMANDS = {
 // Commands whose arguments the session parses before the command runs
 // (rule 5 of the README): the parse reads no key and may yield.
 var PARSERS = {
+    "XADD": parseXadd,
     "XRANGE": parseXrange,
     "XREAD": parseXread,
     "ZADD": parseZadd,

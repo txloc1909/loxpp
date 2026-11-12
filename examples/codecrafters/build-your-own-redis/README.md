@@ -81,10 +81,12 @@ takes the arguments of the command out of its message first (this step
 yields, see rule 2), and the socket write comes after the command. So each
 command is atomic, as in Redis.
 
-Two commands have a step before them: the session parses the arguments of
-`XRANGE` and `XREAD` (`PARSERS`) before the command runs, and yields every
-1024 options or IDs, because one command can hold about 524287 of them. The
-parse reads no key, so the command stays atomic.
+Some commands have a step before them (`PARSERS`): the session parses
+their arguments before the command runs, also when `MULTI` queues the
+command. The parse of `XRANGE` and `XREAD` yields every 1024 options or IDs,
+because one command can hold about 524287 of them. The parse reads no key,
+so the command stays atomic. `XADD` parses its ID there, so `EXEC` parses no ID: in one `EXEC` of 65535 `XADD`, the parse was
+almost half of the step (T7).
 
 ### Lists and BLPOP
 
@@ -754,7 +756,7 @@ ruling on PR #1204. Every stage group keeps them.
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
 | S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
-| T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 200 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 4.28 s) | 0.07 s |
+| T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 400 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 1.0 s; with 200 readers only 0.54 s, too near the limit, #1230) | 0.04 s |
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
 | W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 0.3 s (without the yield of `WATCH`: 0.76–1.13 s) | 0.10 s |
@@ -817,7 +819,7 @@ ruling on PR #1204. Every stage group keeps them.
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
-| T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.60–0.63 s. At 50 readers: 1.91 s, of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
+| T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.40–0.44 s (before #1230: 0.59–0.60 s, about 0.95 s on CI; the readers cost only about 0.03 s, and the rest is the work of each `XADD`). At 50 readers: 1.47–2.02 s (before #1230: 2.27–2.39 s), of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |

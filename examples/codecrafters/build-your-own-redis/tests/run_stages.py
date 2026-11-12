@@ -1708,6 +1708,18 @@ def stages_transactions(prog):
         check("local: an XREAD BLOCK $ reader gets every entry of an EXEC",
               got == [[skey, [["2-1", ["f", "a"]], ["3-1", ["f", "b"]]]]], repr(got))
         reader.close()
+        # The mark of a ready Stream ends with its EXEC, so the next EXEC on
+        # the same Stream serves its reader again.
+        reader = srv.client()
+        reader.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", skey, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", skey, "4-1", "f", "c")
+        c.call("EXEC")
+        got = reader.try_read(3)
+        check("local: a second EXEC on the same stream wakes its reader again",
+              got == [[skey, [["4-1", ["f", "c"]]]]], repr(got))
+        reader.close()
 
         # A key that EXEC pushes to and then replaces wakes nobody.
         key = rand_word()
@@ -1918,18 +1930,18 @@ def stages_transactions_large(prog):
                 time.sleep(0.2)
             return measure_while(srv, run)
 
-        # T3: 200 readers wait above the top, and EXEC adds 10000 entries.
+        # T3: 400 readers wait above the top, and EXEC adds 10000 entries.
         # EXEC passes over the readers once, not once for each XADD.
         c.call("XADD", "t3", "1-1", "f", "v")
         readers = []
-        for _ in range(200):
+        for _ in range(400):
             r = srv.client()
             r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", "t3", "999999999-0"))
             readers.append(r)
         time.sleep(0.5)
         worst, wrong, got = exec_stall(
             [encode("XADD", "t3", "%d-1" % (i + 2), "f", "v") for i in range(10000)])
-        check("local: T3 EXEC of 10000 XADD with 200 readers above the top stalls PING at most 0.5 s",
+        check("local: T3 EXEC of 10000 XADD with 400 readers above the top stalls PING at most 0.5 s",
               worst <= 0.5 and not wrong and isinstance(got, list) and len(got) == 10000,
               "worst %.3f s" % worst)
         for r in readers:
