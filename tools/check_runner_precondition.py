@@ -64,6 +64,8 @@ TOOLS = (
          lambda r: py("check_examples.py") + [r[0], "examples/"]),
     Tool("check_examples_limits.py", 1,
          lambda r: py("check_examples_limits.py") + ["--native", r[0]]),
+    Tool("check_spec_probes_limits.py", 1,
+         lambda r: py("check_spec_probes_limits.py") + ["--native", r[0]]),
     Tool("check_gc_min_heap.py", 1,
          lambda r: py("check_gc_min_heap.py") + [r[0]]),
     Tool("check_gc_sweep_linear.py", 1,

@@ -23,8 +23,11 @@ expected stdout, compared with trailing white space removed.
   stdout lines are exactly the CHECK lines.
 
 A probe that fails by hanging can carry `// TIMEOUT: <seconds>`, which takes
-the place of --timeout for that probe; a run that times out fails. A .lox
-file with no STATUS line is not a spec probe and is not run here.
+the place of --timeout for that probe; a run that times out fails. One rule
+decides both spellings: a finite number of seconds greater than zero and at
+most a day. Any other value is a usage error (exit 2), and a message names
+the probe and the line, or the flag. A .lox file with no STATUS line is not a
+spec probe and is not run here.
 
 A probe never checks stderr. Every report and message is
 implementation-defined, so a `// STDERR:` line is an error (exit 2).
@@ -74,6 +77,7 @@ the program path as its one argument.
 
 import argparse
 import difflib
+import math
 import re
 import subprocess
 import sys
@@ -86,7 +90,14 @@ STATUS_RE = re.compile(r"^\s*//\s*STATUS:\s*(ok|error)\s*$")
 CHECK_RE = re.compile(r"^\s*//\s*CHECK:\s?(.*)$")
 STDERR_RE = re.compile(r"^\s*//\s*STDERR:\s?(.*)$")
 EXIT_RE = re.compile(r"^\s*//\s*EXIT:\s*(-?\d+)\s*$")
-TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:\s*(\d+(?:\.\d+)?)\s*$")
+# The directive takes any value, so one rule decides every spelling: a value
+# that is not a number comes back as nan, and nan is not finite.
+TIMEOUT_RE = re.compile(r"^\s*//\s*TIMEOUT:(.*)$")
+
+# A limit that cannot be given to select(2) or waited for in practice is a
+# mistake. A day is already far past anything a probe wants.
+MAX_TIMEOUT = 86400.0
+
 NOT_BINDING_RE = re.compile(r"^\s*//\s*NOT-BINDING:\s*(\S+)\s+(\S+)\s*$")
 STATIC_ERROR_RE = re.compile(r"^\s*//\s*STATIC-ERROR\s*$")
 
@@ -105,6 +116,19 @@ class SpecProbe:
     static_error: bool = False
 
 
+def timeout_from_text(text: str) -> float:
+    """The seconds a `// TIMEOUT:` value names, or nan when it names none."""
+    try:
+        return float(text.strip())
+    except ValueError:
+        return math.nan
+
+
+def timeout_ok(seconds: float) -> bool:
+    """True for a limit that a run can hold, and that select(2) can wait for."""
+    return math.isfinite(seconds) and 0 < seconds <= MAX_TIMEOUT
+
+
 def parse_probe(path: Path) -> SpecProbe | None:
     """Returns the probe's expectations, or None if it has no STATUS line."""
     status = None
@@ -113,7 +137,7 @@ def parse_probe(path: Path) -> SpecProbe | None:
     checks: list[str] = []
     not_binding: dict[str, str] = {}
     static_error = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if STATIC_ERROR_RE.match(line):
             static_error = True
             continue
@@ -125,7 +149,12 @@ def parse_probe(path: Path) -> SpecProbe | None:
             continue
         m = TIMEOUT_RE.match(line)
         if m:
-            timeout = float(m.group(1))
+            timeout = timeout_from_text(m.group(1))
+            if not timeout_ok(timeout):
+                raise ValueError(
+                    f"{path}:{lineno}: // TIMEOUT: must be a finite number of "
+                    f"seconds greater than zero and at most {MAX_TIMEOUT:g}"
+                )
             continue
         m = EXIT_RE.match(line)
         if m:
@@ -239,6 +268,17 @@ def main() -> None:
     parser.add_argument("--consumer", default=None,
                         help="the consumer the runner is, for NOT-BINDING lines")
     args = parser.parse_args()
+
+    # A limit outside the rule would reach subprocess.run and come back as a
+    # traceback from select(2) or as a run that fails at once, so it is a
+    # usage error here, before any probe runs.
+    if not timeout_ok(args.timeout):
+        print(
+            f"error: --timeout must be a finite number of seconds greater than "
+            f"zero and at most {MAX_TIMEOUT:g}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     require_runner(args.runner)
 

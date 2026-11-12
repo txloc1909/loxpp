@@ -496,6 +496,17 @@ if(LOXPP_PYTHON3)
                 --native $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # Issue #1207: tools/check_spec_probes.py dropped a probe's `// TIMEOUT:`
+    # value that the pattern did not match, so a typo ran for --timeout's 60
+    # seconds and read as a probe that hangs, and it handed a value no syscall
+    # can hold to subprocess.run, so the mistake read as a traceback. This holds
+    # the tool to the rule tools/check_examples.py already answers with, on
+    # directories the test writes itself, so it walks no corpus.
+    add_test(NAME CheckSpecProbesLimits
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_spec_probes_limits.py
+                --native $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # Issue #895: benchmarks/run.py compares every backend with a pinned
     # checksum, so a value that is wrong on every backend fails, and a program
     # with no pinned value is refused before any launch. The checker drives
