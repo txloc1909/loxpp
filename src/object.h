@@ -60,8 +60,15 @@ struct ObjString : public Obj {
     uint32_t hash{0};
     LoxString chars;
 
-    ObjString(std::string_view sv, VmAllocator<char> alloc)
-        : Obj(ObjType::STRING), hash(hashString(sv)), chars(sv, alloc) {}
+    // The caller gives the hash: makeString has computed it already for the
+    // intern lookup, and a second pass over a large String costs as much as
+    // the first.
+    ObjString(std::string_view sv, uint32_t h, VmAllocator<char> alloc)
+        : Obj(ObjType::STRING), hash(h), chars(sv, alloc) {}
+    // Takes the bytes of a String that the caller built with the allocator
+    // of this heap, with no copy.
+    ObjString(LoxString&& s, uint32_t h)
+        : Obj(ObjType::STRING), hash(h), chars(std::move(s)) {}
 };
 
 // An Int that does not fit the native inline range (src/value.h). Immutable:

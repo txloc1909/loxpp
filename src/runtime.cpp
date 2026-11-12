@@ -4140,10 +4140,14 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         pop();
         push(Value{static_cast<Obj*>(result)});
     } else {
-        // String -- copy chars to a local buffer while src is still on stack.
-        auto* src = asObjString(as<Obj*>(seqVal));
-        std::string substr =
-            (s < e) ? std::string(src->chars.data() + s, e - s) : std::string{};
+        // String -- build the bytes while src is still on the stack: the
+        // allocation can collect, so src is read after it.
+        LoxString substr{VmAllocator<char>{&m_mm}};
+        if (s < e) {
+            substr.reserve(e - s);
+            auto* src = asObjString(as<Obj*>(peek(2)));
+            substr.append(src->chars.data() + s, e - s);
+        }
         pop();
         pop();
         pop();
@@ -4212,12 +4216,17 @@ Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isString(peek(0)) && isString(peek(1))) {
-        auto* b_str = asObjString(pop());
-        auto* a_str = asObjString(pop());
-        std::string result;
-        result.reserve(a_str->chars.size() + b_str->chars.size());
-        result.append(a_str->chars.data(), a_str->chars.size());
-        result.append(b_str->chars.data(), b_str->chars.size());
+        // The operands stay on the stack while the result is built: its
+        // allocation can collect.
+        LoxString result{VmAllocator<char>{&m_mm}};
+        result.reserve(asObjString(peek(1))->chars.size() +
+                       asObjString(peek(0))->chars.size());
+        const auto& a_chars = asObjString(peek(1))->chars;
+        const auto& b_chars = asObjString(peek(0))->chars;
+        result.append(a_chars.data(), a_chars.size());
+        result.append(b_chars.data(), b_chars.size());
+        pop();
+        pop();
         push(Value{static_cast<Obj*>(m_mm.makeString(std::move(result)))});
         return OpResult::OK;
     }

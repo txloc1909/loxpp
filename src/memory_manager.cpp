@@ -167,14 +167,20 @@ ObjString* MemoryManager::makeString(std::string_view sv) {
         return interned;
     }
 
-    auto* s = create<ObjString>(sv, VmAllocator<char>{this});
+    auto* s = create<ObjString>(sv, hash, VmAllocator<char>{this});
     pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
     m_strings.set(s, Value{Nil{}});
     popTempRoot();
     return s;
 }
 
+// A std::string has another allocator than LoxString, so its bytes are
+// copied once; a caller that can build a LoxString saves that copy.
 ObjString* MemoryManager::makeString(std::string&& sv) {
+    return makeString(std::string_view{sv});
+}
+
+ObjString* MemoryManager::makeString(LoxString&& sv) {
     uint32_t hash = hashString(sv);
     auto* interned =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
@@ -182,7 +188,7 @@ ObjString* MemoryManager::makeString(std::string&& sv) {
         return interned;
     }
 
-    auto* s = create<ObjString>(std::string_view{sv}, VmAllocator<char>{this});
+    auto* s = create<ObjString>(std::move(sv), hash);
     pushTempRoot(s); // protect s across m_strings.set's potential rawAlloc → GC
     m_strings.set(s, Value{Nil{}});
     popTempRoot();

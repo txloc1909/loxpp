@@ -27,6 +27,27 @@ TEST_F(StressGCTest, StringConcatSurvivesGC) {
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
+// The operands of a concatenation and the source of a slice are only on the
+// stack. Both are longer than the inline buffer of a string, so building the
+// result allocates, and that allocation collects: the operands must still be
+// rooted then.
+TEST_F(StressGCTest, LongStringConcatAndSliceSurviveGC) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var a = "abcdefghijklmnopqrstuvwxyz";
+        var b = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var c = (a + a) + (b + b);
+        var s = (a + b + a)[3:49];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("c"),
+              "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    EXPECT_EQ(h.getGlobalStr("s"),
+              "defghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW");
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Global function declaration and call
 // ---------------------------------------------------------------------------
