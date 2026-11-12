@@ -15,12 +15,15 @@ w.flush();
 var r2 = open(path, "r");
 print "seen_again=" + r2.read();
 r2.close();
-// flush() on a File that is open for reading only does nothing, and reading
-// continues from where it was: a read, a flush, then the rest of the file.
+// flush() on a File that is open for reading only does nothing, and the next
+// read continues from where the last one stopped.
+w.write("\n");
+w.write("second line\n");
+w.flush();
 var reader = open(path, "r");
 var firstLine = reader.readline();
 reader.flush();
-print "read_mode_flush=" + firstLine + "|" + reader.read();
+print "read_mode_flush=" + firstLine + "|" + reader.readline();
 reader.close();
 w.close();
 
@@ -28,4 +31,4 @@ w.close();
 // CHECK: flushed
 // CHECK: seen=first
 // CHECK: seen_again=firstsecond
-// CHECK: read_mode_flush=first|second
+// CHECK: read_mode_flush=firstsecond|second line
