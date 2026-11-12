@@ -60,6 +60,10 @@ class MemoryManager : public VmAllocBase {
     // Returns an interned ObjString, creating one if not already present.
     ObjString* makeString(std::string_view sv);
     ObjString* makeString(std::string&& sv);
+    // Takes the bytes with no copy when the String is new. Build sv with
+    // VmAllocator<char>{this}: its allocation can collect, so the objects
+    // that the bytes come from must stay rooted until sv is complete.
+    ObjString* makeString(LoxString&& sv);
     ObjString* makeString(const char* chars) {
         return makeString(std::string_view{chars});
     }

@@ -52,6 +52,57 @@ TEST(MemoryManagerTest, Interning_DifferentContent_DifferentPointer) {
     EXPECT_NE(a, b);
 }
 
+// makeString computes the hash once and hands it to the object, for each of
+// its three forms.
+TEST(MemoryManagerTest, MakeString_HashIsTheHashOfTheBytes) {
+    MemoryManager mm;
+    const std::string text = "a string longer than the inline buffer";
+    ObjString* fromView = mm.makeString(std::string_view{text});
+    mm.pushTempRoot(fromView);
+    EXPECT_EQ(fromView->hash, hashString(text));
+
+    std::string other = text + " (std::string)";
+    const uint32_t otherHash = hashString(other);
+    ObjString* fromStd = mm.makeString(std::move(other));
+    mm.pushTempRoot(fromStd);
+    EXPECT_EQ(fromStd->hash, otherHash);
+
+    LoxString lox{text + " (LoxString)", VmAllocator<char>{&mm}};
+    const uint32_t loxHash =
+        hashString(std::string_view{lox.data(), lox.size()});
+    ObjString* fromLox = mm.makeString(std::move(lox));
+    mm.pushTempRoot(fromLox);
+    EXPECT_EQ(fromLox->hash, loxHash);
+}
+
+// A new String takes the buffer of the LoxString: the same bytes, not a copy.
+TEST(MemoryManagerTest, MakeString_LoxStringKeepsItsBuffer) {
+    MemoryManager mm;
+    LoxString lox{"a new string that is longer than the inline buffer",
+                  VmAllocator<char>{&mm}};
+    const char* buffer = lox.data();
+    ObjString* s = mm.makeString(std::move(lox));
+    mm.pushTempRoot(s);
+    EXPECT_EQ(s->chars.data(), buffer);
+}
+
+// When the bytes are interned already, makeString gives the interned String
+// and frees the LoxString.
+TEST(MemoryManagerTest, MakeString_LoxStringOfAnInternedText) {
+    MemoryManager mm;
+    ObjString* first =
+        rootedString(mm, "an interned string, longer than the inline buffer");
+    const std::size_t before = mm.bytesAllocated;
+    ObjString* again;
+    {
+        LoxString lox{"an interned string, longer than the inline buffer",
+                      VmAllocator<char>{&mm}};
+        again = mm.makeString(std::move(lox));
+    }
+    EXPECT_EQ(again, first);
+    EXPECT_EQ(mm.bytesAllocated, before);
+}
+
 TEST(MemoryManagerTest, HeapPointers_RemainValidAfterMoreAllocations) {
     // Ensures that adding more strings doesn't invalidate earlier ObjString*
     // pointers (heap objects are stable; only the allObjects vector reallocs).

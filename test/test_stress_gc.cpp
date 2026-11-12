@@ -27,6 +27,49 @@ TEST_F(StressGCTest, StringConcatSurvivesGC) {
     EXPECT_EQ(h.stackDepth(), 0);
 }
 
+// The operands of a concatenation and the source of a slice are only on the
+// stack. Both are longer than the inline buffer of a string, so building the
+// result allocates, and that allocation collects: the operands must still be
+// rooted then.
+TEST_F(StressGCTest, LongStringConcatAndSliceSurviveGC) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var a = "abcdefghijklmnopqrstuvwxyz";
+        var b = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var c = (a + a) + (b + b);
+        var s = (a + b + a)[3:49];
+    )"),
+              InterpretResult::OK);
+    EXPECT_EQ(h.getGlobalStr("c"),
+              "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    EXPECT_EQ(h.getGlobalStr("s"),
+              "defghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW");
+    EXPECT_EQ(h.stackDepth(), 0);
+}
+
+// A String keeps the capacity of its bytes for life, so a concatenation and a
+// slice make them with the exact size. 20 and 18 bytes are in the range where
+// reserve() rounds the capacity up in libstdc++.
+TEST_F(StressGCTest, ConcatAndSliceKeepAnExactCapacity) {
+    VMTestHarness h;
+    ASSERT_EQ(h.run(R"(
+        var a = "abcdefghij";
+        var c = a + "klmnopqrst";
+        var s = c[1:19];
+    )"),
+              InterpretResult::OK);
+    auto c = h.getGlobal("c");
+    auto s = h.getGlobal("s");
+    ASSERT_TRUE(c.has_value() && s.has_value());
+    const auto& cChars = asObjString(as<Obj*>(*c))->chars;
+    const auto& sChars = asObjString(as<Obj*>(*s))->chars;
+    EXPECT_EQ(cChars.size(), 20u);
+    EXPECT_EQ(cChars.capacity(), 20u);
+    EXPECT_EQ(sChars.size(), 18u);
+    EXPECT_EQ(sChars.capacity(), 18u);
+}
+
 // ---------------------------------------------------------------------------
 // Global function declaration and call
 // ---------------------------------------------------------------------------

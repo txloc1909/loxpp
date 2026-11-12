@@ -4140,10 +4140,13 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         pop();
         push(Value{static_cast<Obj*>(result)});
     } else {
-        // String -- copy chars to a local buffer while src is still on stack.
-        auto* src = asObjString(as<Obj*>(seqVal));
-        std::string substr =
-            (s < e) ? std::string(src->chars.data() + s, e - s) : std::string{};
+        // String -- build the bytes while src is still on the stack: the
+        // allocation can collect, so src is read after it. The size is exact
+        // (see opAdd).
+        const std::size_t count = (s < e) ? e - s : 0;
+        LoxString substr(count, '\0', VmAllocator<char>{&m_mm});
+        std::memcpy(substr.data(),
+                    asObjString(as<Obj*>(peek(2)))->chars.data() + s, count);
         pop();
         pop();
         pop();
@@ -4212,12 +4215,17 @@ Runtime::OpResult Runtime::opAdd(int stopAtFrameCount) {
         return OpResult::OK;
     }
     if (isString(peek(0)) && isString(peek(1))) {
-        auto* b_str = asObjString(pop());
-        auto* a_str = asObjString(pop());
-        std::string result;
-        result.reserve(a_str->chars.size() + b_str->chars.size());
-        result.append(a_str->chars.data(), a_str->chars.size());
-        result.append(b_str->chars.data(), b_str->chars.size());
+        // The operands stay on the stack while the result is built: its
+        // allocation can collect. The size is exact, as reserve() can round
+        // a small capacity up, and the String keeps its capacity for life.
+        const std::size_t aSize = asObjString(peek(1))->chars.size();
+        const std::size_t bSize = asObjString(peek(0))->chars.size();
+        LoxString result(aSize + bSize, '\0', VmAllocator<char>{&m_mm});
+        std::memcpy(result.data(), asObjString(peek(1))->chars.data(), aSize);
+        std::memcpy(result.data() + aSize, asObjString(peek(0))->chars.data(),
+                    bSize);
+        pop();
+        pop();
         push(Value{static_cast<Obj*>(m_mm.makeString(std::move(result)))});
         return OpResult::OK;
     }
