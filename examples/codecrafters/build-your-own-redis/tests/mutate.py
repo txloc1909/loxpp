@@ -105,15 +105,16 @@ def run_mutation(m, text, loxpp, suite):
     mutant, skip = apply_edits(m, text)
     if skip is not None:
         return skip, True
-    d = tempfile.mkdtemp(prefix="mut-")
-    lox = os.path.join(d, "redis.lox")
-    with open(lox, "w") as f:
-        f.write(mutant)
-    wrap = os.path.join(d, "wrap.sh")
-    with open(wrap, "w") as f:
-        f.write('#!/bin/sh\nexec %s %s "$@"\n' % (loxpp, lox))
-    os.chmod(wrap, 0o755)
-    out, timed_out = run_suite([sys.executable, "-u", suite, wrap])
+    # The directory is removed on every exit path, including a timeout or a crash.
+    with tempfile.TemporaryDirectory(prefix="mut-") as d:
+        lox = os.path.join(d, "redis.lox")
+        with open(lox, "w") as f:
+            f.write(mutant)
+        wrap = os.path.join(d, "wrap.sh")
+        with open(wrap, "w") as f:
+            f.write('#!/bin/sh\nexec %s %s "$@"\n' % (loxpp, lox))
+        os.chmod(wrap, 0o755)
+        out, timed_out = run_suite([sys.executable, "-u", suite, wrap])
     if timed_out:
         out += "\n(timeout)"
     failed = [c for c in cases if ("FAIL " + c) in out]
