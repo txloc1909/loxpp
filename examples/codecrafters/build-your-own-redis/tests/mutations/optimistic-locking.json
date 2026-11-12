@@ -65,8 +65,8 @@
  },
  {
   "name": "INCR does not mark",
-  "old": "    entry.value = str(n);\n    touch(argv[1]);",
-  "new": "    entry.value = str(n);",
+  "old": "    entry.value = str(n);\n    entry.cache = nil;\n    touch(argv[1]);",
+  "new": "    entry.value = str(n);\n    entry.cache = nil;",
   "cases": [
    "local: WATCH and INCR"
   ]

@@ -919,11 +919,16 @@ python3 examples/codecrafters/build-your-own-redis/tests/mutate.py build/loxpp \
 # persistence-aof.json, pub-sub.json, sorted-sets.json, geospatial.json,
 # bitmaps.json, authentication.json
 REDIS_STAGE_GROUPS=persistence-aof python3 examples/codecrafters/build-your-own-redis/tests/run_stages.py
+python3 examples/codecrafters/build-your-own-redis/tests/mutate.py --check \
+    examples/codecrafters/build-your-own-redis/redis.lox \
+    examples/codecrafters/build-your-own-redis/tests/mutations/*.json
 ```
 
 `REDIS_STAGE_GROUPS` (names split by commas) runs only those groups, also
 under `mutate.py`. A mutation is killed only when its named cases fail, so
-it needs only the group of those cases. A mutation is one `old`/`new` replacement, or an
+it needs only the groups of those cases. Set the groups of the cases, not
+the name of the file: a case of another group does not run, and its
+mutation shows as alive. A mutation is one `old`/`new` replacement, or an
 `edits` list of such pairs when it must change more than one site.
 
 `mutate.py -j N` runs N mutations at once. The default N is a quarter of the
@@ -933,6 +938,12 @@ with no real defect, which `mutate.py` counts as a kill. Keep N low on a busy
 machine. The output keeps the order of the mutation file for every N, so one
 slow mutation delays the lines after it. Ctrl-C cancels the mutations that
 have not started and kills the running suites.
+
+`mutate.py --check` runs no suite. It applies the edits of each mutation to
+`redis.lox` and fails when an `old` text is not found exactly once (the
+mutation can no longer run) or a mutation names no case (it cannot be
+killed). CI runs it on every mutation file, so a change to `redis.lox` that
+makes a mutation stale must update that mutation in the same pull request.
 
 The server binds `0.0.0.0` on port 6379 by default. Build `loxpp` with the
 `release` preset: the `debug` preset prints a trace on standard output.

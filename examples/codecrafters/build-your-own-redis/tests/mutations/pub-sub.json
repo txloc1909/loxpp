@@ -273,16 +273,16 @@
  },
  {
   "name": "CONFIG in subscribed mode is named config",
-  "old": "        shown = \"config|\" + sub;",
-  "new": "",
+  "old": "        return wrongArgs(lower(name) + \"|\" + sub);",
+  "new": "        return wrongArgs(lower(name));",
   "cases": [
    "local: in subscribed mode CONFIG GET gives the error of Redis"
   ]
  },
  {
   "name": "an unknown CONFIG subcommand gets the context error",
-  "old": "        if (subArity == nil) {\n            return errorReply(\"ERR unknown subcommand '\" + argv[1][0:128] + \"'. Try CONFIG HELP.\");\n        }",
-  "new": "        if (subArity == nil) {\n            subArity = -2;\n        }",
+  "old": "    if (subArity == nil) {\n        return errorReply(\"ERR unknown subcommand '\" + argv[1][0:128] + \"'. Try \" + name + \" HELP.\");\n    }",
+  "new": "    if (subArity == nil) {\n        subArity = -2;\n    }",
   "cases": [
    "local: in subscribed mode CONFIG FOO gives the error of Redis"
   ]
@@ -313,7 +313,7 @@
  },
  {
   "name": "a CONFIG subcommand has no arity in subscribed mode",
-  "old": "        if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {\n            return wrongArgs(shown);\n        }",
+  "old": "    if ((subArity < 0 and len(argv) < -subArity) or (subArity > 0 and len(argv) != subArity)) {\n        return wrongArgs(lower(name) + \"|\" + sub);\n    }\n",
   "new": "",
   "cases": [
    "local: in subscribed mode CONFIG GET with no name gives the error of Redis"

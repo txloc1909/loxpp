@@ -1018,6 +1018,14 @@ jobs:
             loxpp-dev:latest \
             python3 examples/codecrafters/build-your-own-http-server/tests/diff_http.py
 
+      - name: Build your own Redis - mutation texts
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/examples/codecrafters/build-your-own-redis \
+            loxpp-dev:latest \
+            sh -c 'python3 tests/mutate.py --check redis.lox tests/mutations/*.json'
+
       - name: Build your own Redis - transcribed stage suite
         run: |
           docker run --rm \
