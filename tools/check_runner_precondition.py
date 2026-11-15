@@ -106,6 +106,7 @@ EXTERNAL = {
 
 NOT_A_RUNNER_TOOL = {
     "check_docs_placement.py": "spawns git",
+    "ci_classes.py": "spawns git; no runner on the command line",
     "check_nvim_syntax.py": "spawns nvim, a fixed tool",
     "check_bootstrap_stack_overflow.py": "spawns build/loxpp and the bootstrap wrapper by fixed repo path; no runner on the command line",
     "run_bootstrap_error_kind_causes.py": "spawns the bootstrap wrapper by fixed repo path; no runner on the command line",
