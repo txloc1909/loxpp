@@ -134,12 +134,51 @@ class Selection:
     labels: set  # contains "all" when every label runs
 
 
-def select(class_map, files):
+def test_sources(cmake_text):
+    """Returns {path of a C++ test source: set of the test targets built from it}."""
+    text = re.sub(r"(?m)#.*$", "", cmake_text)
+    sources = {}
+    patterns = (r"loxpp_add_test\(\s*(\w+)\s+([^)]*)\)", r"add_executable\(\s*(test_\w+)\s+([^)]*)\)")
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            for token in match.group(2).split():
+                if token.endswith(".cpp") and "/" not in token:
+                    sources.setdefault(f"test/{token}", set()).add(match.group(1))
+    return sources
+
+
+def source_labels(file, sources, rows):
+    """The labels of the tests that a test source builds. A source that no
+    target builds selects every label, since its effect is not known."""
+    targets = sources.get(file)
+    if not targets:
+        return {"all"}
+    labels = set()
+    for target in targets:
+        labels |= set(rows.get(target, ["all"]))
+    return labels
+
+
+def select(class_map, files, sources=None, rows=None):
+    """A file of the class `test-source` selects the labels of its own tests,
+    not the labels of the class."""
+    if sources is None:
+        sources = test_sources((ROOT / "test" / "CMakeLists.txt").read_text())
+    if rows is None:
+        rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
     classes = set()
+    own_labels = set()
     for file in files:
         names = classes_of(class_map, file)
-        classes |= set(names) if names is not None else {UNKNOWN_CLASS}
-    return select_classes(class_map, classes)
+        names = set(names) if names is not None else {UNKNOWN_CLASS}
+        classes |= names
+        if "test-source" in names:
+            own_labels |= source_labels(file, sources, rows)
+    selection = select_classes(class_map, classes)
+    if own_labels:
+        selection.labels = {"all"} if "all" in (selection.labels | own_labels) else selection.labels | own_labels
+        selection.gates.add("native-unit")
+    return selection
 
 
 def select_classes(class_map, classes):

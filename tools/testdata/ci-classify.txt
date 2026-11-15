@@ -84,20 +84,25 @@ files src/backend/rt_abi.h
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
 labels all
 
-case a JVM test runs the JVM unit tests and the JVM job
+case a JVM unit test runs format and the JVM unit tests, and no job
 files test/test_jvm_emit.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,format,native-unit
 labels jvm
+legs debug
+targets test_jvm_emit
 
-case a QBE test runs the QBE unit tests and the QBE job
+case a QBE unit test runs format and the QBE unit tests, and no job
 files test/test_backend_qbe_emitter.cpp
-gates placement,format,native-build,native-unit,qbe
+gates placement,format,native-unit
 labels qbe
+legs debug
+targets test_backend_qbe_emitter test_backend_rt_capi
 
-case a core unit test runs the core tests and every consumer
+case a core unit test runs format and the core unit tests, and no job
 files test/test_scanner.cpp
-gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
-labels all
+gates placement,format,native-unit
+labels core
+legs debug
 
 case an example program skips the unit tests except the corpus sweeps
 files examples/fibonacci.lox examples/wc.input
@@ -218,3 +223,26 @@ case the probe that the sockets check reads also runs the cross-consumer job
 files test/translation-probes/64_net_process.lox
 gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
 labels corpus
+
+case a unit test that reads programs runs its own label and no job
+files test/test_tooling_parser.cpp
+gates placement,format,native-unit
+labels tooling,corpus
+legs debug
+
+case the shared test helper runs every unit test and no job
+files test/test_harness.h
+gates placement,format,native-unit
+labels all
+legs debug
+targets all
+
+case two unit tests of two consumers run both label sets
+files test/test_jvm_emit.cpp test/test_backend_rt_capi.cpp
+gates placement,format,native-unit
+labels jvm,qbe
+
+case a unit test source with a program change runs the labels of both
+files test/test_jvm_emit.cpp examples/fibonacci.lox
+gates placement,tables,format,native-unit,native-checks,jvm,qbe,tree-sitter
+labels jvm,corpus

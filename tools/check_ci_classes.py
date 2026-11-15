@@ -12,7 +12,8 @@ reads the repository as text, so it needs no build, and fails when:
    (the job's gates, in the `job` lines, are the gates it belongs to);
 3. a script or program that an add_test() command of test/CMakeLists.txt runs
    does not select a label of that test;
-4. a C++ test source has a class other than the owner label of its tests;
+4. a C++ test source that a test target builds has a class other than
+   `test-source`, or a file of that class is built by no target;
 5. a file under src/backend has a class that its consumers do not give it.
    The consumers come from the #include graph: the JVM emitter, the QBE
    emitter and the C API for the QBE runtime. A file that both use is
@@ -199,31 +200,20 @@ def check_test_references(class_map, files, cmake, labels):
     return errors
 
 
-OWNER_LABELS = {"core", "shared-backend", "jvm", "qbe", "tooling"}
-
-
-def check_test_sources(class_map, files, cmake, labels):
-    """A C++ test source has the class of the owner label of its tests."""
+def check_test_sources(class_map, files, cmake):
+    """A C++ test source selects the labels of its own tests, so a target must
+    build it. One that no target builds would select every label, and a test
+    file that nothing builds is probably a mistake."""
     errors = []
-    text = re.sub(r"(?m)#.*$", "", cmake)
-    sources = {}
-    for match in re.finditer(r"loxpp_add_test\(\s*(\w+)\s+([^)]*)\)", text):
-        target = match.group(1)
-        for token in match.group(2).split():
-            if token.endswith(".cpp") and "/" not in token:
-                sources.setdefault(f"test/{token}", set()).add(target)
-    for source, targets in sorted(sources.items()):
-        owners = set()
-        for target in targets:
-            owners |= (set(labels.get(target, [])) & OWNER_LABELS)
+    sources = ci_classes.test_sources(cmake)
+    for file in files:
+        names = ci_classes.classes_of(class_map, file)
+        if names and "test-source" in names and file not in sources:
+            errors.append(f"{file} is a C++ test source that no test target builds")
+    for source in sorted(sources):
         names = ci_classes.classes_of(class_map, source)
-        if names is None:
-            continue
-        if owners and set(names) != owners:
-            errors.append(
-                f"{source} is the source of {','.join(sorted(targets))}, labelled {','.join(sorted(owners))}, "
-                f"but its class is {','.join(names)}"
-            )
+        if names != ["test-source"]:
+            errors.append(f"{source} is built by a test target, but its class is {','.join(names or ['none'])}, not test-source")
     return errors
 
 
@@ -383,7 +373,7 @@ def check(class_map, files, yml, cmake, labels):
     errors += check_job_references(class_map, files, yml)
     errors += check_job_gates(class_map, yml)
     errors += check_test_references(class_map, files, cmake, labels)
-    errors += check_test_sources(class_map, files, cmake, labels)
+    errors += check_test_sources(class_map, files, cmake)
     errors += check_backend_classes(class_map, files)
     return errors
 

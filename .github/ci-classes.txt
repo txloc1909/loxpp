@@ -74,24 +74,13 @@ path src/lsp/**                                tooling
 path src/**                                    core
 path runtime/jvm/**                            jvm
 
-# --- tests. A C++ test belongs to the class of its label in test/test_labels.txt.
-path test/test_jvm_emit.cpp                    jvm
-path test/test_backend_qbe_emitter.cpp         qbe
-path test/test_backend_rt_capi.cpp             qbe
-path test/test_backend_cfg.cpp                 shared-backend
-path test/test_backend_abstract_stack.cpp      shared-backend
-path test/test_backend_capture.cpp             shared-backend
-path test/test_backend_native_pops.cpp         shared-backend
-path test/test_chunk_decoder.cpp               shared-backend
-path test/test_nonlocal_cfg.cpp                shared-backend
-path test/test_handler_depth_invariant.cpp     shared-backend
-path test/test_lsp.cpp                         tooling
-path test/test_tooling_parser.cpp              tooling
-path test/test_tooling_resolver.cpp            tooling
-path test/test_richards_benchmark.cpp          core
-path test/*.cpp                                core
-path test/*.h                                  core
-path test/CMakeLists.txt                       core
+# --- tests. A C++ test source selects format and the labels of the tests that
+# it builds, which tools/ci_classes.py reads from test/CMakeLists.txt and
+# test/test_labels.txt. The files that every test shares select all labels.
+path test/test_harness.*                       test-support
+path test/*.h                                  test-support
+path test/CMakeLists.txt                       test-support
+path test/*.cpp                                test-source
 
 # --- programs. The sweeps of examples/ and test/ are not recursive, so
 # examples/codecrafters/ is a class of its own.
@@ -163,6 +152,8 @@ path install.sh                                packaging
 
 # --- what each class runs
 class ci               gates=all labels=all
+class test-source      gates=format
+class test-support     gates=format labels=all
 class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
 class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend
 class jvm              gates=format,native-build,jvm labels=jvm
