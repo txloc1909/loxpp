@@ -1,0 +1,121 @@
+# Consumer labels of every CTest test (issue #1258).
+#
+# One line per test: <name> <label>[,<label>...]. <name> is a GTest target
+# listed in LOXPP_GTEST_TARGETS, or the name of an add_test() test. test/
+# CMakeLists.txt gives each test its labels, so CI can run `ctest -L <label>`.
+# tools/check_test_labels.py fails when a test has no line here, when a line
+# names no test, or when a label is not in the list below.
+#
+# A test has the label of each consumer it can fail for:
+#   core            the native VM, the compiler, the scanner, the stdlib
+#   shared-backend  an analysis pass that both backends use
+#   jvm             the JVM backend
+#   qbe             the QBE backend
+#   tooling         the resolver, the parser for tools, the language server
+#   bootstrap       the bootstrap interpreter
+#   harness         a differential or probe tool (tools/diff_runtimes.py, ...)
+#   corpus          also reads programs under examples/, bootstrap/ or test/
+#   bench           reads or checks something under benchmarks/
+test_scanner core
+test_parser_vm core
+test_parser_bytecode core
+test_table core
+test_table_gc core
+test_allocator core
+test_allocator_gc core
+test_value core
+test_local_variables core
+test_control_flow core
+test_vm_runtime core
+test_print_nul core
+test_file_nul core
+test_file_readline core
+test_os_api core
+test_net_process core
+test_net_process_gc core
+test_reflect_api core
+test_reflect_api_gc core
+test_closures core
+test_tail_call core
+test_stress_gc core
+test_gc_regression core
+test_inheritance core
+test_list core
+test_list_gc core
+test_map core
+test_map_gc core
+test_var_destructure core
+test_enum core
+test_enum_gc core
+test_class_pattern core
+test_class_pattern_gc core
+test_match_expr core
+test_slice core
+test_operator_overload core
+test_or_pattern core
+test_or_pattern_gc core
+test_seq_destructure core
+test_list_pattern core
+test_list_pattern_gc core
+test_at_binding core
+test_at_binding_gc core
+test_profiler core
+test_coroutine core
+test_coroutine_gc core
+test_poller core
+test_task_wait core
+test_task_wait_gc core
+test_socket_wait core
+test_socket_wait_gc core
+test_connect_wait core
+test_connect_wait_gc core
+test_worker core
+test_worker_gc core
+test_repl core
+test_repl_gc core
+test_handler_stack_leak core
+test_handler_stack_leak_gc core
+test_stringify_depth_guard core
+test_check_diagnostics core
+test_enum_names core
+TestMain core
+GcTrace core
+GcSweepLinear core
+GcMinHeap core
+ReplSession core
+test_task core,corpus
+test_task_gc core,corpus
+test_token_roundtrip core,corpus
+CompileDiagnosticCases core,corpus
+test_richards_benchmark core,bench
+test_nonlocal_cfg shared-backend
+test_backend_native_pops shared-backend
+test_chunk_decoder shared-backend,corpus
+test_backend_cfg shared-backend,corpus
+test_backend_abstract_stack shared-backend,corpus
+test_backend_capture shared-backend,corpus
+test_handler_depth_invariant shared-backend,corpus
+test_jvm_emit jvm
+JvmGcLog jvm
+test_backend_rt_capi qbe
+test_backend_qbe_emitter qbe
+test_lsp tooling
+test_tooling_parser tooling,corpus
+test_tooling_resolver tooling,corpus
+BootstrapErrorKindAudit bootstrap
+BootstrapErrorKindCausesRuntime bootstrap
+BootstrapStackOverflow bootstrap
+BootstrapMatchArmBreak bootstrap
+BootstrapOperatorOverload bootstrap
+BootstrapMapIteration bootstrap
+BootstrapSuspendCalls bootstrap
+BootstrapParkState bootstrap
+BootstrapDeferAfterPark bootstrap,corpus
+BootstrapListMethodRead bootstrap,corpus
+BootstrapInstancePropertyRead bootstrap,corpus
+DiffRuntimesXfailNames harness
+DiffRuntimesPhases harness
+RunnerPrecondition harness
+CheckExamplesLimits harness
+CheckSpecProbesLimits harness
+BenchmarkExpectedChecksum bench

@@ -51,6 +51,12 @@ jobs:
       - name: Check document placement
         run: tools/check_docs_placement.py
 
+      # test/test_labels.txt gives each CTest test its consumer labels. This
+      # fails when a test has no line, when a line names no test, or when a
+      # label is not defined in the header. Pure Python, so it needs no build.
+      - name: Check test labels
+        run: tools/check_test_labels.py
+
       # spec/03-types.md's Number edge table and the number-format probe must
       # stay in lockstep. This fails when a row loses its probe, a probe names
       # no row, or a CHECK disagrees with its row. Pure Python, so it needs no

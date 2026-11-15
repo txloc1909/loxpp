@@ -566,7 +566,23 @@ endif()
 # ctest TIMEOUT ends it. The limit is far above the run time of any such test
 # on a loaded host, so only a hang reaches it.
 set(LOXPP_HANG_GUARDED_TARGETS test_task_wait test_task_wait_gc test_worker test_worker_gc)
+# Consumer labels (see test_labels.txt). Each test carries the label of every
+# consumer it can fail for, so CI can run a subset with `ctest -L <label>`.
+set(LOXPP_LABELS_FILE ${CMAKE_CURRENT_SOURCE_DIR}/test_labels.txt)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LOXPP_LABELS_FILE})
+file(STRINGS ${LOXPP_LABELS_FILE} LOXPP_LABEL_LINES)
+set(LOXPP_LABELED_TESTS "")
+foreach(line IN LISTS LOXPP_LABEL_LINES)
+    if(line MATCHES "^([^ \t#][^ \t]*)[ \t]+([^ \t]+)$")
+        string(REPLACE "," ";" LOXPP_LABELS_${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
+        list(APPEND LOXPP_LABELED_TESTS ${CMAKE_MATCH_1})
+    endif()
+endforeach()
+
 foreach(t IN LISTS LOXPP_GTEST_TARGETS)
+    if(NOT DEFINED LOXPP_LABELS_${t})
+        message(FATAL_ERROR "test/test_labels.txt has no line for the test target ${t}")
+    endif()
     set(props "")
     if(t IN_LIST LOXPP_GC_STRESS_TARGETS)
         list(APPEND props ENVIRONMENT "LOXPP_STRESS_GC=1")
@@ -578,5 +594,26 @@ foreach(t IN LISTS LOXPP_GTEST_TARGETS)
         gtest_discover_tests(${t} TEST_PREFIX "${t}." PROPERTIES ${props})
     else()
         gtest_discover_tests(${t} TEST_PREFIX "${t}.")
+    endif()
+
+    # gtest_discover_tests passes its PROPERTIES list through a command line,
+    # which splits a LABELS value that holds two labels. CTest includes the
+    # files of TEST_INCLUDE_FILES in order, so this one runs after the
+    # discovery of ${t} has set ${t}_TESTS. The variable is not set when the
+    # target is not built yet.
+    set(label_file ${CMAKE_CURRENT_BINARY_DIR}/labels/${t}.cmake)
+    file(WRITE ${label_file}
+        "if(DEFINED ${t}_TESTS)\n"
+        "  set_tests_properties(\${${t}_TESTS} PROPERTIES LABELS \"${LOXPP_LABELS_${t}}\")\n"
+        "endif()\n")
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES ${label_file})
+endforeach()
+
+# The tests that add_test() registers by name. A test that a missing tool or
+# option leaves out of the build is not in the table's reach, so only the
+# registered ones get labels. The GTest targets above already have theirs.
+foreach(name IN LISTS LOXPP_LABELED_TESTS)
+    if(TEST ${name})
+        set_tests_properties(${name} PROPERTIES LABELS "${LOXPP_LABELS_${name}}")
     endif()
 endforeach()
