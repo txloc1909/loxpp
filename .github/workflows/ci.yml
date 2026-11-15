@@ -57,6 +57,15 @@ jobs:
       - name: Check test labels
         run: tools/check_test_labels.py
 
+      # .github/ci-classes.txt says which CI work a changed file needs. This
+      # fails when a tracked file has no class, when a job reads a file that
+      # does not select it, when a test runs a script that its labels do not
+      # select, when a backend file has a class that the #include graph does
+      # not give it, or when a case of tools/testdata/ci-classify.txt does not
+      # hold. Pure Python, so it needs no build.
+      - name: Check CI class map
+        run: tools/check_ci_classes.py
+
       # spec/03-types.md's Number edge table and the number-format probe must
       # stay in lockstep. This fails when a row loses its probe, a probe names
       # no row, or a CHECK disagrees with its row. Pure Python, so it needs no
