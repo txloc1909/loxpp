@@ -1,0 +1,205 @@
+# Which CI work a changed file needs (issue #1258).
+#
+# tools/ci_classes.py reads this file. Its header says what the three kinds of
+# line mean. tools/check_ci_classes.py holds the file to the repository: every
+# tracked file has a class, a class selects the jobs that read its files, and
+# the backend classes follow the #include graph.
+#
+# The first `path` line that matches a file gives its classes, so a specific
+# line goes before a general one.
+#
+# Gates are the units of CI work that a job or a group of steps carries:
+#   placement      the document-placement check. Always runs.
+#   tables         the pure-Python checks of the spec tables and the probe index
+#   format         clang-format
+#   pi             the pi extension jobs
+#   native-build   the release build of loxpp, which compiles every backend
+#   native-unit    the debug build and `ctest -L`, for the labels of the class.
+#                  A class with labels runs it. `native-unit` is not listed.
+#   native-checks  the example, probe and bootstrap steps on the native VM
+#   jvm            the JVM backend job
+#   qbe            the QBE backend job
+#   cross          the checks that compare native with the bootstrap interpreter
+#   codecrafters   the codecrafters jobs
+#   tree-sitter, lsp, neovim, vscode, release-static   the job of that name
+
+# --- the CI itself: a change here can break anything, so everything runs
+path .github/ci-classes.txt                    ci
+path .github/workflows/ci.yml                  ci
+path .github/workflows/release.yml             packaging
+path .github/workflows/**                      inert
+path test/test_labels.txt                      ci
+path tools/ci_classes.py                       ci
+path tools/check_ci_classes.py                 ci
+path tools/check_test_labels.py                ci
+path tools/testdata/ci-classify.txt            ci
+
+# --- documents
+path docs/**                                   docs
+path spec/**                                   spec
+path *.md                                      docs
+path LICENSE                                   docs
+path man/**                                    docs
+path completions/**                            docs
+path .claude/**                                inert
+path .githooks/**                              inert
+path .gitignore                                inert
+path .dockerignore                             inert
+path .clang-format                             core
+path .clang-tidy                               inert
+path .pre-commit-config.yaml                   inert
+
+# --- the build. The Dockerfile holds every image stage, so any change runs all.
+path CMakeLists.txt                            core
+path CMakePresets.json                         core
+path Dockerfile                                ci
+path third_party/**                            core
+path src/loxpp_version.h.in                    core
+
+# --- source
+path src/backend/jvm_emitter.*                 jvm
+path src/backend/zero_depth_local.*            jvm
+path src/backend/qbe_*                         qbe
+path src/backend/global_slots.*                qbe
+path src/backend/rt_capi.*                     qbe
+path src/backend/rt_abi.h                      core
+path src/backend/chunk_decoder.*               shared-backend
+path src/backend/cfg.*                         shared-backend
+path src/backend/abstract_stack.*              shared-backend
+path src/backend/handler_depth.*               shared-backend
+path src/backend/capture_analysis.*            shared-backend
+path src/backend/native_pops.*                 shared-backend
+path src/tooling/**                            tooling
+path src/lsp/**                                tooling
+path src/**                                    core
+path runtime/jvm/**                            jvm
+
+# --- tests. A C++ test source selects format and the labels of the tests that
+# it builds, which tools/ci_classes.py reads from test/CMakeLists.txt and
+# test/test_labels.txt. The files that every test shares select all labels.
+path test/test_harness.*                       test-support
+path test/*.h                                  test-support
+path test/CMakeLists.txt                       test-support
+path test/*.cpp                                test-source
+
+# --- programs. The sweeps of examples/ and test/ are not recursive, so
+# examples/codecrafters/ is a class of its own.
+path examples/codecrafters/**                  codecrafters
+path examples/**                               programs
+path test/translation-probes/29_os_access.lox  programs,cross-probe
+path test/translation-probes/64_net_process.lox programs,cross-probe
+path test/compile-errors/**                    programs
+path test/print-lines/**                       programs
+path test/translation-probes/**                programs
+path test/coroutine-probes/**                  programs
+path bootstrap/**                              bootstrap
+path benchmarks/**                             bench
+
+# --- tools, by the consumer that runs them
+path tools/test_pi_modes.mjs                   pi
+path tools/agent-workflow/**                   inert
+path tools/clang_tidy_report.py                inert
+path tools/check_bootstrap_*                   bootstrap-tools
+path tools/loxpp_*_bootstrap.sh                bootstrap-tools
+path tools/run_bootstrap_error_kind_causes.py  bootstrap-tools
+path tools/check_benchmark_expected.py         bench
+path tools/check_nvim_*                        nvim
+path tools/check_textmate_grammar.py           vscode
+path tools/lsp_smoke.py                        tooling
+path tools/*jvm*                               jvm
+path tools/*_lox_rt.sh                         jvm
+path tools/toolchain_smoke/**                  jvm
+path tools/check_managed_toolchains.sh         jvm
+path tools/check_fault_table.py                jvm
+path tools/*qbe*                               qbe
+path tools/qbe_rt_smoke/**                     qbe
+path tools/spec-probe-xfail/tree-sitter.txt    tree-sitter
+path tools/spec-probe-xfail/jvm.txt            jvm
+path tools/spec-probe-xfail/qbe.txt            qbe
+path tools/spec-probe-xfail/**                 harness
+path tools/check_docs_placement.py             docs
+path tools/check_spec_probes*                  harness
+path tools/check_print_lines.py                harness
+path tools/check_examples*                     harness
+path tools/check_compile_error_cases.py        harness
+path tools/check_cr_bytes.py                   harness
+path tools/check_runner_precondition.py        harness
+path tools/runner_precondition.py              harness
+path tools/check_diff_runtimes_*               harness
+path tools/diff_runtimes.py                    harness
+path tools/check_coroutine_probes.sh           harness
+path tools/check_file_durability.sh            harness
+path tools/gc_report.py                        core
+path tools/check_gc_*                          core
+path tools/check_repl_session.py               core
+path tools/count_instructions.py               core
+path tools/build_release.sh                    packaging
+path tools/testdata/**                         jvm
+path tools/check_*                             spec-tables
+path tools/spec_tables.py                      spec-tables
+path tools/operator_tables.py                  spec-tables
+
+# --- editors
+path editors/tree-sitter-loxpp/**              tree-sitter
+path editors/loxpp.nvim/**                     nvim
+path editors/loxpp-vscode/**                   vscode
+path editors/loxpp.tmbundle/**                 vscode
+path .pi/**                                    pi
+
+# --- release and packaging
+path packaging/**                              packaging
+path install.sh                                packaging
+
+# --- what each class runs
+class ci               gates=all labels=all
+class test-source      gates=format
+class test-support     gates=format labels=all
+class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
+class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend
+class jvm              gates=format,native-build,jvm labels=jvm
+class qbe              gates=format,native-build,qbe labels=qbe
+class tooling          gates=format,native-build,lsp,neovim,vscode labels=tooling
+class spec             gates=tables,native-checks,jvm,qbe,cross
+class programs         gates=tables,native-checks,jvm,qbe,tree-sitter labels=corpus
+class bootstrap        gates=native-checks,jvm,qbe,cross,tree-sitter labels=corpus,bootstrap
+class bootstrap-tools  gates=native-checks,jvm,qbe,cross labels=bootstrap
+class harness          gates=native-checks,jvm,qbe,cross labels=harness,corpus
+class spec-tables      gates=tables
+class codecrafters     gates=codecrafters
+class tree-sitter      gates=tree-sitter,neovim
+class nvim             gates=neovim
+class vscode           gates=vscode
+class bench            labels=bench
+class pi               gates=pi
+class cross-probe      gates=cross
+class packaging        gates=release-static,tables
+class docs
+class inert
+
+# --- which gates a job of ci.yml belongs to
+job changes               gates=placement
+job checks                gates=placement
+job spec-tables           gates=tables
+job format                gates=format
+job pi-extensions         gates=pi
+job pi-modes              gates=pi
+job tree-sitter           gates=tree-sitter
+job loxpp-lsp             gates=lsp
+job neovim-plugin         gates=neovim
+job vscode-extension      gates=vscode
+job build-and-test        gates=native-build,native-unit,native-checks
+job codecrafters          gates=codecrafters
+job redis-shard-plan      gates=codecrafters
+job redis-stage-shards    gates=codecrafters
+job managed-toolchains    gates=jvm
+job cross-consumer        gates=cross
+job qbe-toolchain         gates=qbe
+job release-static        gates=release-static
+
+# --- files that a job names, and that a change of them does not need it for
+# release-static runs tools/check_examples.py on the static binary. That checks
+# the musl build, and an example can fail there only by a musl difference. The
+# full run on main finds that, and a static build for each new example costs
+# more than it finds.
+ignore release-static examples/**
+ignore release-static tools/check_examples.py

@@ -8,31 +8,88 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: Lint (clang-format)
+  # Decides which gates of work the change needs (issue #1258). The class map
+  # is .github/ci-classes.txt and tools/ci_classes.py reads it. A push to a
+  # protected branch and a manual run select everything, so main stays the
+  # full run that finds a rule that is too narrow.
+  changes:
+    name: Select the work of the change
+    runs-on: ubuntu-latest
+    outputs:
+      gate-tables: ${{ steps.select.outputs.gate-tables }}
+      gate-format: ${{ steps.select.outputs.gate-format }}
+      gate-pi: ${{ steps.select.outputs.gate-pi }}
+      gate-native-build: ${{ steps.select.outputs.gate-native-build }}
+      gate-native-unit: ${{ steps.select.outputs.gate-native-unit }}
+      gate-native-checks: ${{ steps.select.outputs.gate-native-checks }}
+      gate-jvm: ${{ steps.select.outputs.gate-jvm }}
+      gate-qbe: ${{ steps.select.outputs.gate-qbe }}
+      gate-cross: ${{ steps.select.outputs.gate-cross }}
+      gate-codecrafters: ${{ steps.select.outputs.gate-codecrafters }}
+      gate-tree-sitter: ${{ steps.select.outputs.gate-tree-sitter }}
+      gate-lsp: ${{ steps.select.outputs.gate-lsp }}
+      gate-neovim: ${{ steps.select.outputs.gate-neovim }}
+      gate-vscode: ${{ steps.select.outputs.gate-vscode }}
+      gate-release-static: ${{ steps.select.outputs.gate-release-static }}
+      native-legs: ${{ steps.select.outputs.native-legs }}
+      ctest-regex: ${{ steps.select.outputs.ctest-regex }}
+      ctest-targets: ${{ steps.select.outputs.ctest-targets }}
+    steps:
+      # The whole history, so that the diff against the base of the pull
+      # request has its merge base.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select the gates
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            python3 tools/ci_classes.py --base "$BASE" --head HEAD | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 tools/ci_classes.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  # The checks that guard the rules of this file and of the documents. They
+  # are pure Python and cost seconds, so they run for every change.
+  checks:
+    name: Checks of the repository (placement, labels, CI classes)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      # docs/README.md defines the document tiers. This fails when a document
+      # is outside a tier, carries a status that disagrees with its directory,
+      # or refers to a markdown file that does not exist. Pure Python, so it
+      # needs no build.
+      - name: Check document placement
+        run: tools/check_docs_placement.py
 
-      - name: Build dev image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          load: true
-          target: dev
-          tags: loxpp-dev:latest
-          cache-from: type=gha,scope=dev
-          cache-to: type=gha,mode=max,scope=dev
+      # test/test_labels.txt gives each CTest test its consumer labels. This
+      # fails when a test has no line, when a line names no test, or when a
+      # label is not defined in the header. Pure Python, so it needs no build.
+      - name: Check test labels
+        run: tools/check_test_labels.py
 
-      - name: Check formatting
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev:latest \
-            bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
+      # .github/ci-classes.txt says which CI work a changed file needs. This
+      # fails when a tracked file has no class, when a job reads a file that
+      # does not select it, when a test runs a script that its labels do not
+      # select, when a backend file has a class that the #include graph does
+      # not give it, or when a case of tools/testdata/ci-classify.txt does not
+      # hold. Pure Python, so it needs no build.
+      - name: Check CI class map
+        run: tools/check_ci_classes.py
+
+  spec-tables:
+    name: Spec tables and install.sh
+    needs: changes
+    if: needs.changes.outputs.gate-tables == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       # install.sh has no test harness; at least lock its POSIX-sh syntax in.
       - name: Check install.sh syntax
@@ -43,13 +100,6 @@ jobs:
       # undocumented. Pure shell, so it needs no build.
       - name: Check translation-probe index
         run: tools/check_probe_index.sh
-
-      # docs/README.md defines the document tiers. This fails when a document
-      # is outside a tier, carries a status that disagrees with its directory,
-      # or refers to a markdown file that does not exist. Pure Python, so it
-      # needs no build.
-      - name: Check document placement
-        run: tools/check_docs_placement.py
 
       # spec/03-types.md's Number edge table and the number-format probe must
       # stay in lockstep. This fails when a row loses its probe, a probe names
@@ -124,8 +174,38 @@ jobs:
       - name: Check credit channel copies
         run: tools/check_credit_channel_copies.py
 
+  format:
+    name: Lint (clang-format)
+    needs: changes
+    if: needs.changes.outputs.gate-format == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      - name: Check formatting
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "find src test -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror"
+
   pi-extensions:
     name: pi extension (subagent)
+    needs: changes
+    if: needs.changes.outputs.gate-pi == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,6 +224,8 @@ jobs:
 
   pi-modes:
     name: pi mode guards
+    needs: changes
+    if: needs.changes.outputs.gate-pi == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -179,6 +261,8 @@ jobs:
 
   tree-sitter:
     name: tree-sitter grammar
+    needs: changes
+    if: needs.changes.outputs.gate-tree-sitter == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -265,6 +349,8 @@ jobs:
 
   loxpp-lsp:
     name: loxpp-lsp language server
+    needs: changes
+    if: needs.changes.outputs.gate-lsp == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -323,6 +409,8 @@ jobs:
 
   neovim-plugin:
     name: Neovim plugin
+    needs: changes
+    if: needs.changes.outputs.gate-neovim == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -408,6 +496,8 @@ jobs:
 
   vscode-extension:
     name: VS Code extension
+    needs: changes
+    if: needs.changes.outputs.gate-vscode == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -469,10 +559,13 @@ jobs:
 
   build-and-test:
     name: Build & Test (${{ matrix.preset }})
+    needs: changes
+    # native-legs lists the presets that have work, and an empty list has none.
+    if: needs.changes.outputs.native-legs != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        preset: [debug, release]
+        preset: ${{ fromJSON(needs.changes.outputs.native-legs) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -501,10 +594,12 @@ jobs:
             ccache-${{ matrix.preset }}-
 
       # The release leg builds only the interpreter binary. The debug leg
-      # builds the whole GTest suite and the Test step below runs it under
-      # sanitizers; that run is the test gate, so a second unsanitized run
-      # in the release leg adds cost without new coverage.
+      # builds the GTest targets of the labels that the change selects, or all
+      # of them (issue #1258); the Test step below runs them under sanitizers,
+      # and that run is the test gate, so a second unsanitized run in the
+      # release leg adds cost without new coverage.
       - name: Build
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -513,7 +608,26 @@ jobs:
             -e CCACHE_MAXSIZE=400M \
             -e CCACHE_COMPRESS=1 \
             loxpp-dev:latest \
-            bash -c "cmake --preset ${{ matrix.preset }} && cmake --build build${{ matrix.preset == 'release' && ' --target loxpp' || '' }}"
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      # CTEST_TARGETS is `all`, a list of targets, or empty when the selected
+      # tests need no build.
+      - name: Build the unit tests
+        if: matrix.preset == 'debug' && needs.changes.outputs.gate-native-unit == 'true'
+        env:
+          CTEST_TARGETS: ${{ needs.changes.outputs.ctest-targets }}
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            -e CTEST_TARGETS \
+            loxpp-dev:latest \
+            bash -c 'cmake --preset debug &&
+              if [ "$CTEST_TARGETS" = all ]; then cmake --build build;
+              elif [ -n "$CTEST_TARGETS" ]; then cmake --build build --target $CTEST_TARGETS; fi'
 
       - name: ccache stats
         continue-on-error: true
@@ -525,14 +639,19 @@ jobs:
             loxpp-dev:latest \
             ccache -s
 
+      # CTEST_REGEX is empty when every test runs, and a `ctest -L` regex of
+      # the selected labels otherwise.
       - name: Test
-        if: matrix.preset == 'debug'
+        if: matrix.preset == 'debug' && needs.changes.outputs.gate-native-unit == 'true'
+        env:
+          CTEST_REGEX: ${{ needs.changes.outputs.ctest-regex }}
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e CTEST_REGEX \
             loxpp-dev:latest \
-            bash -c "ctest --test-dir build --output-on-failure -j$(nproc)"
+            bash -c 'ctest --test-dir build --output-on-failure -j$(nproc) ${CTEST_REGEX:+-L "$CTEST_REGEX"}'
 
       # The debug leg runs the example corpus under GC stress
       # (collect-on-every-allocation). This kept the corpus covered for
@@ -549,7 +668,7 @@ jobs:
       # flags: the image's default C++ compiler is gcc, which cannot build the
       # parser, and the preset names clang.
       - name: Build loxpp for the example checks, without the instruction trace
-        if: matrix.preset == 'debug'
+        if: matrix.preset == 'debug' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -563,6 +682,7 @@ jobs:
               && cmake --build build-examples --target loxpp"
 
       - name: Run example checks
+        if: needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -576,7 +696,7 @@ jobs:
       # both directions, so a real RFC 1950/1951 implementation is the oracle.
       # Release only: the debug preset's instruction trace is not the point here.
       - name: zlib example - differential vs Python zlib
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -589,7 +709,7 @@ jobs:
       # the corpus is green and this step is a normal gate. Release only: the
       # debug preset's instruction trace floods stdout (see AGENTS.md).
       - name: Check coroutine probes
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -610,7 +730,7 @@ jobs:
       # Release only: the debug preset's instruction trace floods stdout (see
       # AGENTS.md).
       - name: Check spec probes - native
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -619,7 +739,7 @@ jobs:
             bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/spec-probe-xfail/native.txt"
 
       - name: Check spec probes - bootstrap interpreter
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -629,7 +749,7 @@ jobs:
             bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
 
       - name: Run examples through loxpp bootstrap interpreter
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -642,7 +762,7 @@ jobs:
       # caller keeps stdin open (issue #698). CI's own stdin is closed, so
       # only a check that holds a stdin pipe open finds the defect.
       - name: Check bootstrap wrapper exits with stdin open
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -656,7 +776,7 @@ jobs:
       # any order (tools/check_print_lines.py). Release only, like the steps
       # above.
       - name: Check print lines of two workers - native
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -665,7 +785,7 @@ jobs:
             bash -c "python3 tools/check_print_lines.py build/loxpp"
 
       - name: Check print lines of two workers - bootstrap interpreter
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -684,7 +804,7 @@ jobs:
       # probes: other files of test/translation-probes/ pin translation
       # problems of the compiled backends.
       - name: Bootstrap differential suite - spec probes
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -703,7 +823,7 @@ jobs:
       # diff_runtimes.py reads stdout in text mode, which turns each CR into a
       # newline, so that script compares the raw bytes (issue #656, issue #701).
       - name: Bootstrap differential suite - NUL probes
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -718,7 +838,7 @@ jobs:
       # QBE step that runs the corpus through the self-hosted interpreter
       # leaves it out for the same reason.
       - name: Bootstrap differential suite - examples
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -734,7 +854,7 @@ jobs:
       # --compile-errors fails a file that native does not reject at compile
       # time, so the corpus cannot turn into run-time programs unseen.
       - name: Bootstrap differential suite - compile errors
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -751,7 +871,7 @@ jobs:
       # frames. Release only, like the step above: the debug preset's
       # instruction trace floods the wrapper's stdout.
       - name: Run bootstrap headroom check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -767,7 +887,7 @@ jobs:
       # python3 missing at configure time) would look identical to a build
       # where the test ran and passed.
       - name: Run bootstrap error-kind causes at run time
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -778,7 +898,7 @@ jobs:
       # Same trace-noise constraint as BootstrapErrorKindCausesRuntime above,
       # so this is the one leg where BootstrapStackOverflow actually runs.
       - name: Run bootstrap stack-overflow catchability check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -791,7 +911,7 @@ jobs:
       # leg (SKIP_RETURN_CODE 125). This step is where it runs; without it the
       # test would run in no leg at all.
       - name: Run the expected-failure list checks at run time
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -805,7 +925,7 @@ jobs:
       # runs it, and its cases 8 to 12 hold the only coverage of
       # tools/diff_runtimes.py's own argument handling (#1095).
       - name: Run the differential-gate phases check at run time
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -818,7 +938,7 @@ jobs:
       # release leg, where the trace macros are off. --no-tests=error fails
       # the step if a name stops being registered.
       - name: Run bootstrap operator-overload differential
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -827,7 +947,7 @@ jobs:
             bash -c "ctest --test-dir build -R BootstrapOperatorOverload --output-on-failure --no-tests=error"
 
       - name: Run bootstrap match-arm-break check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -839,7 +959,7 @@ jobs:
       # this release leg is the one place the entry runs. --no-tests=error
       # fails the step if the name stops being registered.
       - name: Run bootstrap Map-iteration check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -851,7 +971,7 @@ jobs:
       # this release leg is the one place the entry runs. --no-tests=error
       # fails the step if the name stops being registered.
       - name: Run bootstrap List method read differential
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -865,7 +985,7 @@ jobs:
       # name, so a build that stopped registering it fails here; one name per
       # step is what makes that check cover this entry alone.
       - name: Run bootstrap deferred-call-after-park differential
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -877,7 +997,7 @@ jobs:
       # release leg is the one place the entry runs. Issue #984 is the defect it
       # pins. One name per step, for the reason above.
       - name: Run bootstrap park-state check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -888,7 +1008,7 @@ jobs:
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
       - name: Run GC sweep linearity check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -899,7 +1019,7 @@ jobs:
       # GcMinHeap self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the collection-count bound is checked.
       - name: Run GC minimum heap check
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -910,7 +1030,7 @@ jobs:
       # The suite expects `-0` for negative zero; Lox++ prints `0` by decision
       # (docs/decisions/number-print-format.md). The sed adjusts that one line.
       - name: Run Lox interpreter test suite (craftinginterpreters)
-        if: matrix.preset == 'release'
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -926,6 +1046,8 @@ jobs:
 
   codecrafters:
     name: Codecrafters challenge suites
+    needs: changes
+    if: needs.changes.outputs.gate-codecrafters == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1048,6 +1170,8 @@ jobs:
   # are listed in tests/shards.py, which also checks that they cover every group.
   redis-shard-plan:
     name: Redis stage shards (plan)
+    needs: changes
+    if: needs.changes.outputs.gate-codecrafters == 'true'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -1068,7 +1192,8 @@ jobs:
 
   redis-stage-shards:
     name: Redis stage suite (${{ matrix.name }})
-    needs: redis-shard-plan
+    needs: [changes, redis-shard-plan]
+    if: needs.changes.outputs.gate-codecrafters == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1121,6 +1246,8 @@ jobs:
 
   managed-toolchains:
     name: Managed toolchains (JVM)
+    needs: changes
+    if: needs.changes.outputs.gate-jvm == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1304,18 +1431,10 @@ jobs:
             exit 1
           fi
           grep -Fq "DIVERGE     arithmetic_type_error  [jvm]" "$RUNNER_TEMP/fault_table_custom_jvm.txt"
-
       # spec/05-stdlib.md: every File still open when the program ends must
-      # be flushed as if close() had been called, on every exit path. Runs
-      # on all four consumers this job already has a binary for.
-      - name: Check file durability - native
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            loxpp-dev-managed:latest \
-            bash -c "tools/check_file_durability.sh build/loxpp"
-
+      # be flushed as if close() had been called, on every exit path. The
+      # cross-consumer job runs the same check on native and on the bootstrap
+      # interpreter.
       - name: Check file durability - JVM
         run: |
           docker run --rm \
@@ -1323,78 +1442,6 @@ jobs:
             -w /workspace \
             loxpp-dev-managed:latest \
             bash -c "tools/check_file_durability.sh tools/loxpp_jvm.sh"
-
-      # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
-      # native binary, so this needs no managed toolchain - it sits here
-      # anyway, beside the other two, so a regression on any consumer of
-      # this guarantee fails in one place. The bootstrap interpreter
-      # defines exit() like every other consumer, so its p5b_exit_call
-      # probe runs unskipped.
-      - name: Check file durability - bootstrap interpreter
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh"
-
-      # The bootstrap interpreter defines the OS stdlib globals (issue
-      # 263) by delegating to the host. This diffs the OS-access probe
-      # between native and the bootstrap interpreter, with program
-      # arguments, so those branches and the wrapper argument forwarding
-      # cannot rot unnoticed. exit() is covered by the durability p5b
-      # probe above instead: it ends the program and has no diffable
-      # stdout past the call.
-      - name: Check bootstrap OS stdlib globals match native
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c '
-              native_out=$(build/loxpp test/translation-probes/29_os_access.lox alpha beta)
-              native_status=$?
-              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/29_os_access.lox alpha beta)
-              strap_status=$?
-              if [ "$native_status" -ne "$strap_status" ]; then
-                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
-                exit 1
-              fi
-              if [ -z "$strap_out" ]; then
-                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
-                exit 1
-              fi
-              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
-            '
-
-      # The bootstrap interpreter's sockets and subprocess, added for issue
-      # #516, delegate to the host. This diffs the net/process probe between
-      # native and the bootstrap interpreter, with the same emptiness guard
-      # the OS-stdlib step above uses.
-      - name: Check bootstrap sockets and subprocess match native
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e LANGUAGE=LOXPP \
-            loxpp-dev-managed:latest \
-            bash -c '
-              native_out=$(build/loxpp test/translation-probes/64_net_process.lox)
-              native_status=$?
-              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/64_net_process.lox)
-              strap_status=$?
-              if [ "$native_status" -ne "$strap_status" ]; then
-                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
-                exit 1
-              fi
-              if [ -z "$strap_out" ]; then
-                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
-                exit 1
-              fi
-              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
-            '
 
       # The parity gate. Every probe must be byte-identical on native and JVM
       # stdout (differential runner, not only the check_jvm_probes.sh diff
@@ -1560,8 +1607,136 @@ jobs:
           echo "The 'Build and test the JVM runtime library' step failed; see its log above." >&2
           exit 1
 
+  # The checks that need only the native binary and the bootstrap interpreter
+  # that runs on it. They sit apart from the JVM job, so a change that does not
+  # touch the JVM backend does not pay for its toolchain image (issue #1258).
+  cross-consumer:
+    name: Native and bootstrap interpreter checks
+    needs: changes
+    if: needs.changes.outputs.gate-cross == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # The release-preset compiles here match build-and-test's release leg,
+      # so fall back to that scope's key to seed a cold run.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-cross-${{ github.sha }}
+          restore-keys: |
+            ccache-cross-
+            ccache-release-
+
+      - name: Build loxpp
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-dev:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      # spec/05-stdlib.md: every File still open when the program ends must
+      # be flushed as if close() had been called, on every exit path. The JVM
+      # job runs the same check on the JVM backend.
+      - name: Check file durability - native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            bash -c "tools/check_file_durability.sh build/loxpp"
+
+      # bootstrap/lox_wrapper.sh runs the self-hosted interpreter on the
+      # native binary, so this needs no managed toolchain. The bootstrap
+      # interpreter defines exit() like every other consumer, so its
+      # p5b_exit_call probe runs unskipped.
+      - name: Check file durability - bootstrap interpreter
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c "tools/check_file_durability.sh bootstrap/lox_wrapper.sh"
+
+      # The bootstrap interpreter defines the OS stdlib globals (issue
+      # 263) by delegating to the host. This diffs the OS-access probe
+      # between native and the bootstrap interpreter, with program
+      # arguments, so those branches and the wrapper argument forwarding
+      # cannot rot unnoticed. exit() is covered by the durability p5b
+      # probe above instead: it ends the program and has no diffable
+      # stdout past the call.
+      - name: Check bootstrap OS stdlib globals match native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c '
+              native_out=$(build/loxpp test/translation-probes/29_os_access.lox alpha beta)
+              native_status=$?
+              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/29_os_access.lox alpha beta)
+              strap_status=$?
+              if [ "$native_status" -ne "$strap_status" ]; then
+                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
+                exit 1
+              fi
+              if [ -z "$strap_out" ]; then
+                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
+            '
+
+      # The bootstrap interpreter's sockets and subprocess, added for issue
+      # #516, delegate to the host. This diffs the net/process probe between
+      # native and the bootstrap interpreter, with the same emptiness guard
+      # the OS-stdlib step above uses.
+      - name: Check bootstrap sockets and subprocess match native
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LANGUAGE=LOXPP \
+            loxpp-dev:latest \
+            bash -c '
+              native_out=$(build/loxpp test/translation-probes/64_net_process.lox)
+              native_status=$?
+              strap_out=$(bootstrap/lox_wrapper.sh test/translation-probes/64_net_process.lox)
+              strap_status=$?
+              if [ "$native_status" -ne "$strap_status" ]; then
+                echo "exit differs: native=$native_status bootstrap=$strap_status" >&2
+                exit 1
+              fi
+              if [ -z "$strap_out" ]; then
+                echo "bootstrap gave empty stdout; a silent failure would look like a match" >&2
+                exit 1
+              fi
+              diff <(printf "%s\n" "$native_out") <(printf "%s\n" "$strap_out")
+            '
+
   qbe-toolchain:
     name: QBE toolchain
+    needs: changes
+    if: needs.changes.outputs.gate-qbe == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1828,6 +2003,8 @@ jobs:
 
   release-static:
     name: Static musl release build
+    needs: changes
+    if: needs.changes.outputs.gate-release-static == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

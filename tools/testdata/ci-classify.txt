@@ -1,0 +1,248 @@
+# Cases for tools/check_ci_classes.py (issue #1258): the files of a change, and
+# the work that it must select. The expected sets come from the rules of the
+# issue, not from the output of the classifier, so a wrong line of
+# .github/ci-classes.txt fails a case. `ALL` stands for every gate, and `-`
+# for no label.
+#
+#   case <name>
+#   files <path> [<path>...]       (may repeat)
+#   gates <gate>,<gate>,...
+#   labels <label>,... | all | -
+#   legs <preset>,... | -            (optional) the presets of the native job
+#   targets all | - | <target> ...  (optional) what the debug leg builds
+
+case a document alone runs only the placement check
+files docs/decisions/distribution.md README.md
+gates placement
+labels -
+legs -
+targets -
+
+case a spec clarification runs the tables and the probes of every consumer
+files spec/04-semantics.md
+gates placement,tables,native-checks,jvm,qbe,cross
+labels -
+
+case a change of the VM core runs everything the VM reaches
+files src/vm.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
+labels all
+legs debug,release
+targets all
+
+case a change of the Dockerfile runs everything
+files Dockerfile
+gates ALL
+labels all
+
+case a file that no rule names runs everything
+files brand_new_directory/file.txt
+gates ALL
+labels all
+
+case a JVM-only change skips the QBE job
+files src/backend/jvm_emitter.cpp
+gates placement,format,native-build,native-unit,jvm
+labels jvm
+legs debug,release
+targets test_jvm_emit
+
+case a JVM runtime change skips the QBE job
+files runtime/jvm/README.md
+gates placement,format,native-build,native-unit,jvm
+labels jvm
+
+case a pass that only the JVM emitter uses is JVM-only
+files src/backend/zero_depth_local.cpp
+gates placement,format,native-build,native-unit,jvm
+labels jvm
+
+case a QBE-only change skips the JVM job
+files src/backend/qbe_emitter.cpp
+gates placement,format,native-build,native-unit,qbe
+labels qbe
+legs debug,release
+targets test_backend_qbe_emitter test_backend_rt_capi
+
+case a pass that only the QBE front end uses is QBE-only
+files src/backend/global_slots.cpp
+gates placement,format,native-build,native-unit,qbe
+labels qbe
+
+case a shared analysis pass runs both backends
+files src/backend/cfg.cpp
+gates placement,format,native-build,native-unit,jvm,qbe
+labels shared-backend
+
+case a pass that reaches a backend through another pass is shared
+files src/backend/handler_depth.cpp
+gates placement,format,native-build,native-unit,jvm,qbe
+labels shared-backend
+
+case an ABI header that the VM includes runs everything the VM reaches
+files src/backend/rt_abi.h
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
+labels all
+
+case a JVM unit test runs format and the JVM unit tests, and no job
+files test/test_jvm_emit.cpp
+gates placement,format,native-unit
+labels jvm
+legs debug
+targets test_jvm_emit
+
+case a QBE unit test runs format and the QBE unit tests, and no job
+files test/test_backend_qbe_emitter.cpp
+gates placement,format,native-unit
+labels qbe
+legs debug
+targets test_backend_qbe_emitter test_backend_rt_capi
+
+case a core unit test runs format and the core unit tests, and no job
+files test/test_scanner.cpp
+gates placement,format,native-unit
+labels core
+legs debug
+
+case an example program skips the unit tests except the corpus sweeps
+files examples/fibonacci.lox examples/wc.input
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter
+labels corpus
+legs debug,release
+targets loxpp test_backend_abstract_stack test_backend_capture test_backend_cfg test_chunk_decoder test_handler_depth_invariant test_task test_task_gc test_token_roundtrip test_tooling_parser test_tooling_resolver
+
+case a spec probe goes to every consumer and the corpus tests
+files test/translation-probes/01_assign_local.lox
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter
+labels corpus
+
+case a codecrafters program runs only the codecrafters job
+files examples/codecrafters/build-your-own-redis/redis.lox
+gates placement,codecrafters
+labels -
+legs -
+targets -
+
+case the bootstrap interpreter runs all three consumers and the cross checks
+files bootstrap/loxpp_interpreter.lox
+gates placement,native-unit,native-checks,jvm,qbe,cross,tree-sitter
+labels bootstrap,corpus
+
+case a bootstrap tool runs the bootstrap checks of each consumer
+files tools/check_bootstrap_park_state.py
+gates placement,native-unit,native-checks,jvm,qbe,cross
+labels bootstrap
+
+case a harness tool runs the differential steps of each consumer
+files tools/diff_runtimes.py
+gates placement,native-unit,native-checks,jvm,qbe,cross
+labels corpus,harness
+
+case a benchmark runs only the benchmark tests
+files benchmarks/run.py
+gates placement,native-unit
+labels bench
+legs debug
+targets test_richards_benchmark
+
+case a spec table script runs only the tables
+files tools/check_number_format.py
+gates placement,tables
+labels -
+legs -
+targets -
+
+case the tree-sitter grammar runs its job and the Neovim job that copies its queries
+files editors/tree-sitter-loxpp/grammar.js
+gates placement,tree-sitter,neovim
+labels -
+
+case the Neovim plugin runs only its job
+files editors/loxpp.nvim/README.md
+gates placement,neovim
+labels -
+
+case the VS Code extension runs only its job
+files editors/loxpp-vscode/package.json
+gates placement,vscode
+labels -
+
+case a language server change runs the three editor jobs that build it
+files src/lsp/server.cpp
+gates placement,format,native-build,native-unit,lsp,neovim,vscode
+labels tooling
+legs debug,release
+targets test_lsp test_tooling_parser test_tooling_resolver
+
+case a pi extension runs only the pi jobs
+files .pi/extensions/modes.ts
+gates placement,pi
+labels -
+
+case packaging runs the static release build
+files packaging/components.toml
+gates placement,tables,release-static
+labels -
+
+case the release workflow runs the static release build
+files .github/workflows/release.yml
+gates placement,tables,release-static
+labels -
+
+case a workflow that ci.yml does not use runs nothing
+files .github/workflows/clang-tidy.yml
+gates placement
+labels -
+
+case ci.yml runs everything
+files .github/workflows/ci.yml
+gates ALL
+labels all
+
+case a change of the label table runs everything
+files test/test_labels.txt
+gates ALL
+labels all
+
+case a change of two classes runs both
+files docs/README.md src/backend/jvm_emitter.cpp
+gates placement,format,native-build,native-unit,jvm
+labels jvm
+
+case a JVM change and a QBE change run both backends
+files src/backend/jvm_emitter.cpp src/backend/qbe_emitter.cpp
+gates placement,format,native-build,native-unit,jvm,qbe
+labels jvm,qbe
+
+case the probe that the OS-globals check reads also runs the cross-consumer job
+files test/translation-probes/29_os_access.lox
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
+labels corpus
+
+case the probe that the sockets check reads also runs the cross-consumer job
+files test/translation-probes/64_net_process.lox
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
+labels corpus
+
+case a unit test that reads programs runs its own label and no job
+files test/test_tooling_parser.cpp
+gates placement,format,native-unit
+labels tooling,corpus
+legs debug
+
+case the shared test helper runs every unit test and no job
+files test/test_harness.h
+gates placement,format,native-unit
+labels all
+legs debug
+targets all
+
+case two unit tests of two consumers run both label sets
+files test/test_jvm_emit.cpp test/test_backend_rt_capi.cpp
+gates placement,format,native-unit
+labels jvm,qbe
+
+case a unit test source with a program change runs the labels of both
+files test/test_jvm_emit.cpp examples/fibonacci.lox
+gates placement,tables,format,native-unit,native-checks,jvm,qbe,tree-sitter
+labels jvm,corpus
