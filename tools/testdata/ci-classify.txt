@@ -8,11 +8,15 @@
 #   files <path> [<path>...]       (may repeat)
 #   gates <gate>,<gate>,...
 #   labels <label>,... | all | -
+#   legs <preset>,... | -            (optional) the presets of the native job
+#   targets all | - | <target> ...  (optional) what the debug leg builds
 
 case a document alone runs only the placement check
 files docs/decisions/distribution.md README.md
 gates placement
 labels -
+legs -
+targets -
 
 case a spec clarification runs the tables and the probes of every consumer
 files spec/04-semantics.md
@@ -23,6 +27,8 @@ case a change of the VM core runs everything the VM reaches
 files src/vm.cpp
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
 labels all
+legs debug,release
+targets all
 
 case a change of the Dockerfile runs everything
 files Dockerfile
@@ -38,6 +44,8 @@ case a JVM-only change skips the QBE job
 files src/backend/jvm_emitter.cpp
 gates placement,format,native-build,native-unit,jvm
 labels jvm
+legs debug,release
+targets test_jvm_emit
 
 case a JVM runtime change skips the QBE job
 files runtime/jvm/README.md
@@ -53,6 +61,8 @@ case a QBE-only change skips the JVM job
 files src/backend/qbe_emitter.cpp
 gates placement,format,native-build,native-unit,qbe
 labels qbe
+legs debug,release
+targets test_backend_qbe_emitter test_backend_rt_capi
 
 case a pass that only the QBE front end uses is QBE-only
 files src/backend/global_slots.cpp
@@ -93,6 +103,8 @@ case an example program skips the unit tests except the corpus sweeps
 files examples/fibonacci.lox examples/wc.input
 gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter
 labels corpus
+legs debug,release
+targets loxpp test_backend_abstract_stack test_backend_capture test_backend_cfg test_chunk_decoder test_handler_depth_invariant test_task test_task_gc test_token_roundtrip test_tooling_parser test_tooling_resolver
 
 case a spec probe goes to every consumer and the corpus tests
 files test/translation-probes/01_assign_local.lox
@@ -103,6 +115,8 @@ case a codecrafters program runs only the codecrafters job
 files examples/codecrafters/build-your-own-redis/redis.lox
 gates placement,codecrafters
 labels -
+legs -
+targets -
 
 case the bootstrap interpreter runs all three consumers and the cross checks
 files bootstrap/loxpp_interpreter.lox
@@ -123,11 +137,15 @@ case a benchmark runs only the benchmark tests
 files benchmarks/run.py
 gates placement,native-unit
 labels bench
+legs debug
+targets test_richards_benchmark
 
 case a spec table script runs only the tables
 files tools/check_number_format.py
 gates placement,tables
 labels -
+legs -
+targets -
 
 case the tree-sitter grammar runs its job and the Neovim job that copies its queries
 files editors/tree-sitter-loxpp/grammar.js
@@ -148,6 +166,8 @@ case a language server change runs the three editor jobs that build it
 files src/lsp/server.cpp
 gates placement,format,native-build,native-unit,lsp,neovim,vscode
 labels tooling
+legs debug,release
+targets test_lsp test_tooling_parser test_tooling_resolver
 
 case a pi extension runs only the pi jobs
 files .pi/extensions/modes.ts
@@ -188,3 +208,13 @@ case a JVM change and a QBE change run both backends
 files src/backend/jvm_emitter.cpp src/backend/qbe_emitter.cpp
 gates placement,format,native-build,native-unit,jvm,qbe
 labels jvm,qbe
+
+case the probe that the OS-globals check reads also runs the cross-consumer job
+files test/translation-probes/29_os_access.lox
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
+labels corpus
+
+case the probe that the sockets check reads also runs the cross-consumer job
+files test/translation-probes/64_net_process.lox
+gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
+labels corpus

@@ -54,7 +54,7 @@ The first paragraph after the title of a decision or a proposal is one of:
 
 `tools/check_docs_placement.py` fails when a status line disagrees with its
 directory, when a file is outside a tier, or when a path reference to a
-markdown file points at nothing. CI runs it in the lint job. Nothing it checks
+markdown file points at nothing. CI runs it in the checks job. Nothing it checks
 is hand-kept: `ls docs/` is the index.
 
 ## References between documents

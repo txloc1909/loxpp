@@ -22,6 +22,7 @@ every gate and every label. A file that no path line matches selects the class
 `ci`, which runs everything, so a new directory cannot go untested.
 """
 
+import json
 import re
 import subprocess
 import sys
@@ -161,6 +162,58 @@ def labels_selected(selection_labels, test_labels):
     return "all" in selection_labels or bool(set(selection_labels) & set(test_labels))
 
 
+def test_targets(cmake_text):
+    """Returns {test name: set of build targets that the test needs}.
+
+    A GTest target needs itself. A test of add_test(NAME ...) needs each
+    target that its command names: a `$<TARGET_FILE:x>`, or a first word that
+    is a target and not a variable.
+    """
+    text = re.sub(r"(?m)#.*$", "", cmake_text)
+    needs = {}
+    block = re.search(r"set\(LOXPP_GTEST_TARGETS(.*?)\)", text, re.S)
+    gtest = block.group(1).split() if block else []
+    for appended in re.finditer(r"list\(APPEND LOXPP_GTEST_TARGETS\s+([^)]*)\)", text):
+        gtest += appended.group(1).split()
+    for name in gtest:
+        needs[name] = {name}
+    for match in re.finditer(r"add_test\(\s*NAME\s+(\S+)\s+COMMAND\s+(.*?)\n\s*WORKING_DIRECTORY|add_test\(\s*NAME\s+(\S+)\s+COMMAND\s+(\S+)\)", text, re.S):
+        name = match.group(1) or match.group(3)
+        command = match.group(2) or match.group(4)
+        targets = set(re.findall(r"\$<TARGET_FILE:(\w+)>", command))
+        first = command.split()[0]
+        if not first.startswith(("$", "/")):
+            targets.add(first)
+        needs[name] = targets
+    return needs
+
+
+def ctest_selection(labels, rows, needs):
+    """The `ctest -L` regex and the targets to build for the labels that run.
+
+    Returns ("", None) when every test runs, so the caller builds everything.
+    """
+    if not labels:
+        return "", []
+    if "all" in labels:
+        return "", None
+    regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$"
+    targets = set()
+    for name, test_labels in rows.items():
+        if set(test_labels) & labels:
+            targets |= needs.get(name, set())
+    return regex, sorted(targets)
+
+
+def read_label_rows(text):
+    rows = {}
+    for line in text.splitlines():
+        if line.strip() and not line.startswith("#"):
+            name, labels = line.split()
+            rows[name] = labels.split(",")
+    return rows
+
+
 def changed_files(base, head="HEAD"):
     out = subprocess.run(
         ["git", "diff", "--name-only", "--no-renames", f"{base}...{head}"],
@@ -174,12 +227,31 @@ def tracked_files():
     return [line for line in out.splitlines() if line]
 
 
-def main(argv):
-    """tools/ci_classes.py [--base REF [--head REF] | FILE...]
+def native_legs(gates):
+    """The presets of the native job that have work: debug for the unit tests
+    and the checks under sanitizers, release for the build and the checks."""
+    legs = []
+    if gates & {"native-unit", "native-checks"}:
+        legs.append("debug")
+    if gates & {"native-build", "native-checks"}:
+        legs.append("release")
+    return legs
 
-    Prints the classes, the gates and the CTest labels that the files need, one
-    `name=a,b,c` line each, in the form GitHub Actions reads from GITHUB_OUTPUT.
-    Also prints `gate-<name>=true|false` for every gate.
+
+def main(argv):
+    """tools/ci_classes.py [--all | --base REF [--head REF] | FILE...]
+
+    Prints what the files need, one `name=value` line each, in the form that
+    GitHub Actions reads from GITHUB_OUTPUT:
+
+      classes, gates, labels       comma lists
+      gate-<name>=true|false       for every gate
+      native-legs                  a JSON list of the presets of the native job
+      ctest-regex                  the `ctest -L` regex, empty for every test
+      ctest-targets                the targets to build for the labelled tests,
+                                   `all` for every test, empty for no test
+
+    --all selects everything, which is what a push to main runs.
     """
     args = argv[1:]
     class_map = load_map()
@@ -189,6 +261,8 @@ def main(argv):
     if args[:1] == ["--base"]:
         head = args[3] if args[2:3] == ["--head"] else "HEAD"
         files = changed_files(args[1], head)
+    elif args[:1] == ["--all"]:
+        files = [".github/ci-classes.txt"]
     else:
         files = args
     selection = select(class_map, files)
@@ -197,6 +271,12 @@ def main(argv):
     print("labels=" + ",".join(sorted(selection.labels)))
     for gate in sorted(class_map.all_gates | {"native-unit"}):
         print(f"gate-{gate}={'true' if gate in selection.gates else 'false'}")
+    print("native-legs=" + json.dumps(native_legs(selection.gates)))
+    rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
+    needs = test_targets((ROOT / "test" / "CMakeLists.txt").read_text())
+    regex, targets = ctest_selection(selection.labels, rows, needs)
+    print(f"ctest-regex={regex}")
+    print("ctest-targets=" + ("all" if targets is None else " ".join(targets)))
     return 0
 
 

@@ -97,6 +97,8 @@ path test/CMakeLists.txt                       core
 # examples/codecrafters/ is a class of its own.
 path examples/codecrafters/**                  codecrafters
 path examples/**                               programs
+path test/translation-probes/29_os_access.lox  programs,cross-probe
+path test/translation-probes/64_net_process.lox programs,cross-probe
 path test/compile-errors/**                    programs
 path test/print-lines/**                       programs
 path test/translation-probes/**                programs
@@ -178,12 +180,16 @@ class nvim             gates=neovim
 class vscode           gates=vscode
 class bench            labels=bench
 class pi               gates=pi
+class cross-probe      gates=cross
 class packaging        gates=release-static,tables
 class docs
 class inert
 
 # --- which gates a job of ci.yml belongs to
-job lint                  gates=placement,tables,format
+job changes               gates=placement
+job checks                gates=placement
+job spec-tables           gates=tables
+job format                gates=format
 job pi-extensions         gates=pi
 job pi-modes              gates=pi
 job tree-sitter           gates=tree-sitter
@@ -194,7 +200,8 @@ job build-and-test        gates=native-build,native-unit,native-checks
 job codecrafters          gates=codecrafters
 job redis-shard-plan      gates=codecrafters
 job redis-stage-shards    gates=codecrafters
-job managed-toolchains    gates=jvm,cross
+job managed-toolchains    gates=jvm
+job cross-consumer        gates=cross
 job qbe-toolchain         gates=qbe
 job release-static        gates=release-static
 

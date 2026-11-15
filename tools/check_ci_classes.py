@@ -6,7 +6,9 @@ request skip a test that it needs, and nothing else shows that. This script
 reads the repository as text, so it needs no build, and fails when:
 
 1. a tracked file matches no path line;
-2. a file that a job of ci.yml names in its steps does not select that job
+2. the gates that a job of ci.yml tests in its `if:` lines differ from its
+   `job` line, or the job `changes` does not publish a gate that a job tests;
+   a file that a job of ci.yml names in its steps does not select that job
    (the job's gates, in the `job` lines, are the gates it belongs to);
 3. a script or program that an add_test() command of test/CMakeLists.txt runs
    does not select a label of that test;
@@ -123,6 +125,33 @@ def check_job_references(class_map, files, yml):
     for job in class_map.jobs:
         if job not in job_texts(yml):
             errors.append(f"the map has a job line for {job}, which ci.yml does not have")
+    return errors
+
+
+def check_job_gates(class_map, yml):
+    """The gates that a job tests in its `if:` lines are the gates of its job
+    line, and the `changes` job publishes every gate that a job tests."""
+    errors = []
+    texts = job_texts(yml)
+    tested_anywhere = set()
+    for job, text in texts.items():
+        if job == "changes":
+            continue
+        tested = set(re.findall(r"outputs\.gate-([a-z-]+)", text))
+        if "outputs.native-legs" in text:
+            tested.add("native-build")
+        tested_anywhere |= tested
+        want = class_map.jobs.get(job, set()) - ci_classes.ALWAYS
+        if tested != want:
+            errors.append(
+                f"ci.yml: the job {job} tests the gates {sorted(tested)}, "
+                f"but its job line in the map has {sorted(want)}"
+            )
+    published = set(re.findall(r"^      gate-([a-z-]+):", texts.get("changes", ""), re.M))
+    for gate in sorted(tested_anywhere - published - {"native-build"}):
+        errors.append(f"ci.yml: a job tests the gate {gate}, which the job changes does not publish")
+    for gate in sorted(published - tested_anywhere):
+        errors.append(f"ci.yml: the job changes publishes the gate {gate}, which no job tests")
     return errors
 
 
@@ -303,7 +332,7 @@ def parse_cases(text):
         keyword, _, rest = line.partition(" ")
         if keyword == "case":
             cases.append({"name": rest, "files": [], "line": number})
-        elif keyword in ("files", "gates", "labels") and cases:
+        elif keyword in ("files", "gates", "labels", "legs", "targets") and cases:
             cases[-1].setdefault(keyword, [])
             cases[-1][keyword] += rest.replace(",", " ").split() if keyword != "files" else rest.split()
         else:
@@ -311,7 +340,7 @@ def parse_cases(text):
     return cases
 
 
-def check_cases(class_map, text):
+def check_cases(class_map, text, rows, needs):
     errors = []
     for case in parse_cases(text):
         name = case["name"]
@@ -332,6 +361,17 @@ def check_cases(class_map, text):
             errors.append(
                 f"{CASES.name}: {name!r}: labels are {sorted(selection.labels)}, want {sorted(want_labels)}"
             )
+        if "legs" in case:
+            legs = ci_classes.native_legs(selection.gates)
+            want = [] if case["legs"] == ["-"] else case["legs"]
+            if legs != want:
+                errors.append(f"{CASES.name}: {name!r}: the native legs are {legs}, want {want}")
+        if "targets" in case:
+            _, targets = ci_classes.ctest_selection(selection.labels, rows, needs)
+            got = "all" if targets is None else (" ".join(targets) or "-")
+            want = " ".join(case["targets"])
+            if got != want:
+                errors.append(f"{CASES.name}: {name!r}: the test targets are {got!r}, want {want!r}")
     return errors
 
 
@@ -341,6 +381,7 @@ def check(class_map, files, yml, cmake, labels):
         if ci_classes.classes_of(class_map, file) is None:
             errors.append(f"{file} matches no path line")
     errors += check_job_references(class_map, files, yml)
+    errors += check_job_gates(class_map, yml)
     errors += check_test_references(class_map, files, cmake, labels)
     errors += check_test_sources(class_map, files, cmake, labels)
     errors += check_backend_classes(class_map, files)
@@ -349,6 +390,9 @@ def check(class_map, files, yml, cmake, labels):
 
 def main():
     class_map = ci_classes.load_map()
+    if class_map.errors:
+        print("\n".join(class_map.errors), file=sys.stderr)
+        return 1
     errors = check(
         class_map,
         ci_classes.tracked_files(),
@@ -356,7 +400,12 @@ def main():
         CMAKE.read_text(),
         parse_labels(LABELS.read_text()),
     )
-    errors += check_cases(class_map, CASES.read_text())
+    errors += check_cases(
+        class_map,
+        CASES.read_text(),
+        ci_classes.read_label_rows(LABELS.read_text()),
+        ci_classes.test_targets(CMAKE.read_text()),
+    )
     for error in errors:
         print(error, file=sys.stderr)
     if errors:
