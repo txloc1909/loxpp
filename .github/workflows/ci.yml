@@ -31,7 +31,9 @@ jobs:
       gate-vscode: ${{ steps.select.outputs.gate-vscode }}
       gate-release-static: ${{ steps.select.outputs.gate-release-static }}
       native-legs: ${{ steps.select.outputs.native-legs }}
+      ctest-all: ${{ steps.select.outputs.ctest-all }}
       ctest-regex: ${{ steps.select.outputs.ctest-regex }}
+      ctest-names: ${{ steps.select.outputs.ctest-names }}
       ctest-targets: ${{ steps.select.outputs.ctest-targets }}
     steps:
       # The whole history, so that the diff against the base of the pull
@@ -640,19 +642,34 @@ jobs:
             loxpp-dev:latest \
             ccache -s
 
-      # CTEST_REGEX is empty when every test runs, and a `ctest -L` regex of
-      # the selected labels otherwise.
+      # CTEST_ALL is true when every test runs. Otherwise the tests of the
+      # selected labels run (CTEST_REGEX, for `ctest -L`) and the tests of the
+      # selected targets run (CTEST_NAMES, for `ctest -R`). They run apart,
+      # since ctest joins the two options with AND, and a failure of the first
+      # run does not skip the second.
       - name: Test
         if: matrix.preset == 'debug' && needs.changes.outputs.gate-native-unit == 'true'
         env:
+          CTEST_ALL: ${{ needs.changes.outputs.ctest-all }}
           CTEST_REGEX: ${{ needs.changes.outputs.ctest-regex }}
+          CTEST_NAMES: ${{ needs.changes.outputs.ctest-names }}
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e CTEST_ALL \
             -e CTEST_REGEX \
+            -e CTEST_NAMES \
             loxpp-dev:latest \
-            bash -c 'ctest --test-dir build --output-on-failure -j$(nproc) ${CTEST_REGEX:+-L "$CTEST_REGEX"}'
+            bash -c 'status=0
+              run() { ctest --test-dir build --output-on-failure -j$(nproc) "$@" || status=1; }
+              if [ "$CTEST_ALL" = true ]; then
+                run
+              else
+                if [ -n "$CTEST_REGEX" ]; then run -L "$CTEST_REGEX"; fi
+                if [ -n "$CTEST_NAMES" ]; then run -R "$CTEST_NAMES"; fi
+              fi
+              exit $status'
 
       # The debug leg runs the example corpus under GC stress
       # (collect-on-every-allocation). This kept the corpus covered for

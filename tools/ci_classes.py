@@ -132,6 +132,7 @@ class Selection:
     classes: set
     gates: set
     labels: set  # contains "all" when every label runs
+    tests: set = field(default_factory=set)  # test targets that run by name
 
 
 def test_sources(cmake_text):
@@ -147,36 +148,31 @@ def test_sources(cmake_text):
     return sources
 
 
-def source_labels(file, sources, rows):
-    """The labels of the tests that a test source builds. A source that no
-    target builds selects every label, since its effect is not known."""
-    targets = sources.get(file)
-    if not targets:
-        return {"all"}
-    labels = set()
-    for target in targets:
-        labels |= set(rows.get(target, ["all"]))
-    return labels
-
-
-def select(class_map, files, sources=None, rows=None):
-    """A file of the class `test-source` selects the labels of its own tests,
-    not the labels of the class."""
+def select(class_map, files, sources=None):
+    """A file of the class `test-source` selects the test targets that build
+    it, and not the labels of the class. A test source that no target builds
+    selects every test, since its effect is not known."""
     if sources is None:
         sources = test_sources((ROOT / "test" / "CMakeLists.txt").read_text())
-    if rows is None:
-        rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
     classes = set()
-    own_labels = set()
+    own_tests = set()
+    unknown_source = False
     for file in files:
         names = classes_of(class_map, file)
         names = set(names) if names is not None else {UNKNOWN_CLASS}
         classes |= names
         if "test-source" in names:
-            own_labels |= source_labels(file, sources, rows)
+            if sources.get(file):
+                own_tests |= sources[file]
+            else:
+                unknown_source = True
     selection = select_classes(class_map, classes)
-    if own_labels:
-        selection.labels = {"all"} if "all" in (selection.labels | own_labels) else selection.labels | own_labels
+    if unknown_source:
+        selection.labels = {"all"}
+    if "all" in selection.labels:
+        own_tests = set()
+    selection.tests = own_tests
+    if own_tests or selection.labels:
         selection.gates.add("native-unit")
     return selection
 
@@ -227,21 +223,24 @@ def test_targets(cmake_text):
     return needs
 
 
-def ctest_selection(labels, rows, needs):
-    """The `ctest -L` regex and the targets to build for the labels that run.
+def ctest_selection(labels, tests, rows, needs):
+    """What the debug leg runs, as (label regex, name regex, targets to build).
 
-    Returns ("", None) when every test runs, so the caller builds everything.
+    The label regex is for `ctest -L`, and the name regex for `ctest -R`; the
+    two run apart, since ctest joins both options with AND. Returns
+    ("", "", None) when every test runs, so the caller builds everything.
     """
-    if not labels:
-        return "", []
     if "all" in labels:
-        return "", None
-    regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$"
+        return "", "", None
+    regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$" if labels else ""
+    names = "^(" + "|".join(sorted(re.escape(t) for t in tests)) + ")[.]" if tests else ""
     targets = set()
     for name, test_labels in rows.items():
         if set(test_labels) & labels:
             targets |= needs.get(name, set())
-    return regex, sorted(targets)
+    for target in tests:
+        targets |= needs.get(target, {target})
+    return regex, names, sorted(targets)
 
 
 def read_label_rows(text):
@@ -286,9 +285,12 @@ def main(argv):
       classes, gates, labels       comma lists
       gate-<name>=true|false       for every gate
       native-legs                  a JSON list of the presets of the native job
-      ctest-regex                  the `ctest -L` regex, empty for every test
-      ctest-targets                the targets to build for the labelled tests,
-                                   `all` for every test, empty for no test
+      ctest-all                    `true` when every test runs
+      ctest-regex                  the `ctest -L` regex of the labels, or empty
+      ctest-names                  the `ctest -R` regex of the test targets, or
+                                   empty
+      ctest-targets                the targets to build, `all` for every test,
+                                   empty for none
 
     --all selects everything, which is what a push to main runs.
     """
@@ -313,8 +315,10 @@ def main(argv):
     print("native-legs=" + json.dumps(native_legs(selection.gates)))
     rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
     needs = test_targets((ROOT / "test" / "CMakeLists.txt").read_text())
-    regex, targets = ctest_selection(selection.labels, rows, needs)
+    regex, names, targets = ctest_selection(selection.labels, selection.tests, rows, needs)
+    print(f"ctest-all={'true' if 'all' in selection.labels else 'false'}")
     print(f"ctest-regex={regex}")
+    print(f"ctest-names={names}")
     print("ctest-targets=" + ("all" if targets is None else " ".join(targets)))
     return 0
 

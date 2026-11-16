@@ -322,7 +322,7 @@ def parse_cases(text):
         keyword, _, rest = line.partition(" ")
         if keyword == "case":
             cases.append({"name": rest, "files": [], "line": number})
-        elif keyword in ("files", "gates", "labels", "legs", "targets") and cases:
+        elif keyword in ("files", "gates", "labels", "legs", "targets", "names") and cases:
             cases[-1].setdefault(keyword, [])
             cases[-1][keyword] += rest.replace(",", " ").split() if keyword != "files" else rest.split()
         else:
@@ -356,8 +356,12 @@ def check_cases(class_map, text, rows, needs):
             want = [] if case["legs"] == ["-"] else case["legs"]
             if legs != want:
                 errors.append(f"{CASES.name}: {name!r}: the native legs are {legs}, want {want}")
+        if "names" in case:
+            want = [] if case["names"] == ["-"] else sorted(case["names"])
+            if sorted(selection.tests) != want:
+                errors.append(f"{CASES.name}: {name!r}: the tests that run by name are {sorted(selection.tests)}, want {want}")
         if "targets" in case:
-            _, targets = ci_classes.ctest_selection(selection.labels, rows, needs)
+            _, _, targets = ci_classes.ctest_selection(selection.labels, selection.tests, rows, needs)
             got = "all" if targets is None else (" ".join(targets) or "-")
             want = " ".join(case["targets"])
             if got != want:
