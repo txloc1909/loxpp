@@ -85,6 +85,18 @@ jobs:
       - name: Check CI class map
         run: tools/check_ci_classes.py
 
+      # actionlint checks the syntax of each workflow file, its expressions, the
+      # names that a job takes from another job, and the shell of each run step.
+      # A wrong expression otherwise shows only when GitHub runs the workflow.
+      # The image tag pins the version.
+      - name: Lint the workflow files
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -w /repo \
+            rhysd/actionlint:1.7.7 \
+            -color
+
   spec-tables:
     name: Spec tables and install.sh
     needs: changes
