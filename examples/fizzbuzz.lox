@@ -47,3 +47,5 @@ while (i <= 30) {
 // CHECK: 28
 // CHECK: 29
 // CHECK: FizzBuzz
+
+// dummy change to test the CI selection
