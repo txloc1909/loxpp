@@ -19,7 +19,6 @@ jobs:
       gate-tables: ${{ steps.select.outputs.gate-tables }}
       gate-format: ${{ steps.select.outputs.gate-format }}
       gate-pi: ${{ steps.select.outputs.gate-pi }}
-      gate-native-build: ${{ steps.select.outputs.gate-native-build }}
       gate-native-unit: ${{ steps.select.outputs.gate-native-unit }}
       gate-native-checks: ${{ steps.select.outputs.gate-native-checks }}
       gate-jvm: ${{ steps.select.outputs.gate-jvm }}
@@ -564,6 +563,8 @@ jobs:
     if: needs.changes.outputs.native-legs != '[]'
     runs-on: ubuntu-latest
     strategy:
+      # A failure in one leg must not hide the result of the other.
+      fail-fast: false
       matrix:
         preset: ${{ fromJSON(needs.changes.outputs.native-legs) }}
     steps:
