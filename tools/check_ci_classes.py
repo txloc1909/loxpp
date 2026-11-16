@@ -6,7 +6,9 @@ request skip a test that it needs, and nothing else shows that. This script
 reads the repository as text, so it needs no build, and fails when:
 
 1. a tracked file matches no path line;
-2. a step that runs `ctest -R <Test>` does not run for every class that selects
+2. the Build step of a matrix leg does not run under every gate that a later
+   step of that leg runs under;
+   a step that runs `ctest -R <Test>` does not run for every class that selects
    the test;
    the gates that a job of ci.yml tests in its `if:` differ from its `job` line,
    a step tests a gate that its job does not allow, or the job `changes` does
@@ -223,6 +225,32 @@ def check_job_references(class_map, files, yml):
 
 
 NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes"}
+
+
+def check_build_steps(class_map, yml):
+    """The step named Build of a matrix leg builds what the later steps of that
+    leg run, so it must run under every gate that one of them runs under."""
+    errors = []
+    for job, text in job_texts(yml).items():
+        _, steps = job_steps(text)
+        for index, step in enumerate(steps):
+            name = re.search(r"(?m)^      - name: (.*)$", step)
+            leg = re.search(r"matrix\.preset == '(\w+)'", if_expression(step, 8) or "")
+            if not (name and name.group(1) == "Build" and leg):
+                continue
+            built = step_gates(class_map, job, step)
+            for later in steps[index + 1 :]:
+                condition = if_expression(later, 8) or ""
+                if f"matrix.preset == '{leg.group(1)}'" not in condition:
+                    continue
+                needs = step_gates(class_map, job, later)
+                if not needs <= built:
+                    other = re.search(r"(?m)^      - name: (.*)$", later).group(1)
+                    errors.append(
+                        f"ci.yml: the Build step of the {leg.group(1)} leg of the job {job} runs for the gates {sorted(built)}, "
+                        f"but the step {other!r} of that leg runs for {sorted(needs)} and needs what Build makes"
+                    )
+    return errors
 
 
 def check_ctest_steps(class_map, yml, labels):
@@ -521,6 +549,7 @@ def check(class_map, files, yml, cmake, labels):
     errors += check_job_references(class_map, files, yml)
     errors += check_job_gates(class_map, yml)
     errors += check_ctest_steps(class_map, yml, labels)
+    errors += check_build_steps(class_map, yml)
     errors += check_test_references(class_map, files, cmake, labels)
     errors += check_test_sources(class_map, files, cmake)
     errors += check_backend_classes(class_map, files)
