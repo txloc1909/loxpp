@@ -41,3 +41,5 @@ Read [AGENTS.md](AGENTS.md). The short version: plan before implementing, wait f
 approval, work in an isolated worktree and container, commit atomically with
 [Conventional Commits](https://www.conventionalcommits.org/) subject lines, keep every commit
 green.
+
+<!-- dummy change to test the CI selection -->
