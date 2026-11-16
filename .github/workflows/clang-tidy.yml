@@ -42,7 +42,7 @@ jobs:
             > clang_tidy_output.txt || true
 
       - name: Generate report
-        run: python3 tools/clang_tidy_report.py clang_tidy_output.txt >> $GITHUB_STEP_SUMMARY
+        run: python3 tools/clang_tidy_report.py clang_tidy_output.txt >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on errors
         run: |

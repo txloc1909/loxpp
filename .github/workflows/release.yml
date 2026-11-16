@@ -96,7 +96,6 @@ jobs:
       - name: Build the static binaries, smoke test, and lay out dist/
         run: |
           set -euo pipefail
-          TAG='${{ steps.vars.outputs.tag }}'
           docker run --rm \
             -v "$PWD":/workspace -w /workspace \
             -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
@@ -239,6 +238,9 @@ jobs:
 
       - name: Generate the SPDX SBOM
         run: |
+          # The backticks in the two sed patterns below are literal: they match the
+          # markdown code spans of the README. They are not command substitutions.
+          # shellcheck disable=SC2016
           set -euo pipefail
           VERSION='${{ steps.version.outputs.version }}'
           README="third_party/isocline/README.md"
