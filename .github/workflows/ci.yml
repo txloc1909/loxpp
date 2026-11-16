@@ -615,7 +615,7 @@ jobs:
       # and that run is the test gate, so a second unsanitized run in the
       # release leg adds cost without new coverage.
       - name: Build
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
