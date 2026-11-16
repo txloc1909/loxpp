@@ -238,13 +238,14 @@ jobs:
 
       - name: Generate the SPDX SBOM
         run: |
-          # The backticks in the two sed patterns below are literal: they match the
-          # markdown code spans of the README. They are not command substitutions.
-          # shellcheck disable=SC2016
           set -euo pipefail
           VERSION='${{ steps.version.outputs.version }}'
           README="third_party/isocline/README.md"
+          # The backticks in the two sed patterns are literal: they match the
+          # markdown code spans of the README. They are not command substitutions.
+          # shellcheck disable=SC2016
           ISO_VERSION="$(sed -n 's/.*Release tag.*`v\([0-9.]*\)`.*/\1/p' "$README" | head -1)"
+          # shellcheck disable=SC2016
           ISO_SHA="$(sed -n 's/.*Archive SHA-256.*`\([0-9a-f]*\)`.*/\1/p' "$README" | head -1)"
           CREATED="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
           test -n "$ISO_VERSION"
