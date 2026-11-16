@@ -5,16 +5,23 @@ The map has three kinds of lines:
 
     path  <glob> <class>[,<class>...]    the first path line that matches a
                                          file gives the classes of the file
-    class <name> [gates=<g>,...] [labels=<l>,...]
+    path+  <glob> <class>[,<class>...]   like `path`, but every `path+` line
+                                         that matches a file adds its classes
+                                         to those of the first `path` line
+    class <name> [gates=<g>,...] [labels=<l>,...] [tests=<t>,...]
                                          what a class runs: gates (units of CI
-                                         work) and the CTest labels that the
-                                         unit-test gate runs
+                                         work), the CTest labels that the
+                                         unit-test gate runs, and tests that it
+                                         runs by name
     job   <job id of ci.yml> gates=<g>,...
                                          the gates that a job of ci.yml
                                          belongs to
     ignore <job id> <glob>               files that the job names but that no
                                          change of them needs it for. The line
                                          before it says why.
+    script-ignore <script glob> <glob>   files that a script names in its
+                                         text, such as a help message, and does
+                                         not read. The line before it says why.
 
 A glob is anchored at the repository root. `*` does not cross a `/`, and `**`
 does. The gate `placement` always runs. `gates=all` and `labels=all` stand for
@@ -39,9 +46,12 @@ ALWAYS = {"placement"}
 @dataclass
 class ClassMap:
     paths: list = field(default_factory=list)  # (glob, regex, [class])
+    extras: list = field(default_factory=list)  # (glob, regex, [class]) of `path+` lines
     classes: dict = field(default_factory=dict)  # name -> (gates, labels)
+    class_tests: dict = field(default_factory=dict)  # name -> test names
     jobs: dict = field(default_factory=dict)  # job id -> gates
     ignores: list = field(default_factory=list)  # (job id, glob, regex)
+    script_ignores: list = field(default_factory=list)  # (script regex, glob, file regex)
     errors: list = field(default_factory=list)
 
     @property
@@ -89,24 +99,29 @@ def parse_map(text, source="ci-classes.txt"):
         fields = line.split()
         where = f"{source}:{number}"
         kind = fields[0]
-        if kind == "path" and len(fields) == 3:
-            result.paths.append((fields[1], glob_to_regex(fields[1]), sorted(split(fields[2]))))
+        if kind in ("path", "path+") and len(fields) == 3:
+            row = (fields[1], glob_to_regex(fields[1]), sorted(split(fields[2])))
+            (result.extras if kind == "path+" else result.paths).append(row)
         elif kind == "class" and len(fields) >= 2:
             options = dict(f.split("=", 1) for f in fields[2:] if "=" in f)
-            unknown = set(options) - {"gates", "labels"}
+            unknown = set(options) - {"gates", "labels", "tests"}
             if unknown or len(options) != len(fields) - 2:
                 result.errors.append(f"{where}: bad class line {line!r}")
                 continue
             if fields[1] in result.classes:
                 result.errors.append(f"{where}: the class {fields[1]} has a second line")
             result.classes[fields[1]] = (split(options.get("gates", "")), split(options.get("labels", "")))
+            result.class_tests[fields[1]] = split(options.get("tests", ""))
         elif kind == "job" and len(fields) == 3 and fields[2].startswith("gates="):
             result.jobs[fields[1]] = split(fields[2][len("gates="):])
+        elif kind == "script-ignore" and len(fields) == 3:
+            script, glob = fields[1], fields[2]
+            result.script_ignores.append((glob_to_regex(script), glob, glob_to_regex(glob)))
         elif kind == "ignore" and len(fields) == 3:
             result.ignores.append((fields[1], fields[2], glob_to_regex(fields[2])))
         else:
             result.errors.append(f"{where}: cannot read {line!r}")
-    for glob, _, names in result.paths:
+    for glob, _, names in result.paths + result.extras:
         for name in names:
             if name not in result.classes:
                 result.errors.append(f"path {glob}: the class {name} has no class line")
@@ -120,10 +135,12 @@ def load_map(path=MAP_PATH):
 
 
 def classes_of(class_map, file):
-    """The classes of one file, or None when no path line matches it."""
+    """The classes of one file, or None when no path line matches it. The
+    `path+` lines add their classes to those of the first `path` line."""
     for _, regex, names in class_map.paths:
         if regex.match(file):
-            return names
+            extra = {n for _, r, ns in class_map.extras if r.match(file) for n in ns}
+            return sorted(set(names) | extra)
     return None
 
 
@@ -132,6 +149,7 @@ class Selection:
     classes: set
     gates: set
     labels: set  # contains "all" when every label runs
+    tests: set = field(default_factory=set)  # test targets that run by name
 
 
 def test_sources(cmake_text):
@@ -147,36 +165,32 @@ def test_sources(cmake_text):
     return sources
 
 
-def source_labels(file, sources, rows):
-    """The labels of the tests that a test source builds. A source that no
-    target builds selects every label, since its effect is not known."""
-    targets = sources.get(file)
-    if not targets:
-        return {"all"}
-    labels = set()
-    for target in targets:
-        labels |= set(rows.get(target, ["all"]))
-    return labels
-
-
-def select(class_map, files, sources=None, rows=None):
-    """A file of the class `test-source` selects the labels of its own tests,
-    not the labels of the class."""
+def select(class_map, files, sources=None):
+    """A file of the class `test-source` selects the test targets that build
+    it, and not the labels of the class. A test source that no target builds
+    selects every test, since its effect is not known."""
     if sources is None:
         sources = test_sources((ROOT / "test" / "CMakeLists.txt").read_text())
-    if rows is None:
-        rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
     classes = set()
-    own_labels = set()
+    own_tests = set()
+    unknown_source = False
     for file in files:
         names = classes_of(class_map, file)
         names = set(names) if names is not None else {UNKNOWN_CLASS}
         classes |= names
         if "test-source" in names:
-            own_labels |= source_labels(file, sources, rows)
+            if sources.get(file):
+                own_tests |= sources[file]
+            else:
+                unknown_source = True
     selection = select_classes(class_map, classes)
-    if own_labels:
-        selection.labels = {"all"} if "all" in (selection.labels | own_labels) else selection.labels | own_labels
+    own_tests |= selection.tests
+    if unknown_source:
+        selection.labels = {"all"}
+    if "all" in selection.labels:
+        own_tests = set()
+    selection.tests = own_tests
+    if own_tests or selection.labels:
         selection.gates.add("native-unit")
     return selection
 
@@ -184,17 +198,19 @@ def select(class_map, files, sources=None, rows=None):
 def select_classes(class_map, classes):
     gates = set(ALWAYS)
     labels = set()
+    tests = set()
     for name in classes:
         class_gates, class_labels = class_map.classes[name]
         gates |= class_gates
         labels |= class_labels
+        tests |= class_map.class_tests.get(name, set())
     if "all" in gates:
         gates = class_map.all_gates
     if "all" in labels:
         labels = {"all"}
-    if labels:
+    if labels or tests:
         gates.add("native-unit")
-    return Selection(set(classes), gates, labels)
+    return Selection(set(classes), gates, labels, tests)
 
 
 def labels_selected(selection_labels, test_labels):
@@ -227,21 +243,24 @@ def test_targets(cmake_text):
     return needs
 
 
-def ctest_selection(labels, rows, needs):
-    """The `ctest -L` regex and the targets to build for the labels that run.
+def ctest_selection(labels, tests, rows, needs):
+    """What the debug leg runs, as (label regex, name regex, targets to build).
 
-    Returns ("", None) when every test runs, so the caller builds everything.
+    The label regex is for `ctest -L`, and the name regex for `ctest -R`; the
+    two run apart, since ctest joins both options with AND. Returns
+    ("", "", None) when every test runs, so the caller builds everything.
     """
-    if not labels:
-        return "", []
     if "all" in labels:
-        return "", None
-    regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$"
+        return "", "", None
+    regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$" if labels else ""
+    names = "^(" + "|".join(sorted(re.escape(t) + ("[.]" if t in needs and needs[t] == {t} else "$") for t in tests)) + ")" if tests else ""
     targets = set()
     for name, test_labels in rows.items():
         if set(test_labels) & labels:
             targets |= needs.get(name, set())
-    return regex, sorted(targets)
+    for test in tests:
+        targets |= needs.get(test, set())
+    return regex, names, sorted(targets)
 
 
 def read_label_rows(text):
@@ -270,9 +289,9 @@ def native_legs(gates):
     """The presets of the native job that have work: debug for the unit tests
     and the checks under sanitizers, release for the build and the checks."""
     legs = []
-    if gates & {"native-unit", "native-checks"}:
+    if gates & {"native-unit", "native-checks", "probes"}:
         legs.append("debug")
-    if gates & {"native-build", "native-checks"}:
+    if gates & {"native-build", "native-checks", "probes"}:
         legs.append("release")
     return legs
 
@@ -286,9 +305,12 @@ def main(argv):
       classes, gates, labels       comma lists
       gate-<name>=true|false       for every gate
       native-legs                  a JSON list of the presets of the native job
-      ctest-regex                  the `ctest -L` regex, empty for every test
-      ctest-targets                the targets to build for the labelled tests,
-                                   `all` for every test, empty for no test
+      ctest-all                    `true` when every test runs
+      ctest-regex                  the `ctest -L` regex of the labels, or empty
+      ctest-names                  the `ctest -R` regex of the test targets, or
+                                   empty
+      ctest-targets                the targets to build, `all` for every test,
+                                   empty for none
 
     --all selects everything, which is what a push to main runs.
     """
@@ -313,8 +335,10 @@ def main(argv):
     print("native-legs=" + json.dumps(native_legs(selection.gates)))
     rows = read_label_rows((ROOT / "test" / "test_labels.txt").read_text())
     needs = test_targets((ROOT / "test" / "CMakeLists.txt").read_text())
-    regex, targets = ctest_selection(selection.labels, rows, needs)
+    regex, names, targets = ctest_selection(selection.labels, selection.tests, rows, needs)
+    print(f"ctest-all={'true' if 'all' in selection.labels else 'false'}")
     print(f"ctest-regex={regex}")
+    print(f"ctest-names={names}")
     print("ctest-targets=" + ("all" if targets is None else " ".join(targets)))
     return 0
 

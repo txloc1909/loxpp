@@ -10,6 +10,7 @@
 #   labels <label>,... | all | -
 #   legs <preset>,... | -            (optional) the presets of the native job
 #   targets all | - | <target> ...  (optional) what the debug leg builds
+#   names - | <target> ...         (optional) the test targets that run by name
 
 case a document alone runs only the placement check
 files docs/decisions/distribution.md README.md
@@ -18,10 +19,13 @@ labels -
 legs -
 targets -
 
-case a spec clarification runs the tables and the probes of every consumer
+case a spec clarification runs the tables and the probe steps, not whole jobs
 files spec/04-semantics.md
-gates placement,tables,native-checks,jvm,qbe,cross
+gates placement,tables,native-unit,probes
 labels -
+names BootstrapErrorKindAudit BootstrapSuspendCalls
+legs debug,release
+targets -
 
 case a change of the VM core runs everything the VM reaches
 files src/vm.cpp
@@ -42,19 +46,19 @@ labels all
 
 case a JVM-only change skips the QBE job
 files src/backend/jvm_emitter.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 legs debug,release
 targets test_jvm_emit
 
 case a JVM runtime change skips the QBE job
 files runtime/jvm/README.md
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a pass that only the JVM emitter uses is JVM-only
 files src/backend/zero_depth_local.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a QBE-only change skips the JVM job
@@ -84,25 +88,29 @@ files src/backend/rt_abi.h
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
 labels all
 
-case a JVM unit test runs format and the JVM unit tests, and no job
+case a JVM unit test runs format and its own test target, and no job
 files test/test_jvm_emit.cpp
 gates placement,format,native-unit
-labels jvm
+labels -
+names test_jvm_emit
 legs debug
 targets test_jvm_emit
 
-case a QBE unit test runs format and the QBE unit tests, and no job
+case a QBE unit test runs format and its own test target, and no job
 files test/test_backend_qbe_emitter.cpp
 gates placement,format,native-unit
-labels qbe
+labels -
+names test_backend_qbe_emitter
 legs debug
-targets test_backend_qbe_emitter test_backend_rt_capi
+targets test_backend_qbe_emitter
 
-case a core unit test runs format and the core unit tests, and no job
+case a core unit test runs format and its own test target, not all core tests
 files test/test_scanner.cpp
 gates placement,format,native-unit
-labels core
+labels -
+names test_scanner
 legs debug
+targets test_scanner
 
 case an example program skips the unit tests except the corpus sweeps
 files examples/fibonacci.lox examples/wc.input
@@ -132,10 +140,11 @@ case a bootstrap tool runs the bootstrap checks of each consumer
 files tools/check_bootstrap_park_state.py
 gates placement,native-unit,native-checks,jvm,qbe,cross
 labels bootstrap
+names RunnerPrecondition
 
-case a harness tool runs the differential steps of each consumer
+case a harness tool runs the probe steps, not whole jobs
 files tools/diff_runtimes.py
-gates placement,native-unit,native-checks,jvm,qbe,cross
+gates placement,tables,native-unit,probes
 labels corpus,harness
 
 case a benchmark runs only the benchmark tests
@@ -147,9 +156,10 @@ targets test_richards_benchmark
 
 case a spec table script runs only the tables
 files tools/check_number_format.py
-gates placement,tables
+gates placement,tables,native-unit
 labels -
-legs -
+names RunnerPrecondition
+legs debug
 targets -
 
 case the tree-sitter grammar runs its job and the Neovim job that copies its queries
@@ -206,12 +216,12 @@ labels all
 
 case a change of two classes runs both
 files docs/README.md src/backend/jvm_emitter.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a JVM change and a QBE change run both backends
 files src/backend/jvm_emitter.cpp src/backend/qbe_emitter.cpp
-gates placement,format,native-build,native-unit,jvm,qbe
+gates placement,tables,format,native-build,native-unit,jvm,qbe
 labels jvm,qbe
 
 case the probe that the OS-globals check reads also runs the cross-consumer job
@@ -224,25 +234,89 @@ files test/translation-probes/64_net_process.lox
 gates placement,tables,native-unit,native-checks,jvm,qbe,tree-sitter,cross
 labels corpus
 
-case a unit test that reads programs runs its own label and no job
+case a unit test that reads programs runs its own test target and no job
 files test/test_tooling_parser.cpp
 gates placement,format,native-unit
-labels tooling,corpus
+labels -
+names test_tooling_parser
 legs debug
+targets test_tooling_parser
 
 case the shared test helper runs every unit test and no job
 files test/test_harness.h
-gates placement,format,native-unit
+gates placement,format,native-unit,probes
 labels all
-legs debug
+legs debug,release
 targets all
 
-case two unit tests of two consumers run both label sets
+case two unit tests of two consumers run both test targets
 files test/test_jvm_emit.cpp test/test_backend_rt_capi.cpp
 gates placement,format,native-unit
-labels jvm,qbe
+labels -
+names test_jvm_emit test_backend_rt_capi
 
-case a unit test source with a program change runs the labels of both
+case a unit test source with a program change runs its target and the corpus label
 files test/test_jvm_emit.cpp examples/fibonacci.lox
 gates placement,tables,format,native-unit,native-checks,jvm,qbe,tree-sitter
-labels jvm,corpus
+labels corpus
+names test_jvm_emit
+
+case a test source builds a twin target that runs under GC stress, and both run
+files test/test_task.cpp
+gates placement,format,native-unit
+labels -
+names test_task test_task_gc
+targets test_task test_task_gc
+
+case the benchmark unit test runs by name, and the benchmark label does not
+files test/test_richards_benchmark.cpp
+gates placement,format,native-unit
+labels -
+names test_richards_benchmark
+
+case a test source that no target builds runs every test
+files test/test_not_built_by_any_target.cpp
+gates placement,format,native-unit
+labels all
+names -
+targets all
+
+case a table script imports the spec probe tool, so a harness change runs the tables
+files tools/check_spec_probes.py
+gates placement,tables,native-unit,probes
+labels corpus,harness
+
+case the table scripts read the JVM runtime sources, so a change of them runs the tables
+files runtime/jvm/src/lox/LoxRuntime.java
+gates placement,tables,format,native-build,native-unit,jvm
+labels jvm
+
+case the language server smoke test runs in the language server job and the static build
+files tools/lsp_smoke.py
+gates placement,lsp,release-static,native-unit
+labels -
+names RunnerPrecondition
+
+case the runner module that the smoke test imports runs the harness and the language server job
+files tools/runner_precondition.py
+gates placement,tables,native-unit,probes,lsp,release-static
+labels bootstrap,corpus,harness
+names GcTrace GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
+
+case the library of the spec tables runs the static test that reads it
+files tools/spec_tables.py
+gates placement,tables,native-unit
+labels -
+names BootstrapSuspendCalls RunnerPrecondition
+targets -
+
+case a harness shell script runs the probe steps and the tables, and no backend job gate
+files tools/check_file_durability.sh
+gates placement,tables,native-unit,probes
+labels corpus,harness
+legs debug,release
+
+case a harness change with a JVM change runs the JVM job and the probe steps
+files tools/diff_runtimes.py src/backend/jvm_emitter.cpp
+gates placement,tables,format,native-build,native-unit,jvm,probes
+labels corpus,harness,jvm

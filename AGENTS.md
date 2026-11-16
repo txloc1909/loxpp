@@ -319,6 +319,12 @@ These apply to any contributor, human or agent, in any kind of work.
 - **Give each side, kind, or value that a rule names its own probe case.** A
   mutation of the rule for any one of them must fail a probe, and a probe
   must force the case that its rule names.
+- **Give each new test a label line and each new path a class.** A test needs
+  a line in `test/test_labels.txt`. A new file or directory needs a `path`
+  line in `.github/ci-classes.txt`. CI runs only the jobs and the tests that
+  the class and the labels select, so a missing or wrong line makes a change
+  skip a test that it needs. `tools/check_test_labels.py` and
+  `tools/check_ci_classes.py` check both, and `TESTING.md` says how.
 - **Do not report a tool result you did not just produce.** Run the tool; a
   remembered "it was clean last time" is not evidence.
 - **If a check cannot be made to fail, say so, and name where the defect

@@ -17,6 +17,10 @@
 #   native-unit    the debug build and `ctest -L`, for the labels of the class.
 #                  A class with labels runs it. `native-unit` is not listed.
 #   native-checks  the example, probe and bootstrap steps on the native VM
+#   probes         the steps of the native, JVM, QBE and cross jobs that run the
+#                  probes, the examples or a differential through a harness tool.
+#                  A job runs for its own gate or for this one, and its other
+#                  steps test their own gate.
 #   jvm            the JVM backend job
 #   qbe            the QBE backend job
 #   cross          the checks that compare native with the bootstrap interpreter
@@ -105,7 +109,8 @@ path tools/run_bootstrap_error_kind_causes.py  bootstrap-tools
 path tools/check_benchmark_expected.py         bench
 path tools/check_nvim_*                        nvim
 path tools/check_textmate_grammar.py           vscode
-path tools/lsp_smoke.py                        tooling
+path tools/lsp_smoke.py                        lsp-smoke
+path tools/runner_precondition.py              harness,runner-lib
 path tools/*jvm*                               jvm
 path tools/*_lox_rt.sh                         jvm
 path tools/toolchain_smoke/**                  jvm
@@ -124,7 +129,6 @@ path tools/check_examples*                     harness
 path tools/check_compile_error_cases.py        harness
 path tools/check_cr_bytes.py                   harness
 path tools/check_runner_precondition.py        harness
-path tools/runner_precondition.py              harness
 path tools/check_diff_runtimes_*               harness
 path tools/diff_runtimes.py                    harness
 path tools/check_coroutine_probes.sh           harness
@@ -136,7 +140,8 @@ path tools/count_instructions.py               core
 path tools/build_release.sh                    packaging
 path tools/testdata/**                         jvm
 path tools/check_*                             spec-tables
-path tools/spec_tables.py                      spec-tables
+path+ tools/*.py                               py-tool
+path tools/spec_tables.py                      spec-tables,spec-lib
 path tools/operator_tables.py                  spec-tables
 
 # --- editors
@@ -153,17 +158,26 @@ path install.sh                                packaging
 # --- what each class runs
 class ci               gates=all labels=all
 class test-source      gates=format
-class test-support     gates=format labels=all
+class test-support     gates=format,probes labels=all
 class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
 class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend
-class jvm              gates=format,native-build,jvm labels=jvm
+class jvm              gates=format,native-build,jvm,tables labels=jvm
 class qbe              gates=format,native-build,qbe labels=qbe
 class tooling          gates=format,native-build,lsp,neovim,vscode labels=tooling
-class spec             gates=tables,native-checks,jvm,qbe,cross
+# The two tests read the tables of spec/04-semantics.md and spec/05-stdlib.md.
+class spec             gates=tables,probes tests=BootstrapErrorKindAudit,BootstrapSuspendCalls
+class spec-lib         tests=BootstrapSuspendCalls
 class programs         gates=tables,native-checks,jvm,qbe,tree-sitter labels=corpus
 class bootstrap        gates=native-checks,jvm,qbe,cross,tree-sitter labels=corpus,bootstrap
 class bootstrap-tools  gates=native-checks,jvm,qbe,cross labels=bootstrap
-class harness          gates=native-checks,jvm,qbe,cross labels=harness,corpus
+class harness          gates=tables,probes labels=harness,corpus
+class lsp-smoke        gates=lsp,release-static
+# tools/runner_precondition.py is a module of the tools that start a runner. Each
+# test that runs such a tool and has the label core runs by name.
+class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcSweepLinear,GcMinHeap,ReplSession
+# test/CMakeLists.txt runs RunnerPrecondition, which scans every tools/*.py
+# file for one that starts a process, so each of them selects it.
+class py-tool          tests=RunnerPrecondition
 class spec-tables      gates=tables
 class codecrafters     gates=codecrafters
 class tree-sitter      gates=tree-sitter,neovim
@@ -187,13 +201,13 @@ job tree-sitter           gates=tree-sitter
 job loxpp-lsp             gates=lsp
 job neovim-plugin         gates=neovim
 job vscode-extension      gates=vscode
-job build-and-test        gates=native-build,native-unit,native-checks
+job build-and-test        gates=native-build,native-unit,native-checks,probes
 job codecrafters          gates=codecrafters
 job redis-shard-plan      gates=codecrafters
 job redis-stage-shards    gates=codecrafters
-job managed-toolchains    gates=jvm
-job cross-consumer        gates=cross
-job qbe-toolchain         gates=qbe
+job managed-toolchains    gates=jvm,probes
+job cross-consumer        gates=cross,probes
+job qbe-toolchain         gates=qbe,probes
 job release-static        gates=release-static
 
 # --- files that a job names, and that a change of them does not need it for
@@ -203,3 +217,34 @@ job release-static        gates=release-static
 # more than it finds.
 ignore release-static examples/**
 ignore release-static tools/check_examples.py
+
+# --- files that a script names in its text and does not read
+# tools/check_ci_classes.py follows one level: the files that a script of a job
+# or a test names or imports must select that job or test too. These lines are
+# the names that a script holds as text only.
+# These tools take the runner on the command line, and their help text names
+# the runners that one can pass.
+script-ignore tools/diff_runtimes.py tools/loxpp_*.sh
+script-ignore tools/diff_runtimes.py tools/jvm_excluded_examples.txt
+script-ignore tools/check_print_lines.py tools/loxpp_*.sh
+script-ignore tools/check_spec_probes.py tools/loxpp_*.sh
+script-ignore tools/check_examples.py tools/jvm_excluded_examples.txt
+# These two checks hold a copy of the reserved words of the spec. They do not
+# read the spec, so a change of the spec does not change their result.
+script-ignore tools/check_nvim_syntax.py spec/01-lexical.md
+script-ignore tools/check_textmate_grammar.py spec/01-lexical.md
+# These scripts name a spec file in a docstring or a comment. Only
+# check_bootstrap_error_kinds.py and spec_tables.py read one.
+script-ignore tools/check_bootstrap_map_iteration.py spec/**
+script-ignore tools/check_bootstrap_match_arm_break.py spec/**
+script-ignore tools/check_bootstrap_park_state.py spec/**
+script-ignore tools/check_bootstrap_stack_overflow.py spec/**
+script-ignore tools/run_bootstrap_error_kind_causes.py spec/**
+script-ignore tools/diff_runtimes.py spec/**
+script-ignore tools/check_repl_session.py spec/**
+script-ignore tools/check_repl_session.py test/test_repl.cpp
+# check_runner_precondition.py scans the files of tools/ and not of its
+# subdirectories. It names tools/agent-workflow files in text only.
+script-ignore tools/check_runner_precondition.py tools/agent-workflow/**
+# The pi mode test names a shell script as the text of a mock command line.
+script-ignore tools/test_pi_modes.mjs tools/check_qbe_s8_promotion.sh

@@ -88,6 +88,42 @@ TEST_F(ParserBytecodeTest, Arithmetic_Addition) {
 
 For more details, see the comments in the test harness and example test files.
 
+## Labels and CI classes
+
+CI runs only the jobs that the changed files need (issue #1258). Two files
+decide this, and a new test or a new directory must be in them.
+
+**A new test gets a label line.** `test/test_labels.txt` has one line for each
+test: the name, then one or more labels, separated by commas. The name is a
+GTest target that `test/CMakeLists.txt` lists in `LOXPP_GTEST_TARGETS`, or the
+name of a test that `add_test()` registers. The header of the file defines the
+labels. A test has the label of each consumer that it can fail for. Add
+`corpus` to a test that reads programs under `examples/`, `bootstrap/` or
+`test/`. `ctest -L <label>` runs the tests of one label.
+
+Without the line, CMake stops with `test/test_labels.txt has no line for the
+test target <name>`, and `tools/check_test_labels.py` fails.
+
+**A new file or directory gets a class.** `.github/ci-classes.txt` has a `path`
+line for each kind of file. The first line that matches a file gives its class,
+so put a specific line before a general one. The class says which jobs and
+which labels a change of the file runs. A file that no line matches fails
+`tools/check_ci_classes.py`.
+
+Both scripts run in the `checks` job and need no build. Run them before you
+push:
+
+```bash
+tools/check_test_labels.py
+tools/check_ci_classes.py
+```
+
+`tools/check_ci_classes.py` also fails when a job names a file that does not
+select that job, and when the class of a backend file differs from its
+`#include` graph. When it fails, change the class or the line that it names.
+Do not add an `ignore` line to make it pass, unless the job really does not
+need the file. An `ignore` line must say why.
+
 ## Tests That Run Threads or Tasks
 
 A test of concurrent code runs on a machine that other work also uses. Debug
