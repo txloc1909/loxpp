@@ -6,8 +6,11 @@ request skip a test that it needs, and nothing else shows that. This script
 reads the repository as text, so it needs no build, and fails when:
 
 1. a tracked file matches no path line;
-2. the gates that a job of ci.yml tests in its `if:` lines differ from its
-   `job` line, or the job `changes` does not publish a gate that a job tests;
+2. a step that runs `ctest -R <Test>` does not run for every class that selects
+   the test;
+   the gates that a job of ci.yml tests in its `if:` differ from its `job` line,
+   a step tests a gate that its job does not allow, or the job `changes` does
+   not publish a gate that a job or a step tests;
    a file that a job of ci.yml names in its steps does not select that job
    (the job's gates, in the `job` lines, are the gates it belongs to);
 3. a script or program that an add_test() command of test/CMakeLists.txt runs
@@ -78,6 +81,31 @@ def job_texts(yml):
     return {job: "\n".join(lines) for job, lines in jobs.items()}
 
 
+def job_steps(text):
+    """Splits the text of a job into (the lines before `steps:`, [step text])."""
+    lines = text.split("\n")
+    start = next((i for i, l in enumerate(lines) if l == "    steps:"), len(lines))
+    head = "\n".join(lines[:start])
+    steps, current = [], None
+    for line in lines[start + 1 :]:
+        if line.startswith("      - "):
+            current = [line]
+            steps.append(current)
+        elif current is not None:
+            current.append(line)
+    return head, ["\n".join(step) for step in steps]
+
+
+def gates_of(expression):
+    """The gates that an `if:` expression tests."""
+    return set(re.findall(r"outputs\.gate-([a-z-]+)", expression or ""))
+
+
+def if_expression(block, indent):
+    match = re.search(rf"(?m)^ {{{indent}}}if: (.*)$", block)
+    return match.group(1) if match else None
+
+
 def expand(token, files):
     """The tracked files that a path token in a job names."""
     token = token.rstrip(".,;:'\"\\)`")
@@ -142,6 +170,13 @@ def script_ignored(class_map, script, file):
     return any(s.match(script) and f.match(file) for s, _, f in class_map.script_ignores)
 
 
+def step_gates(class_map, job, step):
+    """The gates under which a step runs: those of its own `if:`, or else those
+    of its job."""
+    own = gates_of(if_expression(step, 8))
+    return own or set(class_map.jobs.get(job, set()))
+
+
 def check_job_references(class_map, files, yml):
     errors = []
     fileset = set(files)
@@ -152,23 +187,32 @@ def check_job_references(class_map, files, yml):
             continue
         exempt = [p for p, jobs in NON_RECURSIVE_EXEMPT.items() if job in jobs]
         ignored = lambda f: any(j == job and regex.match(f) for j, _, regex in class_map.ignores)
-        first = [f for f in dict.fromkeys(named_files(without_comments(text), fileset, exempt)) if not ignored(f)]
-        for file in first:
-            if not selects_job(class_map, file, gates):
-                names = ",".join(ci_classes.classes_of(class_map, file))
-                errors.append(f"{file} (class {names}) is named by the job {job}, which it does not select")
-        for script in first:
-            if not script.endswith(SCRIPT_SUFFIXES):
-                continue
-            for file in sorted(script_reads(script, fileset, exempt)):
-                if file in first or ignored(file) or script_ignored(class_map, script, file):
-                    continue
-                if not selects_job(class_map, file, gates):
+        _, steps = job_steps(text)
+        reported = set()
+        for step in steps:
+            here = step_gates(class_map, job, step)
+            first = [f for f in dict.fromkeys(named_files(without_comments(step), fileset, exempt)) if not ignored(f)]
+            for file in first:
+                if not selects_job(class_map, file, here) and (file, job) not in reported:
+                    reported.add((file, job))
                     names = ",".join(ci_classes.classes_of(class_map, file))
                     errors.append(
-                        f"{file} (class {names}) is read by {script}, which the job {job} runs, "
-                        f"and the job is not selected by it"
+                        f"{file} (class {names}) is named by a step of the job {job} "
+                        f"that runs for the gates {sorted(here)}, which it does not select"
                     )
+            for script in first:
+                if not script.endswith(SCRIPT_SUFFIXES):
+                    continue
+                for file in sorted(script_reads(script, fileset, exempt)):
+                    if file in first or ignored(file) or script_ignored(class_map, script, file):
+                        continue
+                    if not selects_job(class_map, file, here) and (file, job) not in reported:
+                        reported.add((file, job))
+                        names = ",".join(ci_classes.classes_of(class_map, file))
+                        errors.append(
+                            f"{file} (class {names}) is read by {script}, which a step of the job {job} runs "
+                            f"for the gates {sorted(here)}, and it does not select them"
+                        )
     for job, glob, _ in class_map.ignores:
         if job not in class_map.jobs:
             errors.append(f"the ignore line for {job} {glob} names a job that has no job line")
@@ -178,25 +222,64 @@ def check_job_references(class_map, files, yml):
     return errors
 
 
+NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes"}
+
+
+def check_ctest_steps(class_map, yml, labels):
+    """A step that runs `ctest -R <Test>` must run for every class that selects
+    the test, by label or by name, since the step is the only place that runs it."""
+    errors = []
+    for job, text in job_texts(yml).items():
+        _, steps = job_steps(text)
+        for step in steps:
+            for test in re.findall(r"ctest\b[^\n]*? -R (\w+)", step):
+                test_labels = labels.get(test)
+                if test_labels is None:
+                    continue
+                here = step_gates(class_map, job, step)
+                for name, (gates, class_labels) in sorted(class_map.classes.items()):
+                    selects = (
+                        "all" in class_labels
+                        or set(class_labels) & set(test_labels)
+                        or test in class_map.class_tests.get(name, set())
+                    )
+                    runs = "all" in gates or bool(gates & here)
+                    if selects and not runs:
+                        errors.append(
+                            f"ci.yml: a step of the job {job} runs the test {test} for the gates {sorted(here)}, "
+                            f"but the class {name} selects that test and does not select those gates"
+                        )
+    return errors
+
+
 def check_job_gates(class_map, yml):
-    """The gates that a job tests in its `if:` lines are the gates of its job
-    line, and the `changes` job publishes every gate that a job tests."""
+    """The gates that the `if:` of a job tests are the gates of its job line, a
+    step tests only gates that its job allows, and the `changes` job publishes
+    every gate that a job or a step tests."""
     errors = []
     texts = job_texts(yml)
     tested_anywhere = set()
     for job, text in texts.items():
         if job == "changes":
             continue
-        tested = set(re.findall(r"outputs\.gate-([a-z-]+)", text))
-        if "outputs.native-legs" in text:
-            tested.add("native-build")
-        tested_anywhere |= tested
+        head, steps = job_steps(text)
+        job_if = if_expression(head, 4)
+        tested = gates_of(job_if)
+        if job_if and "outputs.native-legs" in job_if:
+            tested |= NATIVE_LEG_GATES
         want = class_map.jobs.get(job, set()) - ci_classes.ALWAYS
         if tested != want:
             errors.append(
-                f"ci.yml: the job {job} tests the gates {sorted(tested)}, "
+                f"ci.yml: the job {job} tests the gates {sorted(tested)} in its `if:`, "
                 f"but its job line in the map has {sorted(want)}"
             )
+        tested_anywhere |= tested
+        for step in steps:
+            own = gates_of(if_expression(step, 8))
+            tested_anywhere |= own
+            for gate in sorted(own - want - ci_classes.ALWAYS):
+                name = re.search(r"(?m)^      - (?:name|uses): (.*)$", step).group(1)
+                errors.append(f"ci.yml: the step {name!r} of the job {job} tests the gate {gate}, which the job does not allow")
     published = set(re.findall(r"^      gate-([a-z-]+):", texts.get("changes", ""), re.M))
     for gate in sorted(tested_anywhere - published - {"native-build"}):
         errors.append(f"ci.yml: a job tests the gate {gate}, which the job changes does not publish")
@@ -437,6 +520,7 @@ def check(class_map, files, yml, cmake, labels):
             errors.append(f"{file} matches no path line")
     errors += check_job_references(class_map, files, yml)
     errors += check_job_gates(class_map, yml)
+    errors += check_ctest_steps(class_map, yml, labels)
     errors += check_test_references(class_map, files, cmake, labels)
     errors += check_test_sources(class_map, files, cmake)
     errors += check_backend_classes(class_map, files)

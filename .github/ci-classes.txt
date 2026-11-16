@@ -17,6 +17,10 @@
 #   native-unit    the debug build and `ctest -L`, for the labels of the class.
 #                  A class with labels runs it. `native-unit` is not listed.
 #   native-checks  the example, probe and bootstrap steps on the native VM
+#   probes         the steps of the native, JVM, QBE and cross jobs that run the
+#                  probes, the examples or a differential through a harness tool.
+#                  A job runs for its own gate or for this one, and its other
+#                  steps test their own gate.
 #   jvm            the JVM backend job
 #   qbe            the QBE backend job
 #   cross          the checks that compare native with the bootstrap interpreter
@@ -154,23 +158,23 @@ path install.sh                                packaging
 # --- what each class runs
 class ci               gates=all labels=all
 class test-source      gates=format
-class test-support     gates=format labels=all
+class test-support     gates=format,probes labels=all
 class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
 class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend
 class jvm              gates=format,native-build,jvm,tables labels=jvm
 class qbe              gates=format,native-build,qbe labels=qbe
 class tooling          gates=format,native-build,lsp,neovim,vscode labels=tooling
 # The two tests read the tables of spec/04-semantics.md and spec/05-stdlib.md.
-class spec             gates=tables,native-checks,jvm,qbe,cross tests=BootstrapErrorKindAudit,BootstrapSuspendCalls
+class spec             gates=tables,probes tests=BootstrapErrorKindAudit,BootstrapSuspendCalls
 class spec-lib         tests=BootstrapSuspendCalls
 class programs         gates=tables,native-checks,jvm,qbe,tree-sitter labels=corpus
 class bootstrap        gates=native-checks,jvm,qbe,cross,tree-sitter labels=corpus,bootstrap
 class bootstrap-tools  gates=native-checks,jvm,qbe,cross labels=bootstrap
-class harness          gates=tables,native-checks,jvm,qbe,cross labels=harness,corpus
+class harness          gates=tables,probes labels=harness,corpus
 class lsp-smoke        gates=lsp,release-static
 # tools/runner_precondition.py is a module of the tools that start a runner. Each
 # test that runs such a tool and has the label core runs by name.
-class runner-lib       gates=lsp,release-static labels=bootstrap tests=GcTrace,GcSweepLinear,GcMinHeap,ReplSession
+class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcSweepLinear,GcMinHeap,ReplSession
 # test/CMakeLists.txt runs RunnerPrecondition, which scans every tools/*.py
 # file for one that starts a process, so each of them selects it.
 class py-tool          tests=RunnerPrecondition
@@ -197,13 +201,13 @@ job tree-sitter           gates=tree-sitter
 job loxpp-lsp             gates=lsp
 job neovim-plugin         gates=neovim
 job vscode-extension      gates=vscode
-job build-and-test        gates=native-build,native-unit,native-checks
+job build-and-test        gates=native-build,native-unit,native-checks,probes
 job codecrafters          gates=codecrafters
 job redis-shard-plan      gates=codecrafters
 job redis-stage-shards    gates=codecrafters
-job managed-toolchains    gates=jvm
-job cross-consumer        gates=cross
-job qbe-toolchain         gates=qbe
+job managed-toolchains    gates=jvm,probes
+job cross-consumer        gates=cross,probes
+job qbe-toolchain         gates=qbe,probes
 job release-static        gates=release-static
 
 # --- files that a job names, and that a change of them does not need it for
@@ -224,6 +228,7 @@ script-ignore tools/diff_runtimes.py tools/loxpp_*.sh
 script-ignore tools/diff_runtimes.py tools/jvm_excluded_examples.txt
 script-ignore tools/check_print_lines.py tools/loxpp_*.sh
 script-ignore tools/check_spec_probes.py tools/loxpp_*.sh
+script-ignore tools/check_examples.py tools/jvm_excluded_examples.txt
 # These two checks hold a copy of the reserved words of the spec. They do not
 # read the spec, so a change of the spec does not change their result.
 script-ignore tools/check_nvim_syntax.py spec/01-lexical.md

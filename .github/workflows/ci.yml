@@ -21,6 +21,7 @@ jobs:
       gate-pi: ${{ steps.select.outputs.gate-pi }}
       gate-native-unit: ${{ steps.select.outputs.gate-native-unit }}
       gate-native-checks: ${{ steps.select.outputs.gate-native-checks }}
+      gate-probes: ${{ steps.select.outputs.gate-probes }}
       gate-jvm: ${{ steps.select.outputs.gate-jvm }}
       gate-qbe: ${{ steps.select.outputs.gate-qbe }}
       gate-cross: ${{ steps.select.outputs.gate-cross }}
@@ -686,7 +687,7 @@ jobs:
       # flags: the image's default C++ compiler is gcc, which cannot build the
       # parser, and the preset names clang.
       - name: Build loxpp for the example checks, without the instruction trace
-        if: matrix.preset == 'debug' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'debug' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -700,7 +701,7 @@ jobs:
               && cmake --build build-examples --target loxpp"
 
       - name: Run example checks
-        if: needs.changes.outputs.gate-native-checks == 'true'
+        if: (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -727,7 +728,7 @@ jobs:
       # the corpus is green and this step is a normal gate. Release only: the
       # debug preset's instruction trace floods stdout (see AGENTS.md).
       - name: Check coroutine probes
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -748,7 +749,7 @@ jobs:
       # Release only: the debug preset's instruction trace floods stdout (see
       # AGENTS.md).
       - name: Check spec probes - native
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -757,7 +758,7 @@ jobs:
             bash -c "python3 tools/check_spec_probes.py build/loxpp test/translation-probes/ --xfail tools/spec-probe-xfail/native.txt"
 
       - name: Check spec probes - bootstrap interpreter
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -767,7 +768,7 @@ jobs:
             bash -c "python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/ --consumer bootstrap --xfail tools/spec-probe-xfail/bootstrap.txt && python3 tools/check_spec_probes.py bootstrap/lox_wrapper.sh test/translation-probes/bootstrap-only/"
 
       - name: Run examples through loxpp bootstrap interpreter
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -780,7 +781,7 @@ jobs:
       # caller keeps stdin open (issue #698). CI's own stdin is closed, so
       # only a check that holds a stdin pipe open finds the defect.
       - name: Check bootstrap wrapper exits with stdin open
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -794,7 +795,7 @@ jobs:
       # any order (tools/check_print_lines.py). Release only, like the steps
       # above.
       - name: Check print lines of two workers - native
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -803,7 +804,7 @@ jobs:
             bash -c "python3 tools/check_print_lines.py build/loxpp"
 
       - name: Check print lines of two workers - bootstrap interpreter
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -822,7 +823,7 @@ jobs:
       # probes: other files of test/translation-probes/ pin translation
       # problems of the compiled backends.
       - name: Bootstrap differential suite - spec probes
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -841,7 +842,7 @@ jobs:
       # diff_runtimes.py reads stdout in text mode, which turns each CR into a
       # newline, so that script compares the raw bytes (issue #656, issue #701).
       - name: Bootstrap differential suite - NUL probes
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -856,7 +857,7 @@ jobs:
       # QBE step that runs the corpus through the self-hosted interpreter
       # leaves it out for the same reason.
       - name: Bootstrap differential suite - examples
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -872,7 +873,7 @@ jobs:
       # --compile-errors fails a file that native does not reject at compile
       # time, so the corpus cannot turn into run-time programs unseen.
       - name: Bootstrap differential suite - compile errors
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -905,7 +906,7 @@ jobs:
       # python3 missing at configure time) would look identical to a build
       # where the test ran and passed.
       - name: Run bootstrap error-kind causes at run time
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -916,7 +917,7 @@ jobs:
       # Same trace-noise constraint as BootstrapErrorKindCausesRuntime above,
       # so this is the one leg where BootstrapStackOverflow actually runs.
       - name: Run bootstrap stack-overflow catchability check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -929,7 +930,7 @@ jobs:
       # leg (SKIP_RETURN_CODE 125). This step is where it runs; without it the
       # test would run in no leg at all.
       - name: Run the expected-failure list checks at run time
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -943,7 +944,7 @@ jobs:
       # runs it, and its cases 8 to 12 hold the only coverage of
       # tools/diff_runtimes.py's own argument handling (#1095).
       - name: Run the differential-gate phases check at run time
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -956,7 +957,7 @@ jobs:
       # release leg, where the trace macros are off. --no-tests=error fails
       # the step if a name stops being registered.
       - name: Run bootstrap operator-overload differential
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -965,7 +966,7 @@ jobs:
             bash -c "ctest --test-dir build -R BootstrapOperatorOverload --output-on-failure --no-tests=error"
 
       - name: Run bootstrap match-arm-break check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -977,7 +978,7 @@ jobs:
       # this release leg is the one place the entry runs. --no-tests=error
       # fails the step if the name stops being registered.
       - name: Run bootstrap Map-iteration check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -989,7 +990,7 @@ jobs:
       # this release leg is the one place the entry runs. --no-tests=error
       # fails the step if the name stops being registered.
       - name: Run bootstrap List method read differential
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1003,7 +1004,7 @@ jobs:
       # name, so a build that stopped registering it fails here; one name per
       # step is what makes that check cover this entry alone.
       - name: Run bootstrap deferred-call-after-park differential
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1015,7 +1016,7 @@ jobs:
       # release leg is the one place the entry runs. Issue #984 is the defect it
       # pins. One name per step, for the reason above.
       - name: Run bootstrap park-state check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1026,7 +1027,7 @@ jobs:
       # GcSweepLinear self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the sweep-time bound is checked.
       - name: Run GC sweep linearity check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1037,7 +1038,7 @@ jobs:
       # GcMinHeap self-skips on debug (SKIP_RETURN_CODE 125), so the release
       # leg is the only place the collection-count bound is checked.
       - name: Run GC minimum heap check
-        if: matrix.preset == 'release' && needs.changes.outputs.gate-native-checks == 'true'
+        if: matrix.preset == 'release' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1265,7 +1266,7 @@ jobs:
   managed-toolchains:
     name: Managed toolchains (JVM)
     needs: changes
-    if: needs.changes.outputs.gate-jvm == 'true'
+    if: needs.changes.outputs.gate-jvm == 'true' || needs.changes.outputs.gate-probes == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1318,6 +1319,7 @@ jobs:
       # "Fail the job" step at the end, which is what actually turns a
       # failure here into a red job).
       - name: Build and test the JVM runtime library
+        if: needs.changes.outputs.gate-jvm == 'true'
         id: jvm_lox_rt_test
         continue-on-error: true
         run: |
@@ -1549,6 +1551,7 @@ jobs:
       # catches the case where both wrappers fail silently with empty stdout,
       # which a bare `diff <(a) <(b)` would report as a match.
       - name: JVM differential suite - self-hosted interpreter on the JVM backend
+        if: needs.changes.outputs.gate-jvm == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1631,7 +1634,7 @@ jobs:
   cross-consumer:
     name: Native and bootstrap interpreter checks
     needs: changes
-    if: needs.changes.outputs.gate-cross == 'true'
+    if: needs.changes.outputs.gate-cross == 'true' || needs.changes.outputs.gate-probes == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1702,6 +1705,7 @@ jobs:
       # probe above instead: it ends the program and has no diffable
       # stdout past the call.
       - name: Check bootstrap OS stdlib globals match native
+        if: needs.changes.outputs.gate-cross == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1729,6 +1733,7 @@ jobs:
       # native and the bootstrap interpreter, with the same emptiness guard
       # the OS-stdlib step above uses.
       - name: Check bootstrap sockets and subprocess match native
+        if: needs.changes.outputs.gate-cross == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1754,7 +1759,7 @@ jobs:
   qbe-toolchain:
     name: QBE toolchain
     needs: changes
-    if: needs.changes.outputs.gate-qbe == 'true'
+    if: needs.changes.outputs.gate-qbe == 'true' || needs.changes.outputs.gate-probes == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1776,6 +1781,7 @@ jobs:
           cache-to: type=gha,mode=min,scope=dev-qbe
 
       - name: Check QBE toolchain
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1788,6 +1794,7 @@ jobs:
       # checkpoint's own plain `cc` link line does not do) and round-trips
       # this node's checkpoint through it.
       - name: Check libloxrt.a + startup (S2)
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1803,6 +1810,7 @@ jobs:
       # `loxrt`, then round-trips probes 01-05 and 15 through the real
       # toolchain.
       - name: Check straight-line code and jumps (S3)
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1817,6 +1825,7 @@ jobs:
       # QBE-only V1/V3 adaptations, V2_shared, fib, and a deep-recursion probe
       # (Q3's own measured C-stack-depth test) through the real toolchain.
       - name: Check calls and closures (S4)
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1828,6 +1837,7 @@ jobs:
       # probes 09-14 and 16 (classes, super, for-in, lists/maps/index, enum
       # match, slice/in) through the real toolchain.
       - name: Check the rest of the language (S5)
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -1923,6 +1933,7 @@ jobs:
       # that args() reflects the executable own command line, not the empty
       # list a harness that drops argc/argv would give.
       - name: --target qbe front end - standalone binary
+        if: needs.changes.outputs.gate-qbe == 'true'
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
