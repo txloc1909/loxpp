@@ -5,16 +5,23 @@ The map has three kinds of lines:
 
     path  <glob> <class>[,<class>...]    the first path line that matches a
                                          file gives the classes of the file
-    class <name> [gates=<g>,...] [labels=<l>,...]
+    path+  <glob> <class>[,<class>...]   like `path`, but every `path+` line
+                                         that matches a file adds its classes
+                                         to those of the first `path` line
+    class <name> [gates=<g>,...] [labels=<l>,...] [tests=<t>,...]
                                          what a class runs: gates (units of CI
-                                         work) and the CTest labels that the
-                                         unit-test gate runs
+                                         work), the CTest labels that the
+                                         unit-test gate runs, and tests that it
+                                         runs by name
     job   <job id of ci.yml> gates=<g>,...
                                          the gates that a job of ci.yml
                                          belongs to
     ignore <job id> <glob>               files that the job names but that no
                                          change of them needs it for. The line
                                          before it says why.
+    script-ignore <script glob> <glob>   files that a script names in its
+                                         text, such as a help message, and does
+                                         not read. The line before it says why.
 
 A glob is anchored at the repository root. `*` does not cross a `/`, and `**`
 does. The gate `placement` always runs. `gates=all` and `labels=all` stand for
@@ -39,9 +46,12 @@ ALWAYS = {"placement"}
 @dataclass
 class ClassMap:
     paths: list = field(default_factory=list)  # (glob, regex, [class])
+    extras: list = field(default_factory=list)  # (glob, regex, [class]) of `path+` lines
     classes: dict = field(default_factory=dict)  # name -> (gates, labels)
+    class_tests: dict = field(default_factory=dict)  # name -> test names
     jobs: dict = field(default_factory=dict)  # job id -> gates
     ignores: list = field(default_factory=list)  # (job id, glob, regex)
+    script_ignores: list = field(default_factory=list)  # (script regex, glob, file regex)
     errors: list = field(default_factory=list)
 
     @property
@@ -89,24 +99,29 @@ def parse_map(text, source="ci-classes.txt"):
         fields = line.split()
         where = f"{source}:{number}"
         kind = fields[0]
-        if kind == "path" and len(fields) == 3:
-            result.paths.append((fields[1], glob_to_regex(fields[1]), sorted(split(fields[2]))))
+        if kind in ("path", "path+") and len(fields) == 3:
+            row = (fields[1], glob_to_regex(fields[1]), sorted(split(fields[2])))
+            (result.extras if kind == "path+" else result.paths).append(row)
         elif kind == "class" and len(fields) >= 2:
             options = dict(f.split("=", 1) for f in fields[2:] if "=" in f)
-            unknown = set(options) - {"gates", "labels"}
+            unknown = set(options) - {"gates", "labels", "tests"}
             if unknown or len(options) != len(fields) - 2:
                 result.errors.append(f"{where}: bad class line {line!r}")
                 continue
             if fields[1] in result.classes:
                 result.errors.append(f"{where}: the class {fields[1]} has a second line")
             result.classes[fields[1]] = (split(options.get("gates", "")), split(options.get("labels", "")))
+            result.class_tests[fields[1]] = split(options.get("tests", ""))
         elif kind == "job" and len(fields) == 3 and fields[2].startswith("gates="):
             result.jobs[fields[1]] = split(fields[2][len("gates="):])
+        elif kind == "script-ignore" and len(fields) == 3:
+            script, glob = fields[1], fields[2]
+            result.script_ignores.append((glob_to_regex(script), glob, glob_to_regex(glob)))
         elif kind == "ignore" and len(fields) == 3:
             result.ignores.append((fields[1], fields[2], glob_to_regex(fields[2])))
         else:
             result.errors.append(f"{where}: cannot read {line!r}")
-    for glob, _, names in result.paths:
+    for glob, _, names in result.paths + result.extras:
         for name in names:
             if name not in result.classes:
                 result.errors.append(f"path {glob}: the class {name} has no class line")
@@ -120,10 +135,12 @@ def load_map(path=MAP_PATH):
 
 
 def classes_of(class_map, file):
-    """The classes of one file, or None when no path line matches it."""
+    """The classes of one file, or None when no path line matches it. The
+    `path+` lines add their classes to those of the first `path` line."""
     for _, regex, names in class_map.paths:
         if regex.match(file):
-            return names
+            extra = {n for _, r, ns in class_map.extras if r.match(file) for n in ns}
+            return sorted(set(names) | extra)
     return None
 
 
@@ -167,6 +184,7 @@ def select(class_map, files, sources=None):
             else:
                 unknown_source = True
     selection = select_classes(class_map, classes)
+    own_tests |= selection.tests
     if unknown_source:
         selection.labels = {"all"}
     if "all" in selection.labels:
@@ -180,17 +198,19 @@ def select(class_map, files, sources=None):
 def select_classes(class_map, classes):
     gates = set(ALWAYS)
     labels = set()
+    tests = set()
     for name in classes:
         class_gates, class_labels = class_map.classes[name]
         gates |= class_gates
         labels |= class_labels
+        tests |= class_map.class_tests.get(name, set())
     if "all" in gates:
         gates = class_map.all_gates
     if "all" in labels:
         labels = {"all"}
-    if labels:
+    if labels or tests:
         gates.add("native-unit")
-    return Selection(set(classes), gates, labels)
+    return Selection(set(classes), gates, labels, tests)
 
 
 def labels_selected(selection_labels, test_labels):
@@ -233,13 +253,13 @@ def ctest_selection(labels, tests, rows, needs):
     if "all" in labels:
         return "", "", None
     regex = "^(" + "|".join(sorted(re.escape(label) for label in labels)) + ")$" if labels else ""
-    names = "^(" + "|".join(sorted(re.escape(t) for t in tests)) + ")[.]" if tests else ""
+    names = "^(" + "|".join(sorted(re.escape(t) + ("[.]" if t in needs and needs[t] == {t} else "$") for t in tests)) + ")" if tests else ""
     targets = set()
     for name, test_labels in rows.items():
         if set(test_labels) & labels:
             targets |= needs.get(name, set())
-    for target in tests:
-        targets |= needs.get(target, {target})
+    for test in tests:
+        targets |= needs.get(test, set())
     return regex, names, sorted(targets)
 
 

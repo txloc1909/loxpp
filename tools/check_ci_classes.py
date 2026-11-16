@@ -24,7 +24,10 @@ reads the repository as text, so it needs no build, and fails when:
    and the gates and labels that it must select, does not hold.
 
 A check of the text of a job cannot see a script that another script calls, so
-2 and 3 hold the first level of references only.
+2 and 3 follow the scripts of a job or a test one level down: the files that
+such a script names or imports. A path that a script builds from variables is
+not followed. A script-ignore line in the map says that a script names a file
+in its text and does not read it.
 
 Exit status 0 when the map holds, 1 when it does not.
 """
@@ -95,6 +98,50 @@ def selects_job(class_map, file, gates):
     return bool(selection.gates & gates)
 
 
+SCRIPT_SUFFIXES = (".py", ".sh", ".mjs")
+
+
+def without_comments(text):
+    return "\n".join(line for line in text.split("\n") if not line.lstrip().startswith("#"))
+
+
+def named_files(text, fileset, prefix_exempt):
+    """The tracked files that a text names. `prefix_exempt` holds the
+    directories whose files a directory token does not name."""
+    named = []
+    for token in REF.findall(text):
+        raw = token.rstrip(".,;:'\"\\)`")
+        files = expand(token, fileset)
+        if raw not in fileset:
+            files = [f for f in files if not any(f.startswith(p) and not raw.startswith(p.rstrip("/")) for p in prefix_exempt)]
+        named += files
+    return named
+
+
+def imported_tools(text, fileset):
+    """The tools/*.py files that a Python script imports by module name."""
+    found = []
+    for module in re.findall(r"(?m)^\s*(?:from|import)\s+(\w+)", text):
+        path = f"tools/{module}.py"
+        if path in fileset:
+            found.append(path)
+    return found
+
+
+def script_reads(script, fileset, prefix_exempt):
+    """The tracked files that a script names or imports, one level down."""
+    text = (ROOT / script).read_text(errors="replace")
+    reads = set(named_files(without_comments(text), fileset, prefix_exempt))
+    if script.endswith(".py"):
+        reads |= set(imported_tools(text, fileset))
+    reads.discard(script)
+    return reads
+
+
+def script_ignored(class_map, script, file):
+    return any(s.match(script) and f.match(file) for s, _, f in class_map.script_ignores)
+
+
 def check_job_references(class_map, files, yml):
     errors = []
     fileset = set(files)
@@ -103,23 +150,25 @@ def check_job_references(class_map, files, yml):
         if gates is None:
             errors.append(f"ci.yml: the job {job} has no job line in the map")
             continue
-        seen = set()
-        for token in REF.findall(text):
-            raw = token.rstrip(".,;:'\"\\)`")
-            named = expand(token, fileset)
-            if raw not in fileset:
-                for prefix, jobs in NON_RECURSIVE_EXEMPT.items():
-                    if job in jobs and not raw.startswith(prefix.rstrip("/")):
-                        named = [f for f in named if not f.startswith(prefix)]
-            for file in named:
-                if file in seen:
-                    continue
-                seen.add(file)
-                if any(j == job and regex.match(file) for j, _, regex in class_map.ignores):
+        exempt = [p for p, jobs in NON_RECURSIVE_EXEMPT.items() if job in jobs]
+        ignored = lambda f: any(j == job and regex.match(f) for j, _, regex in class_map.ignores)
+        first = [f for f in dict.fromkeys(named_files(without_comments(text), fileset, exempt)) if not ignored(f)]
+        for file in first:
+            if not selects_job(class_map, file, gates):
+                names = ",".join(ci_classes.classes_of(class_map, file))
+                errors.append(f"{file} (class {names}) is named by the job {job}, which it does not select")
+        for script in first:
+            if not script.endswith(SCRIPT_SUFFIXES):
+                continue
+            for file in sorted(script_reads(script, fileset, exempt)):
+                if file in first or ignored(file) or script_ignored(class_map, script, file):
                     continue
                 if not selects_job(class_map, file, gates):
                     names = ",".join(ci_classes.classes_of(class_map, file))
-                    errors.append(f"{file} (class {names}) is named by the job {job}, which it does not select")
+                    errors.append(
+                        f"{file} (class {names}) is read by {script}, which the job {job} runs, "
+                        f"and the job is not selected by it"
+                    )
     for job, glob, _ in class_map.ignores:
         if job not in class_map.jobs:
             errors.append(f"the ignore line for {job} {glob} names a job that has no job line")
@@ -169,32 +218,44 @@ def add_test_blocks(cmake):
     """Returns {test name: [paths of the repository that its command names]}."""
     text = re.sub(r"(?m)#.*$", "", cmake)
     blocks = {}
-    for match in re.finditer(r"add_test\(\s*NAME\s+(\S+)(.*?)\n\s*\)?\s*(?:WORKING_DIRECTORY[^)]*)?\)", text, re.S):
-        name = match.group(1)
-        body = match.group(2)
-        # the command may end at the first closing paren that is not a generator expression
-        paths = re.findall(r"\$\{PROJECT_SOURCE_DIR\}/([\w./\-]+)", body.split("WORKING_DIRECTORY")[0])
-        blocks[name] = paths
+    for match in re.finditer(r"add_test\(", text):
+        depth, i = 1, match.end()
+        while depth and i < len(text):
+            depth += {"(": 1, ")": -1}.get(text[i], 0)
+            i += 1
+        body = text[match.end() : i - 1]
+        name = re.match(r"\s*NAME\s+(\S+)", body)
+        if not name:
+            continue
+        command = body.split("WORKING_DIRECTORY")[0]
+        blocks[name.group(1)] = re.findall(r"\$\{PROJECT_SOURCE_DIR\}/([\w./\-]+)", command)
     return blocks
 
 
 def check_test_references(class_map, files, cmake, labels):
     errors = []
     fileset = set(files)
+    exempt = list(NON_RECURSIVE_EXEMPT)
     for name, paths in add_test_blocks(cmake).items():
         test_labels = labels.get(name)
         if test_labels is None:
             continue  # tools/check_test_labels.py reports it
-        for path in paths:
-            if path not in fileset:
+        named = [p for p in paths if p in fileset]
+        reads = []
+        for path in named:
+            if path.endswith(SCRIPT_SUFFIXES):
+                reads += [(path, f) for f in sorted(script_reads(path, fileset, exempt))]
+        for via, path in [(None, p) for p in named] + reads:
+            if via and (path in named or script_ignored(class_map, via, path)):
                 continue
             names = ci_classes.classes_of(class_map, path)
             if names is None:
                 continue
             selection = ci_classes.select_classes(class_map, set(names))
-            if not ci_classes.labels_selected(selection.labels, test_labels):
+            if name not in selection.tests and not ci_classes.labels_selected(selection.labels, test_labels):
+                how = f"is run by the test {name}" if via is None else f"is read by {via}, which the test {name} runs"
                 errors.append(
-                    f"{path} (class {','.join(names)}) is run by the test {name}, "
+                    f"{path} (class {','.join(names)}) {how}, "
                     f"which has the labels {','.join(test_labels)}; its class runs {','.join(sorted(selection.labels)) or 'none'}"
                 )
     return errors
@@ -405,6 +466,10 @@ def main():
     if errors:
         return 1
     print("the CI class map holds")
+    print(
+        "limit: the check follows one level, the files that a script of a job or a test names or imports; "
+        "a path that a script builds from variables, and a file that a called script calls, are not followed"
+    )
     return 0
 
 

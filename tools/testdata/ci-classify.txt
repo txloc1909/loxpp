@@ -21,8 +21,11 @@ targets -
 
 case a spec clarification runs the tables and the probes of every consumer
 files spec/04-semantics.md
-gates placement,tables,native-checks,jvm,qbe,cross
+gates placement,tables,native-unit,native-checks,jvm,qbe,cross
 labels -
+names BootstrapErrorKindAudit BootstrapSuspendCalls
+legs debug,release
+targets -
 
 case a change of the VM core runs everything the VM reaches
 files src/vm.cpp
@@ -43,19 +46,19 @@ labels all
 
 case a JVM-only change skips the QBE job
 files src/backend/jvm_emitter.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 legs debug,release
 targets test_jvm_emit
 
 case a JVM runtime change skips the QBE job
 files runtime/jvm/README.md
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a pass that only the JVM emitter uses is JVM-only
 files src/backend/zero_depth_local.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a QBE-only change skips the JVM job
@@ -137,10 +140,11 @@ case a bootstrap tool runs the bootstrap checks of each consumer
 files tools/check_bootstrap_park_state.py
 gates placement,native-unit,native-checks,jvm,qbe,cross
 labels bootstrap
+names RunnerPrecondition
 
 case a harness tool runs the differential steps of each consumer
 files tools/diff_runtimes.py
-gates placement,native-unit,native-checks,jvm,qbe,cross
+gates placement,tables,native-unit,native-checks,jvm,qbe,cross
 labels corpus,harness
 
 case a benchmark runs only the benchmark tests
@@ -152,9 +156,10 @@ targets test_richards_benchmark
 
 case a spec table script runs only the tables
 files tools/check_number_format.py
-gates placement,tables
+gates placement,tables,native-unit
 labels -
-legs -
+names RunnerPrecondition
+legs debug
 targets -
 
 case the tree-sitter grammar runs its job and the Neovim job that copies its queries
@@ -211,12 +216,12 @@ labels all
 
 case a change of two classes runs both
 files docs/README.md src/backend/jvm_emitter.cpp
-gates placement,format,native-build,native-unit,jvm
+gates placement,tables,format,native-build,native-unit,jvm
 labels jvm
 
 case a JVM change and a QBE change run both backends
 files src/backend/jvm_emitter.cpp src/backend/qbe_emitter.cpp
-gates placement,format,native-build,native-unit,jvm,qbe
+gates placement,tables,format,native-build,native-unit,jvm,qbe
 labels jvm,qbe
 
 case the probe that the OS-globals check reads also runs the cross-consumer job
@@ -275,3 +280,32 @@ gates placement,format,native-unit
 labels all
 names -
 targets all
+
+case a table script imports the spec probe tool, so a harness change runs the tables
+files tools/check_spec_probes.py
+gates placement,tables,native-unit,native-checks,jvm,qbe,cross
+labels corpus,harness
+
+case the table scripts read the JVM runtime sources, so a change of them runs the tables
+files runtime/jvm/src/lox/LoxRuntime.java
+gates placement,tables,format,native-build,native-unit,jvm
+labels jvm
+
+case the language server smoke test runs in the language server job and the static build
+files tools/lsp_smoke.py
+gates placement,lsp,release-static,native-unit
+labels -
+names RunnerPrecondition
+
+case the runner module that the smoke test imports runs the harness and the language server job
+files tools/runner_precondition.py
+gates placement,tables,native-unit,native-checks,jvm,qbe,cross,lsp,release-static
+labels bootstrap,corpus,harness
+names GcTrace GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
+
+case the library of the spec tables runs the static test that reads it
+files tools/spec_tables.py
+gates placement,tables,native-unit
+labels -
+names BootstrapSuspendCalls RunnerPrecondition
+targets -

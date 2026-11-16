@@ -104,7 +104,7 @@ test_tooling_parser tooling,corpus
 test_tooling_resolver tooling,corpus
 BootstrapErrorKindAudit bootstrap
 BootstrapErrorKindCausesRuntime bootstrap
-BootstrapStackOverflow bootstrap
+BootstrapStackOverflow bootstrap,corpus
 BootstrapMatchArmBreak bootstrap
 BootstrapOperatorOverload bootstrap
 BootstrapMapIteration bootstrap
@@ -113,9 +113,9 @@ BootstrapParkState bootstrap
 BootstrapDeferAfterPark bootstrap,corpus
 BootstrapListMethodRead bootstrap,corpus
 BootstrapInstancePropertyRead bootstrap,corpus
-DiffRuntimesXfailNames harness
+DiffRuntimesXfailNames harness,corpus
 DiffRuntimesPhases harness
-RunnerPrecondition harness
+RunnerPrecondition harness,corpus
 CheckExamplesLimits harness
 CheckSpecProbesLimits harness
 BenchmarkExpectedChecksum bench
