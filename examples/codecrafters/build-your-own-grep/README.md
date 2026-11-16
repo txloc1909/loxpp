@@ -51,3 +51,5 @@ byte-for-byte on the battery.
 ./examples/codecrafters/build-your-own-grep/tests/run_stages.sh
 ./examples/codecrafters/build-your-own-grep/tests/diff_grep.sh
 ```
+
+<!-- dummy change to test the CI selection -->
