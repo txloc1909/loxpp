@@ -207,3 +207,5 @@ variant) and adds the following:
 | [`03-types.md`](03-types.md) | Runtime types, truthiness, equality, canonical string form |
 | [`04-semantics.md`](04-semantics.md) | Evaluation rules for every expression and statement |
 | [`05-stdlib.md`](05-stdlib.md) | Built-in functions available at program start |
+
+<!-- dummy change to test the CI selection -->
