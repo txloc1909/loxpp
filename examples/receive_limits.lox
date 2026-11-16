@@ -1,0 +1,71 @@
+// A mailbox receive with a condition or with a limit: task.receive_where,
+// task.receive_within and task.receive_where_within. A message that the
+// condition skips keeps its place; a limit that passes with no selected
+// message raises the catchable TimeoutError and leaves the mailbox as it was.
+// No limit here passes at the same time as a message arrives, so the output
+// does not depend on the order that the spec leaves open.
+// CHECK: a
+// CHECK: 4
+// CHECK: b
+// CHECK: 3
+// CHECK: 1
+// CHECK: 2
+// CHECK: 3
+// CHECK: TimeoutError
+// CHECK: 0
+// CHECK: TimeoutError
+// CHECK: 2
+// CHECK: 1
+// CHECK: 2
+// CHECK: wanted
+// CHECK: later
+// CHECK: 0
+fun isText(m) { return type(m) == "String"; }
+var me = task.self();
+
+// task.receive_where: the skipped messages stay in their order.
+task.send(me, 1);
+task.send(me, "a");
+task.send(me, 2);
+task.send(me, "b");
+task.send(me, 3);
+print task.receive_where(isText);
+print task.pending();
+print task.receive_where(isText);
+print task.pending();
+print task.receive();
+print task.receive();
+print task.receive();
+
+// task.receive_within: the limit passes on an empty mailbox.
+try {
+    task.receive_within(0.05);
+    print "no fault";
+} catch (e) {
+    print e.kind;
+}
+print task.pending();
+
+// task.receive_where_within: the limit passes, and no message is selected.
+task.send(me, 1);
+task.send(me, 2);
+try {
+    task.receive_where_within(isText, 0.05);
+    print "no fault";
+} catch (e) {
+    print e.kind;
+}
+print task.pending();
+print task.receive();
+print task.receive();
+
+// A message that arrives within a long limit ends the wait.
+fun sender() {
+    sleep(0.05);
+    task.send(me, "wanted");
+    task.send(me, "later");
+}
+task.spawn(sender);
+print task.receive_where_within(isText, 60);
+print task.receive_within(60);
+print task.pending();
