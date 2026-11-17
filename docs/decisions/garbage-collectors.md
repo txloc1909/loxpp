@@ -1,6 +1,6 @@
 # More than one garbage collector in the native runtime
 
-**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165).
+**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165). Mission: #1277.
 
 Related: #1165 (the pause grows with the live heap), #1134 (the cost of a
 large String). Facts about the current heap: `docs/reference/gc-runtime-contract.md`.
@@ -321,11 +321,39 @@ A sketch of the order. The decision's tracking issue holds the real nodes.
 5. **The `incremental` collector.** The cycle, the step limits, the pacing,
    the handle list, the verifier.
 6. **The gates.** CI runs every suite with each collector.
-7. **The default.** The owner decides which collector is the default.
+7. **The default.** The owner decides which collector is the default, by
+   the criteria in section 10.1. This phase comes after phases 6 and 8.
 8. **The heap layout.** Size classes and mark bitmaps (they make each
    collector faster). This is part of this mission. The tracking issue may
    put it before phase 5 if the phase-1 measurements show a need.
 9. **Later, a separate decision:** the `generational` mode.
+
+### 10.1 Criteria for the default collector
+
+The choice is made at init time (section 5.1), so the default is one value
+that the owner can change later. It is not a language change.
+
+`incremental` becomes the default only if all of these hold. The owner
+decides, and the evidence below must exist first:
+
+1. **Goal 1 holds.** On the large-heap test and on the Redis example with
+   the #1165 load (524286 streams), the CI gate of phase 6 shows each pause
+   at most 1 ms and MMU(10 ms) at least 50%.
+2. **Goal 3 holds on the finished collector.** The geometric mean of
+   `benchmarks/` is at most 10% slower than `stw`, and the peak heap is at
+   most 2.5× the live heap. Phase 4 measured only the barrier cost on `stw`,
+   so this is the first full measurement.
+3. **Phase 6 is green.** Every suite passes with each collector, including
+   the stress mode and the verifier of section 7. A difference in output
+   between the collectors blocks the default.
+4. **The measurements use the final heap layout.** Phase 8 changes the cost
+   of the trace and the sweep. If phase 7 must run before phase 8 ends, this
+   decision records that fact, and the owner measures again after phase 8.
+
+If a criterion fails, `stw` stays the default. `incremental` stays in the
+binary and a program can choose it. The owner can choose it as the default
+later, when the failed criterion holds. The `generational` mode, when it
+exists, needs a new decision and does not block this choice.
 
 ## 11. Risks
 
@@ -361,4 +389,5 @@ does not decide these now:
    data, and the prototype's result is written into this decision.
 4. **The numbers of goals 1 and 3:** phase 1 checks them. This decision
    states the final numbers after phase 1.
-5. **Which collector is the default:** the owner decides at phase 7.
+5. **Which collector is the default:** the owner decides at phase 7, by
+   the criteria in section 10.1.
