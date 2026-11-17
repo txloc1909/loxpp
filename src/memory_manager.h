@@ -92,7 +92,17 @@ class MemoryManager : public VmAllocBase {
     // A store of `newv` over `oldv` in a heap object. Dijkstra marks the new
     // target, Yuasa marks the old one. The caller checks marking() first.
     void storeBarrier(const Value& oldv, const Value& newv) {
-        markValue(m_mode == GcMode::Yuasa ? oldv : newv);
+        const Value& v = m_mode == GcMode::Yuasa ? oldv : newv;
+        if (isObj(v) && as<Obj*>(v)->heapId == m_heapId) {
+            ++m_barrierCalls;
+            if (!as<Obj*>(v)->marked) {
+                ++m_barrierHits;
+            }
+        }
+        if (m_noBarrier) {
+            return;
+        }
+        markValue(v);
     }
     [[nodiscard]] std::size_t peakBytes() const { return m_peakBytes; }
 
@@ -254,6 +264,10 @@ class MemoryManager : public VmAllocBase {
     GcMode m_mode{GcMode::Stw};
     GcPhase m_phase{GcPhase::Idle};
     bool m_verify{false};
+    bool m_noBarrier{false};
+    std::size_t m_barrierCalls{0};
+    std::size_t m_barrierHits{0};
+    bool m_skipList{false};
     bool m_verifying{false};
     void* m_verifySet{nullptr};
     // Pacing by time: a step runs for at most m_stepNs, then the program runs

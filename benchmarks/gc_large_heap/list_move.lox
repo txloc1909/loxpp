@@ -1,0 +1,46 @@
+// Moves each object between two large Lists, over and over. Half of the
+// objects start in each List, so moves go in both directions at all times. After a move
+// the object is reachable only through its new slot, and the old slot is
+// nil. A move stores an old, maybe not yet traced object into a List that
+// the collector may have traced already (the case of incremental update),
+// and it overwrites the only old path to that object (the case of snapshot
+// at the beginning). A program that stores only new objects needs neither.
+class Node { init(i) { this.i = i; } }
+
+var N = 1500000;
+var ROUNDS = 9000000;
+
+var a = [];
+var b = [];
+var i = 0;
+while (i < N) {
+    if (i % 2 == 0) { a.append(Node(i)); b.append(nil); }
+    else { a.append(nil); b.append(Node(i)); }
+    i = i + 1;
+}
+
+i = 0;
+while (i < ROUNDS) {
+    var j = (i * 7919) % N;
+    var t = a[j];
+    if (t != nil) {
+        b[j] = t;
+        a[j] = nil;
+    } else {
+        t = b[j];
+        a[j] = t;
+        b[j] = nil;
+    }
+    var g = Node(i);
+    i = i + 1;
+}
+
+var sum = 0;
+i = 0;
+while (i < N) {
+    var t = a[i];
+    if (t == nil) { t = b[i]; }
+    sum = sum + t.i;
+    i = i + 1;
+}
+print sum;

@@ -129,6 +129,8 @@ MemoryManager::MemoryManager(int workerNumber)
         m_stepNs = static_cast<std::uint64_t>(std::atoll(v)) * 1000;
     }
     m_verify = std::getenv("LOXPP_GC_VERIFY") != nullptr;
+    m_noBarrier = std::getenv("LOXPP_GC_NOBARRIER") != nullptr;
+    m_skipList = std::getenv("LOXPP_GC_SKIPLIST") != nullptr;
     if (workerNumber == 0) {
         if (const char* v = std::getenv("LOXPP_GC_PAUSELOG")) {
             m_pauseLog = std::fopen(v, "w");
@@ -167,9 +169,11 @@ MemoryManager::~MemoryManager() {
     if (m_pauseLog != nullptr) {
         flushPauseLog();
         std::fprintf(m_pauseLog,
-                     "end %llu\npeak_bytes %zu\nemergency_steps %zu\n",
+                     "end %llu\npeak_bytes %zu\nemergency_steps %zu\n"
+                     "barrier_calls %zu\nbarrier_marked_white %zu\n",
                      static_cast<unsigned long long>(monotonicNs()),
-                     m_peakBytes, m_emergencySteps);
+                     m_peakBytes, m_emergencySteps, m_barrierCalls,
+                     m_barrierHits);
         std::fclose(m_pauseLog);
         m_pauseLog = nullptr;
     }
@@ -1002,7 +1006,9 @@ bool MemoryManager::traceOne(std::size_t& units) {
             auto* list = static_cast<ObjList*>(pt.obj);
             std::size_t end = std::min(list->elements.size(), pt.pos + kChunk);
             for (std::size_t i = pt.pos; i < end; ++i) {
-                markValue(list->elements[i]);
+                if (!m_skipList) {
+                    markValue(list->elements[i]);
+                }
             }
             used = end > pt.pos ? end - pt.pos : 1;
             pt.pos = end;
