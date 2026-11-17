@@ -674,6 +674,9 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 } else {
                     cl->upvalues[i] = frame->closure->upvalues[index];
                 }
+                if (m_rt.m_mm.marking()) {
+                    m_rt.m_mm.markObject(cl->upvalues[i]);
+                }
             }
             break;
         }
@@ -684,6 +687,10 @@ InterpretResult VM::run(int stopAtFrameCount) {
         }
         case Op::SET_UPVALUE: {
             uint8_t slot = readByte();
+            if (m_rt.m_mm.marking()) {
+                m_rt.m_mm.storeBarrier(
+                    *frame->closure->upvalues[slot]->location, m_rt.peek(0));
+            }
             *frame->closure->upvalues[slot]->location = m_rt.peek(0);
             break;
         }

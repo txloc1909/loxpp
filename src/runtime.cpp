@@ -2263,6 +2263,9 @@ ObjUpvalue* Runtime::captureUpvalue(Value* local) {
 void Runtime::closeUpvalues(Value* last) {
     while (m_openUpvalues != nullptr && m_openUpvalues->location >= last) {
         ObjUpvalue* uv = m_openUpvalues;
+        if (m_mm.marking()) {
+            m_mm.storeBarrier(uv->closed, *uv->location);
+        }
         uv->closed = *uv->location;
         uv->location = &uv->closed;
         uv->owner = nullptr;
@@ -3011,6 +3014,9 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 return OpResult::Fatal;
             }
             Value val = peek(0); // still on stack — GC-safe during push_back
+            if (m_mm.marking()) {
+                m_mm.storeBarrier(Value{Nil{}}, val);
+            }
             list->elements.push_back(val);
             pop(); // arg
             pop(); // receiver
@@ -3446,6 +3452,16 @@ Runtime::OpResult Runtime::mapSetKey(ObjMap* map, const Value& key,
     if (auto err = checkMapKey(key, stopAtFrameCount)) {
         return *err;
     }
+    if (m_mm.marking()) {
+        if (m_mm.gcMode() == MemoryManager::GcMode::Dijkstra) {
+            m_mm.markValue(key);
+            m_mm.markValue(value);
+        } else if (!isInstance(key)) {
+            Value old{Nil{}};
+            map->mapGet(key, old);
+            m_mm.markValue(old);
+        }
+    }
     map->keyOpDepth += 1;
     m_mm.pushTempRoot(map);
     if (is<Obj*>(key)) {
@@ -3757,6 +3773,9 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
                                       stopAtFrameCount, &idx)) {
         return *err;
     }
+    if (m_mm.marking()) {
+        m_mm.storeBarrier(list->elements[idx], val);
+    }
     list->elements[idx] = val;
     push(val); // assignment is an expression; its value is the assigned value
     return OpResult::OK;
@@ -3994,6 +4013,11 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
         return OpResult::Fatal;
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
+    if (m_mm.marking()) {
+        Value old{Nil{}};
+        instance->fields.get(name, old);
+        m_mm.storeBarrier(old, peek(0));
+    }
     instance->fields.set(name, peek(0));
     Value val = pop(); // value
     pop();             // instance
@@ -4004,6 +4028,9 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
 void Runtime::opDefineMethod(ObjString* name) {
     Value method = peek(0);                          // ObjClosure* on top
     ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
+    if (m_mm.marking()) {
+        m_mm.storeBarrier(Value{Nil{}}, method);
+    }
     klass->methods.set(name, method);
     pop(); // pop closure; leave class on stack for next method
 }

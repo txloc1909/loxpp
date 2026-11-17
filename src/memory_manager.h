@@ -6,6 +6,7 @@
 #include "worker.h"
 
 #include <cstdint>
+#include <deque>
 #include <cstdio>
 #include <functional>
 #include <mutex>
@@ -49,7 +50,11 @@ class MemoryManager : public VmAllocBase {
         if (bytesAllocated > m_peakBytes) {
             m_peakBytes = bytesAllocated;
         }
+        const std::uint64_t a0 = m_pauseLog != nullptr ? monotonicNow() : 0;
         T* p = new T(std::forward<Args>(args)...);
+        if (a0 != 0) {
+            noteAllocatorStall(a0);
+        }
         p->heapId = m_heapId;
         // Every boxed Obj* goes through here. A pointer the NaN tag cannot
         // hold would be silently truncated by Value's constructor, so reject it
@@ -57,9 +62,24 @@ class MemoryManager : public VmAllocBase {
         if (!pointerFitsInValue(reinterpret_cast<uintptr_t>(p))) {
             reportPointerOutOfRange(reinterpret_cast<uintptr_t>(p));
         }
-        allObjects.push_back(p);
+        std::size_t slot;
+        if (m_mode != GcMode::Stw && m_freeHead != 0) {
+            // The incremental collector never shrinks allObjects: a shrink
+            // or a compaction is one step that grows with the heap.
+            slot = m_freeHead - 1;
+            m_freeHead =
+                reinterpret_cast<std::uintptr_t>(allObjects[slot]) >> 1;
+            allObjects[slot] = p;
+        } else {
+            slot = allObjects.size();
+            allObjects.push_back(p);
+        }
         if (m_phase == GcPhase::Marking) {
             allocatedDuringMark(p);
+        } else if (m_phase == GcPhase::Sweeping && slot >= m_sweepRead) {
+            // The sweep cursor reaches this object later and clears the
+            // mark, so the object survives this cycle.
+            p->marked = true;
         }
         return p;
     }
@@ -192,6 +212,8 @@ class MemoryManager : public VmAllocBase {
         int capacity;
     };
     void allocatedDuringMark(Obj* p);
+    static std::uint64_t monotonicNow();
+    void noteAllocatorStall(std::uint64_t t0);
     void markAllRoots();
     void startCycle();
     void markStep(std::size_t bytes);
@@ -201,7 +223,7 @@ class MemoryManager : public VmAllocBase {
     bool traceOne(std::size_t& units);
     void drainAll();
     void verifyMarked();
-    void logPause(std::uint64_t t0, std::uint64_t t1);
+    void logPause(std::uint64_t t0, std::uint64_t t1, char kind);
     void flushPauseLog();
     template <bool Traced>
     void runCollection();
@@ -219,16 +241,33 @@ class MemoryManager : public VmAllocBase {
 
     // Plain std::vector — using VmAllocator here would cause infinite recursion
     // inside rawAlloc when push_back triggers a reallocation.
-    std::vector<Obj*> allObjects;
+    std::deque<Obj*> allObjects;
+    // The free slots of allObjects form a chain through the slots: a free
+    // slot holds ((next free index + 1) << 1) | 1, and 0 ends the chain. A
+    // separate container would grow during the sweep.
+    std::size_t m_freeHead{0};
     Table m_strings;
 
-    std::vector<Obj*> m_grayStack;
+    // A deque, not a vector: a vector that doubles copies its whole array
+    // in one step, and that copy is a pause that grows with the heap.
+    std::deque<Obj*> m_grayStack;
     GcMode m_mode{GcMode::Stw};
     GcPhase m_phase{GcPhase::Idle};
     bool m_verify{false};
     bool m_verifying{false};
     void* m_verifySet{nullptr};
-    std::size_t m_stepMul{100};
+    // Pacing by time: a step runs for at most m_stepNs, then the program runs
+    // for long enough that the collector uses m_util percent of the time.
+    std::uint64_t m_stepNs{100000};
+    std::uint64_t m_util{35};
+    std::uint64_t m_nextStepAt{0};
+    std::uint32_t m_tick{0};
+    std::size_t m_cycleStartBytes{0};
+    std::size_t m_emergencySteps{0};
+    bool stepDue(std::uint64_t& now);
+    void endStep(std::uint64_t t1);
+    int m_diagType{-1};
+    std::size_t m_diagUnits{0};
     std::size_t m_peakBytes{0};
     std::vector<Partial> m_partials;
     std::size_t m_sweepRead{0};
@@ -236,7 +275,11 @@ class MemoryManager : public VmAllocBase {
     std::size_t m_sweepEnd{0};
     std::FILE* m_pauseLog{nullptr};
     std::uint64_t m_startNs{0};
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> m_pauses;
+    struct PauseRec {
+        std::uint64_t t0, t1;
+        char kind;
+    };
+    std::vector<PauseRec> m_pauses;
     std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};

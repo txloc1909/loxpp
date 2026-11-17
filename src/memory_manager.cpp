@@ -122,8 +122,11 @@ MemoryManager::MemoryManager(int workerNumber)
             m_mode = GcMode::Yuasa;
         }
     }
-    if (const char* v = std::getenv("LOXPP_GC_STEPMUL")) {
-        m_stepMul = static_cast<std::size_t>(std::atoll(v));
+    if (const char* v = std::getenv("LOXPP_GC_UTIL")) {
+        m_util = static_cast<std::uint64_t>(std::atoll(v));
+    }
+    if (const char* v = std::getenv("LOXPP_GC_STEPUS")) {
+        m_stepNs = static_cast<std::uint64_t>(std::atoll(v)) * 1000;
     }
     m_verify = std::getenv("LOXPP_GC_VERIFY") != nullptr;
     if (workerNumber == 0) {
@@ -137,11 +140,11 @@ MemoryManager::MemoryManager(int workerNumber)
     }
 }
 
-void MemoryManager::logPause(std::uint64_t t0, std::uint64_t t1) {
+void MemoryManager::logPause(std::uint64_t t0, std::uint64_t t1, char kind) {
     if (m_pauseLog == nullptr) {
         return;
     }
-    m_pauses.emplace_back(t0, t1);
+    m_pauses.push_back({t0, t1, kind});
     if (m_pauses.size() >= 100000) {
         flushPauseLog();
     }
@@ -152,9 +155,9 @@ void MemoryManager::flushPauseLog() {
         return;
     }
     for (auto& pr : m_pauses) {
-        std::fprintf(m_pauseLog, "p %llu %llu\n",
-                     static_cast<unsigned long long>(pr.first),
-                     static_cast<unsigned long long>(pr.second));
+        std::fprintf(m_pauseLog, "p %llu %llu %c\n",
+                     static_cast<unsigned long long>(pr.t0),
+                     static_cast<unsigned long long>(pr.t1), pr.kind);
     }
     m_pauses.clear();
     std::fflush(m_pauseLog);
@@ -163,9 +166,10 @@ void MemoryManager::flushPauseLog() {
 MemoryManager::~MemoryManager() {
     if (m_pauseLog != nullptr) {
         flushPauseLog();
-        std::fprintf(m_pauseLog, "end %llu\npeak_bytes %zu\n",
+        std::fprintf(m_pauseLog,
+                     "end %llu\npeak_bytes %zu\nemergency_steps %zu\n",
                      static_cast<unsigned long long>(monotonicNs()),
-                     m_peakBytes);
+                     m_peakBytes, m_emergencySteps);
         std::fclose(m_pauseLog);
         m_pauseLog = nullptr;
     }
@@ -209,6 +213,12 @@ void* MemoryManager::rawAlloc(std::size_t bytes) {
     }
     if (bytesAllocated > m_peakBytes) {
         m_peakBytes = bytesAllocated;
+    }
+    if (m_pauseLog != nullptr) {
+        const std::uint64_t a0 = monotonicNs();
+        void* mem = ::operator new(bytes);
+        noteAllocatorStall(a0);
+        return mem;
     }
     return ::operator new(bytes);
 }
@@ -261,9 +271,12 @@ ObjString* MemoryManager::findString(std::string_view sv) const {
 
 void MemoryManager::collectAll() {
     for (Obj* o : allObjects) {
-        delete o;
+        if (o != nullptr && (reinterpret_cast<std::uintptr_t>(o) & 1) == 0) {
+            delete o;
+        }
     }
     allObjects.clear();
+    m_freeHead = 0;
     bytesAllocated = 0;
 }
 
@@ -695,7 +708,7 @@ void MemoryManager::collectGarbage() {
     }
     ++m_collectionCount;
     if (m_pauseLog != nullptr) {
-        logPause(pauseStart, monotonicNs());
+        logPause(pauseStart, monotonicNs(), 'W');
     }
 }
 
@@ -931,6 +944,15 @@ void MemoryManager::dropOwner() {
 
 static constexpr std::size_t kChunk = 512;
 
+std::uint64_t MemoryManager::monotonicNow() { return monotonicNs(); }
+
+void MemoryManager::noteAllocatorStall(std::uint64_t t0) {
+    const std::uint64_t t1 = monotonicNs();
+    if (t1 - t0 > 100000) {
+        logPause(t0, t1, 'A');
+    }
+}
+
 void MemoryManager::allocatedDuringMark(Obj* p) {
     // Yuasa: black. Dijkstra: gray, because a constructor can store a white
     // object into the new one without a barrier.
@@ -963,8 +985,9 @@ void MemoryManager::startCycle() {
     }
     m_reachedForeign.clear();
     markAllRoots();
+    m_cycleStartBytes = bytesAllocated;
     m_phase = GcPhase::Marking;
-    logPause(t0, monotonicNs());
+    logPause(t0, monotonicNs(), 'S');
 }
 
 bool MemoryManager::traceOne(std::size_t& units) {
@@ -1015,6 +1038,7 @@ bool MemoryManager::traceOne(std::size_t& units) {
     }
     Obj* obj = m_grayStack.back();
     m_grayStack.pop_back();
+    m_diagType = static_cast<int>(obj->type);
     if (!m_verifying && obj->type == ObjType::LIST &&
         static_cast<ObjList*>(obj)->elements.size() > kChunk) {
         m_partials.push_back({obj, 0, 0});
@@ -1037,15 +1061,50 @@ void MemoryManager::drainAll() {
     }
 }
 
-void MemoryManager::markStep(std::size_t bytes) {
-    const std::uint64_t t0 = monotonicNs();
-    std::size_t units = std::max<std::size_t>(1, bytes * m_stepMul / 100);
-    while (units > 0 && traceOne(units)) {
+bool MemoryManager::stepDue(std::uint64_t& now) {
+    if ((++m_tick & 31) != 0) {
+        return false;
     }
+    now = monotonicNs();
+    if (now >= m_nextStepAt) {
+        return true;
+    }
+    // The heap grew far past its size at the start of the cycle: the
+    // collector falls behind, so it drops the gap between steps.
+    if (bytesAllocated > m_cycleStartBytes + m_cycleStartBytes / 2) {
+        ++m_emergencySteps;
+        return true;
+    }
+    return false;
+}
+
+void MemoryManager::endStep(std::uint64_t t1) {
+    m_nextStepAt = t1 + m_stepNs * (100 - m_util) / m_util;
+}
+
+void MemoryManager::markStep(std::size_t) {
+    std::uint64_t t0 = 0;
+    if (!stepDue(t0)) {
+        return;
+    }
+    const std::uint64_t deadline = t0 + m_stepNs;
+    unsigned n = 0;
+    for (;;) {
+        std::size_t one = 1;
+        if (!traceOne(one)) {
+            break;
+        }
+        if ((++n & 7) == 0 && monotonicNs() >= deadline) {
+            break;
+        }
+    }
+    const std::uint64_t t1 = monotonicNs();
+    logPause(t0, t1, 'M');
     if (m_grayStack.empty() && m_partials.empty()) {
         finishCycle();
+        logPause(t1, monotonicNs(), 'F');
     }
-    logPause(t0, monotonicNs());
+    endStep(monotonicNs());
 }
 
 void MemoryManager::finishCycle() {
@@ -1089,31 +1148,43 @@ void MemoryManager::verifyMarked() {
     }
 }
 
-void MemoryManager::sweepStep(std::size_t bytes) {
-    const std::uint64_t t0 = monotonicNs();
-    std::size_t units = std::max<std::size_t>(1, bytes * m_stepMul / 100);
-    while (units > 0 && m_sweepRead < m_sweepEnd) {
-        Obj* obj = allObjects[m_sweepRead++];
+void MemoryManager::sweepStep(std::size_t) {
+    std::uint64_t t0 = 0;
+    if (!stepDue(t0)) {
+        return;
+    }
+    const std::uint64_t deadline = t0 + m_stepNs;
+    m_sweepEnd = allObjects.size();
+    unsigned n = 0;
+    while (m_sweepRead < m_sweepEnd) {
+        if ((++n & 15) == 0 && monotonicNs() >= deadline) {
+            break;
+        }
+        const std::size_t idx = m_sweepRead++;
+        Obj* obj = allObjects[idx];
+        if (obj == nullptr ||
+            (reinterpret_cast<std::uintptr_t>(obj) & 1) != 0) {
+            continue;
+        }
         if (obj->marked) {
             obj->marked = false;
-            allObjects[m_sweepWrite++] = obj;
         } else {
             bytesAllocated -= objAllocatedSize(obj);
             delete obj;
+            allObjects[idx] = reinterpret_cast<Obj*>((m_freeHead << 1) | 1);
+            m_freeHead = idx + 1;
         }
-        --units;
     }
+    const std::uint64_t t1 = monotonicNs();
+    logPause(t0, t1, 'R');
     if (m_sweepRead >= m_sweepEnd) {
         finishSweep();
+        logPause(t1, monotonicNs(), 'E');
     }
-    logPause(t0, monotonicNs());
+    endStep(monotonicNs());
 }
 
 void MemoryManager::finishSweep() {
-    for (std::size_t i = m_sweepEnd; i < allObjects.size(); ++i) {
-        allObjects[m_sweepWrite++] = allObjects[i];
-    }
-    allObjects.resize(m_sweepWrite);
     m_nextGC = std::max(bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
     m_phase = GcPhase::Idle;
     ++m_collectionCount;
