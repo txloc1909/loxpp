@@ -1,6 +1,6 @@
 # Garbage collectors in other language runtimes
 
-A short survey for `docs/proposals/garbage-collectors.md`. For each runtime:
+A short survey for `docs/decisions/garbage-collectors.md`. For each runtime:
 what its collector does, and what we can take from it. The facts are from
 the public documentation and source of each runtime. Check a fact in its
 source before a design depends on it.
