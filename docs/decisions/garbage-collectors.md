@@ -1,8 +1,6 @@
 # More than one garbage collector in the native runtime
 
-**Status:** proposal. It waits for the owner's approval of the goals, the
-collector set and the barrier design. When approved, it moves to
-`docs/decisions/` and a mission tracking issue holds its nodes.
+**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165).
 
 Related: #1165 (the pause grows with the live heap), #1134 (the cost of a
 large String). Facts about the current heap: `docs/reference/gc-runtime-contract.md`.
@@ -220,8 +218,12 @@ collector does.
 
 ### 5.1 When the collector is chosen
 
-This question is open. The owner decides it in the decision document. The
-interface must work with each answer.
+**Decided: init time.** The runtime reads the collector name once, when the
+heap starts (an environment variable or a flag). All collectors are in the
+binary. The cost is one test of a heap byte on each barrier and allocation.
+The collector does not change while the program runs, so no standard-library
+API is needed and no language change follows. The other choices stay in the
+table as the options that were not taken.
 
 | Choice | Cost | Use |
 |---|---|---|
@@ -320,8 +322,10 @@ A sketch of the order. The decision's tracking issue holds the real nodes.
    the handle list, the verifier.
 6. **The gates.** CI runs every suite with each collector.
 7. **The default.** The owner decides which collector is the default.
-8. **Later, separate decisions:** a heap layout with size classes and mark
-   bitmaps (it makes each collector faster), and the `generational` mode.
+8. **The heap layout.** Size classes and mark bitmaps (they make each
+   collector faster). This is part of this mission. The tracking issue may
+   put it before phase 5 if the phase-1 measurements show a need.
+9. **Later, a separate decision:** the `generational` mode.
 
 ## 11. Risks
 
@@ -342,13 +346,19 @@ A sketch of the order. The decision's tracking issue holds the real nodes.
   or a very deep stack makes it longer. The limits of the stack and the
   number of globals bound it, and the gate measures it.
 
-## 12. Open questions
+## 12. Decisions of the owner and what stays open
 
-1. When is the collector chosen: build time, init time, run time, or for
-   each worker (section 5.1)?
-2. Which barrier kind: incremental update or snapshot at the beginning
-   (section 4.3)? The phase-1 prototype gives the data.
-3. Are the numbers of goals 1 and 3 right, after phase 1?
-4. Is the heap layout (size classes and mark bitmaps) part of this mission,
-   or a separate one later?
-5. Which collector is the default at the end (phase 7)?
+Decided on 2026-11-17 (review of #1257):
+
+1. **When the collector is chosen:** at init time (section 5.1).
+2. **The heap layout** (size classes and mark bitmaps) is part of this
+   mission (phase 8).
+
+Settled by a later step of this mission, as the proposal planned. The owner
+does not decide these now:
+
+3. **Which barrier kind** (section 4.3): the phase-1 prototype gives the
+   data, and the prototype's result is written into this decision.
+4. **The numbers of goals 1 and 3:** phase 1 checks them. This decision
+   states the final numbers after phase 1.
+5. **Which collector is the default:** the owner decides at phase 7.
