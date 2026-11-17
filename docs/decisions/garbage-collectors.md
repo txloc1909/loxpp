@@ -1,6 +1,6 @@
 # More than one garbage collector in the native runtime
 
-**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165).
+**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165). Mission: #1277.
 
 Related: #1165 (the pause grows with the live heap), #1134 (the cost of a
 large String). Facts about the current heap: `docs/reference/gc-runtime-contract.md`.
