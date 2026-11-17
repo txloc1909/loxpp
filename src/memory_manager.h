@@ -10,6 +10,7 @@
 #include <functional>
 #include <mutex>
 #include <string_view>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -39,10 +40,15 @@ class MemoryManager : public VmAllocBase {
         // m_stressGC fires a collection on every allocation to surface rooting
         // bugs. It is a runtime flag, not a build flag, so this stays one
         // member read and one `||` on the hot allocation path.
-        if (m_stressGC || bytesAllocated > m_nextGC) {
+        if (m_mode != GcMode::Stw) {
+            gcPoll(sizeof(T));
+        } else if (m_stressGC || bytesAllocated > m_nextGC) {
             collectGarbage();
         }
         bytesAllocated += sizeof(T);
+        if (bytesAllocated > m_peakBytes) {
+            m_peakBytes = bytesAllocated;
+        }
         T* p = new T(std::forward<Args>(args)...);
         p->heapId = m_heapId;
         // Every boxed Obj* goes through here. A pointer the NaN tag cannot
@@ -52,8 +58,23 @@ class MemoryManager : public VmAllocBase {
             reportPointerOutOfRange(reinterpret_cast<uintptr_t>(p));
         }
         allObjects.push_back(p);
+        if (m_phase == GcPhase::Marking) {
+            allocatedDuringMark(p);
+        }
         return p;
     }
+
+    // --- Prototype of an incremental collector (N1, throwaway) -----------
+    enum class GcMode { Stw, Dijkstra, Yuasa };
+    enum class GcPhase { Idle, Marking, Sweeping };
+    [[nodiscard]] GcMode gcMode() const { return m_mode; }
+    [[nodiscard]] bool marking() const { return m_phase == GcPhase::Marking; }
+    // A store of `newv` over `oldv` in a heap object. Dijkstra marks the new
+    // target, Yuasa marks the old one. The caller checks marking() first.
+    void storeBarrier(const Value& oldv, const Value& newv) {
+        markValue(m_mode == GcMode::Yuasa ? oldv : newv);
+    }
+    [[nodiscard]] std::size_t peakBytes() const { return m_peakBytes; }
 
     void release(Obj* obj, std::size_t size);
 
@@ -88,6 +109,7 @@ class MemoryManager : public VmAllocBase {
     void markObject(Obj* obj);
     void markValue(const Value& v);
     void collectGarbage();
+    void gcPoll(std::size_t bytes);
     // The number of completed collectGarbage() calls of this heap. Tests read
     // it to prove that an allocation path reaches the threshold check.
     [[nodiscard]] std::size_t collectionCount() const {
@@ -164,6 +186,23 @@ class MemoryManager : public VmAllocBase {
     void dropOwner();
 
   private:
+    struct Partial {
+        Obj* obj;
+        std::size_t pos;
+        int capacity;
+    };
+    void allocatedDuringMark(Obj* p);
+    void markAllRoots();
+    void startCycle();
+    void markStep(std::size_t bytes);
+    void finishCycle();
+    void sweepStep(std::size_t bytes);
+    void finishSweep();
+    bool traceOne(std::size_t& units);
+    void drainAll();
+    void verifyMarked();
+    void logPause(std::uint64_t t0, std::uint64_t t1);
+    void flushPauseLog();
     template <bool Traced>
     void runCollection();
     void traceReferences();
@@ -184,6 +223,20 @@ class MemoryManager : public VmAllocBase {
     Table m_strings;
 
     std::vector<Obj*> m_grayStack;
+    GcMode m_mode{GcMode::Stw};
+    GcPhase m_phase{GcPhase::Idle};
+    bool m_verify{false};
+    bool m_verifying{false};
+    void* m_verifySet{nullptr};
+    std::size_t m_stepMul{100};
+    std::size_t m_peakBytes{0};
+    std::vector<Partial> m_partials;
+    std::size_t m_sweepRead{0};
+    std::size_t m_sweepWrite{0};
+    std::size_t m_sweepEnd{0};
+    std::FILE* m_pauseLog{nullptr};
+    std::uint64_t m_startNs{0};
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> m_pauses;
     std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};

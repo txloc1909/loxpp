@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <string>
+#include <unordered_set>
 
 #ifdef LOXPP_DEBUG_LOG_GC
 static const char* objTypeName(ObjType type) {
@@ -112,9 +113,62 @@ MemoryManager::MemoryManager(int workerNumber)
       m_trace(openTraceFile(workerNumber)), m_workerNumber(workerNumber),
       m_heapId(acquireHeapId(this)) {
     m_inbox.workerNumber = workerNumber;
+    m_startNs = monotonicNs();
+    if (const char* v = std::getenv("LOXPP_GC_MODE")) {
+        std::string mode = v;
+        if (mode == "dijkstra") {
+            m_mode = GcMode::Dijkstra;
+        } else if (mode == "yuasa") {
+            m_mode = GcMode::Yuasa;
+        }
+    }
+    if (const char* v = std::getenv("LOXPP_GC_STEPMUL")) {
+        m_stepMul = static_cast<std::size_t>(std::atoll(v));
+    }
+    m_verify = std::getenv("LOXPP_GC_VERIFY") != nullptr;
+    if (workerNumber == 0) {
+        if (const char* v = std::getenv("LOXPP_GC_PAUSELOG")) {
+            m_pauseLog = std::fopen(v, "w");
+            if (m_pauseLog != nullptr) {
+                std::fprintf(m_pauseLog, "start %llu\n",
+                             static_cast<unsigned long long>(m_startNs));
+            }
+        }
+    }
+}
+
+void MemoryManager::logPause(std::uint64_t t0, std::uint64_t t1) {
+    if (m_pauseLog == nullptr) {
+        return;
+    }
+    m_pauses.emplace_back(t0, t1);
+    if (m_pauses.size() >= 100000) {
+        flushPauseLog();
+    }
+}
+
+void MemoryManager::flushPauseLog() {
+    if (m_pauseLog == nullptr) {
+        return;
+    }
+    for (auto& pr : m_pauses) {
+        std::fprintf(m_pauseLog, "p %llu %llu\n",
+                     static_cast<unsigned long long>(pr.first),
+                     static_cast<unsigned long long>(pr.second));
+    }
+    m_pauses.clear();
+    std::fflush(m_pauseLog);
 }
 
 MemoryManager::~MemoryManager() {
+    if (m_pauseLog != nullptr) {
+        flushPauseLog();
+        std::fprintf(m_pauseLog, "end %llu\npeak_bytes %zu\n",
+                     static_cast<unsigned long long>(monotonicNs()),
+                     m_peakBytes);
+        std::fclose(m_pauseLog);
+        m_pauseLog = nullptr;
+    }
     collectAll();
     // A dead heap keeps the foreign objects its held messages reach until it
     // is freed; a heap that never retired keeps every foreign object it
@@ -148,8 +202,13 @@ MemoryManager::~MemoryManager() {
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
-    if (m_stressGC || bytesAllocated > m_nextGC) {
+    if (m_mode != GcMode::Stw) {
+        gcPoll(bytes);
+    } else if (m_stressGC || bytesAllocated > m_nextGC) {
         collectGarbage();
+    }
+    if (bytesAllocated > m_peakBytes) {
+        m_peakBytes = bytesAllocated;
     }
     return ::operator new(bytes);
 }
@@ -219,6 +278,16 @@ void MemoryManager::setCurrentCompiler(Compiler* c) { m_currentCompiler = c; }
 
 void MemoryManager::markObject(Obj* obj) {
     if (obj == nullptr) {
+        return;
+    }
+    if (m_verifying) {
+        if (obj->heapId != m_heapId) {
+            return;
+        }
+        auto* seen = static_cast<std::unordered_set<Obj*>*>(m_verifySet);
+        if (seen->insert(obj).second) {
+            m_grayStack.push_back(obj);
+        }
         return;
     }
     if (obj->heapId != m_heapId) {
@@ -581,7 +650,42 @@ const char* MemoryManager::collectionCause() const {
     return m_stressGC ? "stress" : "threshold";
 }
 
+void MemoryManager::markAllRoots() {
+    if (m_markRoots) {
+        m_markRoots();
+    }
+    if (m_currentCompiler) {
+        m_currentCompiler->markRoots(*this);
+    }
+    for (auto* obj : m_tempRoots) {
+        markObject(obj);
+    }
+    markHeldRoots();
+    markInboxTargets();
+    for (const Envelope& env : m_draining) {
+        markObject(env.target);
+        markValue(env.msg);
+    }
+}
+
 void MemoryManager::collectGarbage() {
+    if (m_mode != GcMode::Stw) {
+        // Exit collection and other explicit calls: finish any cycle in
+        // progress, then it is enough for the prototype.
+        if (m_phase == GcPhase::Marking) {
+            std::size_t units = ~std::size_t{0};
+            while (!m_grayStack.empty() || !m_partials.empty()) {
+                traceOne(units);
+            }
+            finishCycle();
+        }
+        while (m_phase == GcPhase::Sweeping) {
+            sweepStep(~std::size_t{0} >> 1);
+        }
+        ++m_collectionCount;
+        return;
+    }
+    const std::uint64_t pauseStart = m_pauseLog != nullptr ? monotonicNs() : 0;
     // The traced instantiation holds every clock read and counter, so the
     // untraced one carries none of them.
     if (m_trace != nullptr) {
@@ -590,6 +694,9 @@ void MemoryManager::collectGarbage() {
         runCollection<false>();
     }
     ++m_collectionCount;
+    if (m_pauseLog != nullptr) {
+        logPause(pauseStart, monotonicNs());
+    }
 }
 
 template <bool Traced>
@@ -615,21 +722,7 @@ void MemoryManager::runCollection() {
         objsBefore = allObjects.size();
         t0 = monotonicNs();
     }
-    if (m_markRoots) {
-        m_markRoots();
-    }
-    if (m_currentCompiler) {
-        m_currentCompiler->markRoots(*this);
-    }
-    for (auto* obj : m_tempRoots) {
-        markObject(obj);
-    }
-    markHeldRoots();
-    markInboxTargets();
-    for (const Envelope& env : m_draining) {
-        markObject(env.target);
-        markValue(env.msg);
-    }
+    markAllRoots();
     if constexpr (Traced) {
         t1 = monotonicNs();
     }
@@ -832,4 +925,196 @@ void MemoryManager::dropOwner() {
     if (freeNow) {
         delete this;
     }
+}
+
+// --- Prototype of an incremental collector (N1, throwaway) -----------------
+
+static constexpr std::size_t kChunk = 512;
+
+void MemoryManager::allocatedDuringMark(Obj* p) {
+    // Yuasa: black. Dijkstra: gray, because a constructor can store a white
+    // object into the new one without a barrier.
+    p->marked = true;
+    if (m_mode == GcMode::Dijkstra) {
+        m_grayStack.push_back(p);
+    }
+}
+
+void MemoryManager::gcPoll(std::size_t bytes) {
+    switch (m_phase) {
+    case GcPhase::Idle:
+        if (bytesAllocated > m_nextGC) {
+            startCycle();
+        }
+        break;
+    case GcPhase::Marking:
+        markStep(bytes);
+        break;
+    case GcPhase::Sweeping:
+        sweepStep(bytes);
+        break;
+    }
+}
+
+void MemoryManager::startCycle() {
+    const std::uint64_t t0 = monotonicNs();
+    for (auto& entry : m_foreign) {
+        entry.second = false;
+    }
+    m_reachedForeign.clear();
+    markAllRoots();
+    m_phase = GcPhase::Marking;
+    logPause(t0, monotonicNs());
+}
+
+bool MemoryManager::traceOne(std::size_t& units) {
+    auto spend = [&units](std::size_t n) {
+        units = n >= units ? 0 : units - n;
+    };
+    if (!m_partials.empty()) {
+        Partial& pt = m_partials.back();
+        std::size_t used = 1;
+        bool done = false;
+        if (pt.obj->type == ObjType::LIST) {
+            auto* list = static_cast<ObjList*>(pt.obj);
+            std::size_t end = std::min(list->elements.size(), pt.pos + kChunk);
+            for (std::size_t i = pt.pos; i < end; ++i) {
+                markValue(list->elements[i]);
+            }
+            used = end > pt.pos ? end - pt.pos : 1;
+            pt.pos = end;
+            done = pt.pos >= list->elements.size();
+        } else {
+            auto* map = static_cast<ObjMap*>(pt.obj);
+            if (map->map.capacity() != pt.capacity) {
+                // A rehash moved the entries: start this Map again.
+                pt.pos = 0;
+                pt.capacity = map->map.capacity();
+            }
+            std::size_t cap = static_cast<std::size_t>(pt.capacity);
+            std::size_t end = std::min(cap, pt.pos + kChunk);
+            for (std::size_t i = pt.pos; i < end; ++i) {
+                const MapEntry* e = map->map.entryAt(static_cast<int>(i));
+                if (!MapPolicy::isEmpty(*e) && !MapPolicy::isTombstone(*e)) {
+                    markValue(e->key);
+                    markValue(e->value);
+                }
+            }
+            used = end > pt.pos ? end - pt.pos : 1;
+            pt.pos = end;
+            done = pt.pos >= cap;
+        }
+        if (done) {
+            m_partials.pop_back();
+        }
+        spend(used);
+        return true;
+    }
+    if (m_grayStack.empty()) {
+        return false;
+    }
+    Obj* obj = m_grayStack.back();
+    m_grayStack.pop_back();
+    if (!m_verifying && obj->type == ObjType::LIST &&
+        static_cast<ObjList*>(obj)->elements.size() > kChunk) {
+        m_partials.push_back({obj, 0, 0});
+    } else if (!m_verifying && obj->type == ObjType::MAP &&
+               static_cast<ObjMap*>(obj)->map.capacity() >
+                   static_cast<int>(kChunk)) {
+        auto* map = static_cast<ObjMap*>(obj);
+        markObject(map->klass);
+        m_partials.push_back({obj, 0, map->map.capacity()});
+    } else {
+        traceObject(obj);
+    }
+    spend(1);
+    return true;
+}
+
+void MemoryManager::drainAll() {
+    std::size_t units = ~std::size_t{0};
+    while (traceOne(units)) {
+    }
+}
+
+void MemoryManager::markStep(std::size_t bytes) {
+    const std::uint64_t t0 = monotonicNs();
+    std::size_t units = std::max<std::size_t>(1, bytes * m_stepMul / 100);
+    while (units > 0 && traceOne(units)) {
+    }
+    if (m_grayStack.empty() && m_partials.empty()) {
+        finishCycle();
+    }
+    logPause(t0, monotonicNs());
+}
+
+void MemoryManager::finishCycle() {
+    if (m_mode == GcMode::Dijkstra) {
+        // The stack and the globals take stores with no barrier.
+        markAllRoots();
+        drainAll();
+    }
+    if (m_verify) {
+        verifyMarked();
+    }
+    adoptReachedForeign();
+    removeWhiteStrings();
+    releaseUnreachedForeign();
+    m_phase = GcPhase::Sweeping;
+    m_sweepRead = 0;
+    m_sweepWrite = 0;
+    m_sweepEnd = allObjects.size();
+}
+
+void MemoryManager::verifyMarked() {
+    std::unordered_set<Obj*> seen;
+    m_verifySet = &seen;
+    m_verifying = true;
+    markAllRoots();
+    while (!m_grayStack.empty()) {
+        Obj* obj = m_grayStack.back();
+        m_grayStack.pop_back();
+        traceObject(obj);
+    }
+    m_verifying = false;
+    m_verifySet = nullptr;
+    for (Obj* obj : seen) {
+        if (!obj->marked) {
+            std::fprintf(stderr,
+                         "GC VERIFY FAILED: reachable object %p (type %d) is "
+                         "white at the end of the mark\n",
+                         static_cast<void*>(obj), static_cast<int>(obj->type));
+            std::abort();
+        }
+    }
+}
+
+void MemoryManager::sweepStep(std::size_t bytes) {
+    const std::uint64_t t0 = monotonicNs();
+    std::size_t units = std::max<std::size_t>(1, bytes * m_stepMul / 100);
+    while (units > 0 && m_sweepRead < m_sweepEnd) {
+        Obj* obj = allObjects[m_sweepRead++];
+        if (obj->marked) {
+            obj->marked = false;
+            allObjects[m_sweepWrite++] = obj;
+        } else {
+            bytesAllocated -= objAllocatedSize(obj);
+            delete obj;
+        }
+        --units;
+    }
+    if (m_sweepRead >= m_sweepEnd) {
+        finishSweep();
+    }
+    logPause(t0, monotonicNs());
+}
+
+void MemoryManager::finishSweep() {
+    for (std::size_t i = m_sweepEnd; i < allObjects.size(); ++i) {
+        allObjects[m_sweepWrite++] = allObjects[i];
+    }
+    allObjects.resize(m_sweepWrite);
+    m_nextGC = std::max(bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
+    m_phase = GcPhase::Idle;
+    ++m_collectionCount;
 }
