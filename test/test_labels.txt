@@ -22,6 +22,8 @@ test_parser_bytecode core
 test_table core
 test_table_gc core
 test_allocator core
+test_collector core
+test_collector_gc core
 test_allocator_gc core
 test_value core
 test_local_variables core
@@ -81,6 +83,7 @@ test_enum_names core
 TestMain core
 GcTrace core
 GcTraceV3 core
+GcCollectorChoice core
 GcLargeHeap core
 GcStwCounts core
 GcSweepLinear core

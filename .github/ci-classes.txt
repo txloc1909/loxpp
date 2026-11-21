@@ -175,7 +175,7 @@ class harness          gates=tables,probes labels=harness,corpus
 class lsp-smoke        gates=lsp,release-static
 # tools/runner_precondition.py is a module of the tools that start a runner. Each
 # test that runs such a tool and has the label core runs by name.
-class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcTraceV3,GcLargeHeap,GcStwCounts,GcSweepLinear,GcMinHeap,ReplSession
+class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcTraceV3,GcCollectorChoice,GcLargeHeap,GcStwCounts,GcSweepLinear,GcMinHeap,ReplSession
 # test/CMakeLists.txt runs RunnerPrecondition, which scans every tools/*.py
 # file for one that starts a process, so each of them selects it.
 class py-tool          tests=RunnerPrecondition
@@ -185,9 +185,10 @@ class tree-sitter      gates=tree-sitter,neovim
 class nvim             gates=neovim
 class vscode           gates=vscode
 class bench            labels=bench
-# The programs of benchmarks/gc_large_heap/ run through the test that scales them
-# down, not through the benchmark tests.
-class gc-large-heap    tests=GcLargeHeap
+# The programs of benchmarks/gc_large_heap/ and their pinned collection counts
+# run through the tests that scale them down and compare them, not through the
+# benchmark tests.
+class gc-large-heap    tests=GcLargeHeap,GcStwCounts
 class pi               gates=pi
 class cross-probe      gates=cross
 class packaging        gates=release-static,tables

@@ -76,6 +76,8 @@ TOOLS = (
          lambda r: py("check_gc_trace_v3.py") + [r[0]]),
     Tool("check_gc_large_heap.py", 1,
          lambda r: py("check_gc_large_heap.py") + [r[0]]),
+    Tool("check_gc_collector_choice.py", 1,
+         lambda r: py("check_gc_collector_choice.py") + [r[0]]),
     Tool("check_gc_stw_counts.py", 1,
          lambda r: py("check_gc_stw_counts.py") + [r[0]]),
     Tool("check_repl_session.py", 1,

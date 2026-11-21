@@ -7,7 +7,7 @@ Usage: check_gc_stw_counts.py <loxpp-binary>
 Each large-heap program runs with smaller constants (tools/check_gc_large_heap.py
 holds them) and a GC trace. For each collection, the check compares the cause,
 the object counts and the byte counts before and after with the pinned file
-tools/testdata/gc_stw_counts.txt. The file comes from the collector as it was
+benchmarks/gc_large_heap/stw_counts.txt. The file comes from the collector as it was
 before the collector interface (issue #1280). A change to the collector, to the
 heap layout or to the size of an object that is on purpose changes these
 numbers, and then `--update` writes the file again. A change that is not on
@@ -30,7 +30,7 @@ sys.path.insert(0, HERE)
 import check_gc_large_heap as large  # noqa: E402
 import gc_report  # noqa: E402
 
-PINNED = os.path.join(HERE, "testdata", "gc_stw_counts.txt")
+PINNED = os.path.join(large.PROGRAMS, "stw_counts.txt")
 HEADER = (
     "# Pinned by tools/check_gc_stw_counts.py. One line for each collection of\n"
     "# each large-heap program with the smaller constants of\n"
