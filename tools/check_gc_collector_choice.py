@@ -60,7 +60,9 @@ def main():
             ("stw", {"LOXPP_GC": "stw"}, ()),
         ):
             r = run(binary, d, extra, unset)
-            if r.returncode != 0 or r.stdout.strip() != "ran":
+            # A build that traces execution prints its trace around the output
+            # of the program, so the check looks for the line of the program.
+            if r.returncode != 0 or "ran" not in r.stdout.splitlines():
                 fail(f"LOXPP_GC {label}: exit {r.returncode}, "
                      f"stdout {r.stdout!r}, stderr {r.stderr[:200]!r}")
         for bad in ("incremental", "STW", "stw "):
