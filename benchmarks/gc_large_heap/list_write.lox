@@ -1,0 +1,18 @@
+// A very large List that the program writes into while it makes garbage.
+// A write of a new object into an old, already traced List is the case
+// where the two barrier kinds differ.
+class Node { init(i) { this.i = i; } }
+
+var N = 3000000;
+var ROUNDS = 4000000;
+
+var big = [];
+var i = 0;
+while (i < N) { big.append(Node(i)); i = i + 1; }
+
+i = 0;
+while (i < ROUNDS) {
+    big[(i * 7919) % N] = Node(i);
+    i = i + 1;
+}
+print len(big);

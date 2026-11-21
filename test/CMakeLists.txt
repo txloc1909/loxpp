@@ -226,6 +226,14 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # The reader of the trace format (version 3) must give exact figures for
+    # the records that an incremental collector writes, reject malformed
+    # files, and agree with the version 2 reading of a real trace.
+    add_test(NAME GcTraceV3
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_trace_v3.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # A sweep must be linear in the heap size. The check keeps a large live
     # set, churns garbage, and bounds the summed sweep-phase time from the GC
     # trace. It skips on a build that traces execution, which prints too much
@@ -240,6 +248,18 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(GcSweepLinear PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # The large-heap programs of benchmarks/gc_large_heap/ must print the value
+    # that their constants give, and must make collections. The check runs
+    # each one with smaller constants. Like GcSweepLinear, it skips on a build
+    # that traces execution.
+    add_test(NAME GcLargeHeap
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_large_heap.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcLargeHeap PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 

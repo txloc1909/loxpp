@@ -1,0 +1,17 @@
+// A linked list of millions of nodes: a very long chain of gray objects.
+class Link { init(next, i) { this.next = next; this.i = i; } }
+
+var N = 3000000;
+var ROUNDS = 5000000;
+
+var head = nil;
+var i = 0;
+while (i < N) { head = Link(head, i); i = i + 1; }
+
+i = 0;
+var sum = 0;
+while (i < ROUNDS) { var t = Link(nil, i); sum = sum + t.i; i = i + 1; }
+var n = 0;
+var p = head;
+while (p != nil) { n = n + 1; p = p.next; }
+print n + sum;
