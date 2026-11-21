@@ -112,6 +112,8 @@ set(LOXPP_CORE_SOURCES
     src/container_objects.cpp
     src/table.cpp
     src/memory_manager.cpp
+    src/collector.cpp
+    src/stw_collector.cpp
     src/worker.cpp
     src/poller.cpp
     src/math.cpp

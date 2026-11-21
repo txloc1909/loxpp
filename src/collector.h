@@ -1,0 +1,129 @@
+#pragma once
+
+// The interface between the runtime and a garbage collector
+// (docs/decisions/garbage-collectors.md, section 5). A heap (MemoryManager)
+// has one collector, chosen once when the heap starts (LOXPP_GC, section 5.1).
+//
+// The runtime gives the collector the roots (it calls markObject and
+// markValue on them), the references of each object type (object_trace.h),
+// and the allocation path. The collector gives the runtime the calls below.
+// Only a collector reads or writes the mark of an object, and only a
+// collector owns the list of the objects of a heap.
+
+#include "object.h"
+#include "value.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+
+class MemoryManager;
+
+// Why a caller asks for a collection now. Auto is the cause that the
+// collector would report itself (a threshold, or stress mode).
+enum class CollectCause { Auto, Exit };
+
+// The store kinds of section 5 that need a write barrier.
+enum class Store { Field, Element, Entry, Upvalue, Snapshot };
+
+class Collector {
+  public:
+    virtual ~Collector() = default;
+
+    // --- The allocation path -------------------------------------------
+
+    // True when the allocation that is about to happen is a safe point at
+    // which the collector has work. One compare, inline.
+    [[nodiscard]] bool shouldPoll(std::size_t bytesAllocated) const {
+        return m_stress || bytesAllocated > m_pollAt;
+    }
+    // Runs the work that shouldPoll announced. A collection can run in the
+    // middle of an allocation, so every caller of an allocation is a safe
+    // point (docs/reference/gc-runtime-contract.md, section 2).
+    virtual void poll() = 0;
+    // The heap made `obj`. The collector registers it.
+    virtual void onCreate(Obj* obj) = 0;
+
+    // --- The roots -----------------------------------------------------
+
+    // The runtime calls this for each root and each reference that it finds.
+    virtual void markObject(Obj* obj) = 0;
+    void markValue(const Value& v) {
+        if (isObj(v)) {
+            markObject(as<Obj*>(v));
+        }
+    }
+
+    // --- Explicit collection and the end of a heap ---------------------
+
+    // A full collection now (the exit of a worker, the idle point, tests).
+    virtual void collectNow(CollectCause cause) = 0;
+    [[nodiscard]] virtual std::size_t collectionCount() const = 0;
+    // Frees every object of the heap. The destructor of the heap calls it.
+    virtual void releaseAll() = 0;
+#ifdef LOXPP_PROFILE
+    // Folds the profiler tables of every live coroutine into the root
+    // profiler and clears them.
+    virtual void mergeCoroutineProfilers() {}
+#endif
+
+    // --- The write barriers (empty for the stop-the-world collector) ----
+    //
+    // The runtime calls one of these at each store of a reference into a heap
+    // object, with the old and the new value. The fast path of each is one
+    // test of a byte that the collector keeps ("is a mark in progress?").
+    // The stop-the-world collector never sets it.
+
+    void barrierField(Obj* container, const Value& oldv, const Value& newv) {
+        if (m_marking) {
+            onStore(Store::Field, container, oldv, newv);
+        }
+    }
+    void barrierElement(Obj* container, const Value& oldv, const Value& newv) {
+        if (m_marking) {
+            onStore(Store::Element, container, oldv, newv);
+        }
+    }
+    void barrierEntry(Obj* container, const Value& oldv, const Value& newv) {
+        if (m_marking) {
+            onStore(Store::Entry, container, oldv, newv);
+        }
+    }
+    void barrierUpvalue(Obj* container, const Value& oldv, const Value& newv) {
+        if (m_marking) {
+            onStore(Store::Upvalue, container, oldv, newv);
+        }
+    }
+    void barrierSnapshot(Obj* container, const Value& oldv, const Value& newv) {
+        if (m_marking) {
+            onStore(Store::Snapshot, container, oldv, newv);
+        }
+    }
+    // The read barrier of the weak String table (section 4.7): a lookup of
+    // the intern table found `s`.
+    void internHit(ObjString* s) {
+        if (m_marking) {
+            onInternHit(s);
+        }
+    }
+
+  protected:
+    virtual void onStore(Store, Obj*, const Value&, const Value&) {}
+    virtual void onInternHit(ObjString*) {}
+
+    // A non-empty LOXPP_STRESS_GC value asks for a collection at each
+    // allocation. Read once, when the heap starts.
+    bool m_stress{false};
+    // The heap size at which the next collection starts.
+    std::size_t m_pollAt{0};
+    // True while a mark is in progress. Only an incremental collector sets it.
+    bool m_marking{false};
+};
+
+// The collector that LOXPP_GC names, for `heap`. An unset or empty variable
+// gives the default, the stop-the-world collector "stw". An unknown name
+// prints a message and ends the process with status 64.
+std::unique_ptr<Collector> makeCollector(MemoryManager& heap, int workerNumber);
+// The same for a name: nullptr for a name that is not a collector.
+std::unique_ptr<Collector>
+makeCollectorByName(const char* name, MemoryManager& heap, int workerNumber);

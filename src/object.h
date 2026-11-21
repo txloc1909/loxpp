@@ -43,10 +43,16 @@ inline uint32_t hashString(std::string_view s) {
 
 struct Obj {
     ObjType type;
-    // Written only by the collector of the heap that owns the object. A
-    // worker that holds the object of another heap marks it in a side table
-    // of its own (MemoryManager::markObject), never here.
+
+  private:
+    // Written and read only by the collector of the heap that owns the object
+    // (the friend below), so a use anywhere else does not compile. A worker
+    // that holds the object of another heap marks it in a side table of its
+    // own (MemoryManager::markForeign), never here.
     bool marked = false;
+    friend class StwCollector;
+
+  public:
     // The id of the heap that created the object (worker.h, heapById). Set
     // once by MemoryManager::create and never changed, so another worker
     // can read it at any time. It sits in the header padding: sizeof(Obj)
