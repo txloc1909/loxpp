@@ -19,6 +19,21 @@
 
 class MemoryManager;
 
+// The state that the allocation path reads on every call. It lives in the
+// heap, next to bytesAllocated, so that the check costs what it cost before
+// the collector interface existed: no load through a pointer to the collector.
+// The collector writes it.
+struct PollState {
+    // The heap size at which the next collection starts.
+    std::size_t pollAt{0};
+    // A non-empty LOXPP_STRESS_GC value asks for a collection at each
+    // allocation. Read once, when the heap starts.
+    bool stress{false};
+    // True while a mark is in progress. Only an incremental collector sets
+    // it. The write barriers test it.
+    bool marking{false};
+};
+
 // Why a caller asks for a collection now. Auto is the cause that the
 // collector would report itself (a threshold, or stress mode).
 enum class CollectCause { Auto, Exit };
@@ -28,16 +43,14 @@ enum class Store { Field, Element, Entry, Upvalue, Snapshot };
 
 class Collector {
   public:
+    explicit Collector(PollState& poll) : m_poll(poll) {}
     virtual ~Collector() = default;
 
     // --- The allocation path -------------------------------------------
 
-    // True when the allocation that is about to happen is a safe point at
-    // which the collector has work. One compare, inline.
-    [[nodiscard]] bool shouldPoll(std::size_t bytesAllocated) const {
-        return m_stress || bytesAllocated > m_pollAt;
-    }
-    // Runs the work that shouldPoll announced. A collection can run in the
+    // The heap decides that an allocation is a safe point at which the
+    // collector has work: the heap size is above PollState::pollAt, or stress
+    // mode is on. poll() then runs that work. A collection can run in the
     // middle of an allocation, so every caller of an allocation is a safe
     // point (docs/reference/gc-runtime-contract.md, section 2).
     virtual void poll() = 0;
@@ -75,34 +88,34 @@ class Collector {
     // The stop-the-world collector never sets it.
 
     void barrierField(Obj* container, const Value& oldv, const Value& newv) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onStore(Store::Field, container, oldv, newv);
         }
     }
     void barrierElement(Obj* container, const Value& oldv, const Value& newv) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onStore(Store::Element, container, oldv, newv);
         }
     }
     void barrierEntry(Obj* container, const Value& oldv, const Value& newv) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onStore(Store::Entry, container, oldv, newv);
         }
     }
     void barrierUpvalue(Obj* container, const Value& oldv, const Value& newv) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onStore(Store::Upvalue, container, oldv, newv);
         }
     }
     void barrierSnapshot(Obj* container, const Value& oldv, const Value& newv) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onStore(Store::Snapshot, container, oldv, newv);
         }
     }
     // The read barrier of the weak String table (section 4.7): a lookup of
     // the intern table found `s`.
     void internHit(ObjString* s) {
-        if (m_marking) {
+        if (m_poll.marking) {
             onInternHit(s);
         }
     }
@@ -111,19 +124,16 @@ class Collector {
     virtual void onStore(Store, Obj*, const Value&, const Value&) {}
     virtual void onInternHit(ObjString*) {}
 
-    // A non-empty LOXPP_STRESS_GC value asks for a collection at each
-    // allocation. Read once, when the heap starts.
-    bool m_stress{false};
-    // The heap size at which the next collection starts.
-    std::size_t m_pollAt{0};
-    // True while a mark is in progress. Only an incremental collector sets it.
-    bool m_marking{false};
+    PollState& m_poll;
 };
 
 // The collector that LOXPP_GC names, for `heap`. An unset or empty variable
 // gives the default, the stop-the-world collector "stw". An unknown name
 // prints a message and ends the process with status 64.
-std::unique_ptr<Collector> makeCollector(MemoryManager& heap, int workerNumber);
+std::unique_ptr<Collector> makeCollector(MemoryManager& heap, PollState& poll,
+                                         int workerNumber);
 // The same for a name: nullptr for a name that is not a collector.
-std::unique_ptr<Collector>
-makeCollectorByName(const char* name, MemoryManager& heap, int workerNumber);
+std::unique_ptr<Collector> makeCollectorByName(const char* name,
+                                               MemoryManager& heap,
+                                               PollState& poll,
+                                               int workerNumber);

@@ -106,10 +106,11 @@ static std::FILE* openTraceFile(int workerNumber) {
     return f;
 }
 
-StwCollector::StwCollector(MemoryManager& heap, int workerNumber)
-    : m_heap(heap), m_trace(openTraceFile(workerNumber)) {
-    m_stress = readStressGCEnv();
-    m_pollAt = kMinHeap;
+StwCollector::StwCollector(MemoryManager& heap, PollState& poll,
+                           int workerNumber)
+    : Collector(poll), m_heap(heap), m_trace(openTraceFile(workerNumber)) {
+    m_poll.stress = readStressGCEnv();
+    m_poll.pollAt = kMinHeap;
 }
 
 StwCollector::~StwCollector() {
@@ -209,7 +210,8 @@ void StwCollector::sweep() {
         }
     }
     allObjects.resize(kept);
-    m_pollAt = std::max(m_heap.bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
+    m_poll.pollAt =
+        std::max(m_heap.bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
 }
 
 #ifdef LOXPP_PROFILE
@@ -232,7 +234,7 @@ const char* StwCollector::collectionCause() const {
     if (m_exitCollection) {
         return "exit";
     }
-    return m_stress ? "stress" : "threshold";
+    return m_poll.stress ? "stress" : "threshold";
 }
 
 void StwCollector::collectNow(CollectCause cause) {
@@ -307,6 +309,6 @@ void StwCollector::runCollection() {
     }
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] end   -- %zu bytes allocated, next threshold %zu\n",
-            m_heap.bytesAllocated, m_pollAt);
+            m_heap.bytesAllocated, m_poll.pollAt);
 #endif
 }

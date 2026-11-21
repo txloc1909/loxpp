@@ -2,6 +2,7 @@
 
 #include "collector.h"
 #include "object.h"
+#include "stw_collector.h"
 #include "table.h"
 #include "vm_allocator.h"
 #include "worker.h"
@@ -42,7 +43,7 @@ class MemoryManager : public VmAllocBase {
         // to surface rooting bugs. It is a runtime flag, not a build flag,
         // so this stays one member read and one `||` on the hot allocation
         // path.
-        if (m_collector->shouldPoll(bytesAllocated)) {
+        if (shouldPoll()) {
             m_collector->poll();
         }
         bytesAllocated += sizeof(T);
@@ -54,7 +55,14 @@ class MemoryManager : public VmAllocBase {
         if (!pointerFitsInValue(reinterpret_cast<uintptr_t>(p))) {
             reportPointerOutOfRange(reinterpret_cast<uintptr_t>(p));
         }
-        m_collector->onCreate(p);
+        // m_stw is the same object as m_collector when the collector is
+        // "stw". StwCollector is final, so this is a direct call that the
+        // compiler inlines: the allocation path pays no virtual call.
+        if (m_stw != nullptr) {
+            m_stw->onCreate(p);
+        } else {
+            m_collector->onCreate(p);
+        }
         return p;
     }
 
@@ -190,9 +198,28 @@ class MemoryManager : public VmAllocBase {
     void adoptReachedForeign();
     void releaseUnreachedForeign();
 
+    // True when the allocation that is about to happen is a safe point at
+    // which the collector has work. One compare of members of the heap.
+    [[nodiscard]] bool shouldPoll() const {
+        return m_poll.stress || bytesAllocated > m_poll.pollAt;
+    }
+
+    // The lookup of the intern table found `s`. The test of the flag is on the
+    // state of the heap, so a lookup that finds a String (the common case)
+    // pays one load, not three.
+    void noteInternHit(ObjString* s) const {
+        if (m_poll.marking) {
+            m_collector->internHit(s);
+        }
+    }
+
     Table m_strings;
 
+    // The state that shouldPoll reads. Declared before the collector, which
+    // holds a reference to it.
+    PollState m_poll;
     std::unique_ptr<Collector> m_collector;
+    StwCollector* m_stw{nullptr};
     std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};

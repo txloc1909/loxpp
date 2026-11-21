@@ -19,7 +19,8 @@ MemoryManager::MemoryManager(int workerNumber)
     : m_strings(VmAllocator<Entry>{this}), m_workerNumber(workerNumber),
       m_heapId(acquireHeapId(this)) {
     m_inbox.workerNumber = workerNumber;
-    m_collector = makeCollector(*this, workerNumber);
+    m_collector = makeCollector(*this, m_poll, workerNumber);
+    m_stw = dynamic_cast<StwCollector*>(m_collector.get());
 }
 
 MemoryManager::~MemoryManager() {
@@ -47,13 +48,14 @@ MemoryManager::~MemoryManager() {
         }
     }
     // Writes the end record of the trace.
+    m_stw = nullptr;
     m_collector.reset();
     releaseHeapId(m_heapId);
 }
 
 void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
-    if (m_collector->shouldPoll(bytesAllocated)) {
+    if (shouldPoll()) {
         m_collector->poll();
     }
     return ::operator new(bytes);
@@ -69,7 +71,7 @@ ObjString* MemoryManager::makeString(std::string_view sv) {
     auto* interned =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
     if (interned != nullptr) {
-        m_collector->internHit(interned);
+        noteInternHit(interned);
         return interned;
     }
 
@@ -91,7 +93,7 @@ ObjString* MemoryManager::makeString(LoxString&& sv) {
     auto* interned =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
     if (interned != nullptr) {
-        m_collector->internHit(interned);
+        noteInternHit(interned);
         return interned;
     }
 
@@ -107,7 +109,7 @@ ObjString* MemoryManager::findString(std::string_view sv) const {
     ObjString* found =
         m_strings.findString(sv.data(), static_cast<int>(sv.size()), hash);
     if (found != nullptr) {
-        m_collector->internHit(found);
+        noteInternHit(found);
     }
     return found;
 }
@@ -275,12 +277,12 @@ Value MemoryManager::receiveMessage(Value msg) {
         ObjString* found = m_strings.findString(
             str->chars.data(), static_cast<int>(str->chars.size()), str->hash);
         if (found == str) {
-            m_collector->internHit(found);
+            noteInternHit(found);
             adoptForeign(str);
             return msg;
         }
         if (found != nullptr) {
-            m_collector->internHit(found);
+            noteInternHit(found);
             heapOf(str)->releaseHold(str);
             return Value{static_cast<Obj*>(found)};
         }

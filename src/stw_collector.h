@@ -17,7 +17,7 @@ class StwCollector final : public Collector {
   public:
     // `workerNumber` names the worker of the heap; the GC trace of worker
     // N > 0 goes to `<LOXPP_GC_TRACE>.w<N>`.
-    StwCollector(MemoryManager& heap, int workerNumber);
+    StwCollector(MemoryManager& heap, PollState& poll, int workerNumber);
     // Writes the end record of the trace and closes it.
     ~StwCollector() override;
 
