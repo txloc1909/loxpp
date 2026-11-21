@@ -10,7 +10,9 @@ output with the value that the constants give by arithmetic. It also reads the
 GC trace, and requires that the program made collections: a program that
 never collects measures nothing.
 
-Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
+Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run, 125
+skipped (a build that traces execution prints too much to run these programs
+quickly).
 """
 
 import os
@@ -73,6 +75,9 @@ def main():
         print(__doc__, file=sys.stderr)
         sys.exit(2)
     require_runner(sys.argv[1])
+    if os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1":
+        print("skipped: build traces execution")
+        sys.exit(125)
     binary = os.path.abspath(sys.argv[1])
     on_disk = sorted(f[:-4] for f in os.listdir(PROGRAMS) if f.endswith(".lox"))
     if on_disk != sorted(CASES):
