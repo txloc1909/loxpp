@@ -85,6 +85,15 @@ class MemoryManager : public VmAllocBase {
 
     // The collector of this heap, chosen when the heap started (LOXPP_GC).
     [[nodiscard]] Collector& collector() { return *m_collector; }
+    // For tests. The state that the allocation path and the barriers read.
+    [[nodiscard]] PollState& pollState() { return m_poll; }
+    // For tests. Puts `collector` in the place of the collector of this heap
+    // and returns the old one. `collector` must use pollState(). An object
+    // that the heap makes while `collector` is in place is not known to the
+    // old collector, so a test makes none, and puts the old collector back
+    // before the heap ends.
+    std::unique_ptr<Collector>
+    swapCollector(std::unique_ptr<Collector> collector);
 
     void* rawAlloc(std::size_t bytes) override;
 

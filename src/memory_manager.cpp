@@ -114,6 +114,13 @@ ObjString* MemoryManager::findString(std::string_view sv) const {
     return found;
 }
 
+std::unique_ptr<Collector>
+MemoryManager::swapCollector(std::unique_ptr<Collector> collector) {
+    std::swap(m_collector, collector);
+    m_stw = dynamic_cast<StwCollector*>(m_collector.get());
+    return collector;
+}
+
 void MemoryManager::pushTempRoot(Obj* obj) { m_tempRoots.push_back(obj); }
 void MemoryManager::popTempRoot() { m_tempRoots.pop_back(); }
 

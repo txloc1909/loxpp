@@ -4,6 +4,8 @@
 #include "value.h"
 
 #include <gtest/gtest.h>
+#include <limits>
+#include <string>
 #include <vector>
 
 // The interface between the runtime and a collector
@@ -115,7 +117,7 @@ TEST(CollectorHooksTest, MarkValueMarksAnObjectAndIgnoresAScalar) {
     EXPECT_EQ(c.marked[0], s);
 }
 
-TEST(CollectorHooksTest, TheStopTheWorldCollectorNeverStartsAMark) {
+TEST(CollectorHooksTest, TheHooksOfTheStopTheWorldCollectorChangeNothing) {
     MemoryManager mm;
     ObjString* s = mm.makeString("s");
     mm.pushTempRoot(s);
@@ -128,6 +130,29 @@ TEST(CollectorHooksTest, TheStopTheWorldCollectorNeverStartsAMark) {
     c.internHit(s);
     EXPECT_EQ(mm.bytesAllocated, bytes);
     EXPECT_EQ(mm.collectionCount(), count);
+}
+
+TEST(CollectorHooksTest, TheStopTheWorldCollectorNeverSetsTheMarkFlag) {
+    // The flag gates every barrier hook. A stop-the-world collector that set it
+    // would make each hook do work that this collector does not need.
+    MemoryManager mm;
+    EXPECT_FALSE(mm.pollState().marking);
+    mm.collectGarbage();
+    mm.collector().collectNow(CollectCause::Exit);
+    EXPECT_FALSE(mm.pollState().marking);
+    // Enough allocation to pass the threshold of the first collection.
+    for (int i = 0; i < 6; ++i) {
+        mm.makeString(std::string(300000, static_cast<char>('a' + i)));
+    }
+    EXPECT_GT(mm.collectionCount(), 0u);
+    EXPECT_FALSE(mm.pollState().marking);
+}
+
+TEST(CollectorHooksTest, AFreshPollStateNeverPollsBeforeACollectorSetsIt) {
+    PollState poll;
+    EXPECT_FALSE(poll.stress);
+    EXPECT_FALSE(poll.marking);
+    EXPECT_EQ(poll.pollAt, std::numeric_limits<std::size_t>::max());
 }
 
 TEST(CollectorChoiceTest, TheStopTheWorldCollectorIsAKnownName) {
@@ -168,6 +193,64 @@ TEST(CollectorHeapTest, AnObjectThatTheHeapMadeIsRegisteredWithTheCollector) {
     EXPECT_GT(mm.bytesAllocated, before);
     mm.collectGarbage();
     EXPECT_EQ(mm.bytesAllocated, before);
+}
+
+TEST(CollectorHeapTest, EachLookupOfTheInternTableCallsTheHook) {
+    // `other` is declared first: it must outlive `mm`, whose foreign set holds
+    // its Strings.
+    MemoryManager other;
+    MemoryManager mm;
+    ObjString* shared = mm.makeString("shared");
+    mm.pushTempRoot(shared);
+    ObjString* theirs = other.makeString("shared"); // same text, other heap
+    other.pushTempRoot(theirs);
+    ObjString* fresh = other.makeString("only-there");
+    other.pushTempRoot(fresh);
+    LoxString text("shared", VmAllocator<char>{&mm});
+
+    auto stw =
+        mm.swapCollector(std::make_unique<RecordingCollector>(mm.pollState()));
+    auto& rec = static_cast<RecordingCollector&>(mm.collector());
+
+    // No mark runs: the lookups find Strings, and the hook stays silent.
+    EXPECT_EQ(mm.makeString(std::string_view{"shared"}), shared);
+    EXPECT_EQ(mm.findString("shared"), shared);
+    EXPECT_TRUE(rec.interned.empty());
+
+    mm.pollState().marking = true;
+    std::size_t hits = 0;
+    auto expectOneMoreHit = [&](const char* site) {
+        ++hits;
+        EXPECT_EQ(rec.interned.size(), hits) << site;
+    };
+
+    EXPECT_EQ(mm.makeString(std::string_view{"shared"}), shared);
+    expectOneMoreHit("makeString(string_view)");
+    EXPECT_EQ(mm.makeString(std::string{"shared"}), shared);
+    expectOneMoreHit("makeString(std::string&&)");
+    EXPECT_EQ(mm.makeString(std::move(text)), shared);
+    expectOneMoreHit("makeString(LoxString&&)");
+    EXPECT_EQ(mm.findString("shared"), shared);
+    expectOneMoreHit("findString, a hit");
+    EXPECT_EQ(mm.findString("absent"), nullptr);
+    EXPECT_EQ(rec.interned.size(), hits) << "findString, a miss";
+
+    // A String from another heap with the text of one that this heap has.
+    MemoryManager::holdValue(Value{static_cast<Obj*>(theirs)});
+    EXPECT_EQ(as<Obj*>(mm.receiveMessage(Value{static_cast<Obj*>(theirs)})),
+              static_cast<Obj*>(shared));
+    expectOneMoreHit("receiveMessage, an equal String");
+    // A String that this heap does not have: the first receive adds it to the
+    // table (no hit), and the second one finds that same String.
+    MemoryManager::holdValue(Value{static_cast<Obj*>(fresh)});
+    mm.receiveMessage(Value{static_cast<Obj*>(fresh)});
+    EXPECT_EQ(rec.interned.size(), hits) << "receiveMessage, a new String";
+    MemoryManager::holdValue(Value{static_cast<Obj*>(fresh)});
+    mm.receiveMessage(Value{static_cast<Obj*>(fresh)});
+    expectOneMoreHit("receiveMessage, the same String again");
+
+    mm.pollState().marking = false;
+    mm.swapCollector(std::move(stw));
 }
 
 TEST(CollectorHeapTest, AnExitCollectionCounts) {

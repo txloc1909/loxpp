@@ -20,26 +20,29 @@
 class MemoryManager;
 
 // The state that the allocation path reads on every call. It lives in the
-// heap, next to bytesAllocated, so that the check costs what it cost before
-// the collector interface existed: no load through a pointer to the collector.
-// The collector writes it.
+// heap, next to bytesAllocated, so that the check is one compare of members
+// of the heap and needs no load through a pointer to the collector. The
+// collector writes it.
 struct PollState {
-    // The heap size at which the next collection starts.
-    std::size_t pollAt{0};
+    // The heap size at which the next collection starts. It starts above any
+    // heap size, so no allocation polls before a collector has set it.
+    std::size_t pollAt{~std::size_t{0}};
     // A non-empty LOXPP_STRESS_GC value asks for a collection at each
     // allocation. Read once, when the heap starts.
     bool stress{false};
-    // True while a mark is in progress. Only an incremental collector sets
-    // it. The write barriers test it.
+    // True while the barriers must run. Only an incremental collector sets
+    // it. The write barriers and the read barrier of the intern table
+    // (decision 4.7) test it. The read barrier must also run during a sweep, so
+    // that collector sets the flag for the sweep too, or adds a second flag.
     bool marking{false};
 };
 
 // Why a caller asks for a collection now. Auto is the cause that the
 // collector would report itself (a threshold, or stress mode).
-enum class CollectCause { Auto, Exit };
+enum class CollectCause : std::uint8_t { Auto, Exit };
 
 // The store kinds of section 5 that need a write barrier.
-enum class Store { Field, Element, Entry, Upvalue, Snapshot };
+enum class Store : std::uint8_t { Field, Element, Entry, Upvalue, Snapshot };
 
 class Collector {
   public:
