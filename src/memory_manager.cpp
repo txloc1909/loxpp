@@ -15,10 +15,19 @@
 #include <ctime>
 #include <string>
 
+// A non-empty LOXPP_STRESS_GC value turns on collect-on-every-allocation for
+// the lifetime of this heap, whatever the collector is. Read once here; never
+// on an allocation path.
+static bool readStressGCEnv() {
+    const char* v = std::getenv("LOXPP_STRESS_GC");
+    return v != nullptr && v[0] != '\0';
+}
+
 MemoryManager::MemoryManager(int workerNumber)
     : m_strings(VmAllocator<Entry>{this}), m_workerNumber(workerNumber),
       m_heapId(acquireHeapId(this)) {
     m_inbox.workerNumber = workerNumber;
+    m_poll.stress = readStressGCEnv();
     m_collector = makeCollector(*this, m_poll, workerNumber);
     m_stw = dynamic_cast<StwCollector*>(m_collector.get());
 }

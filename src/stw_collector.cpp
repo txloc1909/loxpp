@@ -68,14 +68,6 @@ static const char* objTypeName(ObjType type) {
 }
 #endif
 
-// A non-empty LOXPP_STRESS_GC value turns on collect-on-every-allocation for
-// the lifetime of this collector. Read once here; never on an allocation
-// path.
-static bool readStressGCEnv() {
-    const char* v = std::getenv("LOXPP_STRESS_GC");
-    return v != nullptr && v[0] != '\0';
-}
-
 static uint64_t monotonicNs() {
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -109,7 +101,6 @@ static std::FILE* openTraceFile(int workerNumber) {
 StwCollector::StwCollector(MemoryManager& heap, PollState& poll,
                            int workerNumber)
     : Collector(poll), m_heap(heap), m_trace(openTraceFile(workerNumber)) {
-    m_poll.stress = readStressGCEnv();
     m_poll.pollAt = kMinHeap;
 }
 
