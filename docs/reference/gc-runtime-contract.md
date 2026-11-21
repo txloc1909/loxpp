@@ -136,10 +136,18 @@ These types do not change after creation: `ObjString`, `ObjInt`, `ObjEnum`,
 ## 8. Observation
 
 - `LOXPP_GC_TRACE=<file>` writes one record for each collection (format
-  v2, described in `tools/gc_report.py`). These read it:
-  `tools/gc_report.py`, `tools/check_gc_trace.py`,
-  `tools/check_gc_min_heap.py`, `benchmarks/gc_compare.py`, and the Redis
-  example's `tests/run_stages.py` (probe S10 reads `objs_before`).
+  v3, described in `tools/gc_report.py`). The stop-the-world collector writes
+  `gc` records only. The format also has `cycle`, `step` and `stall` records,
+  for an incremental collector and for the heap allocator. Nothing writes them
+  yet. These read the trace: `tools/gc_report.py` (and
+  `tools/jvm_gc_log.py` through `summarise_gcs`), `tools/check_gc_trace.py`,
+  `tools/check_gc_trace_v3.py`, `tools/check_gc_min_heap.py`,
+  `tools/check_gc_sweep_linear.py`, `benchmarks/gc_compare.py`, and the Redis
+  example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc`
+  records).
+- `benchmarks/gc_large_heap/` holds the programs that keep a heap of millions
+  of objects. `docs/records/gc-stw-baseline-2026-11-21.md` gives the object
+  counts of each collection of these programs with this collector.
 - `collectionCount()` is read by tests.
 - The spec makes the timing of garbage collection implementation-defined
   (`spec/README.md`, "Conformance", item 4). No program can see when an
