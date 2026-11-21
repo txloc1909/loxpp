@@ -234,6 +234,14 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # The large-heap programs of benchmarks/gc_large_heap/ must print the value
+    # that their constants give, and must make collections. The check runs
+    # each one with smaller constants.
+    add_test(NAME GcLargeHeap
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_large_heap.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # A sweep must be linear in the heap size. The check keeps a large live
     # set, churns garbage, and bounds the summed sweep-phase time from the GC
     # trace. It skips on a build that traces execution, which prints too much
