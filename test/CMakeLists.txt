@@ -263,6 +263,17 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # The stop-the-world collector must collect at the same points as when the
+    # counts were pinned: the same cause, objects and bytes for each collection
+    # of the scaled-down large-heap programs. Skips like GcLargeHeap.
+    add_test(NAME GcStwCounts
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_stw_counts.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcStwCounts PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # tools/jvm_gc_log.py converts a JVM -Xlog:gc log into the gc_report.py
     # format. The check parses checked-in logs, so it needs no JVM.
     add_test(NAME JvmGcLog

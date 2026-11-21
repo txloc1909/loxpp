@@ -82,6 +82,7 @@ TestMain core
 GcTrace core
 GcTraceV3 core
 GcLargeHeap core
+GcStwCounts core
 GcSweepLinear core
 GcMinHeap core
 ReplSession core

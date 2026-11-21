@@ -1,0 +1,30 @@
+# Pinned by tools/check_gc_stw_counts.py. One line for each collection of
+# each large-heap program with the smaller constants of
+# tools/check_gc_large_heap.py: program, number, cause, objs_before,
+# objs_after, bytes_before, bytes_after.
+big_map 1 threshold 12428 6360 1551365 1211557
+big_map 2 threshold 24716 15538 3091461 2577493
+big_map 3 threshold 49292 32415 6171653 5226541
+big_map 4 threshold 70796 62919 10453165 10012053
+big_map 5 threshold 110970 80293 20024277 14134293
+big_map 6 exit 109616 0 19764173 2098176
+list_write 1 threshold 5286 5286 1048669 1048669
+list_write 2 threshold 10407 10407 2097437 2097437
+list_write 3 threshold 20649 20649 4194973 4194973
+list_write 4 threshold 41133 41133 8390045 8390045
+list_write 5 threshold 84832 60290 16780253 12068189
+list_write 6 exit 115748 0 22715989 5120
+live_then_churn 1 threshold 5287 5287 1048725 1048725
+live_then_churn 2 threshold 10408 10408 2097493 2097493
+live_then_churn 3 threshold 20650 20650 4195029 4195029
+live_then_churn 4 threshold 41134 41134 8390101 8390101
+live_then_churn 5 threshold 84833 60291 16780309 12068245
+live_then_churn 6 threshold 123147 60291 24136597 12068245
+live_then_churn 7 exit 92893 0 18327693 5120
+long_chain 1 threshold 5629 5629 1048725 1048725
+long_chain 2 threshold 11092 11092 2097621 2097621
+long_chain 3 threshold 22018 22018 4195413 4195413
+long_chain 4 threshold 43870 43870 8390997 8390997
+long_chain 5 threshold 87574 60292 16782165 11544021
+long_chain 6 threshold 120418 60292 23088213 11544021
+long_chain 7 exit 72884 0 13961549 5120

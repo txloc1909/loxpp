@@ -175,7 +175,7 @@ class harness          gates=tables,probes labels=harness,corpus
 class lsp-smoke        gates=lsp,release-static
 # tools/runner_precondition.py is a module of the tools that start a runner. Each
 # test that runs such a tool and has the label core runs by name.
-class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcTraceV3,GcLargeHeap,GcSweepLinear,GcMinHeap,ReplSession
+class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcTraceV3,GcLargeHeap,GcStwCounts,GcSweepLinear,GcMinHeap,ReplSession
 # test/CMakeLists.txt runs RunnerPrecondition, which scans every tools/*.py
 # file for one that starts a process, so each of them selects it.
 class py-tool          tests=RunnerPrecondition
