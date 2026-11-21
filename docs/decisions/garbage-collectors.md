@@ -229,6 +229,11 @@ That scan visits the whole table, and the prototype took 87 to 93 ms with
   padding). Without this barrier, a dead String that the program finds in
   the table again is freed under the program.
 
+The flag that gates the read barrier (`PollState::marking` in
+`src/collector.h`) is true during a mark only for the write barriers. The read
+barrier must also run during the sweep, so the incremental collector sets the
+flag for the sweep too, or adds a second flag.
+
 A String made during the mark is black, so a new String is never removed in
 the same cycle. This table is the only weak structure that the contract
 lists (`docs/reference/gc-runtime-contract.md`, section 5). N5 searches the
