@@ -105,7 +105,7 @@ def check_records(path, require_shrink=False):
     heap's worker ended, and its only roots were the held objects.
     """
     lines = [l.split() for l in open(path).read().splitlines() if l.strip()]
-    if lines[0] != ["#", "loxpp-gc-trace", "v2"]:
+    if lines[0] != ["#", "loxpp-gc-trace", "v3"]:
         fail(f"bad header {lines[0]}")
     if lines[1][0] != "start":
         fail("no start record")

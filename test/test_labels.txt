@@ -80,6 +80,7 @@ test_check_diagnostics core
 test_enum_names core
 TestMain core
 GcTrace core
+GcTraceV3 core
 GcSweepLinear core
 GcMinHeap core
 ReplSession core

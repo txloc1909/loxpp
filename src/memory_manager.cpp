@@ -101,7 +101,7 @@ static std::FILE* openTraceFile(int workerNumber) {
                      path.c_str());
         return nullptr;
     }
-    std::fprintf(f, "# loxpp-gc-trace v2\nstart t=%llu\n",
+    std::fprintf(f, "# loxpp-gc-trace v3\nstart t=%llu\n",
                  static_cast<unsigned long long>(monotonicNs()));
     std::fflush(f);
     return f;

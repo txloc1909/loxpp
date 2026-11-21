@@ -226,6 +226,14 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # The reader of the trace format (version 3) must give exact figures for
+    # the records that an incremental collector writes, reject malformed
+    # files, and agree with the version 2 reading of a real trace.
+    add_test(NAME GcTraceV3
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_trace_v3.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # A sweep must be linear in the heap size. The check keeps a large live
     # set, churns garbage, and bounds the summed sweep-phase time from the GC
     # trace. It skips on a build that traces execution, which prints too much
