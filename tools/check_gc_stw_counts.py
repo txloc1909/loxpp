@@ -7,11 +7,12 @@ Usage: check_gc_stw_counts.py <loxpp-binary>
 Each large-heap program runs with smaller constants (tools/check_gc_large_heap.py
 holds them) and a GC trace. For each collection, the check compares the cause,
 the object counts and the byte counts before and after with the pinned file
-benchmarks/gc_large_heap/stw_counts.txt. The file comes from the collector as it was
-before the collector interface (issue #1280). A change to the collector, to the
+benchmarks/gc_large_heap/stw_counts.txt. A change to the collector, to the
 heap layout or to the size of an object that is on purpose changes these
 numbers, and then `--update` writes the file again. A change that is not on
-purpose is the failure that this check exists to find.
+purpose is the failure that this check exists to find. The byte counts depend
+on sizeof of the object types, so a toolchain with other sizes (for example
+another standard library) needs `--update` too.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run, 125
 skipped (a build that traces execution prints too much to run these programs

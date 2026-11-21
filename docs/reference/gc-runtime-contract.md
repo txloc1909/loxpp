@@ -1,10 +1,9 @@
 # What the native runtime needs from a collector
 
-This document states facts about the native heap as it is (after the
-collector interface of #1280). Other code relies on these facts, so any collector that replaces
-or joins the current one must keep them, or change the code that relies on
-them in the same pull request. `docs/decisions/garbage-collectors.md` uses
-this list.
+This document states facts about the native heap as it is. Other code relies
+on these facts, so any collector that replaces or joins the current one must
+keep them, or change the code that relies on them in the same pull request.
+`docs/decisions/garbage-collectors.md` uses this list.
 
 Keep this document current: a pull request that changes one of these facts
 changes this file.

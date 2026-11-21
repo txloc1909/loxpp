@@ -248,7 +248,7 @@ perf report -i /tmp/perf.data --no-children --stdio -S _int_free -g caller
 ```
 
 Look for `malloc`, `free`, `operator new`, `operator delete`,
-`MemoryManager::sweep`, and `std::vector::erase` in the `--no-children` list.
+`StwCollector::sweep`, and `std::vector::erase` in the `--no-children` list.
 Their total, set against the trace's sweep and trace phase shares, shows how
 much of a pause is allocator work and how much is the collector's own loops.
 `perf` can need `sysctl kernel.perf_event_paranoid=1` (or root) on the host. In

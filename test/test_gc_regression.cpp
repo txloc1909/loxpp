@@ -20,7 +20,7 @@
 //   compile() returned).
 //
 //   defineNative("clock", ...)
-//     create<ObjNative>  →  m_stressGC  →  GC fires:
+//     create<ObjNative>  →  PollState::stress  →  GC fires:
 //       m_markRoots == nullptr && m_currentCompiler == nullptr
 //       → nothing marked → entire allObjects heap swept
 //     ObjNative allocated, added to allObjects
