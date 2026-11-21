@@ -20,6 +20,8 @@ benchmarks/
   programs/        the runnable, self-timing benchmarks
   programs/prof/   one-batch, no-warm-up variants for the profiler build
   latency/         GC pause benchmarks, run by `run.py --latency`
+  gc_large_heap/   programs that keep a heap of millions of objects, run by
+                   `gc_compare.py --large-heap` (native only)
   run.py           run programs/ on each backend, emit the comparison table
   expected.py      the pinned checksum of every program, with its source
   gc_compare.py    native and JVM GC reports in one format (see "Where the GC
@@ -158,10 +160,13 @@ LOXPP_GC_TRACE=/tmp/storage.trace build/loxpp benchmarks/programs/storage.lox
 python3 tools/gc_report.py /tmp/storage.trace      # --json for scripts
 ```
 
-The report gives GC overhead (% of wall time), p50/p99/max pause, the share of
-each phase, minimum mutator utilisation (MMU) for 1, 10, 100 and 1000 ms
-windows, allocation rate, and mark and sweep rates. The trace format and the
-metric definitions are in the header of `tools/gc_report.py`.
+The report gives GC overhead (% of wall time), the p50, p99, p99.9, p99.99 and
+maximum pause, the share of each phase, minimum mutator utilisation (MMU) for
+1, 10, 100 and 1000 ms windows, allocation rate, and mark and sweep rates. For
+a trace of an incremental collector it also gives the number of steps, the
+largest work count of one step, the stalls of the allocator, and MMU with the
+stalls. The trace format (version 3) and the metric definitions are in the
+header of `tools/gc_report.py`.
 
 Use the `release` preset. A `debug` build prints an instruction trace to stdout
 and runs much slower, so the shares are wrong.
@@ -176,6 +181,7 @@ for the GC-bound programs (`storage`, `binary_trees`, `towers`, `json`):
 
 ```bash
 python3 benchmarks/gc_compare.py                 # add --latency for latency/*.lox
+python3 benchmarks/gc_compare.py --large-heap    # gc_large_heap/*.lox, native only
 python3 benchmarks/gc_compare.py --only storage gc_latency --json /tmp/gc.json
 python3 benchmarks/gc_compare.py --jvm-opts=-XX:+UseG1GC
 ```

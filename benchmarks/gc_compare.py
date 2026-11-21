@@ -9,6 +9,7 @@ tools/jvm_gc_log.py and in benchmarks/README.md.
 Usage:
   python3 benchmarks/gc_compare.py                  # the four GC-bound programs
   python3 benchmarks/gc_compare.py --latency        # ... and latency/*.lox
+  python3 benchmarks/gc_compare.py --large-heap     # ... and gc_large_heap/*.lox (native only)
   python3 benchmarks/gc_compare.py --only storage --jvm-opts=-XX:+UseG1GC
   python3 benchmarks/gc_compare.py --json results/gc.json
 
@@ -35,6 +36,10 @@ import jvm_gc_log  # noqa: E402
 import run  # noqa: E402
 
 GC_BOUND = ["storage", "binary_trees", "towers", "json"]
+# Programs that keep a heap of millions of objects (docs/decisions/
+# garbage-collectors.md, goal 1). They run on the native backend only: the
+# point is the native collector, and the JVM run of such a heap is slow.
+LARGE_HEAP = Path(__file__).resolve().parent / "gc_large_heap"
 
 
 def native_report(prog: Path, workdir: Path, timeout: int, mmu_ms):
@@ -69,6 +74,8 @@ def main() -> int:
     ap.add_argument("--only", nargs="+", help="program names from programs/ or latency/")
     ap.add_argument("--latency", action="store_true",
                     help="also run the programs in latency/")
+    ap.add_argument("--large-heap", action="store_true",
+                    help="also run the programs in gc_large_heap/, native only")
     ap.add_argument("--jvm-opts", default="", help="extra JVM flags, whitespace-split")
     ap.add_argument("--mmu-windows", default="1,10,100,1000")
     ap.add_argument("--timeout", type=int, default=300)
@@ -76,12 +83,18 @@ def main() -> int:
     args = ap.parse_args()
     mmu_ms = [float(x) if "." in x else int(x) for x in args.mmu_windows.split(",")]
 
+    large = sorted(LARGE_HEAP.glob("*.lox"))
     progs = [run.PROGRAMS / f"{n}.lox" for n in (args.only or GC_BOUND)
              if (run.PROGRAMS / f"{n}.lox").exists()]
     if args.only:
         progs += [p for p in sorted(run.LATENCY.glob("*.lox")) if p.stem in args.only]
-    elif args.latency:
-        progs += sorted(run.LATENCY.glob("*.lox"))
+        progs += [p for p in large if p.stem in args.only]
+    else:
+        if args.latency:
+            progs += sorted(run.LATENCY.glob("*.lox"))
+        if args.large_heap:
+            progs += large
+    native_only = {p.stem for p in large}
     missing = [n for n in (args.only or []) if n not in {p.stem for p in progs}]
     if missing:
         print(f"no such program: {', '.join(missing)}", file=sys.stderr)
@@ -100,8 +113,11 @@ def main() -> int:
             return 2
         for prog in progs:
             entry = {"program": prog.stem}
-            for kind, fn in (("native", lambda: native_report(prog, Path(tmp), args.timeout, mmu_ms)),
-                             ("jvm", lambda: jvm_report(prog, Path(tmp), args.timeout, mmu_ms, args.jvm_opts))):
+            reports = (("native", lambda: native_report(prog, Path(tmp), args.timeout, mmu_ms)),
+                       ("jvm", lambda: jvm_report(prog, Path(tmp), args.timeout, mmu_ms, args.jvm_opts)))
+            if prog.stem in native_only:
+                reports = reports[:1]
+            for kind, fn in reports:
                 try:
                     entry[kind] = fn()
                     print(gc_report.render(entry[kind]) + "\n")
