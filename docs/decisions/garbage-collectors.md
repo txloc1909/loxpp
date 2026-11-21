@@ -49,15 +49,25 @@ clients for most of a second does not meet that goal.
 
 ### Goals
 
-1. **A limit on latency that does not depend on the heap size.** With the
-   incremental collector of this proposal, on the CI host:
-   - each pause is at most **1 ms**, at any heap size, for a program whose
-     stack and globals are inside the default limits;
-   - **MMU(10 ms) ≥ 50%**: in every 10 ms window, the program runs for at
-     least 5 ms.
+1. **A limit on latency that does not depend on the heap size.** Changed
+   on 2026-11-21, after the prototype (section 13). With the incremental
+   collector, at any heap size, for a program whose stack and globals are
+   inside the default limits:
+   - **No step of the collector grows with the heap.** One step does at
+     most a fixed number of work units: objects traced, slots swept,
+     elements or entries visited. A gate checks the largest count of one
+     step. This is the main check, because a count does not depend on the
+     host.
+   - **Time of a step:** the 99.99th percentile of the collector steps is at
+     most **1 ms** on the CI host. The target length of a step is 100 µs.
+     The time gate has a wide margin, because hosts stall (section 13).
+   - **MMU(10 ms) ≥ 50%**, computed from the collector steps: in every
+     10 ms window, the program runs for at least 5 ms.
+   - **Not part of this goal:** the time that the C allocator (`malloc` and
+     `free`) spends inside one call. The gates report it on its own, as the
+     allocator stall, and phase 8 limits it (section 13, item 4).
 
-   These numbers are a first choice, not a measured result. Phase 1 below
-   checks them on a prototype, and the decision states the final numbers.
+   Goal 3 below keeps its numbers. The prototype did not check them.
 2. **More than one collector in one runtime**, behind one interface. The
    current mark-sweep stays as the reference collector.
 3. **A limited cost:**
@@ -100,14 +110,15 @@ trace format. The `stw` collector ignores the barrier.
 1. **Start (a short pause):** scan the roots and make them gray. The roots
    are the value stack, the frames, the open upvalues, the globals, the temp
    roots, the held objects and the inbox targets.
-2. **Mark (in steps):** each allocation does a step of mark work, in
-   proportion to the bytes it allocates (the pacing). A step takes gray
-   objects and traces them.
-3. **Finish (a short pause):** the work that must be atomic: the roots again
-   if the barrier needs it (4.3), the held objects again, the weak String
-   table, the foreign-object order rule, and the objects that own OS handles
-   (4.5).
-4. **Sweep (in steps):** each allocation sweeps a part of the heap.
+2. **Mark (in steps):** an allocation runs a step of mark work when the
+   pacing says so (4.8). A step takes gray objects and traces them.
+3. **Finish (a short pause):** the work that must be atomic: the held
+   objects again, the foreign-object order rule, and the objects that own
+   OS handles (4.5). The roots are not scanned again (4.3), and the weak
+   String table is not scanned here (4.7).
+4. **Sweep (in steps):** an allocation sweeps a part of the heap when the
+   pacing says so. The sweep also removes each freed String from the
+   intern table (4.7).
 5. **Idle:** no collector work until the heap grows past the threshold.
 
 ### 4.2 Each step has a limit
@@ -121,21 +132,40 @@ A step must have a limit, or goal 1 fails. These objects can be very large:
 So the tracer can stop inside one object and keep its position (an index
 into the elements or the buckets). A large object is traced in parts, over
 more than one step. The barrier (4.3) keeps the part that is already traced
-correct.
+correct. If a Map rehashes while it is traced in parts, its trace starts
+again from the first bucket.
+
+The same rule holds for each array that the collector or the heap owns: no
+step may copy, compact or free such an array in a way that depends on the
+heap size. A `std::vector` that doubles copies the whole array in one step.
+So the gray stack and the list of all objects are segmented (a `std::deque`
+in the prototype). The sweep does not compact the list of all objects: a
+freed slot joins a chain that goes through the slots, and an allocation
+takes the first slot of the chain.
 
 ### 4.3 The write barrier
 
-A barrier runs at each store of a reference into a heap object. Two kinds
-are possible. The prototype in phase 1 chooses between them:
+**Decided on 2026-11-21: snapshot at the beginning (Yuasa).** A barrier
+runs at each store of a reference into a heap object, in the mark phase
+only:
 
-- **Incremental update (Dijkstra), forward:** when the collector is in the
-  mark phase and the program stores a white object into a black one, the
-  barrier makes the white object gray. The finish pause scans the roots
-  again. That scan has a limit, because the stack and the globals have
-  limits.
-- **Snapshot at the beginning (Yuasa):** before a store overwrites a
-  reference, the barrier makes the old target gray. The finish pause does
-  not scan the roots again. More dead objects live to the next cycle.
+- Before a store overwrites a reference in a heap object, the barrier makes
+  the old target gray. The collector then keeps each object that was
+  reachable when the mark started.
+- The roots are scanned when the mark starts (4.1). A store into the value
+  stack or into the globals needs no barrier, because the old value was
+  reached at the start. The finish pause does not scan the roots again, so
+  it does not depend on the depth of the stack.
+- An object made during the mark is black (4.4).
+- The cost is that more dead objects live to the next cycle.
+
+**Not taken: incremental update (Dijkstra).** The barrier makes the new
+target gray. It needs the roots to be scanned again in the finish pause. A
+new object must also be gray, not black, because a constructor can store a
+white object into it with no barrier. So the collector traces each new
+object. In the prototype this was 17% slower than `stw` against 10% for
+Yuasa. Its peak heap was lower (18% above `stw` against 27%), and the
+difference between the two kinds was small against the noise of the host.
 
 **Not accepted:** the backward barrier for containers (Lua's choice for
 tables, where a black table that gets a store becomes gray again). The
@@ -143,19 +173,23 @@ finish pause must trace each object that became gray again. A program that
 writes into a List of millions of elements during the mark makes that pause
 grow with the List, and goal 1 fails.
 
-The fast path of either barrier is one test of a byte that the heap keeps
+The fast path of the barrier is one test of a byte that the heap keeps
 ("is a mark in progress?"). The `stw` collector never sets it, so the test
-always goes the same way.
+always goes the same way. A store that replaces a field of an Instance or an
+entry of a Map must read the old value first, so that the barrier can mark
+it. That read happens only during the mark.
 
 ### 4.4 Colors and new objects
 
-- The header byte `marked` becomes a color byte (white A, white B, gray,
-  black). It fits in the same byte; `sizeof(Obj)` does not change.
-- An object made during the mark is black. Yuasa needs this. With Dijkstra
-  it is the simple choice, and its cost is only that some dead objects live
-  one cycle more.
-- Two white colors, as in Lua: an object made during the sweep gets the
-  white of the next cycle, so the sweep does not free it.
+- The header byte `marked` stays one byte, and `sizeof(Obj)` does not
+  change. A set mark means gray or black. The gray stack holds the gray
+  objects.
+- An object made during the mark is black. Yuasa needs this.
+- An object made during the sweep must survive this cycle and must be white
+  at the start of the next one. The prototype sets the mark of an object in
+  a slot that the sweep has not reached yet, and leaves it clear in a slot
+  that the sweep has passed. Two white colors, as in Lua, are the other way.
+  N5 chooses.
 
 ### 4.5 Objects that own OS handles
 
@@ -179,21 +213,46 @@ inbox wait), so a quiet program does not keep garbage.
 
 ### 4.7 The weak String table
 
-The finish pause removes each white String from the intern table, as
-`removeWhiteStrings` does now. A String made during the mark is black, so a
-new String is never removed in the same cycle.
+The finish pause must not remove the white Strings from the intern table.
+That scan visits the whole table, and the prototype took 87 to 93 ms with
+2 million Strings (section 13). Two rules replace it:
+
+- **The sweep removes a String from the table when it frees it.** The cost
+  of one String is one table deletion, and it does not depend on the size of
+  the table.
+- **A read barrier on the lookup.** When `makeString` or `findString`
+  returns a String that is already in the table, the collector must keep
+  that String. During the mark, the lookup makes it gray. During the sweep,
+  the lookup must stop the sweep from freeing a String that it has not
+  reached yet. N5 chooses how the barrier tells a String that the sweep has
+  passed from one that it has not (for example, a bit in the header
+  padding). Without this barrier, a dead String that the program finds in
+  the table again is freed under the program.
+
+A String made during the mark is black, so a new String is never removed in
+the same cycle. This table is the only weak structure that the contract
+lists (`docs/reference/gc-runtime-contract.md`, section 5). N5 searches the
+runtime for any other weak holder before it ends.
 
 ### 4.8 Pacing
 
-Two values, as in Lua and Go:
+The pacing is by time, not by the bytes that the program allocates:
 
 - **when** a cycle starts: when the heap reaches a factor of the live heap
   after the last cycle (now the factor is 2);
-- **how much** work each allocated byte pays for, so that the mark and the
-  sweep end before the heap grows too far.
+- **how long** a step runs: at most about 100 µs of work. After a step, the
+  program runs until the collector has used its target share of the time (35%
+  in the prototype);
+- **an emergency rule:** if the heap grows past 1.5 times its size at the
+  start of the cycle, the gap between the steps drops to zero, so the cycle
+  ends.
 
-The pacing must also keep goal 3 (the peak heap). Phase 1 measures the
-values.
+The pacing by bytes is not accepted. The prototype paid for one large buffer
+growth (a List that doubles) with a step of 10 to 16 ms, and MMU(10 ms) stayed
+near 0%. Phase 5 tunes the length of a step and the target share, so that
+goal 1 (including MMU(10 ms) at least 50%) and the peak heap of goal 3 both
+hold. The prototype did not reach 50% on most programs with a 35% share
+(section 13).
 
 ## 5. The collector interface
 
@@ -256,6 +315,29 @@ large heap.
    future JIT or AOT compiler that writes into heap objects in its own code
    must emit the barrier fast path.
 
+### 6.1 Named bug classes
+
+Each class below came from the prototype. Each one is a constraint for all
+remaining work. Each names the shared layer where it belongs, and the work
+must check every other place that uses the same data.
+
+1. **A missed barrier** (the heap stores of section 6). The layer: the
+   mutators of each object type. A barrier that no probe forces is
+   unproven. A program that stores only new objects needs no barrier, and
+   it proves nothing. A probe must move old objects between large
+   containers, in both directions at the same time, so that a missed barrier
+   leaves a reachable white object.
+2. **A weak reference that is read without a barrier** (4.7). The layer: the
+   intern table, `makeString` and `findString`. Check every other weak
+   holder in the runtime.
+3. **A step that grows with the heap because of an array that the heap
+   owns** (4.2). The layer: the data of the collector (the gray stack, the
+   list of all objects, the free slots). Check each container that the
+   collector uses, also the ones that it grows only in the sweep.
+4. **A stall in the C allocator** (section 13, item 4). The layer: the heap
+   layout of phase 8. A call of `malloc` or `free` can take longer than the
+   step budget. No collector step can bound it.
+
 ## 7. How we show that it is correct
 
 - **A verifier (debug builds).** At the end of each mark, a separate full
@@ -271,6 +353,8 @@ large heap.
   each collector.
 - **Mutations.** Remove one barrier, one finish-pause step, or the limit of
   a step, and see a test fail. A barrier mutation must fail the verifier.
+  The prototype showed this for all barriers together. Each barrier needs
+  its own probe and its own mutation (section 6.1, item 1).
 
 ## 8. Measurement and gates
 
@@ -285,11 +369,13 @@ large heap.
   - a large-heap test (the program of section 1, made part of
     `benchmarks/`);
   - the Redis example with the #1165 load (524286 streams).
-- A CI job checks the maximum pause and the MMU of `incremental` on the
-  large-heap test. The CI host is slower than a local machine and it
-  varies, so the job checks a count where it can (for example, the largest
-  number of objects traced in one step), and a time only with a wide
-  margin.
+- A CI job checks goal 1 for `incremental` on the large-heap test. The
+  main check is a count: the largest number of work units in one step. The
+  time checks (the 99.99th percentile of the steps, and MMU(10 ms)) have a
+  wide margin. The CI host is slower than a local machine and it varies.
+  The development VM of the prototype stalled a process for more than 1 ms
+  about once every 0.3 s. The job reports the allocator stall on its own,
+  and MMU with and without it.
 
 ## 9. Effect on each consumer
 
@@ -308,10 +394,13 @@ This is not a language change, but it touches each user of the heap:
 ## 10. Phases
 
 A sketch of the order. The decision's tracking issue holds the real nodes.
+The order of work is 1, 2, 3, 4, 8, 5, 6, 7: the heap layout (phase 8) comes
+before the new collector (phase 5), because of the allocator stalls in
+section 13. The owner decided this on 2026-11-21.
 
 1. **Prototype and measure.** A throwaway branch with an incremental mark on
-   the current heap, for the large-heap test only. It checks the numbers of
-   goal 1 and chooses the barrier kind (4.3). No merge.
+   the current heap, for the large-heap test only. It chose the barrier kind
+   (4.3) and showed what goal 1 needs (section 13). No merge. Done.
 2. **Measurement tools.** Trace v3, MMU in `gc_report.py`, the large-heap
    benchmark.
 3. **The interface.** Move the current collector behind the interface as
@@ -324,8 +413,11 @@ A sketch of the order. The decision's tracking issue holds the real nodes.
 7. **The default.** The owner decides which collector is the default, by
    the criteria in section 10.1. This phase comes after phases 6 and 8.
 8. **The heap layout.** Size classes and mark bitmaps (they make each
-   collector faster). This is part of this mission. The tracking issue may
-   put it before phase 5 if the phase-1 measurements show a need.
+   collector faster). The layout also gives the heap its own allocator, so
+   that one call cannot return memory to the operating system or rebuild
+   free lists in one long step. This runs before phase 5. It works with
+   `stw` only, and the collector interface of phase 3 and the barrier layer
+   of phase 4 are already in place.
 9. **Later, a separate decision:** the `generational` mode.
 
 ### 10.1 Criteria for the default collector
@@ -337,8 +429,9 @@ that the owner can change later. It is not a language change.
 decides, and the evidence below must exist first:
 
 1. **Goal 1 holds.** On the large-heap test and on the Redis example with
-   the #1165 load (524286 streams), the CI gate of phase 6 shows each pause
-   at most 1 ms and MMU(10 ms) at least 50%.
+   the #1165 load (524286 streams), the CI gate of phase 6 shows the step
+   counts, the 99.99th percentile of the steps, and MMU(10 ms) at least
+   50%.
 2. **Goal 3 holds on the finished collector.** The geometric mean of
    `benchmarks/` is at most 10% slower than `stw`, and the peak heap is at
    most 2.5× the live heap. Phase 4 measured only the barrier cost on `stw`,
@@ -347,8 +440,8 @@ decides, and the evidence below must exist first:
    the stress mode and the verifier of section 7. A difference in output
    between the collectors blocks the default.
 4. **The measurements use the final heap layout.** Phase 8 changes the cost
-   of the trace and the sweep. If phase 7 must run before phase 8 ends, this
-   decision records that fact, and the owner measures again after phase 8.
+   of the trace and the sweep. It ends before phase 5, so this holds by the
+   order of the phases.
 
 If a criterion fails, `stw` stays the default. `incremental` stays in the
 binary and a program can choose it. The owner can choose it as the default
@@ -364,15 +457,20 @@ exists, needs a new decision and does not block this choice.
   gets one more test. Goal 3 limits it, and phase 4 measures it before the
   new collector exists.
 - **Fragmentation.** A non-moving heap with one `new` for each object can
-  fragment. The size-class layout in phase 8 is the answer if the
-  measurements show a problem.
+  fragment. The size-class layout in phase 8 is the answer, and phase 8
+  measures it.
 - **The pacing.** If the pacing is wrong, the heap grows too far before the
-  mark ends, or the steps take too much of the program's time. Phase 1 and
-  the MMU gate find this.
-- **The finish pause.** It scans the roots (with Dijkstra), the held
-  objects and the handle list. A program with a very large globals table
-  or a very deep stack makes it longer. The limits of the stack and the
-  number of globals bound it, and the gate measures it.
+  mark ends, or the steps take too much of the program's time. The
+  emergency rule of 4.8 and the MMU gate find this.
+- **The finish pause.** It reads the held objects and frees the handle
+  list. The prototype did not test a deep stack, a very large globals
+  table, coroutines or a second worker, so the gate must measure them.
+  The weak String table is no longer part of the finish pause (4.7).
+- **The allocator.** One `malloc` or `free` stalled the prototype for 2 to
+  7 ms, and one `free` for up to 143 ms (section 13). Phase 8 is the answer.
+  Goal 1 does not count these stalls, and the gate reports them.
+- **A host that stalls.** A time gate on a shared host gives false results.
+  The gate checks counts first (section 8).
 
 ## 12. Decisions of the owner and what stays open
 
@@ -382,12 +480,62 @@ Decided on 2026-11-17 (review of #1257):
 2. **The heap layout** (size classes and mark bitmaps) is part of this
    mission (phase 8).
 
-Settled by a later step of this mission, as the proposal planned. The owner
-does not decide these now:
+Decided on 2026-11-21 (after the prototype of #1278):
 
-3. **Which barrier kind** (section 4.3): the phase-1 prototype gives the
-   data, and the prototype's result is written into this decision.
-4. **The numbers of goals 1 and 3:** phase 1 checks them. This decision
-   states the final numbers after phase 1.
-5. **Which collector is the default:** the owner decides at phase 7, by
+3. **The barrier kind:** snapshot at the beginning, Yuasa (section 4.3).
+4. **Goal 1 changes** to the form in section 2: counts of work for each
+   step, the 99.99th percentile of the steps, and the allocator stall
+   reported on its own.
+5. **MMU(10 ms) at least 50% stays the goal.** N5 tunes the pacing (4.8) as
+   it sees fit.
+6. **Phase 8 runs before phase 5** (section 10).
+
+Settled by a later step of this mission. The owner does not decide these
+now:
+
+7. **The numbers of goal 3:** phases 4 and 5 measure them on `benchmarks/`.
+   The prototype did not.
+8. **Which collector is the default:** the owner decides at phase 7, by
    the criteria in section 10.1.
+
+## 13. Evidence from the prototype (#1278)
+
+The prototype is the branch `feat/gc-n1-prototype`. It is never merged. It has
+an incremental mark, a chunked sweep, both barrier kinds, a verifier, and
+five programs in `benchmarks/gc_large_heap/`. The runs used a `release`
+build on one VM with 4 cores. Each number is the median of 3 runs. Raw rows:
+`benchmarks/gc_large_heap/n1-tools/matrix.out` on that branch.
+
+| | `stw` | Dijkstra | Yuasa |
+|---|---|---|---|
+| Longest single pause | 380 to 600 ms | 0.4 to 1.9 ms, 87 ms on `big_map` | 1.8 to 5.3 ms, 57 and 90 ms on two programs |
+| Step, 99.99th percentile | 380 to 600 ms | 0.4 to 1.5 ms, 68 ms on `big_map` | 1.7 to 5.6 ms, 70 ms on `big_map` |
+| MMU(10 ms), collector steps | 0% | 0 to 61% | 0 to 23% |
+| Run time, geometric mean, against `stw` | 1.00 | 1.17 | 1.10 |
+| Peak heap, geometric mean, against `stw` | 1.00 | 1.18 | 1.27 |
+
+What the data showed:
+
+1. **The barriers are needed.** With the barriers, each program gave the
+   right output and the verifier passed. With all barriers off, the
+   verifier failed in both modes on `list_move`. A program that stores only
+   new objects did not need a barrier. The probe covers List stores only.
+2. **The weak String table** took 87 to 93 ms in the finish pause with 2
+   million Strings (4.7).
+3. **Arrays that the heap owns** gave steps of 1 to 16 ms (the gray stack),
+   20 to 45 ms (the list of all objects), and up to 176 ms (compaction after
+   the sweep) (4.2).
+4. **The allocator** stalled the program. One `new` took 2 to 7 ms. One
+   `free` took 27 to 143 ms inside a sweep step that had processed 16 slots.
+   A larger trim threshold made the stalls smaller (5 to 24 ms) but did not
+   remove them. The cause in glibc is not found. No collector can bound
+   these stalls, so goal 1 does not count them and phase 8 limits them.
+5. **Pacing by bytes** gave a step of 10 to 16 ms for one buffer growth.
+   Time-paced steps (100 µs, 35% share) fixed this, and MMU(10 ms) reached 50%
+   or more on 2 of the 10 runs-by-program cases only.
+6. **The host stalls.** A tight loop saw 9 to 26 stalls longer than 1 ms in
+   8 s, and one of 9.4 ms.
+
+What the prototype did not check: the `benchmarks/` suite (goal 3), a deep
+stack, a very large globals table, coroutines, a second worker, and the
+probes for the barriers of Instance fields, Map entries and upvalues.
