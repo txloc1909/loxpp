@@ -175,6 +175,7 @@ The status of a row:
 | `ObjInt` | - | - | - | immutable | The value is set by the constructor. |
 | `ObjNative` | - | - | - | immutable | A function pointer and an arity. |
 | `ObjFunction` | `name` | the compiler | - | exempt | The compiler writes the name and appends constants while the function is not yet reachable from the program. An insert overwrites no reference, and a snapshot barrier needs none. |
+| `ObjFunction` | `chunk` | the compiler | - | exempt | The compiler writes the name and appends constants while the function is not yet reachable from the program. An insert overwrites no reference, and a snapshot barrier needs none. |
 | `ObjUpvalue` | `next` | - | - | exempt | The list of open upvalues. Open upvalues are roots, so the collector does not trace this link. |
 | `ObjUpvalue` | `m_location` | `setLocation` | - | exempt | Moves the cell between the stack, the closed value and a snapshot. The value does not change, and the old and new cell are both kept alive. |
 | `ObjUpvalue` | `m_closed` | `set` | `barrierUpvalue`, `barrierSnapshot` | protected | A store through a closed upvalue is an Upvalue store. A store into a cell of a snapshot goes to the owner as a Snapshot store. A store to an open cell of the value stack needs none. |

@@ -108,7 +108,7 @@ class Member:
             return True
         if re.search(r"\bObj\w*\s*\*", t):
             return True
-        for word in ("Table", "Entries", "FrameSnapshot", "WaitingCall"):
+        for word in ("Table", "Entries", "FrameSnapshot", "WaitingCall", "Chunk"):
             if word in t:
                 return True
         return False

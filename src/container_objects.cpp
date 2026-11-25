@@ -86,6 +86,11 @@ bool ObjMap::mapSet(const Value& key, const Value& value) {
     if (barrier::active(c)) {
         const MapEntry* old = m_map.find(
             hash, [&key](const MapEntry& s) { return s.key == key; });
+        if (old != nullptr && old->key.bits != key.bits) {
+            // An equal key can be another object (an Int of the heap, a
+            // String of another heap), and the entry keeps the new one.
+            c->barrierEntry(this, old->key, key);
+        }
         c->barrierEntry(this, old != nullptr ? old->value : barrier::nil(),
                         value);
     }

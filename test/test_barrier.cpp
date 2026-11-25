@@ -706,3 +706,24 @@ TEST(BarrierTest, AMapStoreThatGrowsReportsTheOldValueAfterTheGrowth) {
     EXPECT_EQ(objOf(r.rec->stores[0].oldv), oldv);
     EXPECT_EQ(objOf(r.rec->stores[0].newv), newv);
 }
+
+TEST(BarrierTest, AMapStoreThatReplacesAnEqualKeyReportsTheOldKey) {
+    Rig r;
+    // Two heap Ints of one value are equal and are two objects.
+    auto* k1 = r.mm.create<ObjInt>(std::int64_t{1} << 60);
+    r.mm.pushTempRoot(k1);
+    auto* k2 = r.mm.create<ObjInt>(std::int64_t{1} << 60);
+    r.mm.pushTempRoot(k2);
+    ObjString* v1 = r.str("v1");
+    ObjString* v2 = r.str("v2");
+    auto* map = r.mm.create<ObjMap>(nullptr, VmAllocator<MapEntry>{&r.mm});
+    r.mm.pushTempRoot(map);
+    map->mapSet(ref(k1), ref(v1));
+    r.arm(true);
+    EXPECT_FALSE(map->mapSet(ref(k2), ref(v2)));
+    ASSERT_EQ(r.rec->stores.size(), 2u);
+    EXPECT_EQ(objOf(r.rec->stores[0].oldv), k1);
+    EXPECT_EQ(objOf(r.rec->stores[0].newv), k2);
+    EXPECT_EQ(objOf(r.rec->stores[1].oldv), v1);
+    EXPECT_EQ(objOf(r.rec->stores[1].newv), v2);
+}
