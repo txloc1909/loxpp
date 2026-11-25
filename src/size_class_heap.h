@@ -10,15 +10,25 @@
 // size class of the form m * 2^k.
 //
 // What this layout guarantees:
-//   - A small allocation or free never calls the C allocator. Only a new chunk
-//     and a large block do, and the heap times exactly these calls
-//     (`stall` records).
+//   - A small allocation or free of the heap's own memory (an object slot or
+//     a VmAllocator buffer of at most kMaxSmall bytes) never calls the C
+//     allocator or the kernel.
+//   - Every call that the heap itself makes to the C allocator or the kernel
+//     is timed and bounded: a new chunk (operator new, one call of a fixed
+//     size), the map of a large block (mmap), and the release of a large
+//     block (munmap, in slices of kReleaseSlice at most, one slice for each
+//     step; see releaseStep). The timed calls write the `stall` records.
 //   - A span, once taken from the C allocator, stays until the heap ends. An
 //     empty span goes to a pool that every size class takes from.
 //   - No operation walks or copies an array whose size follows the heap size.
 //     A free list is intrusive, the lists of spans are linked through the span
 //     headers, and the bitmaps have a fixed size for each span.
 //   - Objects never move.
+// What it does not cover: the std:: containers that an object or the
+// collector owns (a closure's upvalue vector, a function's Chunk, a String
+// member of a container object, the gray stack, the tables of the heap).
+// They call the C allocator directly and nothing times them. The contract
+// document, section 1, lists them.
 
 #include "object.h"
 
@@ -34,6 +44,8 @@ class SizeClassHeap {
     // The largest block that a span serves. A larger request is a large block.
     static constexpr std::size_t kMaxSmall = 2048;
     static constexpr std::size_t kMaxObject = kMaxSmall;
+    // The most that one call gives back to the kernel.
+    static constexpr std::size_t kReleaseSlice = std::size_t{1} << 20;
     static constexpr std::size_t kSlotAlign = 16;
     // The default limit of a stall record, in nanoseconds.
     static constexpr std::uint64_t kDefaultStallLimitNs = 100'000;
@@ -95,11 +107,28 @@ class SizeClassHeap {
     // The bytes that the heap holds from the C allocator: the chunks, the
     // large blocks in use and the cached large blocks.
     [[nodiscard]] std::size_t footprintBytes() const {
-        return m_chunkBytes + m_largeLiveBytes + m_largeCachedBytes;
+        return m_chunkBytes + m_largeLiveBytes + m_largeCachedBytes +
+               m_largePendingBytes;
     }
     [[nodiscard]] std::size_t chunkCount() const { return m_chunkCount; }
-    // The number of calls into the C allocator that the heap has made.
+    // The number of calls into the C allocator and the kernel that the heap
+    // has made (and timed).
     [[nodiscard]] std::size_t osCalls() const { return m_osCalls; }
+    // The largest number of bytes that one call has given back to the kernel.
+    // It is at most kReleaseSlice, except for the memory that the heap gives
+    // back when it ends.
+    [[nodiscard]] std::size_t largestReleaseBytes() const {
+        return m_largestRelease;
+    }
+    // The bytes of large blocks that wait to go back to the kernel.
+    [[nodiscard]] std::size_t pendingReleaseBytes() const {
+        return m_largePendingBytes;
+    }
+    // Gives back at most kReleaseSlice bytes of a freed large block, or moves
+    // one cached block that is over the cache limit to the blocks that wait.
+    // The allocation paths and the sweep call it, so a large release is
+    // spread over many steps.
+    void releaseStep();
     // The `stall` records go to `trace`, one for each timed call that takes
     // longer than the limit. nullptr turns them off, and then a timed call
     // reads no clock.
@@ -137,6 +166,10 @@ class SizeClassHeap {
     Span* carveSpan();
     void* osNew(std::size_t bytes);
     void osDelete(void* p) noexcept;
+    void* osMap(std::size_t bytes);
+    void osUnmap(void* p, std::size_t bytes) noexcept;
+    // A freed large block, over the cache limit: it waits for releaseStep.
+    void queueRelease(void* p, std::size_t bytes) noexcept;
     void* allocLarge(std::size_t bytes);
     void freeLarge(void* p, std::size_t bytes) noexcept;
     void noteStall(const char* kind, std::uint64_t t0, std::uint64_t t1);
@@ -153,6 +186,10 @@ class SizeClassHeap {
     void* m_largeFree[kLargeClasses]{};
     std::size_t m_largeLiveBytes{0};
     std::size_t m_largeCachedBytes{0};
+    std::size_t m_largePendingBytes{0};
+    std::size_t m_largestRelease{0};
+    struct ReleaseNode;
+    ReleaseNode* m_pending{nullptr};
     std::size_t m_chunkBytes{0};
     std::size_t m_chunkCount{0};
     std::size_t m_objects{0};

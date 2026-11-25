@@ -189,6 +189,8 @@ std::size_t StwCollector::sweep() {
 #endif
             m_heap.bytesAllocated -= objAllocatedSize(obj);
         });
+        // A freed large block goes back to the kernel one slice for each span.
+        m_store.releaseStep();
     }
     m_poll.pollAt =
         std::max(m_heap.bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <sys/mman.h>
 #include <cstring>
 #include <ctime>
 
@@ -12,10 +13,17 @@ constexpr std::size_t kClassSizes[24] = {
     320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048};
 
 constexpr std::size_t kHeaderBytes = 64;
+constexpr std::size_t kPage = 4096;
+
+std::size_t pageRound(std::size_t n) { return (n + kPage - 1) & ~(kPage - 1); }
+
+void asanPoison(void*, std::size_t) {}
+void asanUnpoison(void*, std::size_t) {}
 constexpr std::size_t kSpanBytes = SizeClassHeap::kSpanSize;
 
 // Cached large blocks stay below the larger of the large bytes in use and
-// this floor. A block over the limit goes back to the C allocator at once.
+// this floor. A block over the limit waits to go back to the kernel, one
+// slice of kReleaseSlice for each step (releaseStep).
 constexpr std::size_t kLargeCacheFloor = std::size_t{4} << 20;
 
 struct ClassTable {
@@ -64,6 +72,13 @@ const ClassTable& table() {
 
 } // namespace
 
+// A node sits in the first bytes of the block that it describes. The block
+// loses its tail slice by slice, so the first page stays until the last call.
+struct SizeClassHeap::ReleaseNode {
+    ReleaseNode* next;
+    std::size_t remaining;
+};
+
 using Span = SizeClassHeap::Span;
 
 std::uint64_t SizeClassHeap::nowNs() {
@@ -77,12 +92,21 @@ SizeClassHeap::SizeClassHeap() { (void)table(); }
 
 SizeClassHeap::~SizeClassHeap() {
     m_stallTrace = nullptr;
-    for (void*& head : m_largeFree) {
-        while (head != nullptr) {
-            void* next = *static_cast<void**>(head);
-            osDelete(head);
-            head = next;
+    // The heap ends: everything goes back, in as many calls as it takes.
+    for (std::size_t cls = 0; cls < kLargeClasses; ++cls) {
+        std::size_t hb = cls / 4 + 11;
+        std::size_t m = cls % 4 + 4;
+        std::size_t mapBytes = pageRound((m + 1) << (hb - 2));
+        while (void* head = m_largeFree[cls]) {
+            asanUnpoison(head, mapBytes);
+            m_largeFree[cls] = *static_cast<void**>(head);
+            munmap(head, mapBytes);
         }
+    }
+    while (m_pending != nullptr) {
+        ReleaseNode* node = m_pending;
+        m_pending = node->next;
+        munmap(node, node->remaining);
     }
     while (m_chunks != nullptr) {
         void* next = *static_cast<void**>(m_chunks);
@@ -118,6 +142,31 @@ void* SizeClassHeap::osNew(std::size_t bytes) {
     void* p = ::operator new(bytes);
     noteStall("new", t0, nowNs());
     return p;
+}
+
+void* SizeClassHeap::osMap(std::size_t bytes) {
+    ++m_osCalls;
+    std::uint64_t t0 = m_stallTrace != nullptr ? nowNs() : 0;
+    void* p = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) {
+        throw std::bad_alloc();
+    }
+    if (m_stallTrace != nullptr) {
+        noteStall("new", t0, nowNs());
+    }
+    return p;
+}
+
+void SizeClassHeap::osUnmap(void* p, std::size_t bytes) noexcept {
+    ++m_osCalls;
+    m_largestRelease = std::max(m_largestRelease, bytes);
+    std::uint64_t t0 = m_stallTrace != nullptr ? nowNs() : 0;
+    asanUnpoison(p, bytes);
+    munmap(p, bytes);
+    if (m_stallTrace != nullptr) {
+        noteStall("free", t0, nowNs());
+    }
 }
 
 void SizeClassHeap::osDelete(void* p) noexcept {
@@ -347,27 +396,83 @@ void SizeClassHeap::freeBuffer(void* p, std::size_t bytes) noexcept {
 void* SizeClassHeap::allocLarge(std::size_t bytes) {
     std::size_t rounded;
     std::size_t cls = largeClass(bytes, rounded);
+    std::size_t mapBytes = pageRound(rounded);
     void* p = m_largeFree[cls];
     if (p != nullptr) {
+        asanUnpoison(p, mapBytes);
         m_largeFree[cls] = *static_cast<void**>(p);
-        m_largeCachedBytes -= rounded;
+        m_largeCachedBytes -= mapBytes;
     } else {
-        p = osNew(rounded);
+        p = osMap(mapBytes);
     }
-    m_largeLiveBytes += rounded;
+    m_largeLiveBytes += mapBytes;
+    releaseStep();
     return p;
 }
 
 void SizeClassHeap::freeLarge(void* p, std::size_t bytes) noexcept {
     std::size_t rounded;
     std::size_t cls = largeClass(bytes, rounded);
-    m_largeLiveBytes -= rounded;
-    if (m_largeCachedBytes + rounded <=
+    std::size_t mapBytes = pageRound(rounded);
+    m_largeLiveBytes -= mapBytes;
+    if (m_largeCachedBytes + mapBytes <=
         std::max(m_largeLiveBytes, kLargeCacheFloor)) {
         *static_cast<void**>(p) = m_largeFree[cls];
         m_largeFree[cls] = p;
-        m_largeCachedBytes += rounded;
+        m_largeCachedBytes += mapBytes;
+        asanPoison(p, mapBytes);
+    } else {
+        queueRelease(p, mapBytes);
+    }
+    releaseStep();
+}
+
+void SizeClassHeap::queueRelease(void* p, std::size_t bytes) noexcept {
+    asanUnpoison(p, bytes);
+    auto* node = static_cast<ReleaseNode*>(p);
+    node->next = m_pending;
+    node->remaining = bytes;
+    m_pending = node;
+    m_largePendingBytes += bytes;
+}
+
+void SizeClassHeap::releaseStep() {
+    if (m_pending == nullptr) {
+        // Trim the cache when the live large bytes have fallen under it. One
+        // block for each step, the largest class first: the scan is over a
+        // fixed number of classes.
+        if (m_largeCachedBytes > std::max(m_largeLiveBytes, kLargeCacheFloor)) {
+            for (std::size_t cls = kLargeClasses; cls-- > 0;) {
+                void* p = m_largeFree[cls];
+                if (p == nullptr) {
+                    continue;
+                }
+                std::size_t rounded = 0;
+                // Recover the size of the class from its index.
+                std::size_t hb = cls / 4 + 11;
+                std::size_t m = cls % 4 + 4;
+                rounded = (m + 1) << (hb - 2);
+                std::size_t mapBytes = pageRound(rounded);
+                asanUnpoison(p, mapBytes);
+                m_largeFree[cls] = *static_cast<void**>(p);
+                m_largeCachedBytes -= mapBytes;
+                queueRelease(p, mapBytes);
+                break;
+            }
+        }
+        if (m_pending == nullptr) {
+            return;
+        }
+    }
+    ReleaseNode* node = m_pending;
+    if (node->remaining <= kReleaseSlice) {
+        std::size_t bytes = node->remaining;
+        m_pending = node->next;
+        m_largePendingBytes -= bytes;
+        osUnmap(node, bytes);
         return;
     }
-    osDelete(p);
+    node->remaining -= kReleaseSlice;
+    m_largePendingBytes -= kReleaseSlice;
+    osUnmap(reinterpret_cast<char*>(node) + node->remaining, kReleaseSlice);
 }

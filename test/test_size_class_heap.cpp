@@ -289,3 +289,65 @@ TEST(SizeClassHeap, ACollectionDuringAConstructorDoesNotFreeTheNewSlot) {
         mm.popTempRoot();
     }
 }
+
+TEST(SizeClassHeap, AFreedLargeBlockGoesBackInSlices) {
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    constexpr std::size_t kBlock = std::size_t{256} << 20;
+    void* p = mm.rawAlloc(kBlock);
+    std::size_t base = store.footprintBytes() - kBlock;
+    std::size_t calls = store.osCalls();
+    mm.rawFree(p, kBlock);
+    // The free gave back at most one slice. The rest waits.
+    EXPECT_LE(store.largestReleaseBytes(), SizeClassHeap::kReleaseSlice);
+    EXPECT_GT(store.pendingReleaseBytes(), 0u);
+    std::size_t steps = 0;
+    while (store.pendingReleaseBytes() != 0) {
+        store.releaseStep();
+        ++steps;
+        ASSERT_LT(steps, 1000u);
+    }
+    EXPECT_EQ(store.largestReleaseBytes(), SizeClassHeap::kReleaseSlice);
+    EXPECT_GE(store.osCalls() - calls, kBlock / SizeClassHeap::kReleaseSlice);
+    EXPECT_EQ(store.footprintBytes(), base);
+}
+
+TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    constexpr std::size_t kBlock = std::size_t{64} << 20;
+    mm.rawFree(mm.rawAlloc(kBlock), kBlock);
+    std::size_t pending = store.pendingReleaseBytes();
+    ASSERT_GT(pending, 0u);
+    // A collection sweeps every span of the heap. Make a few spans first.
+    std::vector<ObjString*> strings;
+    for (int i = 0; i < 2000; ++i) {
+        strings.push_back(mm.makeString("a string " + std::to_string(i)));
+        mm.pushTempRoot(strings.back());
+    }
+    mm.collectGarbage();
+    EXPECT_LT(store.pendingReleaseBytes(), pending);
+    EXPECT_LE(store.largestReleaseBytes(), SizeClassHeap::kReleaseSlice);
+    for (std::size_t i = 0; i < strings.size(); ++i) {
+        mm.popTempRoot();
+    }
+}
+
+TEST(SizeClassHeap, TheCacheShrinksWhenTheLiveLargeBytesFall) {
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    constexpr std::size_t kBlock = std::size_t{8} << 20;
+    std::size_t base = store.footprintBytes();
+    void* a = mm.rawAlloc(kBlock);
+    void* b = mm.rawAlloc(kBlock);
+    void* c = mm.rawAlloc(kBlock);
+    mm.rawFree(a, kBlock); // cached: the others are live
+    mm.rawFree(b, kBlock);
+    mm.rawFree(c, kBlock);
+    // Nothing is live now, so the cached block is over the limit.
+    for (int i = 0; i < 200 && store.footprintBytes() > base + (4u << 20);
+         ++i) {
+        store.releaseStep();
+    }
+    EXPECT_LE(store.footprintBytes(), base + (4u << 20));
+}
