@@ -135,25 +135,99 @@ workers":
 
 ## 7. Stores of a reference into a heap object
 
-A store of a Value or an `Obj*` into a heap object happens through these
-paths. An incremental or generational collector needs a barrier on each of
-them. A first grep finds about 40 direct sites. The true list is a task of
-the proposal, not of this file.
+A store of a reference into a heap object goes through a mutator, a member
+function of the object type. The mutator runs the write barrier hook of the
+collector (`src/collector.h`, `src/barrier.h`). The members that hold a
+reference are private, so a direct store does not compile. A reader gets a
+const accessor. The hooks do nothing for `stw`.
 
-| Object | Mutable references |
-|---|---|
-| `ObjInstance` | `fields` (a `Table`) |
-| `ObjClass` | `methods`, the superclass link at class creation |
-| `ObjList` | `elements` (a `VmVector<Value>`) |
-| `ObjMap` | `map` (a `CoreHashMap` of key and value) |
-| `ObjUpvalue` | the closed value, and `location` |
-| `ObjClosure` | its upvalue array, filled after creation |
-| `ObjCoroutine` | the snapshot vectors, written on each suspend |
-| `ObjTask`, `ObjIterator`, `ObjError`, `ObjDeferredCall` | fields that are set after creation (to be listed) |
+The rules of a mutator:
 
-These types do not change after creation: `ObjString`, `ObjInt`, `ObjEnum`,
-`ObjBoundMethod`, `ObjBoundNative`, `ObjNative`, `ObjEnumCtor`,
-`ObjFunction` (after the compiler is done with it).
+- It calls the hook before it overwrites or removes a reference. The hook gets
+  the old value and the new value. A mutator reads the old value only while
+  `Collector::marking()` is true.
+- It reads the old value after any growth of a buffer. A growth calls the
+  allocator, and an allocation can collect and start a mark. A store that can
+  grow calls `ensureRoom()` first, so the hook and the store make no
+  allocation. A push has no old value, so its hook runs after the growth.
+- The hooks have one old value and one new value. A store that removes an
+  entry of a Table or a Map, or that replaces its key, calls the hook twice:
+  first for the key as a `Value`, then for the value.
+- A type whose object holds no allocator (Closure, Upvalue, Iterator, Socket,
+  Server) takes a `Collector&` in its mutator. The other types read the
+  collector from the allocator of their container (`VmAllocBase::barrierCollector`).
+
+`tools/check_gc_barrier_table.py` checks this table against the headers (see
+its docstring for the ten checks). The ctest test `GcBarrierTable` runs it.
+The status of a row:
+
+- `protected`: the member is private. Each named mutator exists and reaches
+  each named hook.
+- `immutable`: the member is const.
+- `exempt`: the note gives the reason that the member needs no mutator.
+- `unprotected`: the type has no barrier yet. `barrier::isUnprotectedType`
+  lists it, and the collector traces each object of the type again in the
+  finish pause. No type has this status now.
+
+| Object | Member | Mutators | Barrier | Status | Note |
+|---|---|---|---|---|---|
+| `ObjString` | - | - | - | immutable | The characters and the hash are set by the constructor. |
+| `ObjInt` | - | - | - | immutable | The value is set by the constructor. |
+| `ObjNative` | - | - | - | immutable | A function pointer and an arity. |
+| `ObjFunction` | `name` | the compiler | - | exempt | The compiler writes the name and appends constants while the function is not yet reachable from the program. An insert overwrites no reference, and a snapshot barrier needs none. |
+| `ObjUpvalue` | `next` | - | - | exempt | The list of open upvalues. Open upvalues are roots, so the collector does not trace this link. |
+| `ObjUpvalue` | `m_location` | `setLocation` | - | exempt | Moves the cell between the stack, the closed value and a snapshot. The value does not change, and the old and new cell are both kept alive. |
+| `ObjUpvalue` | `m_closed` | `set` | `barrierUpvalue`, `barrierSnapshot` | protected | A store through a closed upvalue is an Upvalue store. A store into a cell of a snapshot goes to the owner as a Snapshot store. A store to an open cell of the value stack needs none. |
+| `ObjUpvalue` | `m_owner` | `setOwner`, `close` | `barrierUpvalue` | protected | - |
+| `ObjClosure` | `function` | - | - | immutable | - |
+| `ObjClosure` | `m_upvalues` | `setUpvalue` | `barrierElement` | protected | - |
+| `ObjClass` | `name` | - | - | immutable | - |
+| `ObjClass` | `m_superclass` | `setSuperclass` | `barrierField` | protected | - |
+| `ObjClass` | `m_methods` | `setMethod`, `inheritMethods` | `barrierField` | protected | A Table store runs the hook for the value. A removed key goes in its own call. |
+| `ObjInstance` | `klass` | - | - | immutable | - |
+| `ObjInstance` | `m_fields` | `setField` | `barrierField` | protected | As ObjClass::m_methods. |
+| `ObjBoundMethod` | `receiver` | - | - | immutable | Both are const members. |
+| `ObjBoundMethod` | `method` | - | - | immutable | Both are const members. |
+| `ObjBoundNative` | `receiver` | - | - | immutable | Both are const members. |
+| `ObjBoundNative` | `native` | - | - | immutable | Both are const members. |
+| `ObjList` | `m_elements` | `push`, `pop`, `set`, `resize`, `eraseAt` | `barrierElement` | protected | A shift of the elements runs the hook once for each slot that it overwrites. |
+| `ObjIterator` | `collection` | - | - | immutable | - |
+| `ObjIterator` | `m_current` | `setCurrent`, `takeCurrent` | `barrierField` | protected | - |
+| `ObjMap` | `klass` | - | - | immutable | - |
+| `ObjMap` | `m_map` | `mapSet`, `mapDel`, `mapSetHashed`, `mapDelHashed` | `barrierEntry` | protected | A removed entry, and an overwritten key, run the hook twice: first for the key as a Value, then for the value. |
+| `ObjEnumCtor` | `ctorName` | - | - | immutable | - |
+| `ObjEnumCtor` | `enumName` | - | - | immutable | - |
+| `ObjEnum` | `ctor` | - | - | immutable | - |
+| `ObjEnum` | `m_fields` | `set` | `barrierElement` | protected | The constructor of the value fills the fields once. A new slot is Nil. |
+| `ObjError` | `klass` | - | - | immutable | - |
+| `ObjError` | `message` | - | - | immutable | - |
+| `ObjError` | `kind` | - | - | immutable | - |
+| `ObjDeferredCall` | `callable` | - | - | immutable | - |
+| `ObjDeferredCall` | `m_args` | `addArg` | `barrierElement` | protected | - |
+| `ObjFile` | `klass` | - | - | immutable | - |
+| `ObjSocket` | `klass` | - | - | immutable | - |
+| `ObjSocket` | `m_readHolder` | `setReadHolder` | `barrierField` | protected | - |
+| `ObjSocket` | `m_writeHolder` | `setWriteHolder` | `barrierField` | protected | - |
+| `ObjServer` | `klass` | - | - | immutable | - |
+| `ObjServer` | `m_acceptHolder` | `setAcceptHolder` | `barrierField` | protected | - |
+| `ObjProcess` | `klass` | - | - | immutable | - |
+| `ObjCoroutine` | `klass` | - | - | immutable | - |
+| `ObjCoroutine` | `callee` | - | - | immutable | - |
+| `ObjCoroutine` | `m_stack` | `captureStack`, `clearSnapshot` | `barrierSnapshot` | protected | A resume clears the whole snapshot, so each old reference goes to the hook. |
+| `ObjCoroutine` | `m_frames` | `pushFrame`, `clearSnapshot` | `barrierSnapshot` | protected | - |
+| `ObjCoroutine` | `m_defers` | `pushDefers`, `clearSnapshot` | `barrierSnapshot` | protected | - |
+| `ObjCoroutine` | `m_openUpvalues` | `pushOpenUpvalue`, `clearSnapshot` | `barrierSnapshot` | protected | - |
+| `ObjCoroutine` | `m_resultOverrides` | `pushResult`, `clearSnapshot` | `barrierSnapshot` | protected | - |
+| `ObjCoroutine` | `m_waitingInner` | `setWaiting` | `barrierSnapshot` | protected | - |
+| `ObjCoroutine` | `m_waitingIterator` | `setWaiting` | `barrierSnapshot` | protected | - |
+| `ObjTask` | `m_co` | `setCo` | `barrierField` | protected | - |
+| `ObjTask` | `m_mailbox` | `pushMessage`, `popMessage`, `eraseMessage`, `clearMailbox` | `barrierElement` | protected | - |
+| `ObjTask` | `m_pendingValue` | `setPendingValue` | `barrierField` | protected | - |
+| `ObjTask` | `m_startArg` | `setStartArg` | `barrierField` | protected | - |
+| `ObjTask` | `m_selectWant` | `setSelectWant` | `barrierField` | protected | - |
+| `ObjTask` | `m_io` | `setWait`, `clearWait` | `barrierField` | protected | The record names a Socket, a Server or a String. setWait runs the hook for the old target and the old text. |
+| `ObjTask` | - | `ioProgress` | - | exempt | Gives the call record to the step functions of a network call that waits many times. They write only the progress (bytes, offset, connect state). The check script lets only src/stdlib/net_api.cpp call it. A write of target or text through it is not found by a script: this is a gap, and the review of net_api.cpp covers it. |
+
 
 ## 8. Observation
 

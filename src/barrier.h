@@ -30,6 +30,19 @@ inline Collector* collectorOf(const Alloc& alloc) {
     return alloc.mm->barrierCollector;
 }
 
+// True for an object type whose stores have no barrier yet (decision section
+// 6, item 3). A collector that needs the barrier traces each object of such a
+// type again in its finish pause. A type is listed with a `case` here and has
+// a row with the status unprotected in the table of
+// docs/reference/gc-runtime-contract.md, section 7. Every type has its
+// mutators now, so none is listed.
+constexpr bool isUnprotectedType(ObjType type) {
+    switch (type) {
+    default:
+        return false;
+    }
+}
+
 inline bool active(const Collector* c) { return c != nullptr && c->marking(); }
 
 inline Value nil() { return Value{Nil{}}; }
