@@ -337,8 +337,8 @@ static Side sideOf(IoOp op) {
 }
 
 static bool holds(const ObjTask* task, const Obj* target, Side side) {
-    return task != nullptr && task->io.target == target &&
-           sideOf(task->io.op) == side;
+    return task != nullptr && task->io().target == target &&
+           sideOf(task->io().op) == side;
 }
 
 // The holder of the side of `target` that `side` names.
@@ -923,7 +923,7 @@ static Value runIo(WaitingCall io) {
             if (sideOf(io.op) != Side::None) {
                 setHolder(io.target, sideOf(io.op), task);
             }
-            task->io = std::move(io);
+            task->setWait(std::move(io));
             return from<Nil>(Nil{});
         }
         std::string err;
@@ -941,7 +941,7 @@ static Value runIo(WaitingCall io) {
 }
 
 void resumeWaitingCall(Runtime& rt, ObjTask* task) {
-    WaitingCall& io = task->io;
+    WaitingCall& io = task->ioProgress();
     IoOutcome out;
     step(io, out);
     switch (out.kind) {
@@ -1130,17 +1130,18 @@ static void closeDescriptor(int& fd, const char* noun) {
     fd = -1;
     for (ObjTask* task : waiting) {
         rt->failWait(task, kSocketClosedError,
-                     closedMessage(task->io.method, noun).c_str());
+                     closedMessage(task->io().method, noun).c_str());
     }
 }
 
 void closeWaitingDescriptor(Runtime& rt, ObjTask* task) {
-    if (task->io.op == IoOp::CONNECT) {
+    if (task->io().op == IoOp::CONNECT) {
         // The attempt has no Socket. The end of the task closes it.
         return;
     }
-    int& fd = task->io.op == IoOp::ACCEPT ? asObjServer(task->io.target)->fd
-                                          : asObjSocket(task->io.target)->fd;
+    int& fd = task->io().op == IoOp::ACCEPT
+                  ? asObjServer(task->io().target)->fd
+                  : asObjSocket(task->io().target)->fd;
     if (fd < 0) {
         return;
     }

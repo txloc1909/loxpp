@@ -1103,13 +1103,13 @@ void Runtime::waitTask(ObjTask* task) {
         break;
     }
     task->setPendingValue(Value{});
-    if (token == 0 && task->io.op != IoOp::NONE) {
+    if (token == 0 && task->io().op != IoOp::NONE) {
         // A socket that epoll refuses (the kernel is out of watches, for one)
         // cannot be waited on, and the call must not return a value it did not
         // read.
         const std::string message =
-            std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->io = WaitingCall{};
+            std::string(task->io().method) + "(): " + std::strerror(errno);
+        task->clearWait();
         task->hasPendingFault = true;
         task->faultKind = "NetworkError";
         task->faultMessage = message;
@@ -1128,8 +1128,8 @@ void Runtime::waitTask(ObjTask* task) {
     task->waitEvent = request.reason;
     task->waitToken = token;
     m_waitingTasks.emplace(token, task);
-    if (task->io.hasDeadline) {
-        const Poller::Token timer = poller().waitUntil(task->io.deadline);
+    if (task->io().hasDeadline) {
+        const Poller::Token timer = poller().waitUntil(task->io().deadline);
         task->waitTimerToken = timer;
         m_waitTimers.emplace(timer, task);
     }
@@ -1165,7 +1165,7 @@ void Runtime::rearmWait(ObjTask* task, int fd) {
     const Poller::Token token = poller().waitFd(fd, interest, task->waitToken);
     if (token == 0) {
         const std::string message =
-            std::string(task->io.method) + "(): " + std::strerror(errno);
+            std::string(task->io().method) + "(): " + std::strerror(errno);
         task->waitToken = 0;
         failWait(task, "NetworkError", message.c_str());
         return;
@@ -1247,7 +1247,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             ObjTask* task = limit->second;
             m_waitTimers.erase(limit);
             task->waitTimerToken = 0;
-            const std::string message = task->io.timeoutMessage;
+            const std::string message = task->io().timeoutMessage;
             failWait(task, "NetworkError", message.c_str());
             continue;
         }
@@ -1256,7 +1256,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             continue;
         }
         ObjTask* task = found->second;
-        if (task->io.op != IoOp::NONE) {
+        if (task->io().op != IoOp::NONE) {
             resumeWaitingCall(*this, task);
         } else if (task->inStateReceiving()) {
             limitTask(task);
@@ -1343,7 +1343,7 @@ void Runtime::retireTask(ObjTask* task) {
     task->setStartArg(Value{});
     task->setPendingValue(Value{});
     task->hasPendingFault = false;
-    task->io = WaitingCall{};
+    task->clearWait();
     task->resetSelect();
     releaseWait(task);
     m_receivingTasks.erase(task);
@@ -1576,7 +1576,7 @@ bool Runtime::runTask(ObjTask* task) {
     } else {
         // The network call that the task waited in returns or raises now, so
         // from here on it holds no side.
-        task->io = WaitingCall{};
+        task->clearWait();
         Value received = from<Nil>(Nil{});
         if (!task->mailbox().empty() && task->receiving) {
             received = task->popMessage();
@@ -1672,7 +1672,7 @@ void Runtime::abandonTask(ObjTask* task) {
     // The main task of a session survives the line, but its wait does not:
     // nothing would end it once m_waitingTasks is cleared.
     releaseWait(task);
-    task->io = WaitingCall{};
+    task->clearWait();
     task->setPendingValue(Value{});
     task->hasPendingFault = false;
 }
@@ -1685,7 +1685,7 @@ void Runtime::abandonTasks() {
     for (const auto& entry : m_waitingTasks) {
         left.push_back(entry.second);
         // No deferred call will close the descriptor of a waiting call.
-        if (entry.second->io.op != IoOp::NONE) {
+        if (entry.second->io().op != IoOp::NONE) {
             closeWaitingDescriptor(*this, entry.second);
         }
     }

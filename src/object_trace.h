@@ -190,11 +190,11 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
         m.markValue(task->startArg());
         m.markValue(task->pendingValue());
         m.markValue(task->selectWant());
-        if (task->io.target != nullptr) {
-            m.markObject(task->io.target);
+        if (task->io().target != nullptr) {
+            m.markObject(task->io().target);
         }
-        if (task->io.text != nullptr) {
-            m.markObject(task->io.text);
+        if (task->io().text != nullptr) {
+            m.markObject(task->io().text);
         }
         break;
     }

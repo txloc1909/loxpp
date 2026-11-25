@@ -908,7 +908,10 @@ struct ObjTask : public Obj {
     // of the call and kept until the task runs again, so it also names the
     // call while the task is READY after its wait ended: such a call still
     // holds its side (spec/04-semantics.md, The Task Machine, Sides, rule 1).
-    WaitingCall io;
+  private:
+    WaitingCall m_io;
+
+  public:
     // The state of a receive_within, receive_where, or receive_where_within
     // call (spec/04-semantics.md, task.receive_within). A task that waits in
     // one has no result to hand over when it runs again: the runtime runs the
@@ -954,6 +957,28 @@ struct ObjTask : public Obj {
         : Obj(ObjType::TASK), epoch(e), m_co(c), m_mailbox(alloc) {}
 
     [[nodiscard]] ObjCoroutine* co() const { return m_co; }
+    // The network call that the task waits in (see the comment above).
+    [[nodiscard]] const WaitingCall& io() const { return m_io; }
+    // The record, for the step functions of a call that waits many times.
+    // They write the progress of the call (the bytes read, the offset, the
+    // state of a connect). They never write `target` or `text`: those two
+    // are set on a record that no task owns yet, and a task gets them only
+    // through setWait.
+    WaitingCall& ioProgress() { return m_io; }
+    // The task starts to wait in `call`, or stops (an empty record). Each
+    // one runs the write barrier (src/barrier.h) for the objects that the
+    // old record names.
+    void setWait(WaitingCall&& call) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierField(this, barrier::refValue(m_io.target),
+                            barrier::refValue(call.target));
+            c->barrierField(this, barrier::refValue(m_io.text),
+                            barrier::refValue(call.text));
+        }
+        m_io = std::move(call);
+    }
+    void clearWait() { setWait(WaitingCall{}); }
     // Unbounded by design: a send never waits for room. A bound is a library
     // over the primitive (spec/04-semantics.md, Bounding a Mailbox).
     // On the worker's heap: a push can pass the collection threshold and
