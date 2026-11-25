@@ -1,0 +1,21 @@
+// A String that no code holds is garbage, but the program can make the same
+// String again before the collector frees it, and then hold it while the mark
+// or the sweep goes on. The lookup of the intern table must give the program a
+// String that stays alive, and the text of the String must still be there when
+// the program reads it again.
+class Node { init(i) { this.i = i; } }
+
+var bad = 0;
+var total = 0;
+var i = 0;
+while (i < 4000) {
+    var k = i % 700;
+    var s = "word" + str(k);
+    var j = 0;
+    while (j < 150) { var junk = Node(j); j = j + 1; }
+    if ((s + "!") != ("word" + str(k) + "!")) { bad = bad + 1; }
+    total = total + len(s);
+    i = i + 1;
+}
+print bad;
+print total;

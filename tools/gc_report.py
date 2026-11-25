@@ -82,6 +82,10 @@ MMU(w)          minimum mutator utilisation: the smallest fraction of any
                 records as pauses too.
 stall           the longest stall of each kind (new, free), and how many.
 step units      the largest units value of one step.
+exit cycle      the steps of a cycle with cause=exit (the collection that a
+                worker runs as it ends) are not pauses: no program waits for
+                them. The report gives their count, units and time on their
+                own line.
 alloc rate      bytes allocated between collections over wall. Allocation
                 after the last collection is not seen, so this is a lower
                 bound.
@@ -277,6 +281,14 @@ def summarise_gcs(label, start, end, gcs, mmu_ms, cycles=(), steps=(), stalls=()
     a collection. A stall is not a pause; it has its own figures.
     """
     wall = max(end - start, 1)
+    # The steps of a cycle with cause=exit run after the program has ended, so
+    # no program waits for them. They have their own line, and they are not
+    # in the pauses, the MMU or the largest step.
+    exit_iv = [(c["t0"], c["t1"]) for c in cycles if c["cause"] == "exit"]
+    exit_steps = [
+        x for x in steps if any(a <= x["t0"] and x["t1"] <= b for a, b in exit_iv)
+    ]
+    steps = [x for x in steps if x not in exit_steps]
     pause_iv = [(g["t0"], g["t4"]) for g in gcs] + [
         (x["t0"], x["t1"]) for x in steps
     ]
@@ -345,6 +357,13 @@ def summarise_gcs(label, start, end, gcs, mmu_ms, cycles=(), steps=(), stalls=()
         "pause_max_us": (sorted_p[-1] if sorted_p else 0) / 1e3,
         "steps": len(steps),
         "max_step_units": max((x["units"] for x in steps), default=None),
+        "exit_steps": {
+            "count": len(exit_steps),
+            "max_units": max(x["units"] for x in exit_steps),
+            "max_us": max(x["t1"] - x["t0"] for x in exit_steps) / 1e3,
+        }
+        if exit_steps
+        else None,
         "stalls": stall_info,
         "phase_pct": None
         if phase_ns is None
@@ -384,6 +403,12 @@ def render(s):
     )
     if s["steps"]:
         out.append(f"steps             {s['steps']}  max units {s['max_step_units']}")
+    if s.get("exit_steps"):
+        e = s["exit_steps"]
+        out.append(
+            f"exit cycle        {e['count']} steps, max units {e['max_units']},"
+            f" max {e['max_us']:.1f} us (not in the pauses above)"
+        )
     if s["phase_pct"] is None:
         out.append("phase share       n/a")
     else:

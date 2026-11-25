@@ -90,6 +90,7 @@ GcCollectorChoice core
 GcLargeHeap core
 GcStwCounts core
 GcStall core
+GcIncremental core
 test_size_class_heap core
 test_size_class_heap_gc core
 GcBarrierTable core

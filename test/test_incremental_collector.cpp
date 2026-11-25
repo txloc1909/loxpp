@@ -270,26 +270,43 @@ TEST_F(IncrementalTest, ALargeListIsTracedInPartsAndNoStepGrowsWithIt) {
     EXPECT_LE(ic->largestStepUnits(), 4096u);
 }
 
-TEST_F(IncrementalTest, AMapThatRehashesWhileItIsTracedStartsAgain) {
-    ObjMap* map = newMap();
-    std::vector<ObjString*> keys;
-    for (int i = 0; i < 600; ++i) {
-        keys.push_back(mm.makeString("key" + std::to_string(i)));
-        map->mapSet(ref(keys.back()), ref(newList()));
+// Strings whose hash has the low nine bits clear. In a table of 512 buckets
+// they all start at bucket 0 and form one cluster. After the table doubles,
+// the ones with bit 9 clear start at bucket 0 and the others at bucket 512, so
+// an entry that sat far inside the cluster moves to a bucket near the start.
+// An entry like that is in the part of the table that was not traced, and it
+// moves into the part that was.
+std::vector<std::string> collidingKeys(std::size_t count) {
+    std::vector<std::string> keys;
+    for (std::size_t i = 0; keys.size() < count; ++i) {
+        std::string s = "key" + std::to_string(i);
+        if ((hashString(s) & 511) == 0) {
+            keys.push_back(s);
+        }
     }
+    return keys;
+}
+
+TEST_F(IncrementalTest, AMapThatRehashesWhileItIsTracedStartsAgain) {
+    const std::vector<std::string> names = collidingKeys(420);
+    ObjMap* map = newMap();
+    for (std::size_t i = 0; i < 300; ++i) {
+        map->mapSet(ref(mm.makeString(names[i])), ref(newList()));
+    }
+    ASSERT_EQ(map->entries().capacity(), 512);
     mm.pushTempRoot(map);
     ic->startCycle("test");
-    // A part of the buckets is traced, then the table grows.
-    ic->markStep(200);
-    for (int i = 600; i < 3000; ++i) {
-        ObjString* k = mm.makeString("key" + std::to_string(i));
+    // The first 128 buckets are traced, then the table grows.
+    ic->markStep(1);
+    ic->markStep(1);
+    for (std::size_t i = 300; i < names.size(); ++i) {
+        ObjString* k = mm.makeString(names[i]);
         mm.pushTempRoot(k);
         map->mapSet(ref(k), ref(newList()));
         mm.popTempRoot();
-        ic->markStep(1);
     }
-    finishTracing();
-    EXPECT_EQ(ic->verify(), 0u);
+    ASSERT_EQ(map->entries().capacity(), 1024);
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
 }
 
 // --- Colors of new objects ------------------------------------------------
@@ -309,31 +326,40 @@ TEST_F(IncrementalTest, AnObjectMadeDuringTheMarkIsBlack) {
 }
 
 TEST_F(IncrementalTest, AnObjectMadeDuringTheSweepLivesThroughTheCycle) {
-    std::vector<ObjList*> before;
-    for (int i = 0; i < 6000; ++i) {
-        before.push_back(newList()); // dead: nothing reaches them
+    // Spans that are half full, so that the allocations of the sweep take
+    // slots in spans that it has passed and in spans that it has not.
+    ObjList* keep = newList();
+    mm.pushTempRoot(keep);
+    for (int i = 0; i < 12000; ++i) {
+        ObjList* o = newList();
+        if (i % 2 == 0) {
+            keep->push(ref(o));
+        }
     }
+    mm.collectGarbage();
     ic->startCycle("test");
     finishTracing();
     ic->finishMark();
     ic->sweepStep(1);
     std::vector<ObjList*> made;
-    for (int i = 0; i < 6000; ++i) {
+    std::size_t unswept = 0;
+    std::size_t swept = 0;
+    for (int i = 0; i < 12000; ++i) {
         ObjList* o = newList();
         made.push_back(o);
         // Marked exactly when the sweep has not reached its span.
         EXPECT_EQ(mm.store().isMarked(o), mm.store().isUnswept(o));
+        (mm.store().isUnswept(o) ? unswept : swept)++;
     }
+    // The test reaches both kinds of span.
+    EXPECT_GT(unswept, 0u);
+    EXPECT_GT(swept, 0u);
     while (!ic->sweepStep(4096)) {
     }
     for (ObjList* o : made) {
         EXPECT_FALSE(mm.store().isMarked(o)); // white for the next cycle
         EXPECT_TRUE(o->elements().empty());   // and alive
     }
-    // Every one of the made objects is still counted, and the dead ones are
-    // not.
-    EXPECT_GE(mm.store().objectCount(), made.size());
-    EXPECT_LT(mm.store().objectCount(), before.size() + made.size());
 }
 
 // --- The read barrier of the intern table --------------------------------

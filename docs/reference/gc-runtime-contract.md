@@ -15,9 +15,10 @@ changes this file.
   collects it.
 - The heap has one collector, an object of a class that derives from
   `Collector` (`src/collector.h`). `LOXPP_GC` names it when the heap starts.
-  The only name is `stw`, the default: `StwCollector`
-  (`src/stw_collector.{h,cpp}`). An unknown name ends the process with
-  status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
+  The names are `stw`, the default: `StwCollector`
+  (`src/stw_collector.{h,cpp}`), and `incremental`: `IncrementalCollector`
+  (`src/incremental_collector.{h,cpp}`). An unknown name ends the process
+  with status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
   its own API (`create<T>`, `makeString`, `pushTempRoot`, `markObject`,
   `collectGarbage`, `collectionCount`) and forwards to the collector.
 - The memory of a heap is `SizeClassHeap` (`src/size_class_heap.{h,cpp}`),
@@ -32,7 +33,11 @@ changes this file.
   constructor does not see it. Then it calls `Collector::onCreate`, which is
   empty for `stw`. There is no list of all objects: the collector finds
   the objects through the spans (`firstObjectSpan`, `sweepSpan`,
-  `forEachObject`). `sizeof(T)` must be at most 2048 and the alignment at
+  `forEachObject`). A sweep that goes through the spans in more than one
+  step calls `beginSweep` first. Each span keeps the epoch of the last sweep
+  that visited it (`Span::sweepEpoch`), and a span that the heap takes during
+  a sweep counts as swept, so `isUnswept(obj)` tells a collector whether the
+  sweep has to reach the span of `obj`. `sizeof(T)` must be at most 2048 and the alignment at
   most 16 (a `static_assert` in `create<T>`).
 - The mark bit of an object is a bit in the mark bitmap of its span
   (`SizeClassHeap::tryMark`, `isMarked`). Only a collector reads or writes
@@ -77,7 +82,10 @@ changes this file.
   the containers of the objects (`ObjClosure::m_upvalues`, the `Chunk` of an
   `ObjFunction`, the `std::string` and `std::shared_ptr` members of the
   container objects, the profiler members), #1294; the gray stack of
-  the collector, #1295; the containers of `MemoryManager` (`m_foreign`,
+  the stop-the-world collector, #1295 (the incremental collector does not
+  have this gap: its gray stack and its handle list are linked blocks of 2048
+  bytes from the buffer classes of the heap, `src/seg_stack.h`, so no push or
+  pop calls the C allocator); the containers of `MemoryManager` (`m_foreign`,
   `m_reachedForeign`, `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
   sweep runs the destructors of the objects, so the `free` calls of the first
   class run inside the sweep. The test
@@ -89,8 +97,10 @@ changes this file.
 - `Collector` has the hooks of the write barrier (`barrierField`,
   `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
   and the read barrier of the intern table (`internHit`). They are empty for
-  `stw`, which never sets `PollState::marking`. The lookups of the intern
-  table call `internHit`. Each store of a reference into a heap object calls a
+  `stw`, which never sets `PollState::marking` or `PollState::internBarrier`.
+  The incremental collector sets `marking` during a mark (the five store hooks
+  test it) and `internBarrier` during a mark and a sweep (`internHit` tests
+  it). The lookups of the intern table call `internHit`. Each store of a reference into a heap object calls a
   store hook, through a mutator of the object type (section 7).
 - There are 23 object types (`enum class ObjType`). These own OS handles
   and close them in their destructor: `ObjFile`, `ObjSocket`, `ObjServer`,
@@ -112,7 +122,12 @@ changes this file.
   can run in the middle of a `std::vector` or a hash map growth. At that
   moment the old buffer is still complete and the container is consistent:
   the new buffer is allocated before any element moves.
-- `LOXPP_STRESS_GC=1` runs a full collection at each allocation.
+- `LOXPP_STRESS_GC=1` runs a full collection at each allocation with `stw`.
+  With `incremental` it runs one step of 16 units at each allocation, and a
+  new cycle starts when the last one ends.
+- `Collector::onIdle` is called by `Runtime::waitForWork` before a worker with
+  an empty inbox may sleep. `incremental` finishes its cycle there, so a quiet
+  worker keeps no garbage and no OS handle. `stw` does nothing.
 - The threshold: `PollState::pollAt = max(2 × bytesAllocated after the
   sweep, 1 MB)`. `PollState` is in the heap (`MemoryManager::m_poll`), and
   the collector writes it. `MemoryManager::shouldPoll` compares
@@ -165,8 +180,13 @@ changes this file.
 
 - The String intern table (`m_strings`) holds its Strings weakly.
   `StwCollector::removeWhiteStrings` removes each unmarked String after the
-  trace and before the sweep. Each lookup that finds a String calls
-  `Collector::internHit` (`makeString`, `findString`, `receiveMessage`).
+  trace and before the sweep. The incremental collector does not scan the
+  table: its sweep removes a String when it frees it, and its finish pause
+  removes the foreign Strings that it releases
+  (`releaseUnreachedForeign(true)`). Each lookup that finds a String calls
+  `Collector::internHit` (`makeString`, `findString`, `receiveMessage`). The
+  incremental collector marks that String during a mark, and during a sweep
+  when the sweep has not reached its span.
 - Every String is interned, so String equality is pointer equality. A
   collector must not free an interned String that is still reachable, and
   must remove each dead String from the table before it is freed.
@@ -292,13 +312,18 @@ The status of a row:
 
 - `LOXPP_GC_TRACE=<file>` writes one record for each collection (format
   v3, described in `tools/gc_report.py`). The stop-the-world collector writes
-  `gc` records and `stall` records. The heap writes a `stall` record
+  `gc` records and `stall` records. The incremental collector writes `cycle`
+  and `step` records instead of `gc` records (one `step` for each pause, of
+  kind `start`, `mark`, `finish`, `sweep` or `end`, with the `units` of the
+  step, and one `cycle` at the end of the cycle). A cycle with cause `exit` is
+  the collection that a worker runs as it ends: its steps are not pauses of
+  the program, and `tools/gc_report.py` gives them their own line. The heap writes a `stall` record
   (`stall kind=<new|free> t0= t1=`) for each call into the C allocator (a new
-  chunk or a large block) that takes longer than 100 us. The format also
-  has `cycle` and `step` records, for an incremental collector. Nothing
-  writes them yet. These read the trace: `tools/gc_report.py` (and
+  chunk or a large block) that takes longer than 100 us. These read the
+  trace: `tools/gc_report.py` (and
   `tools/jvm_gc_log.py` through `summarise_gcs`), `tools/check_gc_trace.py`,
-  `tools/check_gc_trace_v3.py`, `tools/check_gc_stall.py`,
+  `tools/check_gc_trace_v3.py`, `tools/check_gc_incremental.py`,
+  `tools/check_gc_stall.py`,
   `tools/check_gc_min_heap.py`,
   `tools/check_gc_sweep_linear.py`, `benchmarks/gc_compare.py`, and the Redis
   example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc`

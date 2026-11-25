@@ -408,7 +408,10 @@ bool IncrementalCollector::markStep(std::size_t units,
     const std::uint64_t t0 = gcMonotonicNs();
     const std::size_t u0 = m_units;
     const bool done = traceUntil(units, deadlineNs);
-    logStep("mark", t0, gcMonotonicNs(), m_units - u0);
+    // A call that finds nothing to trace is not a pause worth a record.
+    if (m_units != u0) {
+        logStep("mark", t0, gcMonotonicNs(), m_units - u0);
+    }
     return done;
 }
 

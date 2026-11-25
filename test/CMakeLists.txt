@@ -302,6 +302,17 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # The incremental collector must give the output of the reference collector
+    # on the probes of test/gc_incremental/, with a step at each allocation and
+    # with the verifier on, and it must write a trace that gc_report.py reads.
+    add_test(NAME GcIncremental
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_incremental.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcIncremental PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
     # The table of write-barrier mutators in the contract (section 7) must
     # match the headers of the object types.
     add_test(NAME GcBarrierTable

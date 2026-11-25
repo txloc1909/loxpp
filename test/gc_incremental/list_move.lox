@@ -1,0 +1,40 @@
+// Old objects move between two large Lists in both directions at the same
+// time, while garbage makes the collector run. A swap stores an old object
+// into a container that the mark may have traced already, and then removes it
+// from the container that it has not traced yet. Only the barrier on the old
+// value keeps it.
+class Node { init(i) { this.i = i; } }
+
+var N = 3000;
+var a = [];
+var b = [];
+var i = 0;
+while (i < N) { a.append(Node(i)); b.append(Node(i + N)); i = i + 1; }
+
+var round = 0;
+while (round < 30) {
+    i = 0;
+    while (i < N) {
+        var t = a[i];
+        a[i] = b[i];
+        b[i] = t;
+        var garbage = Node(i);
+        i = i + 1;
+    }
+    // Also move through pop and append, which are the other List mutators.
+    i = 0;
+    while (i < 200) {
+        var x = a.pop();
+        var y = b.pop();
+        b.append(x);
+        a.append(y);
+        var garbage2 = [i, i];
+        i = i + 1;
+    }
+    round = round + 1;
+}
+var sum = 0;
+i = 0;
+while (i < len(a)) { sum = sum + a[i].i + b[i].i; i = i + 1; }
+print len(a);
+print sum;

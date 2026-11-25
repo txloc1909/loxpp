@@ -1,0 +1,42 @@
+// A second worker builds data and sends it back. The messages live in the heap
+// of the worker, and the main worker holds them while its own collector runs.
+// The messages are Strings and Enum values, the kinds that a message can be.
+class Node { init(i) { this.i = i; } }
+enum Tree { Leaf(v) Node(l, r) }
+
+fun make(main) {
+    var round = 0;
+    while (round < 300) {
+        var i = 0;
+        var t = Tree.Leaf("w" + str(round));
+        while (i < 40) { t = Tree.Node(t, Tree.Leaf("v" + str(i + round))); i = i + 1; }
+        task.send(main, t);
+        task.send(main, "s" + str(round));
+        round = round + 1;
+    }
+    task.send(main, "done");
+}
+
+fun count(t) {
+    return match t {
+        case Tree.Leaf(v) => 1
+        case Tree.Node(l, r) => count(l) + count(r)
+    };
+}
+
+var w = task.spawn_worker(make, task.self());
+var total = 0;
+var kept = [];
+while (true) {
+    var m = task.receive();
+    if (m == "done") { break; }
+    var s = task.receive();
+    kept.append(m);
+    kept.append(s);
+    var i = 0;
+    while (i < 300) { var g = Node(i); i = i + 1; }
+}
+var j = 0;
+while (j < len(kept)) { total = total + count(kept[j]) + len(kept[j + 1]); j = j + 2; }
+print len(kept);
+print total;
