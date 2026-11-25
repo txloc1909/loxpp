@@ -22,10 +22,10 @@
 //   defineNative("clock", ...)
 //     create<ObjNative>  →  PollState::stress  →  GC fires:
 //       m_markRoots == nullptr && m_currentCompiler == nullptr
-//       → nothing marked → entire allObjects heap swept
-//     ObjNative allocated, added to allObjects
+//       → nothing marked → the whole heap swept
+//     ObjNative allocated, a committed object of the heap
 //     makeString("clock")  →  create<ObjString>  →  GC fires again:
-//       ObjNative in allObjects, not reachable from any root  →  swept/freed
+//       ObjNative in the heap, not reachable from any root  →  swept/freed
 //     m_globals.set(key, Value{dangling_native})  →  UAF written to globals
 //
 // ASAN detects: heap-use-after-free in sweep() while processing the ObjNative
@@ -54,12 +54,12 @@ TEST(GcRegression, Bug31_NativeUnrootedInDefineNative) {
 // Timeline under LOXPP_STRESS_GC (m_scopeDepth > 0 path only):
 //   funDeclaration() for a local function:
 //     create<ObjFunction>()
-//       → fn allocated, added to allObjects
+//       → fn allocated, a committed object of the heap
 //       → m_currentCompiler == outer Compiler (correct)
 //         outer Compiler's markRoots marks only outer->m_function
 //         fn is NOT outer->m_function and NOT yet in outer's constant pool
 //     makeString(name.lexeme)  →  create<ObjString>  →  GC fires:
-//       fn is in allObjects, not reachable from any root  →  swept/freed
+//       fn is in the heap, not reachable from any root  →  swept/freed
 //     fn->name = <result>  →  write to freed ObjFunction  →  UAF
 //     Compiler inner(fn, ...)  →  inner.m_function = dangling pointer
 //
