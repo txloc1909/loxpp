@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <new>
 #include <gtest/gtest.h>
 #include <set>
 #include <string>
@@ -24,23 +25,44 @@ std::atomic<std::size_t> g_news{0};
 std::atomic<std::size_t> g_deletes{0};
 } // namespace
 
-void* operator new(std::size_t n) {
+// Every form of operator new and operator delete is replaced, so that a
+// sanitizer sees a matching pair.
+static void* countedNew(std::size_t n) {
     if (g_countCalls.load(std::memory_order_relaxed)) {
         g_news.fetch_add(1, std::memory_order_relaxed);
     }
-    void* p = std::malloc(n != 0 ? n : 1);
-    if (p == nullptr) {
-        throw std::bad_alloc();
-    }
-    return p;
+    return std::malloc(n != 0 ? n : 1);
 }
-void operator delete(void* p) noexcept {
+static void countedDelete(void* p) noexcept {
     if (p != nullptr && g_countCalls.load(std::memory_order_relaxed)) {
         g_deletes.fetch_add(1, std::memory_order_relaxed);
     }
     std::free(p);
 }
-void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
+void* operator new(std::size_t n) {
+    void* p = countedNew(n);
+    if (p == nullptr) {
+        throw std::bad_alloc();
+    }
+    return p;
+}
+void* operator new[](std::size_t n) { return operator new(n); }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+    return countedNew(n);
+}
+void* operator new[](std::size_t n, const std::nothrow_t&) noexcept {
+    return countedNew(n);
+}
+void operator delete(void* p) noexcept { countedDelete(p); }
+void operator delete[](void* p) noexcept { countedDelete(p); }
+void operator delete(void* p, std::size_t) noexcept { countedDelete(p); }
+void operator delete[](void* p, std::size_t) noexcept { countedDelete(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept {
+    countedDelete(p);
+}
+void operator delete[](void* p, const std::nothrow_t&) noexcept {
+    countedDelete(p);
+}
 
 namespace {
 
@@ -203,6 +225,32 @@ TEST(SizeClassHeap, ASpanThatEmptiesServesAnotherClass) {
     EXPECT_EQ(store.chunkCount(), chunks);
     for (void* p : blocks) {
         mm.rawFree(p, 96);
+    }
+}
+
+TEST(SizeClassHeap, ASpanThatHeldBuffersServesObjects) {
+    // The bitmaps of an object span lie over the slots that the span held as a
+    // buffer span. A sanitizer build poisons the freed slots, so the span must
+    // be unpoisoned when it takes its new class.
+    MemoryManager mm;
+    std::vector<void*> blocks;
+    for (int i = 0; i < 50000; ++i) {
+        blocks.push_back(mm.rawAlloc(48));
+    }
+    for (void* p : blocks) {
+        mm.rawFree(p, 48);
+    }
+    std::vector<ObjString*> strings;
+    for (int i = 0; i < 3000; ++i) {
+        strings.push_back(mm.makeString("object " + std::to_string(i)));
+        mm.pushTempRoot(strings.back());
+    }
+    mm.collectGarbage();
+    for (std::size_t i = 0; i < strings.size(); ++i) {
+        EXPECT_EQ(
+            std::string(strings[i]->chars.data(), strings[i]->chars.size()),
+            "object " + std::to_string(i));
+        mm.popTempRoot();
     }
 }
 

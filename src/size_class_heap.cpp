@@ -239,6 +239,9 @@ Span* SizeClassHeap::takeSpan(Kind kind, std::size_t cls) {
     } else {
         s = carveSpan();
     }
+    // The span may have held another class: its slots were poisoned, and the
+    // header and the bitmaps of this class lie over them.
+    asanUnpoison(s, kSpanBytes);
     const ClassTable& t = table();
     int buffer = kind == Kind::Buffer ? 1 : 0;
     s->partialNext = nullptr;
