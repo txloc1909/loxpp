@@ -22,7 +22,7 @@ struct VmAllocBase {
         bytesAllocated += bytes;
         return ::operator new(bytes);
     }
-    void rawFree(void* p, std::size_t bytes) noexcept {
+    virtual void rawFree(void* p, std::size_t bytes) noexcept {
         bytesAllocated -= bytes;
         ::operator delete(p);
     }

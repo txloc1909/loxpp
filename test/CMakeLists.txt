@@ -44,6 +44,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/collector.cpp
     ${PROJECT_SOURCE_DIR}/src/stw_collector.cpp
+    ${PROJECT_SOURCE_DIR}/src/size_class_heap.cpp
     ${PROJECT_SOURCE_DIR}/src/worker.cpp
     ${PROJECT_SOURCE_DIR}/src/poller.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp

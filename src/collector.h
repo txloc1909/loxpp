@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 
 class MemoryManager;
@@ -59,6 +60,9 @@ class Collector {
     virtual void poll() = 0;
     // The heap made `obj`. The collector registers it.
     virtual void onCreate(Obj* obj) = 0;
+    // The file of the GC trace (LOXPP_GC_TRACE), or nullptr. The heap writes
+    // its `stall` records there.
+    [[nodiscard]] virtual std::FILE* traceFile() const { return nullptr; }
 
     // --- The roots -----------------------------------------------------
 

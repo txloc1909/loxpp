@@ -23,23 +23,6 @@
 #include <vector>
 
 namespace {
-bool inArena(void* p);
-}
-void* operator new(std::size_t n) {
-    void* p = std::malloc(n ? n : 1);
-    if (p == nullptr) {
-        throw std::bad_alloc{};
-    }
-    return p;
-}
-void operator delete(void* p) noexcept {
-    if (p != nullptr && !inArena(p)) {
-        std::free(p);
-    }
-}
-void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
-
-namespace {
 
 using Clock = std::chrono::steady_clock;
 
@@ -61,10 +44,9 @@ struct Roots {
 // malloc. Obj headers still go through `new` in MemoryManager::create; the
 // arena covers only what VmAllocator reaches.
 //
-// VmAllocBase::rawFree is not virtual and calls `operator delete` on every
-// pointer it is given, so this file replaces the global `operator delete`
-// with one that ignores a pointer inside an arena block. The blocks are
-// never freed; this is a benchmark, and the leak is bounded by the run.
+// The arena never frees a block: ArenaMM::rawFree does nothing for a pointer
+// inside an arena block. This is a benchmark, and the leak is bounded by the
+// run.
 struct ArenaBlock {
     char* begin;
     char* end;
@@ -73,15 +55,6 @@ std::vector<ArenaBlock>& arenaBlocks() {
     static std::vector<ArenaBlock> blocks;
     return blocks;
 }
-bool inArena(void* p) {
-    for (const ArenaBlock& b : arenaBlocks()) {
-        if (p >= b.begin && p < b.end) {
-            return true;
-        }
-    }
-    return false;
-}
-
 struct ArenaMM : MemoryManager {
     char* cur{nullptr};
     std::size_t left{0};
@@ -99,6 +72,9 @@ struct ArenaMM : MemoryManager {
         cur += bytes;
         left -= bytes;
         return p;
+    }
+    void rawFree(void*, std::size_t bytes) noexcept override {
+        bytesAllocated -= bytes;
     }
 };
 
@@ -231,7 +207,8 @@ void run(const char* name, ObjList* root, int n, int reps, bool share,
         Value out = c.copy(from<Obj*>(root));
         auto t1 = Clock::now();
         droots.objs.push_back(asObj(out));
-        per.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count() / n);
+        per.push_back(
+            std::chrono::duration<double, std::nano>(t1 - t0).count() / n);
         delete dst;
     }
     std::sort(per.begin(), per.end());
@@ -261,7 +238,8 @@ int main(int argc, char** argv) {
             auto t0 = Clock::now();
             std::memcpy(b.data(), a.data(), a.size() * sizeof(Value));
             auto t1 = Clock::now();
-            per.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count() / n);
+            per.push_back(
+                std::chrono::duration<double, std::nano>(t1 - t0).count() / n);
         }
         std::sort(per.begin(), per.end());
         std::printf("%-34s N=%d  %8.1f ns/item  (min %.1f, max %.1f)\n",
@@ -273,8 +251,10 @@ int main(int argc, char** argv) {
     run("numbers, no memo", nums, n, reps, false, false, false);
     run("strings, copied and re-interned", strs, n, reps, false, true, false);
     run("strings, shared by reference", strs, n, reps, true, true, false);
-    run("records (5-entry maps), keys copied", recs, n, reps, false, true, false);
-    run("records (5-entry maps), keys shared", recs, n, reps, true, true, false);
+    run("records (5-entry maps), keys copied", recs, n, reps, false, true,
+        false);
+    run("records (5-entry maps), keys shared", recs, n, reps, true, true,
+        false);
     run("nested (4-number lists)", nest, n, reps, false, true, false);
     run("ARENA numbers, memo", nums, n, reps, false, true, true);
     run("ARENA records, keys shared", recs, n, reps, true, true, true);
@@ -297,10 +277,12 @@ int main(int argc, char** argv) {
         auto t3 = Clock::now();
         std::printf("%-34s N=%d  %8.1f ns/item  (mark+sweep, all live)\n",
                     "receiver GC, records live", n,
-                    std::chrono::duration<double, std::nano>(t1 - t0).count() / n);
+                    std::chrono::duration<double, std::nano>(t1 - t0).count() /
+                        n);
         std::printf("%-34s N=%d  %8.1f ns/item  (sweep, all dead)\n",
                     "receiver GC, records dropped", n,
-                    std::chrono::duration<double, std::nano>(t3 - t2).count() / n);
+                    std::chrono::duration<double, std::nano>(t3 - t2).count() /
+                        n);
     }
 
     // A cycle must arrive as a cycle.
