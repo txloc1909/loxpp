@@ -14,7 +14,9 @@ Three runs of one program:
      hold records of both kinds, each well formed, and tools/gc_report.py must
      show the longest stall of each kind and MMU with stalls.
   2. With the default limit, each record that exists must be at least 100 us
-     long.
+     long, and no `free` record may be longer than MAX_FREE_STALL_NS. A free
+     of one large block in one call took 1.6 ms for 120 M elements before the
+     heap gave memory back in slices.
   3. With a limit that no call reaches, the trace holds no stall record.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that does not exist or
@@ -31,14 +33,19 @@ from runner_precondition import refuse_unrunnable, require_runner
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TIMEOUT_S = 120
+# The slice of a release is 1 MiB, which takes about 0.1 ms. One free of the
+# whole 128 MB block takes about 5 ms. The limit sits between, with a margin
+# on both sides, because the host stalls (decision section 13, item 6).
+MAX_FREE_STALL_NS = 3_000_000
 
-# A List that grows to a buffer of 8 MB, and then 300000 small Lists. The
+# A List that grows to a buffer of 128 MB, and then 300000 small Lists. The
 # buffer is a large block: its growth frees old blocks, and the Lists need
-# more chunks of spans.
+# more chunks of spans. The free of the 128 MB block gives memory back in
+# slices of 1 MiB, so no single free is long.
 PROGRAM = """
 var big = [];
 var i = 0;
-while (i < 600000) { big.append(i); i = i + 1; }
+while (i < 16000000) { big.append(i); i = i + 1; }
 big = nil;
 var t = [];
 var j = 0;
@@ -123,6 +130,9 @@ def main():
             if t1 - t0 < 100_000:
                 fail(f"default limit: a {kind} stall of {t1 - t0} ns is "
                      "under the limit of 100 us")
+            if kind == "free" and t1 - t0 > MAX_FREE_STALL_NS:
+                fail(f"default limit: a free stall of {t1 - t0} ns is over "
+                     f"{MAX_FREE_STALL_NS} ns")
 
         _, stalls = run(binary, d, "never", 100_000_000)
         if stalls:
