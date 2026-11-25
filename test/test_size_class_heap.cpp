@@ -392,18 +392,30 @@ TEST(SizeClassHeap, AFreedLargeBlockGoesBackInSlices) {
 TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
     MemoryManager mm;
     SizeClassHeap& store = mm.store();
-    constexpr std::size_t kBlock = std::size_t{64} << 20;
-    mm.rawFree(mm.rawAlloc(kBlock), kBlock);
-    std::size_t pending = store.pendingReleaseBytes();
-    ASSERT_GT(pending, 0u);
-    // A collection sweeps every span of the heap. Make a few spans first.
+    // Make the objects first, and let the intern table grow: its growth is a
+    // large allocation, and an allocation gives a slice back too. After the
+    // large block is freed, nothing allocates before the collection, so the
+    // fall of the queue is the work of the sweep alone.
     std::vector<ObjString*> strings;
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < 4000; ++i) {
         strings.push_back(mm.makeString("a string " + std::to_string(i)));
         mm.pushTempRoot(strings.back());
     }
+    constexpr std::size_t kBlock = std::size_t{64} << 20;
+    void* block = mm.rawAlloc(kBlock);
+    mm.rawFree(block, kBlock);
+    std::size_t pending = store.pendingReleaseBytes();
+    ASSERT_GT(pending, 0u);
+    std::size_t spans = 0;
+    for (auto* sp = store.firstObjectSpan(); sp != nullptr;
+         sp = SizeClassHeap::nextObjectSpan(sp)) {
+        ++spans;
+    }
+    ASSERT_GE(spans, 2u);
+    ASSERT_GT(pending, spans * SizeClassHeap::kReleaseSlice);
     mm.collectGarbage();
-    EXPECT_LT(store.pendingReleaseBytes(), pending);
+    EXPECT_EQ(pending - store.pendingReleaseBytes(),
+              spans * SizeClassHeap::kReleaseSlice);
     EXPECT_LE(store.largestReleaseBytes(), SizeClassHeap::kReleaseSlice);
     for (std::size_t i = 0; i < strings.size(); ++i) {
         mm.popTempRoot();
@@ -461,6 +473,11 @@ TEST(SizeClassHeap, TheCacheShrinksWhenTheLiveLargeBytesFall) {
     EXPECT_LE(store.footprintBytes(), base + (4u << 20));
 }
 
+// The limit of this test: it counts the calls that go through the heap's own
+// counter (osCalls) and the calls of operator new and delete. A call of mmap or
+// munmap that skips osMap and osUnmap is not counted, and this test does not
+// see it. AFreedLargeBlockGoesBackInSlices checks the release path, which
+// is the one that matters for the bound of a call.
 TEST(SizeClassHeap, EveryCallToTheCAllocatorOfTheHeapIsTimed) {
     std::FILE* f = std::tmpfile();
     ASSERT_NE(f, nullptr);
