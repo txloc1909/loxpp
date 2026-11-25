@@ -108,7 +108,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::ENUM: {
         auto* e = static_cast<ObjEnum*>(obj);
         m.markObject(e->ctor);
-        for (auto& v : e->fields) {
+        for (auto& v : e->fields()) {
             m.markValue(v);
         }
         break;
@@ -137,14 +137,14 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::SOCKET: {
         auto* sock = static_cast<ObjSocket*>(obj);
         m.markObject(sock->klass);
-        m.markObject(sock->readHolder);
-        m.markObject(sock->writeHolder);
+        m.markObject(sock->readHolder());
+        m.markObject(sock->writeHolder());
         break;
     }
     case ObjType::SERVER: {
         auto* srv = static_cast<ObjServer*>(obj);
         m.markObject(srv->klass);
-        m.markObject(srv->acceptHolder);
+        m.markObject(srv->acceptHolder());
         break;
     }
     case ObjType::PROCESS:

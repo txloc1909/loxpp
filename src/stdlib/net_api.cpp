@@ -341,30 +341,46 @@ static bool holds(const ObjTask* task, const Obj* target, Side side) {
            sideOf(task->io.op) == side;
 }
 
-// The slot that finds the holder of the side that `io` waits on, or null for
-// a call that has no side (connect).
-static ObjTask** holderSlot(const WaitingCall& io) {
-    switch (sideOf(io.op)) {
+// The holder of the side of `target` that `side` names.
+static ObjTask* holderOf(Obj* target, Side side) {
+    switch (side) {
     case Side::Read:
-        return &asObjSocket(io.target)->readHolder;
+        return asObjSocket(target)->readHolder();
     case Side::Write:
-        return &asObjSocket(io.target)->writeHolder;
+        return asObjSocket(target)->writeHolder();
     case Side::Accept:
-        return &asObjServer(io.target)->acceptHolder;
+        return asObjServer(target)->acceptHolder();
     case Side::None:
         break;
     }
     return nullptr;
 }
 
+static void setHolder(Obj* target, Side side, ObjTask* task) {
+    Collector& c = getActiveMM()->collector();
+    switch (side) {
+    case Side::Read:
+        asObjSocket(target)->setReadHolder(c, task);
+        break;
+    case Side::Write:
+        asObjSocket(target)->setWriteHolder(c, task);
+        break;
+    case Side::Accept:
+        asObjServer(target)->setAcceptHolder(c, task);
+        break;
+    case Side::None:
+        break;
+    }
+}
+
 // Raises BusyError when a call of another task holds the side. The running
 // task holds no side: its waiting call ended when it ran again. The check
 // comes after the check for a closed value, because a closed side fails as a
 // closed value does even while a woken call still holds it (rule 6).
-static bool sideFree(ObjTask*& holder, const Obj* target, Side side,
-                     const char* method, const char* where) {
-    if (!holds(holder, target, side)) {
-        holder = nullptr;
+static bool sideFree(Obj* target, Side side, const char* method,
+                     const char* where) {
+    if (!holds(holderOf(target, side), target, side)) {
+        setHolder(target, side, nullptr);
         return true;
     }
     raiseNet(kBusyError, std::string("Cannot call '") + method + "': a call " +
@@ -386,8 +402,7 @@ static ObjSocket* openSocket(Value* args, const char* method) {
 
 static ObjSocket* checkSocketRead(Value* args, const char* method) {
     ObjSocket* s = openSocket(args, method);
-    if (s == nullptr ||
-        !sideFree(s->readHolder, s, Side::Read, method, "read side")) {
+    if (s == nullptr || !sideFree(s, Side::Read, method, "read side")) {
         return nullptr;
     }
     return s;
@@ -402,7 +417,7 @@ static ObjSocket* checkSocketWrite(Value* args, const char* method) {
         raiseNet(kSocketClosedError, kWriteAfterCloseWrite);
         return nullptr;
     }
-    if (!sideFree(s->writeHolder, s, Side::Write, method, "write side")) {
+    if (!sideFree(s, Side::Write, method, "write side")) {
         return nullptr;
     }
     return s;
@@ -905,8 +920,8 @@ static Value runIo(WaitingCall io) {
         if (rt->requestWait(writes ? WaitEvent::FD_WRITE : WaitEvent::FD_READ,
                             fd)) {
             ObjTask* task = rt->currentTask();
-            if (ObjTask** slot = holderSlot(io)) {
-                *slot = task;
+            if (sideOf(io.op) != Side::None) {
+                setHolder(io.target, sideOf(io.op), task);
             }
             task->io = std::move(io);
             return from<Nil>(Nil{});
@@ -1093,7 +1108,7 @@ static Value socketCloseWriteNative(int /*argc*/, Value* args) {
         // write after close_write() does. Only the write side's wait ends: a
         // read that waits on the same descriptor keeps its wait.
         s->writeClosed = true;
-        if (ObjTask* task = s->writeHolder; holds(task, s, Side::Write)) {
+        if (ObjTask* task = s->writeHolder(); holds(task, s, Side::Write)) {
             getActiveRuntime()->failWait(task, kSocketClosedError,
                                          kWriteAfterCloseWrite);
         }
@@ -1149,7 +1164,7 @@ static Value serverAcceptNative(int /*argc*/, Value* args) {
         raiseNet(kSocketClosedError, closedMessage("accept", "server"));
         return from<Nil>(Nil{});
     }
-    if (!sideFree(s->acceptHolder, s, Side::Accept, "accept", "accept side")) {
+    if (!sideFree(s, Side::Accept, "accept", "accept side")) {
         return from<Nil>(Nil{});
     }
     WaitingCall io;

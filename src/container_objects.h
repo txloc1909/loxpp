@@ -146,7 +146,7 @@ inline bool isIterator(const Value& v) {
 }
 
 struct ObjFile : public Obj {
-    ObjClass* klass;       // shared s_fileClass; GC-tracked
+    ObjClass* const klass; // shared s_fileClass; GC-tracked
     FILE* handle{nullptr}; // null when closed
     bool readable{false};
     bool writable{false};
@@ -182,15 +182,28 @@ inline bool isFile(const Value& v) { return isValueOfType<ObjType::FILE>(v); }
 struct ObjTask;
 
 struct ObjSocket : public Obj {
-    ObjClass* klass; // shared Socket class; GC-tracked
-    int fd{-1};      // raw descriptor; -1 when closed
+    ObjClass* const klass; // shared Socket class; GC-tracked
+    int fd{-1};            // raw descriptor; -1 when closed
     bool writeClosed{false};
     // The task whose call holds each side (spec/04-semantics.md, The Task
     // Machine, Sides), or null. The pointer only finds the task: the task's
     // waiting call (ObjTask::io) says whether it still holds the side, so a
     // pointer that outlives the hold is never read as a hold. GC-tracked.
-    ObjTask* readHolder{nullptr};
-    ObjTask* writeHolder{nullptr};
+    [[nodiscard]] ObjTask* readHolder() const { return m_readHolder; }
+    [[nodiscard]] ObjTask* writeHolder() const { return m_writeHolder; }
+    // The mutators. Each one runs the write barrier (src/barrier.h).
+    void setReadHolder(Collector& c, ObjTask* task) {
+        barrier::storeRef(c, this, m_readHolder, task);
+    }
+    void setWriteHolder(Collector& c, ObjTask* task) {
+        barrier::storeRef(c, this, m_writeHolder, task);
+    }
+
+  private:
+    ObjTask* m_readHolder{nullptr};
+    ObjTask* m_writeHolder{nullptr};
+
+  public:
     // Bytes read from the descriptor and not yet returned. A read may take
     // more than the line it returns; the rest stays here for the next read.
     std::string inbuf;
@@ -217,12 +230,20 @@ inline bool isSocket(const Value& v) {
 // ObjServer — a bound, listening TCP socket (net_api.cpp)
 // ---------------------------------------------------------------------------
 struct ObjServer : public Obj {
-    ObjClass* klass; // shared Server class; GC-tracked
-    int fd{-1};      // listening descriptor; -1 when closed
+    ObjClass* const klass; // shared Server class; GC-tracked
+    int fd{-1};            // listening descriptor; -1 when closed
     int boundPort{0};
     // The task whose call holds the accept side, as ObjSocket::readHolder.
-    ObjTask* acceptHolder{nullptr};
+    [[nodiscard]] ObjTask* acceptHolder() const { return m_acceptHolder; }
+    // The mutator. It runs the write barrier (src/barrier.h).
+    void setAcceptHolder(Collector& c, ObjTask* task) {
+        barrier::storeRef(c, this, m_acceptHolder, task);
+    }
 
+  private:
+    ObjTask* m_acceptHolder{nullptr};
+
+  public:
     explicit ObjServer(ObjClass* k) : Obj(ObjType::SERVER), klass(k) {}
     ~ObjServer() override;
 };
@@ -241,7 +262,7 @@ inline bool isServer(const Value& v) {
 // the destructor only closes the pipes and reaps non-blockingly, so a child
 // left running is not killed and a status not yet collected is lost.
 struct ObjProcess : public Obj {
-    ObjClass* klass; // shared Process class; GC-tracked
+    ObjClass* const klass; // shared Process class; GC-tracked
     long pid{-1};
     FILE* in{nullptr};  // child stdin (parent writes)
     FILE* out{nullptr}; // child stdout (parent reads)
@@ -263,9 +284,9 @@ inline bool isProcess(const Value& v) {
 // ObjError — error value caught by try/catch
 // ---------------------------------------------------------------------------
 struct ObjError : public Obj {
-    ObjClass* klass;    // shared s_errorClass; GC-tracked
-    ObjString* message; // human-readable error message
-    ObjString* kind;    // error category string (e.g. "ArithmeticTypeError")
+    ObjClass* const klass;    // shared s_errorClass; GC-tracked
+    ObjString* const message; // human-readable error message
+    ObjString* const kind;    // error category string
 
     ObjError(ObjClass* k, ObjString* msg, ObjString* k_str)
         : Obj(ObjType::ERROR), klass(k), message(msg), kind(k_str) {}
@@ -314,7 +335,7 @@ struct MapPolicy {
 struct ObjMap : public Obj {
     using Entries = CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>>;
 
-    ObjClass* klass; // shared s_mapClass, for method dispatch
+    ObjClass* const klass; // shared s_mapClass, for method dispatch
 
   private:
     // Declared here so that the layout (and the byte count of the heap) is
@@ -379,8 +400,8 @@ inline bool isMap(const Value& v) { return isValueOfType<ObjType::MAP>(v); }
 struct ObjEnumCtor : public Obj {
     uint8_t tag;
     uint8_t arity;
-    ObjString* ctorName;
-    ObjString* enumName;
+    ObjString* const ctorName;
+    ObjString* const enumName;
 
     ObjEnumCtor(uint8_t t, uint8_t a, ObjString* cn, ObjString* en)
         : Obj(ObjType::ENUM_CTOR), tag(t), arity(a), ctorName(cn),
@@ -398,8 +419,7 @@ inline ObjEnumCtor* asObjEnumCtor(Obj* o) {
 // ObjEnum — value produced by calling an ObjEnumCtor.
 // ---------------------------------------------------------------------------
 struct ObjEnum : public Obj {
-    ObjEnumCtor* ctor;
-    VmVector<Value> fields;
+    ObjEnumCtor* const ctor;
     // Whether this value is a message (spec/03-types.md, Messages): true when
     // every field is a message. The constructor sets it once, after it fills
     // the fields. No construct writes a field after that, so the bit stays
@@ -407,7 +427,25 @@ struct ObjEnum : public Obj {
     bool sendable{true};
 
     ObjEnum(ObjEnumCtor* c, VmAllocator<Value> alloc)
-        : Obj(ObjType::ENUM), ctor(c), fields(alloc) {}
+        : Obj(ObjType::ENUM), ctor(c), m_fields(alloc) {}
+
+    [[nodiscard]] const VmVector<Value>& fields() const { return m_fields; }
+
+    // The mutators. Each one runs the write barrier (src/barrier.h). The
+    // constructor of the value calls them while it fills the fields, and
+    // none after that. A new slot is Nil, so the barrier sees no old
+    // reference.
+    void resize(std::size_t count) { m_fields.resize(count); }
+    void set(std::size_t index, const Value& v) {
+        Collector* c = barrier::collectorOf(m_fields.get_allocator());
+        if (barrier::active(c)) {
+            c->barrierElement(this, m_fields[index], v);
+        }
+        m_fields[index] = v;
+    }
+
+  private:
+    VmVector<Value> m_fields;
 };
 
 inline bool isEnumValue(const Value& v) {
@@ -492,8 +530,8 @@ struct CoroutineHandlerSnapshot {
 };
 
 struct ObjCoroutine : public Obj {
-    ObjClass* klass;    // shared Coroutine class; GC-tracked
-    const Value callee; // Function or BoundMethod to run; set once
+    ObjClass* const klass; // shared Coroutine class; GC-tracked
+    const Value callee;    // Function or BoundMethod to run; set once
     CoroutineState state{CoroutineState::SUSPENDED};
     bool started{false};
 

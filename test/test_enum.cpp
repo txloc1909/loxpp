@@ -67,9 +67,9 @@ TEST_F(EnumDeclarationTest, ConstructorWithFields) {
     ASSERT_TRUE(pv.has_value());
     ASSERT_TRUE(isEnumValue(*pv));
     ObjEnum* e = asObjEnum(as<Obj*>(*pv));
-    ASSERT_EQ(e->fields.size(), 2u);
-    expect_num(e->fields[0], 10.0);
-    expect_num(e->fields[1], 20.0);
+    ASSERT_EQ(e->fields().size(), 2u);
+    expect_num(e->fields()[0], 10.0);
+    expect_num(e->fields()[1], 20.0);
 }
 
 TEST_F(EnumDeclarationTest, DuplicateEnumNameIsError) {
@@ -352,8 +352,8 @@ TEST_F(ReplEnumTest, ConstructorExpressionOnALaterLine) {
     ASSERT_TRUE(isEnumValue(*x));
     ObjEnum* some = asObjEnum(as<Obj*>(*x));
     EXPECT_EQ(some->ctor->tag, 0);
-    ASSERT_EQ(some->fields.size(), 1u);
-    expect_num(some->fields[0], 1.0);
+    ASSERT_EQ(some->fields().size(), 1u);
+    expect_num(some->fields()[0], 1.0);
 
     auto n = h.getGlobal("n");
     ASSERT_TRUE(n.has_value());

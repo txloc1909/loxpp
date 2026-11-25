@@ -8,7 +8,7 @@
 #include "vm_allocator.h"
 
 struct ObjClass : public Obj {
-    ObjString* name;
+    ObjString* const name;
 
     ObjClass(ObjString* n, VmAllocator<Entry> alloc)
         : Obj(ObjType::CLASS), name(n), m_methods(alloc) {}
@@ -47,7 +47,7 @@ inline bool isClass(const Value& v) {
 } // NOLINT
 
 struct ObjInstance : public Obj {
-    ObjClass* klass;
+    ObjClass* const klass;
 
     ObjInstance(ObjClass* k, VmAllocator<Entry> alloc)
         : Obj(ObjType::INSTANCE), klass(k), m_fields(alloc) {}
@@ -74,8 +74,8 @@ inline bool isInstance(const Value& v) {
 }
 
 struct ObjBoundMethod : public Obj {
-    Value receiver; // the instance this method is bound to
-    ObjClosure* method;
+    const Value receiver; // the instance this method is bound to
+    ObjClosure* const method;
 
     ObjBoundMethod(Value recv, ObjClosure* m)
         : Obj(ObjType::BOUND_METHOD), receiver(recv), method(m) {}

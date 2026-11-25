@@ -114,7 +114,7 @@ inline bool isObjUpvalue(Obj* o) { return isObjType(o, ObjType::UPVALUE); }
 inline ObjUpvalue* asObjUpvalue(Obj* o) { return static_cast<ObjUpvalue*>(o); }
 
 struct ObjClosure : public Obj {
-    ObjFunction* function;
+    ObjFunction* const function;
     int upvalueCount;
 
     explicit ObjClosure(ObjFunction* fn)
@@ -161,8 +161,8 @@ inline ObjNative* asObjNative(const Value& v) {
 }
 
 struct ObjBoundNative : public Obj {
-    Value receiver;
-    ObjNative* native;
+    const Value receiver;
+    ObjNative* const native;
     ObjBoundNative(Value recv, ObjNative* n)
         : Obj(ObjType::BOUND_NATIVE), receiver(recv), native(n) {}
 };

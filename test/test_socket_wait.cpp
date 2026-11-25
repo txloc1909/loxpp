@@ -1668,9 +1668,15 @@ TEST_F(SocketWaitTest, ATaskFoundOnlyThroughASideSurvivesACollection) {
     auto* srv = mm.create<ObjServer>(nullptr);
     mm.pushTempRoot(srv);
     const std::size_t withValues = mm.bytesAllocated;
-    sock->readHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
-    sock->writeHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
-    srv->acceptHolder = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    sock->setReadHolder(
+        mm.collector(),
+        mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm}));
+    sock->setWriteHolder(
+        mm.collector(),
+        mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm}));
+    srv->setAcceptHolder(
+        mm.collector(),
+        mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm}));
     const std::size_t withTasks = mm.bytesAllocated;
     ASSERT_GT(withTasks, withValues);
 
@@ -1678,9 +1684,9 @@ TEST_F(SocketWaitTest, ATaskFoundOnlyThroughASideSurvivesACollection) {
     EXPECT_EQ(mm.bytesAllocated, withTasks);
 
     // The same tasks with no side that finds them are garbage.
-    sock->readHolder = nullptr;
-    sock->writeHolder = nullptr;
-    srv->acceptHolder = nullptr;
+    sock->setReadHolder(mm.collector(), nullptr);
+    sock->setWriteHolder(mm.collector(), nullptr);
+    srv->setAcceptHolder(mm.collector(), nullptr);
     mm.collectGarbage();
     EXPECT_EQ(mm.bytesAllocated, withValues);
     mm.popTempRoot();

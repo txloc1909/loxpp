@@ -2890,11 +2890,11 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         ObjEnum* enumVal =
             m_mm.create<ObjEnum>(ctor, VmAllocator<Value>{&m_mm});
         m_mm.pushTempRoot(enumVal);
-        enumVal->fields.resize(static_cast<size_t>(argCount));
+        enumVal->resize(static_cast<size_t>(argCount));
         for (int i = argCount - 1; i >= 0; i--) {
-            enumVal->fields[static_cast<size_t>(i)] = pop();
+            enumVal->set(static_cast<size_t>(i), pop());
         }
-        enumVal->sendable = std::ranges::all_of(enumVal->fields, isMessage);
+        enumVal->sendable = std::ranges::all_of(enumVal->fields(), isMessage);
         m_mm.popTempRoot();
         pop(); // pop the ObjEnumCtor from the callee slot
         push(Value{static_cast<Obj*>(enumVal)});
@@ -3650,12 +3650,12 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         case IndexKind::Ok:
             break;
         }
-        if (static_cast<std::uint64_t>(idx) >= e->fields.size()) {
+        if (static_cast<std::uint64_t>(idx) >= e->fields().size()) {
             runtimeError("Enum field index %s out of range.",
                          stringify(indexVal).c_str());
             return OpResult::Fatal;
         }
-        push(e->fields[static_cast<size_t>(idx)]);
+        push(e->fields()[static_cast<size_t>(idx)]);
         return OpResult::OK;
     }
     if (isInstance(collectionVal)) {

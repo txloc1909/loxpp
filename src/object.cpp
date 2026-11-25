@@ -133,10 +133,10 @@ std::string stringifyObj(Obj* obj) {
         s += "::";
         s += std::string(e->ctor->ctorName->chars.data(),
                          e->ctor->ctorName->chars.size());
-        if (!e->fields.empty()) {
+        if (!e->fields().empty()) {
             s += "(";
             bool first = true;
-            for (auto& f : e->fields) {
+            for (auto& f : e->fields()) {
                 if (!first) {
                     s += ", ";
                 }

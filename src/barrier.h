@@ -36,6 +36,16 @@ inline Value nil() { return Value{Nil{}}; }
 
 inline Value refValue(Obj* o) { return o == nullptr ? Value{Nil{}} : Value{o}; }
 
+// A store into a field that holds one object pointer, for a type whose
+// object holds no allocator.
+template <typename T>
+inline void storeRef(Collector& c, Obj* owner, T*& slot, T* value) {
+    if (c.marking()) {
+        c.barrierField(owner, refValue(slot), refValue(value));
+    }
+    slot = value;
+}
+
 // A store into an entry of a Table that an object owns (the fields of an
 // Instance, the methods of a Class). Returns true when the key is new.
 inline bool tableSet(Collector* c, Obj* owner, Table& t, ObjString* key,
