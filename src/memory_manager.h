@@ -212,6 +212,7 @@ class MemoryManager : public VmAllocBase {
     // The collector reaches the roots, the foreign set and the intern table
     // of its heap through these calls and this friend declaration.
     friend class StwCollector;
+    friend class IncrementalCollector;
     // Calls markObject and markValue of the collector for each root: the
     // root callback, the compiler, the temp roots, the held objects, the
     // inbox targets and the batch that the drain took out.
@@ -224,8 +225,17 @@ class MemoryManager : public VmAllocBase {
     [[nodiscard]] bool foreignMarked(const Obj* obj) const;
     void markHeldRoots();
     void markInboxTargets();
+    // The roots that another thread can change while a mark runs: the held
+    // objects, the inbox targets and the batch of the drain. An incremental
+    // collector reads them again in its finish pause.
+    void markFinishRoots();
     void adoptReachedForeign();
-    void releaseUnreachedForeign();
+    // Drops the count on each foreign object that the cycle did not reach.
+    // With dropStrings, a String among them leaves the intern table first: a
+    // collector that does not scan the table (decision 4.7) removes the
+    // Strings of this heap when it frees them, and these are the others.
+    void releaseUnreachedForeign(bool dropStrings = false);
+    [[nodiscard]] std::size_t foreignCount() const { return m_foreign.size(); }
 
     // True when the allocation that is about to happen is a safe point at
     // which the collector has work. One compare of members of the heap.
@@ -237,7 +247,7 @@ class MemoryManager : public VmAllocBase {
     // state of the heap, so a lookup that finds a String (the common case)
     // pays one load, not three.
     void noteInternHit(ObjString* s) const {
-        if (m_poll.marking) {
+        if (m_poll.internBarrier) {
             m_collector->internHit(s);
         }
     }

@@ -173,6 +173,22 @@ class CoreHashMap {
         }
     }
 
+    // Calls fn for each live entry of the buckets [from, to), and returns the
+    // index of the first bucket that it did not visit. A collector that traces
+    // a large map in parts keeps this index between its steps.
+    template <typename F>
+    int forEachRange(int from, int to, F&& fn) const {
+        int cap = static_cast<int>(m_buckets.size());
+        int end = to < cap ? to : cap;
+        for (int i = from; i < end; ++i) {
+            const Entry& e = m_buckets[i];
+            if (!Policy::isEmpty(e) && !Policy::isTombstone(e)) {
+                fn(e);
+            }
+        }
+        return end < from ? from : end;
+    }
+
     // Mark live entries matching shouldRemove as tombstones.
     template <typename Pred>
     void removeIf(Pred shouldRemove) {

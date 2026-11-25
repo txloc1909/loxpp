@@ -161,6 +161,15 @@ void MemoryManager::setMarkRootsCallback(std::function<void()> cb) {
 
 void MemoryManager::setCurrentCompiler(Compiler* c) { m_currentCompiler = c; }
 
+void MemoryManager::markFinishRoots() {
+    markHeldRoots();
+    markInboxTargets();
+    for (const Envelope& env : m_draining) {
+        markObject(env.target);
+        markValue(env.msg);
+    }
+}
+
 void MemoryManager::markAllRoots() {
     if (m_markRoots) {
         m_markRoots();
@@ -279,7 +288,7 @@ void MemoryManager::adoptReachedForeign() {
     m_reachedForeign.clear();
 }
 
-void MemoryManager::releaseUnreachedForeign() {
+void MemoryManager::releaseUnreachedForeign(bool dropStrings) {
     std::vector<Obj*> dropped;
     for (auto it = m_foreign.begin(); it != m_foreign.end();) {
         if (it->second) {
@@ -287,6 +296,15 @@ void MemoryManager::releaseUnreachedForeign() {
         } else {
             dropped.push_back(it->first);
             it = m_foreign.erase(it);
+        }
+    }
+    if (dropStrings) {
+        // Before any release: the owner can free a String as soon as its count
+        // drops, and the table must not hold it by then.
+        for (Obj* obj : dropped) {
+            if (obj->type == ObjType::STRING) {
+                m_strings.del(static_cast<ObjString*>(obj));
+            }
         }
     }
     for (Obj* obj : dropped) {

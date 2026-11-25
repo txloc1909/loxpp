@@ -63,6 +63,16 @@ class Table {
     void forEach(F&& fn) const {
         m_map.forEach([&fn](const Entry& e) { fn(e.key, e.value); });
     }
+
+    // The number of buckets. It changes only when the table rehashes.
+    [[nodiscard]] int capacity() const { return m_map.capacity(); }
+    // fn(key, value) for each live entry of the buckets [from, to). Returns
+    // the first bucket that it did not visit.
+    template <typename F>
+    int forEachRange(int from, int to, F&& fn) const {
+        return m_map.forEachRange(
+            from, to, [&fn](const Entry& e) { fn(e.key, e.value); });
+    }
 };
 
 // hashString is defined inline in object.h; declared here for callers that

@@ -110,7 +110,9 @@ def main():
             if r.stdout.strip() != expect:
                 fail(f"{name}: printed {r.stdout.strip()!r}, arithmetic gives {expect}")
             collections = sum(
-                1 for line in open(trace) if line.startswith("gc cause=threshold")
+                1
+                for line in open(trace)
+                if line.startswith(("gc cause=threshold", "cycle cause=threshold"))
             )
             if collections < MIN_COLLECTIONS:
                 fail(f"{name}: {collections} collections, at least {MIN_COLLECTIONS} needed")

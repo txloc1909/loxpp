@@ -68,34 +68,10 @@ static const char* objTypeName(ObjType type) {
 }
 #endif
 
-static uint64_t monotonicNs() {
-    timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
-           static_cast<uint64_t>(ts.tv_nsec);
-}
+static uint64_t monotonicNs() { return gcMonotonicNs(); }
 
-// Trace line formats are documented in tools/gc_report.py. Worker N > 0
-// writes its own file, `<path>.w<N>`, so two heaps never share one.
 static std::FILE* openTraceFile(int workerNumber) {
-    const char* env = std::getenv("LOXPP_GC_TRACE");
-    if (env == nullptr || env[0] == '\0') {
-        return nullptr;
-    }
-    std::string path = env;
-    if (workerNumber > 0) {
-        path += ".w" + std::to_string(workerNumber);
-    }
-    std::FILE* f = std::fopen(path.c_str(), "w");
-    if (f == nullptr) {
-        std::fprintf(stderr, "LOXPP_GC_TRACE: cannot open '%s'\n",
-                     path.c_str());
-        return nullptr;
-    }
-    std::fprintf(f, "# loxpp-gc-trace v3\nstart t=%llu\n",
-                 static_cast<unsigned long long>(monotonicNs()));
-    std::fflush(f);
-    return f;
+    return openGcTraceFile(workerNumber);
 }
 
 StwCollector::StwCollector(MemoryManager& heap, PollState& poll,

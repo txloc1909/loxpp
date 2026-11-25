@@ -250,9 +250,10 @@ Span* SizeClassHeap::takeSpan(Kind kind, std::size_t cls) {
     s->freeHead = nullptr;
     s->bump = 0;
     s->used = 0;
-    s->slotSize = static_cast<std::uint32_t>(kClassSizes[cls]);
-    s->slots = t.slots[buffer][cls];
-    s->slotsOffset = t.slotsOffset[buffer][cls];
+    s->slotSize = static_cast<std::uint16_t>(kClassSizes[cls]);
+    s->slots = static_cast<std::uint16_t>(t.slots[buffer][cls]);
+    s->slotsOffset = static_cast<std::uint16_t>(t.slotsOffset[buffer][cls]);
+    s->sweepEpoch = m_sweepEpoch;
     s->reciprocal = t.reciprocal[cls];
     s->cls = static_cast<std::uint16_t>(cls);
     s->bitmapWords = static_cast<std::uint16_t>(t.words[buffer][cls]);
@@ -373,6 +374,14 @@ void SizeClassHeap::freeObject(void* p, bool committed) {
     }
     freeSlot(s, p);
     releaseIfEmpty(s);
+}
+
+void SizeClassHeap::clearAllMarks() {
+    for (Span* s = m_objectSpans; s != nullptr; s = s->objectNext) {
+        if (s->kind == static_cast<std::uint8_t>(Kind::Object)) {
+            std::memset(s->marks(), 0, s->bitmapWords * sizeof(std::uint64_t));
+        }
+    }
 }
 
 void SizeClassHeap::destroyAllObjects() {

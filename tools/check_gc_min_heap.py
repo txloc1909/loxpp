@@ -52,6 +52,7 @@ def main():
         with open(src, "w") as f:
             f.write(PROGRAM)
         env = {k: v for k, v in os.environ.items() if k != "LOXPP_STRESS_GC"}
+        env["LOXPP_GC"] = "stw"
         env["LOXPP_GC_TRACE"] = trace
         try:
             r = subprocess.run([binary, src], env=env, capture_output=True,
