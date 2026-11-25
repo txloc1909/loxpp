@@ -162,6 +162,14 @@ names GcLargeHeap GcStwCounts
 legs debug
 targets loxpp
 
+case the barrier table in the contract runs the test that checks it
+files docs/reference/gc-runtime-contract.md
+gates placement,native-unit
+labels -
+names GcBarrierTable
+legs debug
+targets -
+
 case a spec table script runs only the tables
 files tools/check_number_format.py
 gates placement,tables,native-unit
