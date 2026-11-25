@@ -552,6 +552,10 @@ void IncrementalCollector::endCycle() {
         }
     }
 #endif
+    writeCycleRecord(t1);
+}
+
+void IncrementalCollector::writeCycleRecord(std::uint64_t t1) {
     if (m_trace != nullptr) {
         const std::size_t objs = m_store.objectCount();
         std::fprintf(m_trace,
@@ -569,6 +573,13 @@ void IncrementalCollector::endCycle() {
 }
 
 void IncrementalCollector::abortCycle() {
+    if (m_phase != Phase::Idle && m_trace != nullptr) {
+        // The trace shows a cycle that a full collection cuts short as a cycle
+        // that ends here: its steps so far, an end step and a cycle record.
+        const std::uint64_t t = gcMonotonicNs();
+        logStep("end", t, t, 0);
+        writeCycleRecord(t);
+    }
     while (!m_gray.empty()) {
         m_gray.pop();
     }
@@ -606,8 +617,10 @@ void IncrementalCollector::collectNow(CollectCause cause) {
 }
 
 void IncrementalCollector::onIdle() {
-    if (m_phase != Phase::Idle) {
-        runToCompletion();
+    // The steps follow each other with no wait, and each has its own limit, so
+    // that the trace shows the work as steps and no step grows with the heap.
+    while (m_phase != Phase::Idle) {
+        runStep(0, kStepUnits);
     }
 }
 

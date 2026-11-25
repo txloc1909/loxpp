@@ -74,6 +74,8 @@ TOOLS = (
          lambda r: py("check_gc_trace.py") + [r[0]]),
     Tool("check_gc_trace_v3.py", 1,
          lambda r: py("check_gc_trace_v3.py") + [r[0]]),
+    Tool("check_gc_incremental.py", 1,
+         lambda r: py("check_gc_incremental.py") + [r[0]]),
     Tool("check_gc_stall.py", 1,
          lambda r: py("check_gc_stall.py") + [r[0]]),
     Tool("check_gc_large_heap.py", 1,

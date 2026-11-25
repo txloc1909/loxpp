@@ -165,6 +165,9 @@ def check_trace(binary, work):
         fail(f"{len(cycles)} cycles, at least 2 threshold cycles needed")
     if not steps:
         fail("no step records")
+    whole = [c for c in cycles if c["cause"] == "threshold"]
+    if len(whole) < 2:
+        fail("fewer than 2 threshold cycles")
     by_cycle = {}
     for x in steps:
         by_cycle.setdefault(x["cycle"], []).append(x)
@@ -174,13 +177,16 @@ def check_trace(binary, work):
     for n, (cid, c) in enumerate(zip(sorted(by_cycle), cycles), 1):
         xs = by_cycle[cid]
         kinds = [x["kind"] for x in xs]
-        if kinds.count("start") != 1 or kinds.count("finish") != 1 \
+        if kinds.count("start") != 1 or kinds.count("finish") > 1 \
                 or kinds.count("end") != 1:
-            fail(f"cycle {cid}: kinds {kinds[:6]}... need one start, finish, end")
+            fail(f"cycle {cid}: kinds {kinds[:6]}... need one start, one end, "
+                 "at most one finish")
         if kinds != sorted(kinds, key=lambda k: order[k]):
             fail(f"cycle {cid}: the steps are not in the order of a cycle")
-        if kinds.count("sweep") < 1:
-            fail(f"cycle {cid}: no sweep step")
+        # A cycle that a full collection cuts short has no finish and no
+        # sweep, so those are checked only for the cycles that have a sweep.
+        if "sweep" in kinds and "finish" not in kinds:
+            fail(f"cycle {cid}: a sweep with no finish pause")
         if c["steps"] != len(xs):
             fail(f"cycle {cid}: the record says {c['steps']} steps, "
                  f"{len(xs)} step records")

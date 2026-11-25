@@ -61,13 +61,13 @@ class IncrementalCollector final : public Collector {
     // the clock.
     static constexpr std::size_t kChunkUnits = 64;
     // The share of the time that the collector may use while a cycle runs.
-    static constexpr double kShare = 0.30;
+    static constexpr double kShare = 0.25;
     // A cycle starts when the heap reaches this factor of the heap after the
     // last cycle, and never below kMinHeap.
     static constexpr double kStartFactor = 1.5;
     // When the heap grows past this factor of its size at the start of the
     // cycle, the program no longer waits between steps.
-    static constexpr double kEmergencyFactor = 1.25;
+    static constexpr double kEmergencyFactor = 1.5;
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     // Bytes that the program allocates between two looks of the pacing.
     static constexpr std::size_t kPollBytes = 16 * 1024;
@@ -129,6 +129,7 @@ class IncrementalCollector final : public Collector {
 
     bool grayEmpty() const { return m_cur == nullptr && m_gray.empty(); }
     void endCycle();
+    void writeCycleRecord(std::uint64_t t1);
     void abortCycle();
     void runToCompletion();
     // One step of a paced cycle.
