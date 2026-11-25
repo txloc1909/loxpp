@@ -307,6 +307,32 @@ TEST_F(IncrementalTest, TaskClearMailboxKeepsTheOldMessages) {
     EXPECT_EQ(whiteAfterTheMark(), 0u);
 }
 
+// A receive moves each message that stays one place to the front. The tracer
+// has traced the first part of the mailbox, and the messages that move into
+// that part are not traced again unless the tracer moves its position.
+TEST_F(IncrementalTest, AReceiveWhileTheMailboxIsTracedLosesNoMessage) {
+    ObjTask* c = newTask();
+    constexpr int kMessages = 400;
+    for (int i = 0; i < kMessages; ++i) {
+        c->pushMessage(
+            ref(mm.makeString(("message " + std::to_string(i)).c_str())));
+    }
+    startWithRoot(c);
+    // One step of the mark traces the first part of the mailbox and no more.
+    EXPECT_FALSE(ic->markStep(1));
+    for (int i = 0; i < 50; ++i) {
+        c->popMessage();
+    }
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+    // The receive moves the messages that stay, so the next ones to leave
+    // are the right messages too.
+    for (int i = 50; i < kMessages; ++i) {
+        const Value m = c->popMessage();
+        EXPECT_EQ(std::string(asObjString(as<Obj*>(m))->chars),
+                  "message " + std::to_string(i));
+    }
+}
+
 TEST_F(IncrementalTest, ClosureSetUpvalueKeepsTheOldUpvalue) {
     ObjFunction* fn = mm.create<ObjFunction>();
     fn->upvalueCount = 1;

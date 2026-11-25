@@ -154,6 +154,8 @@ class IncrementalCollector final : public Collector {
     Obj* m_cur{nullptr};
     std::size_t m_curPos{0};
     int m_curCap{-1};
+    // A second position of the object in m_cur (a Task: its popped count).
+    std::uint64_t m_curAux{0};
     // Units of work done by the tracer and the roots, read as differences.
     std::size_t m_units{0};
     SizeClassHeap::Span* m_sweepCursor{nullptr};
@@ -161,7 +163,6 @@ class IncrementalCollector final : public Collector {
     // The pacing.
     std::uint64_t m_nextStepNs{0};
     std::size_t m_cycleStartBytes{0};
-    std::size_t m_pollBytes{0};
 
     // The cycle in progress.
     std::size_t m_cycleId{0};
@@ -177,9 +178,6 @@ class IncrementalCollector final : public Collector {
     std::int64_t m_cyclePauseNs{0};
     std::int64_t m_cycleMaxStepNs{0};
 #endif
-    // True while a collectNow runs the whole cycle with no program to wait
-    // for.
-    bool m_full{false};
 
     // The verifier. It runs at the end of each finish pause when it is on.
     bool m_verifyAtFinish{false};

@@ -1018,8 +1018,13 @@ struct ObjTask : public Obj {
             c->barrierElement(this, barrier::nil(), v);
         }
     }
+    // The count of the messages that left the front of the mailbox. A tracer
+    // that cuts the mailbox by index reads it to move its index (a pop shifts
+    // each message that stays, and its barrier sees only the one that goes).
+    [[nodiscard]] std::uint64_t poppedCount() const { return m_popped; }
     // The mailbox must not be empty.
     Value popMessage() {
+        ++m_popped;
         Value v = m_mailbox.front();
         Collector* c = collector();
         if (barrier::active(c)) {
@@ -1074,6 +1079,7 @@ struct ObjTask : public Obj {
 
     ObjCoroutine* m_co;
     std::deque<Value, VmAllocator<Value>> m_mailbox;
+    std::uint64_t m_popped{0};
     Value m_pendingValue;
     Value m_startArg;
     Value m_selectWant;

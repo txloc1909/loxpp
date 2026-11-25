@@ -327,7 +327,15 @@ void IncrementalCollector::traceChunk() {
             if (task->io().text != nullptr) {
                 e.markObject(task->io().text);
             }
+            m_curAux = task->poppedCount();
         }
+        // A receive since the last part moved each message that stays one
+        // place to the front, so the traced part is shorter by that count.
+        const std::uint64_t popped = task->poppedCount();
+        const std::uint64_t moved = popped - m_curAux;
+        m_curPos =
+            moved >= m_curPos ? 0 : m_curPos - static_cast<std::size_t>(moved);
+        m_curAux = popped;
         const auto& box = task->mailbox();
         const std::size_t n = box.size();
         const std::size_t end = std::min(n, m_curPos + kChunkUnits);
