@@ -32,9 +32,9 @@ changes this file.
 - `Collector` has the hooks of the write barrier (`barrierField`,
   `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
   and the read barrier of the intern table (`internHit`). They are empty for
-  `stw`, which never sets `PollState::marking`. Only `internHit` has callers
-  today (the lookups of the intern table). The runtime does not call the
-  store hooks yet.
+  `stw`, which never sets `PollState::marking`. The lookups of the intern
+  table call `internHit`. Each store of a reference into a heap object calls a
+  store hook, through a mutator of the object type (section 7).
 - There are 23 object types (`enum class ObjType`). These own OS handles
   and close them in their destructor: `ObjFile`, `ObjSocket`, `ObjServer`,
   `ObjProcess`. So the time of the sweep is the time when an unreachable

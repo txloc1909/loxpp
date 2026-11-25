@@ -4,7 +4,7 @@
 docs/reference/gc-runtime-contract.md, section 7, has a table. Each row names
 a heap object type, one of its members, the mutators that change it, the
 barrier hooks that those mutators run, and a status. This script reads the
-headers of the object types (src/*_objects.h, src/object.h) and checks that:
+headers of the object types and checks that:
 
   1. each object type has a row;
   2. each member that can hold a reference (a Value, an object pointer, a
@@ -20,7 +20,8 @@ headers of the object types (src/*_objects.h, src/object.h) and checks that:
      returns a non-const reference or pointer to a private member, except the
      functions in RAW_ACCESSORS (they have a row with the status exempt);
   8. each RAW_ACCESSORS function is called only in its allowed files;
-  9. const_cast does not appear in src/ outside the allowed files;
+  9. const_cast does not appear in the source tree, except a cast to a char
+    buffer or to an object pointer;
  10. isUnprotectedType (src/barrier.h) lists exactly the types that have a row
      with the status unprotected.
 
@@ -59,13 +60,9 @@ STATUSES = {"protected", "immutable", "exempt", "unprotected"}
 RAW_ACCESSORS = {
     "ObjTask::ioProgress": ["src/stdlib/net_api.cpp"],
 }
-# Each use here casts a char buffer or an object pointer, and writes no member
-# of a heap object.
-CONST_CAST_ALLOWED = {
-    "src/memory_manager.cpp",
-    "src/backend/qbe_frontend.cpp",
-    "src/stdlib/net_api.cpp",
-}
+# A cast to a char buffer or to an object pointer writes no member of a heap
+# object. Any other const_cast is refused: it could write a private member.
+CONST_CAST_OK = re.compile(r"const_cast<\s*(char|Obj)\s*\*\s*>")
 
 
 def fail(problems):
@@ -437,8 +434,9 @@ def check(root):
                 fn = acc.split("::")[1]
                 if re.search(r"[>.]%s\s*\(" % fn, text) and rel not in allowed:
                     problems.append(f"{rel} calls {fn}, and only {allowed} may")
-            if "const_cast" in text and rel not in CONST_CAST_ALLOWED:
-                problems.append(f"{rel} uses const_cast")
+            for cc in re.finditer(r"const_cast\s*<[^>]*>", text):
+                if not CONST_CAST_OK.match(cc.group(0)):
+                    problems.append(f"{rel} uses {cc.group(0)}")
 
     # 10. the unprotected set
     in_code = unprotected_types(barrier_text)
