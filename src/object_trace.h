@@ -25,8 +25,8 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::NATIVE:
         break;
     case ObjType::UPVALUE:
-        m.markValue(static_cast<ObjUpvalue*>(obj)->closed);
-        m.markObject(static_cast<ObjUpvalue*>(obj)->owner);
+        m.markValue(static_cast<ObjUpvalue*>(obj)->closed());
+        m.markObject(static_cast<ObjUpvalue*>(obj)->owner());
         break;
     case ObjType::FUNCTION: {
         auto* fn = static_cast<ObjFunction*>(obj);
@@ -40,7 +40,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::CLOSURE: {
         auto* cl = static_cast<ObjClosure*>(obj);
         m.markObject(cl->function);
-        for (auto* uv : cl->upvalues) {
+        for (auto* uv : cl->upvalues()) {
             m.markObject(uv);
         }
         break;
@@ -48,10 +48,10 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::CLASS: {
         auto* klass = static_cast<ObjClass*>(obj);
         m.markObject(klass->name);
-        if (klass->superclass) {
-            m.markObject(klass->superclass);
+        if (klass->superclass()) {
+            m.markObject(klass->superclass());
         }
-        klass->methods.forEach([&m](ObjString* k, Value v) {
+        klass->methods().forEach([&m](ObjString* k, Value v) {
             m.markObject(k);
             m.markValue(v);
         });
@@ -60,7 +60,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::INSTANCE: {
         auto* inst = static_cast<ObjInstance*>(obj);
         m.markObject(inst->klass);
-        inst->fields.forEach([&m](ObjString* k, Value v) {
+        inst->fields().forEach([&m](ObjString* k, Value v) {
             m.markObject(k);
             m.markValue(v);
         });
@@ -74,7 +74,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     }
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
-        for (auto& v : list->elements) {
+        for (auto& v : list->elements()) {
             m.markValue(v);
         }
         break;
@@ -85,15 +85,15 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::ITERATOR: {
         auto* it = static_cast<ObjIterator*>(obj);
         m.markValue(it->collection);
-        if (it->hasCurrent) {
-            m.markValue(it->current);
+        if (it->hasCurrent()) {
+            m.markValue(it->current());
         }
         break;
     }
     case ObjType::MAP: {
         auto* map = static_cast<ObjMap*>(obj);
         m.markObject(map->klass);
-        map->map.forEach([&m](const MapEntry& e) {
+        map->entries().forEach([&m](const MapEntry& e) {
             m.markValue(e.key);
             m.markValue(e.value);
         });

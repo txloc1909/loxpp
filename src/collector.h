@@ -90,6 +90,10 @@ class Collector {
     // test of a byte that the collector keeps ("is a mark in progress?").
     // The stop-the-world collector never sets it.
 
+    // True while a barrier hook does work. A mutator reads the old value of a
+    // store only when this is true (src/barrier.h).
+    [[nodiscard]] bool marking() const { return m_poll.marking; }
+
     void barrierField(Obj* container, const Value& oldv, const Value& newv) {
         if (m_poll.marking) {
             onStore(Store::Field, container, oldv, newv);

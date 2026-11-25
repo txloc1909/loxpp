@@ -670,21 +670,26 @@ InterpretResult VM::run(int stopAtFrameCount) {
                 uint8_t isLocal = readByte();
                 uint8_t index = readByte();
                 if (isLocal) {
-                    cl->upvalues[i] = m_rt.captureUpvalue(frame->slots + index);
+                    cl->setUpvalue(m_rt.m_mm.collector(),
+                                   static_cast<std::size_t>(i),
+                                   m_rt.captureUpvalue(frame->slots + index));
                 } else {
-                    cl->upvalues[i] = frame->closure->upvalues[index];
+                    cl->setUpvalue(m_rt.m_mm.collector(),
+                                   static_cast<std::size_t>(i),
+                                   frame->closure->upvalues()[index]);
                 }
             }
             break;
         }
         case Op::GET_UPVALUE: {
             uint8_t slot = readByte();
-            m_rt.push(*frame->closure->upvalues[slot]->location);
+            m_rt.push(frame->closure->upvalues()[slot]->get());
             break;
         }
         case Op::SET_UPVALUE: {
             uint8_t slot = readByte();
-            *frame->closure->upvalues[slot]->location = m_rt.peek(0);
+            frame->closure->upvalues()[slot]->set(m_rt.m_mm.collector(),
+                                                  m_rt.peek(0));
             break;
         }
         case Op::CLOSE_UPVALUE: {

@@ -783,10 +783,10 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         }
         for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
             ObjUpvalue* uv = co->openUpvalues[i];
-            uv->location = base + co->openUpvalueOffsets[i];
-            uv->owner = nullptr;
+            uv->setLocation(base + co->openUpvalueOffsets[i]);
+            uv->setOwner(m_mm.collector(), nullptr);
             ObjUpvalue** pp = &m_openUpvalues;
-            while (*pp != nullptr && (*pp)->location > uv->location) {
+            while (*pp != nullptr && (*pp)->location() > uv->location()) {
                 pp = &(*pp)->next;
             }
             uv->next = *pp;
@@ -959,26 +959,27 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     // here. Reserve both vectors first, while every upvalue is still a root,
     // so the loop itself cannot collect and free one mid-move.
     std::size_t openCount = 0;
-    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr && uv->location >= base;
-         uv = uv->next) {
+    for (ObjUpvalue* uv = m_openUpvalues;
+         uv != nullptr && uv->location() >= base; uv = uv->next) {
         ++openCount;
     }
     co->openUpvalueOffsets.reserve(openCount);
     co->openUpvalues.reserve(openCount);
-    while (m_openUpvalues != nullptr && m_openUpvalues->location >= base) {
+    while (m_openUpvalues != nullptr && m_openUpvalues->location() >= base) {
         ObjUpvalue* uv = m_openUpvalues;
         m_openUpvalues = uv->next;
         uv->next = nullptr;
-        co->openUpvalueOffsets.push_back(static_cast<int>(uv->location - base));
+        co->openUpvalueOffsets.push_back(
+            static_cast<int>(uv->location() - base));
         co->openUpvalues.push_back(uv);
-        uv->owner = co;
+        uv->setOwner(m_mm.collector(), co);
     }
     // Point the open upvalues at the snapshot's own stable storage so a
     // closure that escaped the coroutine still reads the captured cell. The
     // buffer does not move again while the coroutine is suspended.
     for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
-        co->openUpvalues[i]->location =
-            co->stack.data() + co->openUpvalueOffsets[i];
+        co->openUpvalues[i]->setLocation(co->stack.data() +
+                                         co->openUpvalueOffsets[i]);
     }
 
 #ifdef LOXPP_PROFILE
@@ -1050,8 +1051,7 @@ Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
     }
     pop();
     if (inner->state == CoroutineState::SUSPENDED) {
-        iter->current = result;
-        iter->hasCurrent = true;
+        iter->setCurrent(m_mm.collector(), result);
         push(from<bool>(true));
     } else {
         push(from<bool>(false));
@@ -1887,7 +1887,7 @@ void Runtime::checkWorkingSetEmpty(const WorkingSetMark& mark) const {
         m_frameCount != mark.frameCount ||
         m_handlerStack.size() != mark.handlerCount ||
         stackTop != mark.stackTop || !m_deferLists[mark.frameCount].empty() ||
-        (m_openUpvalues != nullptr && m_openUpvalues->location >= stackTop);
+        (m_openUpvalues != nullptr && m_openUpvalues->location() >= stackTop);
     if (left) {
         std::fprintf(stderr, "A task left its frames, handlers or stack in "
                              "the worker after it ran.\n");
@@ -2243,11 +2243,11 @@ Runtime::~Runtime() {
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
     ObjUpvalue* prev = nullptr;
     ObjUpvalue* cur = m_openUpvalues;
-    while (cur != nullptr && cur->location > local) {
+    while (cur != nullptr && cur->location() > local) {
         prev = cur;
         cur = cur->next;
     }
-    if (cur != nullptr && cur->location == local) {
+    if (cur != nullptr && cur->location() == local) {
         return cur;
     }
     ObjUpvalue* uv = m_mm.create<ObjUpvalue>(local);
@@ -2261,11 +2261,9 @@ ObjUpvalue* Runtime::captureUpvalue(Value* local) {
 }
 
 void Runtime::closeUpvalues(Value* last) {
-    while (m_openUpvalues != nullptr && m_openUpvalues->location >= last) {
+    while (m_openUpvalues != nullptr && m_openUpvalues->location() >= last) {
         ObjUpvalue* uv = m_openUpvalues;
-        uv->closed = *uv->location;
-        uv->location = &uv->closed;
-        uv->owner = nullptr;
+        uv->close(m_mm.collector());
         m_openUpvalues = uv->next;
     }
 }
@@ -2595,7 +2593,7 @@ Runtime::OpResult Runtime::callBoundNative(ObjBoundNative* bn, int argCount,
 
 bool Runtime::bindMethod(ObjClass* klass, ObjString* name) {
     Value method;
-    if (!klass->methods.get(name, method)) {
+    if (!klass->methods().get(name, method)) {
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return false;
     }
@@ -2759,7 +2757,7 @@ Runtime::tryBinaryMethod(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(left));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2775,7 +2773,7 @@ Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(left));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2791,7 +2789,7 @@ Runtime::tryReflectedBinaryMethod(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(right));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2813,7 +2811,7 @@ Runtime::tryReflectedBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(right));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2901,7 +2899,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         // Call init() if the class defines one.
         ObjString* initStr = m_mm.findString("init");
         Value initMethod;
-        if (initStr && klass->methods.get(initStr, initMethod)) {
+        if (initStr && klass->methods().get(initStr, initMethod)) {
             return invokeClosure(asObjClosure(as<Obj*>(initMethod)), argCount,
                                  stopAtFrameCount);
         }
@@ -2935,7 +2933,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
     if (isInstance(callee)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(callee));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Call)],
                 method)) {
             // The receiver already sits at stackTop[-argCount-1], which
@@ -2956,7 +2954,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
         // A field can shadow a method — check fields first.
         Value fieldVal;
-        if (instance->fields.get(name, fieldVal)) {
+        if (instance->fields().get(name, fieldVal)) {
             stackTop[-argCount - 1] = fieldVal;
             if (isClosure(fieldVal)) {
                 return invokeClosure(asObjClosure(as<Obj*>(fieldVal)), argCount,
@@ -2977,10 +2975,10 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
             Value dunderCall;
             if (isInstance(fieldVal) &&
                 asObjInstance(as<Obj*>(fieldVal))
-                    ->klass->methods.get(
-                        m_protocolNames[static_cast<std::size_t>(
-                            Protocol::Call)],
-                        dunderCall)) {
+                    ->klass->methods()
+                    .get(m_protocolNames[static_cast<std::size_t>(
+                             Protocol::Call)],
+                         dunderCall)) {
                 return opCall(argCount, stopAtFrameCount);
             }
             runtimeError("Can only call functions, classes and enums.");
@@ -2990,7 +2988,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         // stackTop[-argCount-1], which becomes slot 0 (= this) of the new
         // frame.
         Value method;
-        if (!instance->klass->methods.get(name, method)) {
+        if (!instance->klass->methods().get(name, method)) {
             runtimeError("Undefined property '%s'.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3011,7 +3009,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 return OpResult::Fatal;
             }
             Value val = peek(0); // still on stack — GC-safe during push_back
-            list->elements.push_back(val);
+            list->push(val);
             pop(); // arg
             pop(); // receiver
             push(from<Nil>(Nil{}));
@@ -3022,13 +3020,12 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 runtimeError("'pop' expects 0 arguments but got %d.", argCount);
                 return OpResult::Fatal;
             }
-            if (list->elements.empty()) {
+            if (list->elements().empty()) {
                 return fromThrow(raiseThrowableError(
                     "EmptyListError", "Cannot pop from an empty list.",
                     stopAtFrameCount));
             }
-            Value val = list->elements.back();
-            list->elements.pop_back();
+            Value val = list->pop();
             pop(); // receiver
             push(val);
             return OpResult::OK;
@@ -3040,11 +3037,11 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 return OpResult::Fatal;
             }
             Value target = peek(0);
-            auto& elems = list->elements;
+            const auto& elems = list->elements();
             bool found = false;
             for (int i = 0; i < static_cast<int>(elems.size()); i++) {
                 if (elems[i] == target) {
-                    elems.erase(elems.begin() + i);
+                    list->eraseAt(static_cast<std::size_t>(i));
                     found = true;
                     break;
                 }
@@ -3063,7 +3060,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isFile(receiver)) {
         Value method;
-        if (!m_fileClass->methods.get(name, method)) {
+        if (!m_fileClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on file.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3072,7 +3069,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isMap(receiver)) {
         Value method;
-        if (!m_mapClass->methods.get(name, method)) {
+        if (!m_mapClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on map.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3081,7 +3078,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isSocket(receiver)) {
         Value method;
-        if (!m_socketClass->methods.get(name, method)) {
+        if (!m_socketClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on socket.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3091,7 +3088,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isServer(receiver)) {
         Value method;
-        if (!m_serverClass->methods.get(name, method)) {
+        if (!m_serverClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on server.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3101,7 +3098,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isProcess(receiver)) {
         Value method;
-        if (!m_processClass->methods.get(name, method)) {
+        if (!m_processClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on process.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3111,7 +3108,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isCoroutine(receiver)) {
         Value method;
-        if (!m_coroutineClass->methods.get(name, method)) {
+        if (!m_coroutineClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on coroutine.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3142,7 +3139,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isFile(peek(0))) {
         Value method;
-        if (!m_fileClass->methods.get(name, method)) {
+        if (!m_fileClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on file.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3155,7 +3152,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isMap(peek(0))) {
         Value method;
-        if (!m_mapClass->methods.get(name, method)) {
+        if (!m_mapClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on map.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3168,7 +3165,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isSocket(peek(0))) {
         Value method;
-        if (!m_socketClass->methods.get(name, method)) {
+        if (!m_socketClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on socket.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3181,7 +3178,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isServer(peek(0))) {
         Value method;
-        if (!m_serverClass->methods.get(name, method)) {
+        if (!m_serverClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on server.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3194,7 +3191,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isProcess(peek(0))) {
         Value method;
-        if (!m_processClass->methods.get(name, method)) {
+        if (!m_processClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on process.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3207,7 +3204,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isCoroutine(peek(0))) {
         Value method;
-        if (!m_coroutineClass->methods.get(name, method)) {
+        if (!m_coroutineClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on coroutine.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3224,7 +3221,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(peek(0)));
     Value value;
-    if (instance->fields.get(name, value)) {
+    if (instance->fields().get(name, value)) {
         pop(); // instance
         push(value);
         return OpResult::OK;
@@ -3247,7 +3244,7 @@ Runtime::OpResult Runtime::opSuperInvoke(ObjString* name, int argCount,
                                          int stopAtFrameCount) {
     ObjClass* superclass = asObjClass(as<Obj*>(pop()));
     Value method;
-    if (!superclass->methods.get(name, method)) {
+    if (!superclass->methods().get(name, method)) {
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return OpResult::Fatal;
     }
@@ -3263,8 +3260,8 @@ Runtime::OpResult Runtime::opInherit() {
     }
     ObjClass* superclass = asObjClass(as<Obj*>(superVal));
     ObjClass* subclass = asObjClass(as<Obj*>(peek(0)));
-    subclass->methods.addAll(superclass->methods);
-    subclass->superclass = superclass;
+    subclass->inheritMethods(*superclass);
+    subclass->setSuperclass(superclass);
     pop(); // pop subclass; superclass stays as "super" local
     return OpResult::OK;
 }
@@ -3277,10 +3274,10 @@ bool Runtime::mapKeyValid(const Value& v) const {
     // resolves a collision (the class defines equality for it).
     ObjInstance* inst = asObjInstance(as<Obj*>(v));
     Value ignored;
-    return inst->klass->methods.get(
+    return inst->klass->methods().get(
                m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
                ignored) &&
-           inst->klass->methods.get(
+           inst->klass->methods().get(
                m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
                ignored);
 }
@@ -3318,7 +3315,7 @@ std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
     }
     ObjInstance* inst = asObjInstance(as<Obj*>(key));
     Value method;
-    if (!inst->klass->methods.get(
+    if (!inst->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
             method)) {
         // mapKeyValid() rejects this before a hash is asked for; keep a
@@ -3373,7 +3370,7 @@ bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
     if (isInstance(stored)) {
         ObjInstance* inst = asObjInstance(as<Obj*>(stored));
         Value method;
-        if (inst->klass->methods.get(
+        if (inst->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
                 method)) {
             push(stored);
@@ -3633,11 +3630,11 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
     if (isList(collectionVal)) {
         auto* list = asObjList(as<Obj*>(collectionVal));
         int idx = 0;
-        if (auto err = checkSequenceIndex(indexVal, list->elements.size(),
+        if (auto err = checkSequenceIndex(indexVal, list->elements().size(),
                                           "List", stopAtFrameCount, &idx)) {
             return *err;
         }
-        push(list->elements[idx]);
+        push(list->elements()[idx]);
         return OpResult::OK;
     }
     if (isString(collectionVal)) {
@@ -3694,7 +3691,7 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
     if (isInstance(collectionVal)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(collectionVal));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::IndexGet)],
                 method)) {
             // Receiver is the collection, argument is the index.
@@ -3732,7 +3729,7 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
     if (isInstance(listVal)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(listVal));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::IndexSet)],
                 method)) {
             // Receiver is the collection, arguments are the index and the
@@ -3753,11 +3750,11 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
     }
     auto* list = asObjList(as<Obj*>(listVal));
     int idx = 0;
-    if (auto err = checkSequenceIndex(indexVal, list->elements.size(), "List",
+    if (auto err = checkSequenceIndex(indexVal, list->elements().size(), "List",
                                       stopAtFrameCount, &idx)) {
         return *err;
     }
-    list->elements[idx] = val;
+    list->set(static_cast<std::size_t>(idx), val);
     push(val); // assignment is an expression; its value is the assigned value
     return OpResult::OK;
 }
@@ -3768,7 +3765,7 @@ Runtime::OpResult Runtime::opGetIter(int stopAtFrameCount) {
     if (isInstance(iterable)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(iterable));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Iter)],
                 method)) {
             // Receiver is the iterable. The method's result must be a
@@ -3843,7 +3840,7 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
     bool has;
     if (isList(it->collection)) {
         has = it->index <
-              (int)asObjList(as<Obj*>(it->collection))->elements.size();
+              (int)asObjList(as<Obj*>(it->collection))->elements().size();
     } else if (isString(it->collection)) {
         has = it->index <
               (int)asObjString(as<Obj*>(it->collection))->chars.size();
@@ -3855,11 +3852,11 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
         }
         // Scan forward from current index for the next occupied bucket.
         int i = it->index;
-        while (i < map->map.capacity() &&
-               map->map.entryAt(i)->state != MapSlot::OCCUPIED) {
+        while (i < map->entries().capacity() &&
+               map->entries().entryAt(i)->state != MapSlot::OCCUPIED) {
             ++i;
         }
-        has = i < map->map.capacity();
+        has = i < map->entries().capacity();
     } else if (isCoroutine(it->collection)) {
         // The resume is what decides whether an element exists: a coroutine
         // that returns instead of yielding ends the loop. Cache the yielded
@@ -3881,8 +3878,7 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
                 return OpResult::Stop;
             }
             if (co->state == CoroutineState::SUSPENDED) {
-                it->current = yielded;
-                it->hasCurrent = true;
+                it->setCurrent(m_mm.collector(), yielded);
                 has = true;
             } else {
                 has = false;
@@ -3905,7 +3901,7 @@ Runtime::OpResult Runtime::opIterNext() {
     }
     ObjIterator* it = asObjIterator(as<Obj*>(top));
     if (isList(it->collection)) {
-        push(asObjList(as<Obj*>(it->collection))->elements[it->index++]);
+        push(asObjList(as<Obj*>(it->collection))->elements()[it->index++]);
     } else if (isString(it->collection)) {
         char ch = asObjString(as<Obj*>(it->collection))->chars[it->index++];
         // ObjIterator is GC-rooted at iterSlot on the stack; GC is
@@ -3920,20 +3916,18 @@ Runtime::OpResult Runtime::opIterNext() {
         if (mapIterationInvalidated(map, it->expectedVersion)) {
             return OpResult::Fatal;
         }
-        while (it->index < map->map.capacity() &&
-               map->map.entryAt(it->index)->state != MapSlot::OCCUPIED) {
+        while (it->index < map->entries().capacity() &&
+               map->entries().entryAt(it->index)->state != MapSlot::OCCUPIED) {
             ++it->index;
         }
         // ITER_HAS_NEXT was true, so an occupied slot must exist.
-        push(map->map.entryAt(it->index)->key);
+        push(map->entries().entryAt(it->index)->key);
         ++it->index;
     } else if (isCoroutine(it->collection)) {
         // ITER_HAS_NEXT resumed the coroutine and cached the value it yielded;
         // no second resume happens here. Clear the cache so a value that
         // escaped the loop body's last iteration is not retained.
-        Value v = it->current;
-        it->current = Value{Nil{}};
-        it->hasCurrent = false;
+        Value v = it->takeCurrent(m_mm.collector());
         push(v);
     } else {
         runtimeError("BUG: ObjIterator::collection has unexpected type.");
@@ -3994,7 +3988,7 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
         return OpResult::Fatal;
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
-    instance->fields.set(name, peek(0));
+    instance->setField(name, peek(0));
     Value val = pop(); // value
     pop();             // instance
     push(val);         // assignment is an expression
@@ -4004,7 +3998,7 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
 void Runtime::opDefineMethod(ObjString* name) {
     Value method = peek(0);                          // ObjClosure* on top
     ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
-    klass->methods.set(name, method);
+    klass->setMethod(name, method);
     pop(); // pop closure; leave class on stack for next method
 }
 
@@ -4028,9 +4022,9 @@ void Runtime::opDeferRecord(int argCount) {
 Runtime::OpResult Runtime::opBuildList(int count) {
     ObjList* list = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
     m_mm.pushTempRoot(list); // protect across resize's potential GC
-    list->elements.resize(static_cast<std::size_t>(count));
+    list->resize(static_cast<std::size_t>(count));
     for (int i = count - 1; i >= 0; i--) {
-        list->elements[static_cast<std::size_t>(i)] = pop();
+        list->set(static_cast<std::size_t>(i), pop());
     }
     m_mm.popTempRoot();
     push(Value{static_cast<Obj*>(list)});
@@ -4074,7 +4068,7 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         if (isInstance(seqVal)) {
             ObjInstance* instance = asObjInstance(as<Obj*>(seqVal));
             Value method;
-            if (instance->klass->methods.get(
+            if (instance->klass->methods().get(
                     m_protocolNames[static_cast<std::size_t>(Protocol::Slice)],
                     method)) {
                 // The stack is already [seq, start, end]: the receiver sits
@@ -4092,7 +4086,7 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
     // exact for every Int, so a bound above every reachable index yields the
     // whole tail and never a truncated one.
     const size_t n = isList(seqVal)
-                         ? asObjList(as<Obj*>(seqVal))->elements.size()
+                         ? asObjList(as<Obj*>(seqVal))->elements().size()
                          : asObjString(as<Obj*>(seqVal))->chars.size();
     auto readBound = [&](const Value& value, size_t* out) -> bool {
         Int bound = 0;
@@ -4129,10 +4123,10 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         ObjList* result = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
         // seqVal is still at peek(2), so it is GC-rooted on the stack.
         m_mm.pushTempRoot(result);
-        result->elements.resize(count);           // may GC
+        result->resize(count);                    // may GC
         auto* src = asObjList(as<Obj*>(peek(2))); // re-read after potential GC
         for (size_t i = 0; i < count; i++) {
-            result->elements[i] = src->elements[s + i];
+            result->set(i, src->elements()[s + i]);
         }
         m_mm.popTempRoot();
         pop();
@@ -4191,7 +4185,7 @@ void Runtime::opInstanceof(ObjString* className) {
             ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
             const ObjClass* found = walkChain<ObjClass>(
                 klass, [target](const ObjClass* k) { return k == target; },
-                [](const ObjClass* k) { return k->superclass; });
+                [](const ObjClass* k) { return k->superclass(); });
             result = found != nullptr;
         }
     }
@@ -4435,7 +4429,7 @@ Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
     if (isInstance(operand)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(operand));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Neg)],
                 method)) {
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
@@ -4525,7 +4519,7 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
     if (isList(seq)) {
         auto* list = asObjList(as<Obj*>(seq));
         bool found = false;
-        for (const auto& v : list->elements) {
+        for (const auto& v : list->elements()) {
             if (v == elem) {
                 found = true;
                 break;
@@ -4567,7 +4561,7 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
     if (isInstance(seq)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(seq));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Contains)],
                 method)) {
             // __contains__ lives on the container, which is the RIGHT operand
@@ -4589,7 +4583,8 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     Value operand = peek(0);
     if (isList(operand)) {
         auto* list = asObjList(as<Obj*>(operand));
-        stackTop[-1] = from<Number>(static_cast<double>(list->elements.size()));
+        stackTop[-1] =
+            from<Number>(static_cast<double>(list->elements().size()));
         return OpResult::OK;
     }
     if (isString(operand)) {
@@ -4599,13 +4594,14 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     }
     if (isMap(operand)) {
         auto* map = asObjMap(as<Obj*>(operand));
-        stackTop[-1] = from<Number>(static_cast<double>(map->map.count()));
+        stackTop[-1] =
+            from<Number>(static_cast<double>(map->entries().count()));
         return OpResult::OK;
     }
     if (isInstance(operand)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(operand));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Len)],
                 method)) {
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
@@ -4656,7 +4652,7 @@ std::string Runtime::stringifyInstanceStr(ObjInstance* instance) {
         return "...";
     }
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(Protocol::Str)], method)) {
         return std::string(instance->klass->name->chars.data(),
                            instance->klass->name->chars.size()) +

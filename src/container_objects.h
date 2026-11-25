@@ -1,5 +1,6 @@
 #pragma once
 
+#include "barrier.h"
 #include "class_objects.h"
 #include "core_hash_map.h"
 #include "object.h"
@@ -22,10 +23,68 @@
 #endif
 
 struct ObjList : public Obj {
-    VmVector<Value> elements;
-
     explicit ObjList(VmAllocator<Value> alloc)
-        : Obj(ObjType::LIST), elements(alloc) {}
+        : Obj(ObjType::LIST), m_elements(alloc) {}
+
+    [[nodiscard]] const VmVector<Value>& elements() const { return m_elements; }
+
+    // The mutators. Each one runs the write barrier (src/barrier.h). A call
+    // that grows the buffer can collect, so the caller roots the list and the
+    // value first. The barrier of a growing call runs after the growth.
+    void push(const Value& v) {
+        m_elements.push_back(v);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierElement(this, barrier::nil(), v);
+        }
+    }
+    // The list must not be empty.
+    Value pop() {
+        Value last = m_elements.back();
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierElement(this, last, barrier::nil());
+        }
+        m_elements.pop_back();
+        return last;
+    }
+    void set(std::size_t index, const Value& v) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierElement(this, m_elements[index], v);
+        }
+        m_elements[index] = v;
+    }
+    // A new slot is Nil. A removed slot goes to the barrier first.
+    void resize(std::size_t count) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (std::size_t i = count; i < m_elements.size(); ++i) {
+                c->barrierElement(this, m_elements[i], barrier::nil());
+            }
+        }
+        m_elements.resize(count);
+    }
+    // Each slot from `index` on gets the value of the next slot, so the
+    // barrier sees each of those stores.
+    void eraseAt(std::size_t index) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (std::size_t i = index; i < m_elements.size(); ++i) {
+                c->barrierElement(this, m_elements[i],
+                                  i + 1 < m_elements.size() ? m_elements[i + 1]
+                                                            : barrier::nil());
+            }
+        }
+        m_elements.erase(m_elements.begin() +
+                         static_cast<std::ptrdiff_t>(index));
+    }
+
+  private:
+    [[nodiscard]] Collector* collector() const {
+        return barrier::collectorOf(m_elements.get_allocator());
+    }
+    VmVector<Value> m_elements;
 };
 
 inline bool isObjList(Obj* o) { return isObjType(o, ObjType::LIST); }
@@ -33,23 +92,49 @@ inline ObjList* asObjList(Obj* o) { return static_cast<ObjList*>(o); }
 inline bool isList(const Value& v) { return isValueOfType<ObjType::LIST>(v); }
 
 struct ObjIterator : public Obj {
-    // ObjList*, ObjString*, ObjMap*, or ObjCoroutine* being iterated.
-    Value collection;
+    // ObjList*, ObjString*, ObjMap*, or ObjCoroutine* being iterated. Set once
+    // when the iterator is made.
+    const Value collection;
     int index; // current cursor position
     // Map structural version recorded at GET_ITER; -1 unless collection is a
     // Map. Any insert or erase during map iteration is an error, even when a
     // paired erase and insert restore the net size.
     int expectedVersion;
-    // Coroutine mode only, and meaningful while hasCurrent is true: the value
-    // ITER_HAS_NEXT resumed out of the coroutine, cached for ITER_NEXT to
-    // push. The resume happens at has-next time because its outcome is what
-    // decides whether another element exists at all.
-    Value current;
-    bool hasCurrent{false};
 
     ObjIterator(Value coll, int idx = 0, int expected = -1)
         : Obj(ObjType::ITERATOR), collection(coll), index(idx),
-          expectedVersion(expected), current{Nil{}} {}
+          expectedVersion(expected), m_current{Nil{}} {}
+
+    // Coroutine mode only, and meaningful while hasCurrent() is true: the
+    // value ITER_HAS_NEXT resumed out of the coroutine, cached for ITER_NEXT
+    // to push. The resume happens at has-next time because its outcome is what
+    // decides whether another element exists at all.
+    [[nodiscard]] const Value& current() const { return m_current; }
+    [[nodiscard]] bool hasCurrent() const { return m_hasCurrent; }
+
+    // The mutators. Each one runs the write barrier (src/barrier.h).
+    void setCurrent(Collector& c, const Value& v) {
+        if (c.marking()) {
+            c.barrierField(this, m_hasCurrent ? m_current : barrier::nil(), v);
+        }
+        m_current = v;
+        m_hasCurrent = true;
+    }
+    // Gives the cached value to the caller and clears it.
+    Value takeCurrent(Collector& c) {
+        Value v = m_current;
+        if (c.marking()) {
+            c.barrierField(this, m_hasCurrent ? v : barrier::nil(),
+                           barrier::nil());
+        }
+        m_current = Value{Nil{}};
+        m_hasCurrent = false;
+        return v;
+    }
+
+  private:
+    Value m_current;
+    bool m_hasCurrent{false};
 };
 
 inline bool isObjIterator(Obj* o) { return isObjType(o, ObjType::ITERATOR); }
@@ -227,8 +312,9 @@ struct MapPolicy {
 };
 
 struct ObjMap : public Obj {
+    using Entries = CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>>;
+
     ObjClass* klass; // shared s_mapClass, for method dispatch
-    CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>> map;
     // Structural version, bumped by mapSet on a new key and by mapDel on a
     // real erase only. Overwrites and misses leave it alone. Plain int packs
     // with CoreHashMap's own counts; wrap needs 2B changes in one loop.
@@ -244,7 +330,9 @@ struct ObjMap : public Obj {
     using KeyEq = std::function<bool(const Value&, const Value&)>;
 
     ObjMap(ObjClass* k, VmAllocator<MapEntry> alloc)
-        : Obj(ObjType::MAP), klass(k), map(alloc) {}
+        : Obj(ObjType::MAP), klass(k), m_map(alloc) {}
+
+    [[nodiscard]] const Entries& entries() const { return m_map; }
 
     // Scalar/string path: identity equality, hash computed with hashValue().
     // Returns true if key was newly inserted (false = update).
@@ -264,6 +352,16 @@ struct ObjMap : public Obj {
                       Value& out) const;
     bool mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq,
                       bool& eqFailed);
+
+  private:
+    [[nodiscard]] Collector* collector() const {
+        return barrier::collectorOf(m_map.allocator());
+    }
+    // A removed or overwritten entry. The key and the value go to the barrier
+    // in two calls, because a hook reports one old value and one new value.
+    void barrierRemoved(Collector* c, const MapEntry& old);
+
+    Entries m_map;
 };
 
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }

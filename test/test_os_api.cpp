@@ -66,7 +66,7 @@ TEST_F(OsApiTest, Args_EmptyByDefault) {
     ASSERT_EQ(h.run("args();"), InterpretResult::OK);
     ASSERT_TRUE(isList(h.lastResult()));
     auto* list = asObjList(as<Obj*>(h.lastResult()));
-    EXPECT_EQ(list->elements.size(), 0);
+    EXPECT_EQ(list->elements().size(), 0);
 }
 
 TEST_F(OsApiTest, Args_ReturnsProgramArgs) {
@@ -75,10 +75,10 @@ TEST_F(OsApiTest, Args_ReturnsProgramArgs) {
     ASSERT_EQ(h.run("args();"), InterpretResult::OK);
     ASSERT_TRUE(isList(h.lastResult()));
     auto* list = asObjList(as<Obj*>(h.lastResult()));
-    ASSERT_EQ(list->elements.size(), 3);
-    EXPECT_EQ(stringify(list->elements[0]), "alpha");
-    EXPECT_EQ(stringify(list->elements[1]), "beta");
-    EXPECT_EQ(stringify(list->elements[2]), "3");
+    ASSERT_EQ(list->elements().size(), 3);
+    EXPECT_EQ(stringify(list->elements()[0]), "alpha");
+    EXPECT_EQ(stringify(list->elements()[1]), "beta");
+    EXPECT_EQ(stringify(list->elements()[2]), "3");
 }
 
 // ---------------------------------------------------------------------------

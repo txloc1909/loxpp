@@ -10,8 +10,14 @@
 //   vm_allocator.h → (nothing)
 //   object.h       → vm_allocator.h
 //   memory_manager.h → object.h, table.h → vm_allocator.h
+class Collector;
+
 struct VmAllocBase {
     std::size_t bytesAllocated{0};
+    // The collector of the heap. A mutator of an object (src/barrier.h) finds
+    // it here, through the allocator of the object's own container, so a store
+    // needs no extra argument. Null for an allocator that has no collector.
+    Collector* barrierCollector{nullptr};
     virtual void* rawAlloc(std::size_t bytes) {
         bytesAllocated += bytes;
         return ::operator new(bytes);

@@ -221,11 +221,11 @@ TEST(RtCallCompiled, ClosesUpvaluesCapturedOverItsOwnFrameOnReturn) {
 
     EXPECT_EQ(status, static_cast<int>(Runtime::OpResult::OK));
     ASSERT_NE(g_capturedUpvalue, nullptr);
-    EXPECT_EQ(g_capturedUpvalue->location, &g_capturedUpvalue->closed)
+    EXPECT_EQ(g_capturedUpvalue->location(), &g_capturedUpvalue->closed())
         << "the upvalue must be closed before callCompiled pops the frame, "
            "or a later stack reuse silently corrupts the captured value";
-    ASSERT_TRUE(is<Number>(g_capturedUpvalue->closed));
-    EXPECT_EQ(as<Number>(g_capturedUpvalue->closed), 42.0);
+    ASSERT_TRUE(is<Number>(g_capturedUpvalue->closed()));
+    EXPECT_EQ(as<Number>(g_capturedUpvalue->closed()), 42.0);
 }
 
 // R2 (blocking, PR #473 review round 1): pins down the return-value
@@ -522,9 +522,9 @@ TEST(RtCapiClosureWrappers, NewClosureAllocatesWithEveryUpvalueSlotNull) {
     ASSERT_TRUE(isClosure(closureVal));
     ObjClosure* closure = asObjClosure(closureVal);
     EXPECT_EQ(closure->function, fn);
-    ASSERT_EQ(closure->upvalues.size(), 2u);
-    EXPECT_EQ(closure->upvalues[0], nullptr);
-    EXPECT_EQ(closure->upvalues[1], nullptr);
+    ASSERT_EQ(closure->upvalues().size(), 2u);
+    EXPECT_EQ(closure->upvalues()[0], nullptr);
+    EXPECT_EQ(closure->upvalues()[1], nullptr);
 }
 
 TEST(RtCapiClosureWrappers, ConstantAtReadsFromTheClosuresOwnFunction) {
@@ -577,8 +577,8 @@ TEST(RtCapiClosureWrappers, CaptureLocalUpvalueStoresARealUpvalue) {
     Value* localSlot = rt.top() - 1;
     rt_capture_local_upvalue(&rt, closureVal, 0, localSlot);
 
-    ASSERT_NE(closure->upvalues[0], nullptr);
-    EXPECT_EQ(closure->upvalues[0]->location, localSlot);
+    ASSERT_NE(closure->upvalues()[0], nullptr);
+    EXPECT_EQ(closure->upvalues()[0]->location(), localSlot);
 }
 
 TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
@@ -593,7 +593,7 @@ TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
 
     rt.push(Value{3.0});
     ObjUpvalue* uv = rt.captureUpvalue(rt.top() - 1);
-    parent->upvalues[0] = uv;
+    parent->setUpvalue(rt.memoryManager().collector(), 0, uv);
 
     ObjFunction* childFn = rt.memoryManager().create<ObjFunction>();
     rt.memoryManager().pushTempRoot(static_cast<Obj*>(childFn));
@@ -605,7 +605,7 @@ TEST(RtCapiClosureWrappers, ForwardUpvalueCopiesThePointerNotTheValue) {
 
     rt_forward_upvalue(&rt, childVal, 0, parentVal, 0);
 
-    EXPECT_EQ(child->upvalues[0], uv);
+    EXPECT_EQ(child->upvalues()[0], uv);
 }
 
 TEST(RtCapiClosureWrappers, GetAndSetUpvalueRoundTripThroughTheSameCell) {
@@ -619,7 +619,8 @@ TEST(RtCapiClosureWrappers, GetAndSetUpvalueRoundTripThroughTheSameCell) {
     Value closureVal{static_cast<Obj*>(closure)};
 
     rt.push(Value{1.0});
-    closure->upvalues[0] = rt.captureUpvalue(rt.top() - 1);
+    closure->setUpvalue(rt.memoryManager().collector(), 0,
+                        rt.captureUpvalue(rt.top() - 1));
 
     rt_set_upvalue(&rt, closureVal, 0, Value{9.0});
     Value read = rt_get_upvalue(&rt, closureVal, 0);
@@ -643,13 +644,13 @@ TEST(RtCapiClosureWrappers, CloseUpvaluesClosesEveryOpenCellAtOrAboveLast) {
     rt.push(Value{5.0});
     Value* slot = rt.top() - 1;
     ObjUpvalue* uv = rt.captureUpvalue(slot);
-    closure->upvalues[0] = uv;
+    closure->setUpvalue(rt.memoryManager().collector(), 0, uv);
 
     rt_close_upvalues(&rt, slot);
 
-    EXPECT_EQ(uv->location, &uv->closed);
-    ASSERT_TRUE(is<Number>(uv->closed));
-    EXPECT_EQ(as<Number>(uv->closed), 5.0);
+    EXPECT_EQ(uv->location(), &uv->closed());
+    ASSERT_TRUE(is<Number>(uv->closed()));
+    EXPECT_EQ(as<Number>(uv->closed()), 5.0);
 }
 
 // ===========================================================================

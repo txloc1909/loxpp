@@ -1402,10 +1402,10 @@ TEST_F(StackOverflowTest,
     ObjList* ran = asObjList(as<Obj*>(*ranVal));
     // The deepest frame (whichever one first hit the reserve boundary) drains
     // first, so its recorded depth is the list's first (highest) entry.
-    ASSERT_FALSE(ran->elements.empty());
-    for (std::size_t idx = 1; idx < ran->elements.size(); ++idx) {
-        EXPECT_EQ(as<Number>(ran->elements[idx - 1]) - 1,
-                  as<Number>(ran->elements[idx]))
+    ASSERT_FALSE(ran->elements().empty());
+    for (std::size_t idx = 1; idx < ran->elements().size(); ++idx) {
+        EXPECT_EQ(as<Number>(ran->elements()[idx - 1]) - 1,
+                  as<Number>(ran->elements()[idx]))
             << "defers must run in LIFO unwind order (deepest frame first), "
                "with no frame's defer skipped, at list index "
             << idx;

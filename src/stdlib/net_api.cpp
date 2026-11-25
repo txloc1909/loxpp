@@ -836,7 +836,7 @@ static Value finish(const WaitingCall& io, IoOutcome& out) {
         ObjString* str =
             mm->makeString(std::string_view(data).substr(start, end - start));
         mm->pushTempRoot(str);
-        list->elements.emplace_back(static_cast<Obj*>(str));
+        list->push(Value{static_cast<Obj*>(str)});
         mm->popTempRoot();
         start = end + 1;
     }

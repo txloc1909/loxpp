@@ -64,7 +64,7 @@ uint32_t MapPolicy::hashOf(const MapEntry& e) { return e.hash; }
 bool ObjMap::mapGet(const Value& key, Value& out) const {
     uint32_t hash = hashValue(key);
     const MapEntry* e =
-        map.find(hash, [&key](const MapEntry& s) { return s.key == key; });
+        m_map.find(hash, [&key](const MapEntry& s) { return s.key == key; });
     if (!e) {
         return false;
     }
@@ -72,11 +72,24 @@ bool ObjMap::mapGet(const Value& key, Value& out) const {
     return true;
 }
 
+void ObjMap::barrierRemoved(Collector* c, const MapEntry& old) {
+    c->barrierEntry(this, old.key, barrier::nil());
+    c->barrierEntry(this, old.value, barrier::nil());
+}
+
 bool ObjMap::mapSet(const Value& key, const Value& value) {
-    // map.set may grow (re-allocate via VmAllocator, which may trigger GC).
-    // Caller must ensure this ObjMap is rooted before calling mapSet.
-    bool inserted =
-        map.set(MapEntry{key, value, hashValue(key), MapSlot::OCCUPIED});
+    const uint32_t hash = hashValue(key);
+    // The growth can collect (VmAllocator), so the caller roots this ObjMap
+    // before it calls mapSet. The barrier reads the old entry after it.
+    m_map.ensureRoom();
+    Collector* c = collector();
+    if (barrier::active(c)) {
+        const MapEntry* old = m_map.find(
+            hash, [&key](const MapEntry& s) { return s.key == key; });
+        c->barrierEntry(this, old != nullptr ? old->value : barrier::nil(),
+                        value);
+    }
+    bool inserted = m_map.set(MapEntry{key, value, hash, MapSlot::OCCUPIED});
     // Count only a new key: an overwrite leaves iteration valid, while a
     // paired erase plus insert must still trip the iterator check.
     if (inserted) {
@@ -86,8 +99,15 @@ bool ObjMap::mapSet(const Value& key, const Value& value) {
 }
 
 bool ObjMap::mapDel(const Value& key) {
-    bool removed = map.remove(
-        hashValue(key), [&key](const MapEntry& s) { return s.key == key; });
+    const uint32_t hash = hashValue(key);
+    auto match = [&key](const MapEntry& s) { return s.key == key; };
+    Collector* c = collector();
+    if (barrier::active(c)) {
+        if (const MapEntry* old = m_map.find(hash, match)) {
+            barrierRemoved(c, *old);
+        }
+    }
+    bool removed = m_map.remove(hash, match);
     // Count only a real erase: a miss leaves iteration valid.
     if (removed) {
         ++version;
@@ -98,7 +118,7 @@ bool ObjMap::mapDel(const Value& key) {
 bool ObjMap::mapGetHashed(const Value& key, uint32_t hash, const KeyEq& eq,
                           Value& out) const {
     const MapEntry* e =
-        map.find(hash, [&](const MapEntry& s) { return eq(s.key, key); });
+        m_map.find(hash, [&](const MapEntry& s) { return eq(s.key, key); });
     if (!e) {
         return false;
     }
@@ -109,30 +129,43 @@ bool ObjMap::mapGetHashed(const Value& key, uint32_t hash, const KeyEq& eq,
 bool ObjMap::mapSetHashed(const Value& key, const Value& value, uint32_t hash,
                           const KeyEq& eq, bool& eqFailed) {
     // Find first: an __eq__ that fails must not be followed by an insert.
-    MapEntry* existing = map.findMutable(
+    MapEntry* existing = m_map.findMutable(
         hash, [&](const MapEntry& s) { return eq(s.key, key); });
     if (eqFailed) {
         return false;
     }
+    Collector* c = collector();
     if (existing != nullptr) {
+        if (barrier::active(c)) {
+            c->barrierEntry(this, existing->key, key);
+            c->barrierEntry(this, existing->value, value);
+        }
         *existing = MapEntry{key, value, hash, MapSlot::OCCUPIED};
         return false; // overwrite
     }
     // No equal key exists, so an identity match cannot miss it. No user code
     // runs here, so the locked map cannot change between the find and the set.
-    map.set(MapEntry{key, value, hash, MapSlot::OCCUPIED});
+    m_map.ensureRoom();
+    if (barrier::active(c)) {
+        c->barrierEntry(this, barrier::nil(), value);
+    }
+    m_map.set(MapEntry{key, value, hash, MapSlot::OCCUPIED});
     ++version;
     return true;
 }
 
 bool ObjMap::mapDelHashed(const Value& key, uint32_t hash, const KeyEq& eq,
                           bool& eqFailed) {
-    MapEntry* existing = map.findMutable(
+    MapEntry* existing = m_map.findMutable(
         hash, [&](const MapEntry& s) { return eq(s.key, key); });
     if (eqFailed || existing == nullptr) {
         return false;
     }
-    map.removeAt(existing);
+    Collector* c = collector();
+    if (barrier::active(c)) {
+        barrierRemoved(c, *existing);
+    }
+    m_map.removeAt(existing);
     ++version;
     return true;
 }
