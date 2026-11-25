@@ -1,3 +1,4 @@
+#include "collector.h"
 #include "container_objects.h"
 #include "memory_manager.h"
 #include "value.h"
@@ -210,6 +211,9 @@ TEST(MemoryManagerTest, ALargeMailboxTriggersACollection) {
         GTEST_SKIP() << "stress mode collects on every allocation";
     }
     MemoryManager mm;
+    // A collection that ends inside the loop: an incremental cycle paces its
+    // steps by time, and a loop this short does not wait for them.
+    mm.swapCollector(makeCollectorByName("stw", mm, mm.pollState(), 0));
     auto* task = mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
     mm.pushTempRoot(task);
     const std::size_t before = mm.collectionCount();
