@@ -599,7 +599,7 @@ default.
   its sweep freed. The heap after a cycle is not used: it holds the objects
   that the program made during the cycle (they are black), and a pacing that
   counted them as live let the peak grow to 2.4 to 3.5 times the live heap
-  on a long churn (review of #1298). When the heap passes 1.5 times its size
+  on a long churn (review of #1298). When the heap passes 1.3 times its size
   at the start of the cycle, the share rises to 45%. It stays under one
   half, so that MMU(10 ms) stays above 50%.
 - **Finish pause.** It reads the held objects, the inbox targets and the drain

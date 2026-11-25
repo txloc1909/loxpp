@@ -70,7 +70,7 @@ class IncrementalCollector final : public Collector {
     static constexpr double kStartFactor = 1.5;
     // When the heap grows past this factor of its size at the start of the
     // cycle, the collector uses kUrgentShare of the time, not kShare.
-    static constexpr double kEmergencyFactor = 1.5;
+    static constexpr double kEmergencyFactor = 1.3;
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     // Bytes that the program allocates between two looks of the pacing.
     static constexpr std::size_t kPollBytes = 16 * 1024;
