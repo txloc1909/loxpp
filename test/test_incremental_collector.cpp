@@ -44,6 +44,9 @@ class IncrementalTest : public ::testing::Test {
         return mm.create<ObjClass>(mm.makeString(name),
                                    VmAllocator<Entry>{&mm});
     }
+    ObjTask* newTask() {
+        return mm.create<ObjTask>(nullptr, 0, VmAllocator<Value>{&mm});
+    }
     ObjInstance* newInstance(ObjClass* k) {
         return mm.create<ObjInstance>(k, VmAllocator<Entry>{&mm});
     }
@@ -210,6 +213,137 @@ TEST_F(IncrementalTest, CoroutineClearSnapshotKeepsTheOldValues) {
     startWithRoot(c);
     mm.pushTempRoot(x);
     c->clearSnapshot();
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+// --- The stores of a Task, a Closure, an Upvalue snapshot cell and a
+// --- Coroutine that wait or that hold state
+
+TEST_F(IncrementalTest, TaskSetPendingValueKeepsTheOldValue) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    c->setPendingValue(ref(x));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->setPendingValue(nil());
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskSetStartArgKeepsTheOldValue) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    c->setStartArg(ref(x));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->setStartArg(nil());
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskSetSelectWantKeepsTheOldValue) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    c->setSelectWant(ref(x));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->resetSelect();
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskSetCoKeepsTheOldCoroutine) {
+    ObjCoroutine* x =
+        mm.create<ObjCoroutine>(nullptr, nil(), VmAllocator<Value>{&mm});
+    ObjTask* c = newTask();
+    c->setCo(x);
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->setCo(nullptr);
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskSetWaitKeepsTheOldTargetAndText) {
+    ObjTask* c = newTask();
+    ObjList* target = newList();
+    ObjList* text = newList();
+    WaitingCall call;
+    call.target = target;
+    call.text = text;
+    c->setWait(std::move(call));
+    startWithRoot(c);
+    mm.pushTempRoot(target);
+    mm.pushTempRoot(text);
+    c->clearWait();
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskPopMessageKeepsTheOldMessage) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    c->pushMessage(ref(x));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->popMessage();
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskEraseMessageKeepsTheOldMessages) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    ObjList* y = newList();
+    c->pushMessage(ref(x));
+    c->pushMessage(ref(y));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->eraseMessage(0);
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, TaskClearMailboxKeepsTheOldMessages) {
+    ObjTask* c = newTask();
+    ObjList* x = newList();
+    c->pushMessage(ref(x));
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->clearMailbox();
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, ClosureSetUpvalueKeepsTheOldUpvalue) {
+    ObjFunction* fn = mm.create<ObjFunction>();
+    fn->upvalueCount = 1;
+    ObjClosure* c = mm.create<ObjClosure>(fn);
+    Value cell = nil();
+    ObjUpvalue* x = mm.create<ObjUpvalue>(&cell);
+    c->setUpvalue(*ic, 0, x);
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->setUpvalue(*ic, 0, nullptr);
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, UpvalueSetOnASnapshotCellKeepsTheOldValue) {
+    ObjCoroutine* owner =
+        mm.create<ObjCoroutine>(nullptr, nil(), VmAllocator<Value>{&mm});
+    ObjList* x = newList();
+    Value cell = ref(x);
+    ObjUpvalue* c = mm.create<ObjUpvalue>(&cell);
+    c->setOwner(*ic, owner);
+    startWithRoot(c);
+    mm.pushTempRoot(x);
+    c->set(*ic, nil());
+    EXPECT_EQ(whiteAfterTheMark(), 0u);
+}
+
+TEST_F(IncrementalTest, CoroutineSetWaitingKeepsTheOldInnerAndIterator) {
+    ObjCoroutine* c =
+        mm.create<ObjCoroutine>(nullptr, nil(), VmAllocator<Value>{&mm});
+    ObjCoroutine* inner =
+        mm.create<ObjCoroutine>(nullptr, nil(), VmAllocator<Value>{&mm});
+    ObjIterator* iter = mm.create<ObjIterator>(nil());
+    c->setWaiting(inner, iter);
+    startWithRoot(c);
+    mm.pushTempRoot(inner);
+    mm.pushTempRoot(iter);
+    c->setWaiting(nullptr, nullptr);
     EXPECT_EQ(whiteAfterTheMark(), 0u);
 }
 
