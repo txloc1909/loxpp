@@ -18,7 +18,8 @@ Three runs of one program:
   3. With a limit that no call reaches, the trace holds no stall record.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that does not exist or
-cannot run.
+cannot run, 125 skipped (a build that traces execution prints too much to run
+this program quickly).
 """
 
 import os
@@ -100,6 +101,9 @@ def main():
         return 2
     binary = sys.argv[1]
     require_runner(binary)
+    if os.environ.get("LOXPP_EXEC_TRACE_ENABLED") == "1":
+        print("skipped: build traces execution")
+        return 125
     with tempfile.TemporaryDirectory() as d:
         trace, stalls = run(binary, d, "all", 0)
         kinds = {k for k, _, _ in stalls}
