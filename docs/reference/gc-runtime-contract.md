@@ -20,15 +20,42 @@ changes this file.
   status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
   its own API (`create<T>`, `makeString`, `pushTempRoot`, `markObject`,
   `collectGarbage`, `collectionCount`) and forwards to the collector.
-- `MemoryManager::create<T>` makes each object with one `new`, and gives the
-  pointer to the collector (`Collector::onCreate`). `StwCollector` keeps it
-  in `allObjects`, a plain `std::vector<Obj*>` that only the collector
-  touches. Its sweep calls `delete` on each dead object.
+- The memory of a heap is `SizeClassHeap` (`src/size_class_heap.{h,cpp}`),
+  the member `MemoryManager::m_store`. It cuts chunks of 1 MiB into spans of
+  64 KiB. A span holds slots of one size class (24 classes, 16 to 2048
+  bytes), and the span of a pointer is `ptr & ~0xFFFF`. Objects and buffers
+  use separate spans. A block over 2048 bytes is a large block with its own
+  allocation, in a class of the form m * 2^k (m = 4 to 7).
+- `MemoryManager::create<T>` takes a slot with `allocObject`, runs the
+  constructor, and then calls `commitObject`. Only a committed object is in
+  the allocation bitmap of its span, so a collection that runs inside the
+  constructor does not see it. Then it calls `Collector::onCreate`, which is
+  empty for `stw`. There is no list of all objects: the collector finds
+  the objects through the spans (`firstObjectSpan`, `sweepSpan`,
+  `forEachObject`). `sizeof(T)` must be at most 2048 and the alignment at
+  most 16 (a `static_assert` in `create<T>`).
+- The mark bit of an object is a bit in the mark bitmap of its span
+  (`SizeClassHeap::tryMark`, `isMarked`). Only a collector reads or writes
+  it, for the objects of its own heap. The sweep frees `alloc & ~mark` of a
+  span, word by word, runs the destructor, and puts the slot on the free
+  list of the span. An object never moves.
 - The header (`struct Obj`, `src/object.h`) has a vtable pointer, `type`
-  (1 byte), `marked` (1 byte) and `heapId` (2 bytes). Four bytes of padding
-  follow. `marked` is private. Only `StwCollector` is its friend, so a use
-  anywhere else does not compile. `heapId` is set once and never changes, so
-  another thread can read it at any time.
+  (1 byte) and `heapId` (2 bytes). Five bytes of padding follow. `heapId`
+  is set once and never changes, so another thread can read it at any time.
+- The allocator limits its own stalls. A small allocation or free never
+  calls the C allocator. An empty span goes to a pool that every class takes
+  from. A span or a chunk is not returned to the operating system before the
+  heap ends. Freed large blocks wait in a cache for their class. The cache
+  holds at most the larger of the bytes of the large blocks in use and 4
+  MiB. A block over that limit goes back to the C allocator in one call, and
+  that call costs what its own size costs. No operation walks or copies an
+  array whose size follows the heap size: free lists are intrusive, the lists
+  of spans are linked through the span headers, and a bitmap has a fixed size
+  for each span.
+- Only two calls reach the C allocator: a new chunk and a large block. The
+  heap times them, and writes a `stall` record to the GC trace (section 8)
+  for each one longer than 100 us (`LOXPP_GC_STALL_LIMIT_US` changes the limit
+  in microseconds, and 0 records every call).
 - `Collector` has the hooks of the write barrier (`barrierField`,
   `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
   and the read barrier of the intern table (`internHit`). They are empty for
@@ -62,7 +89,8 @@ changes this file.
   `bytesAllocated` with it on each allocation, and calls
   `Collector::poll` when the heap is above it (or when stress is on).
 - Byte accounting: `bytesAllocated` counts `sizeof(T)` for each object
-  plus each buffer that `VmAllocator` allocates. `objAllocatedSize`
+  plus the requested bytes of each buffer that `VmAllocator` allocates. It
+  does not count the rounding of a size class. `objAllocatedSize`
   (`src/object_trace.h`) gives the size that the sweep subtracts.
 
 ## 3. Roots
@@ -234,11 +262,14 @@ The status of a row:
 
 - `LOXPP_GC_TRACE=<file>` writes one record for each collection (format
   v3, described in `tools/gc_report.py`). The stop-the-world collector writes
-  `gc` records only. The format also has `cycle`, `step` and `stall` records,
-  for an incremental collector and for the heap allocator. Nothing writes them
-  yet. These read the trace: `tools/gc_report.py` (and
+  `gc` records and `stall` records. The heap writes a `stall` record
+  (`stall kind=<new|free> t0= t1=`) for each call into the C allocator (a new
+  chunk or a large block) that takes longer than 100 us. The format also
+  has `cycle` and `step` records, for an incremental collector. Nothing
+  writes them yet. These read the trace: `tools/gc_report.py` (and
   `tools/jvm_gc_log.py` through `summarise_gcs`), `tools/check_gc_trace.py`,
-  `tools/check_gc_trace_v3.py`, `tools/check_gc_min_heap.py`,
+  `tools/check_gc_trace_v3.py`, `tools/check_gc_stall.py`,
+  `tools/check_gc_min_heap.py`,
   `tools/check_gc_sweep_linear.py`, `benchmarks/gc_compare.py`, and the Redis
   example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc`
   records).
