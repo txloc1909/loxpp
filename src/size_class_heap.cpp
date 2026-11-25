@@ -6,6 +6,20 @@
 #include <cstring>
 #include <ctime>
 
+// A freed slot or block cannot be read or written until it is handed out
+// again. AddressSanitizer then reports a use after free of an object or of a
+// buffer, as it does for a block that came from `new`.
+#if defined(__SANITIZE_ADDRESS__)
+#define LOXPP_HEAP_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LOXPP_HEAP_ASAN 1
+#endif
+#endif
+#ifdef LOXPP_HEAP_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
+
 namespace {
 
 constexpr std::size_t kClassSizes[24] = {
@@ -17,8 +31,13 @@ constexpr std::size_t kPage = 4096;
 
 std::size_t pageRound(std::size_t n) { return (n + kPage - 1) & ~(kPage - 1); }
 
+#ifdef LOXPP_HEAP_ASAN
+void asanPoison(void* p, std::size_t n) { ASAN_POISON_MEMORY_REGION(p, n); }
+void asanUnpoison(void* p, std::size_t n) { ASAN_UNPOISON_MEMORY_REGION(p, n); }
+#else
 void asanPoison(void*, std::size_t) {}
 void asanUnpoison(void*, std::size_t) {}
+#endif
 constexpr std::size_t kSpanBytes = SizeClassHeap::kSpanSize;
 
 // Cached large blocks stay below the larger of the large bytes in use and
@@ -235,6 +254,7 @@ Span* SizeClassHeap::takeSpan(Kind kind, std::size_t cls) {
     s->bitmapWords = static_cast<std::uint16_t>(t.words[buffer][cls]);
     s->kind = static_cast<std::uint8_t>(kind);
     s->inPartial = false;
+    asanPoison(s->slot(0), static_cast<std::size_t>(s->slots) * s->slotSize);
     if (kind == Kind::Object) {
         std::memset(s->marks(), 0, 2 * s->bitmapWords * sizeof(std::uint64_t));
         if (!s->listed) {
@@ -280,9 +300,11 @@ void* SizeClassHeap::popSlot(Span* s) {
     void* p;
     if (s->freeHead != nullptr) {
         p = s->freeHead;
+        asanUnpoison(p, s->slotSize);
         s->freeHead = *static_cast<void**>(p);
     } else {
         p = s->slot(s->bump++);
+        asanUnpoison(p, s->slotSize);
     }
     ++s->used;
     if (s->freeHead == nullptr && s->bump == s->slots) {
@@ -300,6 +322,7 @@ void* SizeClassHeap::allocSlow(Kind kind, std::size_t cls) {
 void SizeClassHeap::freeSlot(Span* s, void* p) {
     *static_cast<void**>(p) = s->freeHead;
     s->freeHead = p;
+    asanPoison(p, s->slotSize);
     --s->used;
     if (!s->inPartial) {
         linkPartial(s);

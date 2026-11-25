@@ -351,3 +351,44 @@ TEST(SizeClassHeap, TheCacheShrinksWhenTheLiveLargeBytesFall) {
     }
     EXPECT_LE(store.footprintBytes(), base + (4u << 20));
 }
+
+#if defined(__SANITIZE_ADDRESS__) ||                                           \
+    (defined(__has_feature) && __has_feature(address_sanitizer))
+TEST(SizeClassHeapDeathTest, ReadingAFreedStringIsReported) {
+    // A freed slot is poisoned, so AddressSanitizer reports a read of a freed
+    // object. It reports "use-after-poison", not "heap-use-after-free".
+    EXPECT_DEATH(
+        {
+            MemoryManager mm;
+            ObjString* s = mm.makeString("a string that nothing keeps");
+            mm.collectGarbage();
+            volatile std::uint32_t h = s->hash;
+            (void)h;
+        },
+        "AddressSanitizer");
+}
+
+TEST(SizeClassHeapDeathTest, ReadingAFreedBufferIsReported) {
+    EXPECT_DEATH(
+        {
+            MemoryManager mm;
+            volatile char* p = static_cast<char*>(mm.rawAlloc(100));
+            mm.rawFree(const_cast<char*>(p), 100);
+            char c = p[0];
+            (void)c;
+        },
+        "AddressSanitizer");
+}
+
+TEST(SizeClassHeapDeathTest, ReadingACachedLargeBlockIsReported) {
+    EXPECT_DEATH(
+        {
+            MemoryManager mm;
+            volatile char* p = static_cast<char*>(mm.rawAlloc(100000));
+            mm.rawFree(const_cast<char*>(p), 100000);
+            char c = p[50000];
+            (void)c;
+        },
+        "AddressSanitizer");
+}
+#endif
