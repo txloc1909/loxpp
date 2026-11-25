@@ -108,6 +108,8 @@ loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_cor
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector       test_collector.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector_gc    test_collector.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_barrier        test_barrier.cpp         CORE loxpp_test_core)
+loxpp_add_test(test_barrier_gc     test_barrier.cpp         CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_value           test_value.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_token_roundtrip test_token_roundtrip.cpp CORE loxpp_test_core PROBE)
@@ -284,6 +286,12 @@ if(LOXPP_PYTHON3)
     set_tests_properties(GcStwCounts PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
+
+    # The table of write-barrier mutators in the contract (section 7) must
+    # match the headers of the object types.
+    add_test(NAME GcBarrierTable
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_barrier_table.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
     # tools/jvm_gc_log.py converts a JVM -Xlog:gc log into the gc_report.py
     # format. The check parses checked-in logs, so it needs no JVM.
@@ -566,7 +574,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
-    test_table_gc test_allocator_gc test_collector_gc test_net_process_gc test_coroutine_gc
+    test_table_gc test_allocator_gc test_collector_gc test_barrier_gc test_net_process_gc test_coroutine_gc
     test_task_gc test_task_wait_gc test_socket_wait_gc test_connect_wait_gc
     test_worker_gc
     test_repl_gc)
@@ -577,7 +585,8 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
-    test_allocator test_allocator_gc test_collector test_collector_gc test_value
+    test_allocator test_allocator_gc test_collector test_collector_gc
+    test_barrier test_barrier_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_file_readline
     test_os_api test_net_process test_net_process_gc

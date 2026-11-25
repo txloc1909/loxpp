@@ -113,8 +113,8 @@ static Value fieldsNative(int /*argc*/, Value* argv) {
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
-    inst->fields.forEach([list](ObjString* key, const Value& /*value*/) {
-        list->elements.emplace_back(static_cast<Obj*>(key));
+    inst->fields().forEach([list](ObjString* key, const Value& /*value*/) {
+        list->push(Value{static_cast<Obj*>(key)});
     });
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
@@ -129,8 +129,8 @@ static Value methodsNative(int /*argc*/, Value* argv) {
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
-    klass->methods.forEach([list](ObjString* key, const Value& /*value*/) {
-        list->elements.emplace_back(static_cast<Obj*>(key));
+    klass->methods().forEach([list](ObjString* key, const Value& /*value*/) {
+        list->push(Value{static_cast<Obj*>(key)});
     });
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
@@ -152,7 +152,7 @@ static Value getFieldNative(int /*argc*/, Value* argv) {
     }
     ObjInstance* inst = asObjInstance(as<Obj*>(argv[0]));
     Value value;
-    if (inst->fields.get(name, value)) {
+    if (inst->fields().get(name, value)) {
         return value;
     }
     return from<Nil>(Nil{});
@@ -169,7 +169,7 @@ static Value hasFieldNative(int /*argc*/, Value* argv) {
     }
     ObjInstance* inst = asObjInstance(as<Obj*>(argv[0]));
     Value dummy;
-    return from<bool>(inst->fields.get(name, dummy));
+    return from<bool>(inst->fields().get(name, dummy));
 }
 
 static Value setFieldNative(int /*argc*/, Value* argv) {
@@ -182,7 +182,7 @@ static Value setFieldNative(int /*argc*/, Value* argv) {
         return from<Nil>(Nil{});
     }
     ObjInstance* inst = asObjInstance(as<Obj*>(argv[0]));
-    inst->fields.set(name, argv[2]);
+    inst->setField(name, argv[2]);
     return argv[2]; // assignment is an expression, per Property Set semantics
 }
 
@@ -209,8 +209,8 @@ static Value callMethodNative(int argCount, Value* argv) {
     ObjInstance* inst = asObjInstance(as<Obj*>(argv[0]));
 
     Value callee;
-    bool viaField = inst->fields.get(name, callee);
-    if (!viaField && !inst->klass->methods.get(name, callee)) {
+    bool viaField = inst->fields().get(name, callee);
+    if (!viaField && !inst->klass->methods().get(name, callee)) {
         std::string msg = "Undefined property '" +
                           std::string(name->chars.data(), name->chars.size()) +
                           "'.";

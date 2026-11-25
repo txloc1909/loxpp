@@ -671,7 +671,8 @@ TEST(ToolingResolver, IntegerMembersMatchTheRuntimeFields) {
     ASSERT_TRUE(isInstance(*value));
     std::set<std::string> runtime;
     asObjInstance(as<Obj*>(*value))
-        ->fields.forEach([&runtime](ObjString* key, Value /*member*/) {
+        ->fields()
+        .forEach([&runtime](ObjString* key, Value /*member*/) {
             runtime.emplace(key->chars.data(), key->chars.size());
         });
     std::set<std::string> tooling;

@@ -398,7 +398,8 @@ TEST(LspStdlibDocs, EveryGlobalObjectMemberHasADoc) {
         objects.push_back(name);
         ASSERT_NE(loxpp::lsp::receiverMemberDocs(name), nullptr) << name;
         asObjInstance(as<Obj*>(*value))
-            ->fields.forEach([&name](ObjString* key, Value /*member*/) {
+            ->fields()
+            .forEach([&name](ObjString* key, Value /*member*/) {
                 const std::string member(key->chars.data(), key->chars.size());
                 EXPECT_NE(loxpp::lsp::receiverMemberDoc(name, member), nullptr)
                     << name << "." << member;

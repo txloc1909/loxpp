@@ -183,7 +183,7 @@ TEST(MemoryManagerTest, MailboxBytesCountTowardHeap) {
     mm.pushTempRoot(task);
     const std::size_t before = mm.bytesAllocated;
     for (int i = 0; i < 1024; i++) {
-        task->mailbox.push_back(from<Number>(static_cast<Number>(i)));
+        task->pushMessage(from<Number>(static_cast<Number>(i)));
     }
     EXPECT_GE(mm.bytesAllocated, before + 1024 * sizeof(Value));
 }
@@ -194,8 +194,11 @@ TEST(MemoryManagerTest, CoroutineSnapshotBytesCountTowardHeap) {
                                        VmAllocator<Value>{&mm});
     mm.pushTempRoot(co);
     const std::size_t before = mm.bytesAllocated;
-    co->stack.assign(512, from<Nil>(Nil{}));
-    co->resultOverrides.assign(512, from<Nil>(Nil{}));
+    const std::vector<Value> nils(512, from<Nil>(Nil{}));
+    co->captureStack(nils.data(), nils.data() + nils.size());
+    for (std::size_t i = 0; i < 512; i++) {
+        co->pushResult(0, false, from<Nil>(Nil{}));
+    }
     EXPECT_GE(mm.bytesAllocated, before + 1024 * sizeof(Value));
 }
 
@@ -212,7 +215,7 @@ TEST(MemoryManagerTest, ALargeMailboxTriggersACollection) {
     const std::size_t before = mm.collectionCount();
     // More than one minimum heap (1 MiB) of messages.
     for (std::size_t i = 0; i < 200000; i++) {
-        task->mailbox.push_back(from<Number>(static_cast<Number>(i)));
+        task->pushMessage(from<Number>(static_cast<Number>(i)));
     }
     EXPECT_GT(mm.collectionCount(), before);
 }

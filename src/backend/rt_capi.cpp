@@ -471,27 +471,29 @@ Value rt_new_closure(Runtime* rt, Value functionConstant) noexcept {
 
 void rt_capture_local_upvalue(Runtime* rt, Value closure, int upvalueIndex,
                               Value* localSlot) noexcept {
-    asObjClosure(closure)->upvalues[static_cast<std::size_t>(upvalueIndex)] =
-        rt->captureUpvalue(localSlot);
+    ObjUpvalue* uv = rt->captureUpvalue(localSlot);
+    asObjClosure(closure)->setUpvalue(rt->memoryManager().collector(),
+                                      static_cast<std::size_t>(upvalueIndex),
+                                      uv);
 }
 
-void rt_forward_upvalue(Runtime*, Value closure, int upvalueIndex,
+void rt_forward_upvalue(Runtime* rt, Value closure, int upvalueIndex,
                         Value parentClosure, int parentUpvalueIndex) noexcept {
-    asObjClosure(closure)->upvalues[static_cast<std::size_t>(upvalueIndex)] =
+    asObjClosure(closure)->setUpvalue(
+        rt->memoryManager().collector(), static_cast<std::size_t>(upvalueIndex),
         asObjClosure(parentClosure)
-            ->upvalues[static_cast<std::size_t>(parentUpvalueIndex)];
+            ->upvalues()[static_cast<std::size_t>(parentUpvalueIndex)]);
 }
 
 Value rt_get_upvalue(Runtime*, Value closure, int index) noexcept {
-    return *asObjClosure(closure)
-                ->upvalues[static_cast<std::size_t>(index)]
-                ->location;
+    return asObjClosure(closure)
+        ->upvalues()[static_cast<std::size_t>(index)]
+        ->get();
 }
 
-void rt_set_upvalue(Runtime*, Value closure, int index, Value v) noexcept {
-    *asObjClosure(closure)
-         ->upvalues[static_cast<std::size_t>(index)]
-         ->location = v;
+void rt_set_upvalue(Runtime* rt, Value closure, int index, Value v) noexcept {
+    asObjClosure(closure)->upvalues()[static_cast<std::size_t>(index)]->set(
+        rt->memoryManager().collector(), v);
 }
 
 void rt_close_upvalues(Runtime* rt, Value* last) noexcept {

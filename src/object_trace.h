@@ -25,8 +25,8 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::NATIVE:
         break;
     case ObjType::UPVALUE:
-        m.markValue(static_cast<ObjUpvalue*>(obj)->closed);
-        m.markObject(static_cast<ObjUpvalue*>(obj)->owner);
+        m.markValue(static_cast<ObjUpvalue*>(obj)->closed());
+        m.markObject(static_cast<ObjUpvalue*>(obj)->owner());
         break;
     case ObjType::FUNCTION: {
         auto* fn = static_cast<ObjFunction*>(obj);
@@ -40,7 +40,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::CLOSURE: {
         auto* cl = static_cast<ObjClosure*>(obj);
         m.markObject(cl->function);
-        for (auto* uv : cl->upvalues) {
+        for (auto* uv : cl->upvalues()) {
             m.markObject(uv);
         }
         break;
@@ -48,10 +48,10 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::CLASS: {
         auto* klass = static_cast<ObjClass*>(obj);
         m.markObject(klass->name);
-        if (klass->superclass) {
-            m.markObject(klass->superclass);
+        if (klass->superclass()) {
+            m.markObject(klass->superclass());
         }
-        klass->methods.forEach([&m](ObjString* k, Value v) {
+        klass->methods().forEach([&m](ObjString* k, Value v) {
             m.markObject(k);
             m.markValue(v);
         });
@@ -60,7 +60,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::INSTANCE: {
         auto* inst = static_cast<ObjInstance*>(obj);
         m.markObject(inst->klass);
-        inst->fields.forEach([&m](ObjString* k, Value v) {
+        inst->fields().forEach([&m](ObjString* k, Value v) {
             m.markObject(k);
             m.markValue(v);
         });
@@ -74,7 +74,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     }
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
-        for (auto& v : list->elements) {
+        for (auto& v : list->elements()) {
             m.markValue(v);
         }
         break;
@@ -85,15 +85,15 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::ITERATOR: {
         auto* it = static_cast<ObjIterator*>(obj);
         m.markValue(it->collection);
-        if (it->hasCurrent) {
-            m.markValue(it->current);
+        if (it->hasCurrent()) {
+            m.markValue(it->current());
         }
         break;
     }
     case ObjType::MAP: {
         auto* map = static_cast<ObjMap*>(obj);
         m.markObject(map->klass);
-        map->map.forEach([&m](const MapEntry& e) {
+        map->entries().forEach([&m](const MapEntry& e) {
             m.markValue(e.key);
             m.markValue(e.value);
         });
@@ -108,7 +108,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::ENUM: {
         auto* e = static_cast<ObjEnum*>(obj);
         m.markObject(e->ctor);
-        for (auto& v : e->fields) {
+        for (auto& v : e->fields()) {
             m.markValue(v);
         }
         break;
@@ -129,7 +129,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::DEFERRED_CALL: {
         auto* deferred = static_cast<ObjDeferredCall*>(obj);
         m.markValue(deferred->callable);
-        for (auto& v : deferred->args) {
+        for (auto& v : deferred->args()) {
             m.markValue(v);
         }
         break;
@@ -137,14 +137,14 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::SOCKET: {
         auto* sock = static_cast<ObjSocket*>(obj);
         m.markObject(sock->klass);
-        m.markObject(sock->readHolder);
-        m.markObject(sock->writeHolder);
+        m.markObject(sock->readHolder());
+        m.markObject(sock->writeHolder());
         break;
     }
     case ObjType::SERVER: {
         auto* srv = static_cast<ObjServer*>(obj);
         m.markObject(srv->klass);
-        m.markObject(srv->acceptHolder);
+        m.markObject(srv->acceptHolder());
         break;
     }
     case ObjType::PROCESS:
@@ -154,47 +154,47 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
         auto* co = static_cast<ObjCoroutine*>(obj);
         m.markObject(co->klass);
         m.markValue(co->callee);
-        for (const auto& v : co->stack) {
+        for (const auto& v : co->stack()) {
             m.markValue(v);
         }
-        for (const auto& frame : co->frames) {
+        for (const auto& frame : co->frames()) {
             m.markObject(frame.closure);
         }
-        for (const auto& deferList : co->defers) {
+        for (const auto& deferList : co->defers()) {
             for (const auto& v : deferList) {
                 m.markValue(v);
             }
         }
-        for (ObjUpvalue* uv : co->openUpvalues) {
+        for (ObjUpvalue* uv : co->openUpvalues()) {
             m.markObject(uv);
         }
-        for (const auto& v : co->resultOverrides) {
+        for (const auto& v : co->resultOverrides()) {
             m.markValue(v);
         }
-        if (co->waitingInner != nullptr) {
-            m.markObject(co->waitingInner);
+        if (co->waitingInner() != nullptr) {
+            m.markObject(co->waitingInner());
         }
-        if (co->waitingIterator != nullptr) {
-            m.markObject(co->waitingIterator);
+        if (co->waitingIterator() != nullptr) {
+            m.markObject(co->waitingIterator());
         }
         break;
     }
     case ObjType::TASK: {
         auto* task = static_cast<ObjTask*>(obj);
-        if (task->co != nullptr) {
-            m.markObject(task->co);
+        if (task->co() != nullptr) {
+            m.markObject(task->co());
         }
-        for (const auto& v : task->mailbox) {
+        for (const auto& v : task->mailbox()) {
             m.markValue(v);
         }
-        m.markValue(task->startArg);
-        m.markValue(task->pendingValue);
-        m.markValue(task->sel.want);
-        if (task->io.target != nullptr) {
-            m.markObject(task->io.target);
+        m.markValue(task->startArg());
+        m.markValue(task->pendingValue());
+        m.markValue(task->selectWant());
+        if (task->io().target != nullptr) {
+            m.markObject(task->io().target);
         }
-        if (task->io.text != nullptr) {
-            m.markObject(task->io.text);
+        if (task->io().text != nullptr) {
+            m.markObject(task->io().text);
         }
         break;
     }

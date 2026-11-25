@@ -30,7 +30,7 @@
 static std::vector<std::string> sortedStringListContents(const Value& v) {
     ObjList* list = asObjList(as<Obj*>(v));
     std::vector<std::string> out;
-    for (const Value& elem : list->elements) {
+    for (const Value& elem : list->elements()) {
         ObjString* s = asObjString(as<Obj*>(elem));
         out.emplace_back(s->chars.data(), s->chars.size());
     }

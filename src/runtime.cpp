@@ -628,10 +628,10 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                              ? STACK_OVERFLOW_STACK_RESERVE
                              : 0);
         if (static_cast<std::ptrdiff_t>(entry) +
-                    static_cast<std::ptrdiff_t>(co->frames.size()) >
+                    static_cast<std::ptrdiff_t>(co->frames().size()) >
                 frameCeiling ||
             static_cast<std::ptrdiff_t>(base - stack) +
-                    static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
+                    static_cast<std::ptrdiff_t>(co->stack().size()) + 1 >
                 stackCeiling) {
             if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
                 m_owned->unwindingStackOverflow = true;
@@ -748,45 +748,45 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             outcome = r;
         }
     } else {
-        for (const Value& v : co->stack) {
+        for (const Value& v : co->stack()) {
             push(v);
         }
-        for (std::size_t i = 0; i < co->frames.size(); i++) {
-            const CoroutineFrameSnapshot& fs = co->frames[i];
+        for (std::size_t i = 0; i < co->frames().size(); i++) {
+            const CoroutineFrameSnapshot& fs = co->frames()[i];
             CallFrame& f = m_frames[entry + static_cast<int>(i)];
             f.closure = fs.closure;
             f.ip = fs.closure->function->chunk.cbegin() + fs.ipOffset;
             f.slots = base + fs.slotOffset;
             f.compiledState = fs.compiledState;
         }
-        m_frameCount = entry + static_cast<int>(co->frames.size());
-        // `co->handlers` is stored innermost-first (suspend pops the handler
+        m_frameCount = entry + static_cast<int>(co->frames().size());
+        // `co->handlers()` is stored innermost-first (suspend pops the handler
         // stack from the back). Push it back outermost-first so the innermost
         // handler ends on top and handleThrow's LIFO search finds it first.
-        for (std::size_t i = co->handlers.size(); i-- > 0;) {
-            const CoroutineHandlerSnapshot& hs = co->handlers[i];
+        for (std::size_t i = co->handlers().size(); i-- > 0;) {
+            const CoroutineHandlerSnapshot& hs = co->handlers()[i];
             m_handlerStack.push_back(HandlerRecord{entry + hs.frameOffset,
                                                    base + hs.stackOffset,
                                                    hs.catchIp, hs.catchState});
         }
-        for (std::size_t i = 0; i < co->defers.size(); i++) {
+        for (std::size_t i = 0; i < co->defers().size(); i++) {
             auto& frameDefers = m_deferLists[entry + static_cast<int>(i)];
-            frameDefers.assign(co->defers[i].begin(), co->defers[i].end());
+            frameDefers.assign(co->defers()[i].begin(), co->defers()[i].end());
         }
-        for (std::size_t i = 0; i < co->resultChecks.size(); i++) {
+        for (std::size_t i = 0; i < co->resultChecks().size(); i++) {
             m_frameResultCheck[entry + static_cast<int>(i)] =
-                static_cast<ResultCheck>(co->resultChecks[i]);
+                static_cast<ResultCheck>(co->resultChecks()[i]);
             m_frameResultOverrideSet[entry + static_cast<int>(i)] =
-                co->resultOverrideSet[i] != 0;
+                co->resultOverrideSet()[i] != 0;
             m_frameResultOverride[entry + static_cast<int>(i)] =
-                co->resultOverrides[i];
+                co->resultOverrides()[i];
         }
-        for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
-            ObjUpvalue* uv = co->openUpvalues[i];
-            uv->location = base + co->openUpvalueOffsets[i];
-            uv->owner = nullptr;
+        for (std::size_t i = 0; i < co->openUpvalues().size(); i++) {
+            ObjUpvalue* uv = co->openUpvalues()[i];
+            uv->setLocation(base + co->openUpvalueOffsets()[i]);
+            uv->setOwner(m_mm.collector(), nullptr);
             ObjUpvalue** pp = &m_openUpvalues;
-            while (*pp != nullptr && (*pp)->location > uv->location) {
+            while (*pp != nullptr && (*pp)->location() > uv->location()) {
                 pp = &(*pp)->next;
             }
             uv->next = *pp;
@@ -807,15 +807,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         push(received);
         // The snapshot is now live on the shared stack. Clear it so a running
         // coroutine has no stale state and markRoots does not double-mark it.
-        co->stack.clear();
-        co->frames.clear();
-        co->handlers.clear();
-        co->defers.clear();
-        co->openUpvalues.clear();
-        co->openUpvalueOffsets.clear();
-        co->resultChecks.clear();
-        co->resultOverrideSet.clear();
-        co->resultOverrides.clear();
+        co->clearSnapshot();
         frameReady = true;
     }
 
@@ -832,7 +824,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         WakeResult wake = WakeResult::Run;
         // The coroutine that holds the suspended call is the one at the end
         // of the chain; a waiting call's fault is raised there.
-        const bool innermost = co->waitingInner == nullptr;
+        const bool innermost = co->waitingInner() == nullptr;
         if (!innermost) {
             wake = resumeWaitingInner(co, entry);
         } else if (m_currentTask != nullptr &&
@@ -903,9 +895,9 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     // field, which keeps the value alive until the resume copies it out.
     m_yieldedValue = yielded;
 
-    co->stack.assign(base, stackTop);
+    co->clearSnapshot();
+    co->captureStack(base, stackTop);
 
-    co->handlers.clear();
     // HandlerRecord::frameCount is the frame COUNT at push time, one more
     // than the pushing frame's index. The coroutine's own frames start at
     // index baseFrame, so their records are `frameCount > baseFrame`. A
@@ -915,71 +907,55 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
            m_handlerStack.back().frameCount > baseFrame) {
         HandlerRecord h = m_handlerStack.back();
         m_handlerStack.pop_back();
-        co->handlers.push_back(CoroutineHandlerSnapshot{
+        co->pushHandler(CoroutineHandlerSnapshot{
             h.frameCount - baseFrame, static_cast<int>(h.stackTop - base),
             h.catchIp, h.catchState});
     }
 
-    co->frames.clear();
-    co->frames.reserve(static_cast<std::size_t>(m_frameCount - baseFrame));
+    co->reserveFrames(static_cast<std::size_t>(m_frameCount - baseFrame));
     for (int i = baseFrame; i < m_frameCount; i++) {
         const CallFrame& f = m_frames[i];
-        co->frames.push_back(CoroutineFrameSnapshot{
+        co->pushFrame(CoroutineFrameSnapshot{
             f.closure,
             static_cast<int>(f.ip - f.closure->function->chunk.cbegin()),
             static_cast<int>(f.slots - base), f.compiledState});
     }
 
-    co->defers.clear();
     for (int i = baseFrame; i < m_frameCount; i++) {
         // The snapshot is on the heap; the live lists are not, so this copies
         // into the snapshot's own allocator.
-        co->defers.push_back(VmVector<Value>(m_deferLists[i].begin(),
-                                             m_deferLists[i].end(),
-                                             co->defers.get_allocator()));
+        co->pushDefers(m_deferLists[i].begin(), m_deferLists[i].end());
         m_deferLists[i].clear();
     }
 
-    co->resultChecks.clear();
-    co->resultOverrideSet.clear();
-    co->resultOverrides.clear();
     for (int i = baseFrame; i < m_frameCount; i++) {
-        co->resultChecks.push_back(
-            static_cast<std::uint8_t>(m_frameResultCheck[i]));
-        co->resultOverrideSet.push_back(m_frameResultOverrideSet[i] ? 1 : 0);
-        co->resultOverrides.push_back(m_frameResultOverride[i]);
+        co->pushResult(static_cast<std::uint8_t>(m_frameResultCheck[i]),
+                       m_frameResultOverrideSet[i], m_frameResultOverride[i]);
         m_frameResultCheck[i] = ResultCheck::None;
         m_frameResultOverrideSet[i] = false;
     }
 
-    co->openUpvalues.clear();
-    co->openUpvalueOffsets.clear();
     // An upvalue that no live closure holds is rooted only by the
     // m_openUpvalues chain, and the loop below unlinks it before it stores it
     // here. Reserve both vectors first, while every upvalue is still a root,
     // so the loop itself cannot collect and free one mid-move.
     std::size_t openCount = 0;
-    for (ObjUpvalue* uv = m_openUpvalues; uv != nullptr && uv->location >= base;
-         uv = uv->next) {
+    for (ObjUpvalue* uv = m_openUpvalues;
+         uv != nullptr && uv->location() >= base; uv = uv->next) {
         ++openCount;
     }
-    co->openUpvalueOffsets.reserve(openCount);
-    co->openUpvalues.reserve(openCount);
-    while (m_openUpvalues != nullptr && m_openUpvalues->location >= base) {
+    co->reserveOpenUpvalues(openCount);
+    while (m_openUpvalues != nullptr && m_openUpvalues->location() >= base) {
         ObjUpvalue* uv = m_openUpvalues;
         m_openUpvalues = uv->next;
         uv->next = nullptr;
-        co->openUpvalueOffsets.push_back(static_cast<int>(uv->location - base));
-        co->openUpvalues.push_back(uv);
-        uv->owner = co;
+        co->pushOpenUpvalue(uv, static_cast<int>(uv->location() - base));
+        uv->setOwner(m_mm.collector(), co);
     }
     // Point the open upvalues at the snapshot's own stable storage so a
     // closure that escaped the coroutine still reads the captured cell. The
     // buffer does not move again while the coroutine is suspended.
-    for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
-        co->openUpvalues[i]->location =
-            co->stack.data() + co->openUpvalueOffsets[i];
-    }
+    co->bindOpenUpvalues();
 
 #ifdef LOXPP_PROFILE
     co->profilerScopes.clear();
@@ -1004,10 +980,9 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 // --- workers and tasks (spec/04-semantics.md, Workers and Tasks) ---------
 
 Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
-    ObjCoroutine* inner = co->waitingInner;
-    ObjIterator* iter = co->waitingIterator;
-    co->waitingInner = nullptr;
-    co->waitingIterator = nullptr;
+    ObjCoroutine* inner = co->waitingInner();
+    ObjIterator* iter = co->waitingIterator();
+    co->setWaiting(nullptr, nullptr);
     // The inner coroutine kept the status "running" (or "normal") while the
     // task waited, so no other task could resume it. Its own resume below
     // continues it.
@@ -1050,8 +1025,7 @@ Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
     }
     pop();
     if (inner->state == CoroutineState::SUSPENDED) {
-        iter->current = result;
-        iter->hasCurrent = true;
+        iter->setCurrent(m_mm.collector(), result);
         push(from<bool>(true));
     } else {
         push(from<bool>(false));
@@ -1062,14 +1036,14 @@ Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
 void Runtime::suspendForTaskSwitch(ObjIterator* iter) {
     ObjCoroutine* co = m_currentCoroutine;
     ObjCoroutine* inner = m_taskSwitchInner;
-    co->waitingInner = inner;
-    co->waitingIterator = iter;
+    co->setWaiting(inner, iter);
     if (inner != nullptr) {
         // spec/04-semantics.md, task.receive: a coroutine that holds a
         // suspended receive keeps the status "running"; one that resumed it
         // stays "normal".
-        inner->state = inner->waitingInner == nullptr ? CoroutineState::RUNNING
-                                                      : CoroutineState::NORMAL;
+        inner->state = inner->waitingInner() == nullptr
+                           ? CoroutineState::RUNNING
+                           : CoroutineState::NORMAL;
     }
     suspendCurrentCoroutine(from<Nil>(Nil{}));
     m_taskSwitchInner = co;
@@ -1128,14 +1102,14 @@ void Runtime::waitTask(ObjTask* task) {
     case WaitEvent::NONE:
         break;
     }
-    task->pendingValue = Value{};
-    if (token == 0 && task->io.op != IoOp::NONE) {
+    task->setPendingValue(Value{});
+    if (token == 0 && task->io().op != IoOp::NONE) {
         // A socket that epoll refuses (the kernel is out of watches, for one)
         // cannot be waited on, and the call must not return a value it did not
         // read.
         const std::string message =
-            std::string(task->io.method) + "(): " + std::strerror(errno);
-        task->io = WaitingCall{};
+            std::string(task->io().method) + "(): " + std::strerror(errno);
+        task->clearWait();
         task->hasPendingFault = true;
         task->faultKind = "NetworkError";
         task->faultMessage = message;
@@ -1154,8 +1128,8 @@ void Runtime::waitTask(ObjTask* task) {
     task->waitEvent = request.reason;
     task->waitToken = token;
     m_waitingTasks.emplace(token, task);
-    if (task->io.hasDeadline) {
-        const Poller::Token timer = poller().waitUntil(task->io.deadline);
+    if (task->io().hasDeadline) {
+        const Poller::Token timer = poller().waitUntil(task->io().deadline);
         task->waitTimerToken = timer;
         m_waitTimers.emplace(timer, task);
     }
@@ -1191,7 +1165,7 @@ void Runtime::rearmWait(ObjTask* task, int fd) {
     const Poller::Token token = poller().waitFd(fd, interest, task->waitToken);
     if (token == 0) {
         const std::string message =
-            std::string(task->io.method) + "(): " + std::strerror(errno);
+            std::string(task->io().method) + "(): " + std::strerror(errno);
         task->waitToken = 0;
         failWait(task, "NetworkError", message.c_str());
         return;
@@ -1227,7 +1201,7 @@ void Runtime::completeWait(ObjTask* task, Value value) {
     if (task->state != TaskState::WAITING) {
         return;
     }
-    task->pendingValue = value;
+    task->setPendingValue(value);
     waitEndTask(task);
 }
 
@@ -1273,7 +1247,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             ObjTask* task = limit->second;
             m_waitTimers.erase(limit);
             task->waitTimerToken = 0;
-            const std::string message = task->io.timeoutMessage;
+            const std::string message = task->io().timeoutMessage;
             failWait(task, "NetworkError", message.c_str());
             continue;
         }
@@ -1282,7 +1256,7 @@ void Runtime::onPollReady(const std::vector<Poller::Token>& ready) {
             continue;
         }
         ObjTask* task = found->second;
-        if (task->io.op != IoOp::NONE) {
+        if (task->io().op != IoOp::NONE) {
             resumeWaitingCall(*this, task);
         } else if (task->inStateReceiving()) {
             limitTask(task);
@@ -1364,13 +1338,13 @@ void Runtime::retireTask(ObjTask* task) {
         --m_liveTasks;
     }
     task->state = TaskState::ENDED;
-    task->co = nullptr;
-    task->mailbox.clear();
-    task->startArg = Value{};
-    task->pendingValue = Value{};
+    task->setCo(nullptr);
+    task->clearMailbox();
+    task->setStartArg(Value{});
+    task->setPendingValue(Value{});
     task->hasPendingFault = false;
-    task->io = WaitingCall{};
-    task->sel = ObjTask::SelectiveReceive{};
+    task->clearWait();
+    task->resetSelect();
     releaseWait(task);
     m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
@@ -1398,7 +1372,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     // keeps the envelope in the draining batch) and the message with it;
     // root the target here as well, so the window is local to this function.
     m_mm.pushTempRoot(task);
-    task->mailbox.push_back(msg);
+    task->pushMessage(msg);
     m_mm.popTempRoot();
     if (task->inStateReceiving()) {
         messageTask(task);
@@ -1449,9 +1423,8 @@ bool Runtime::receiveFromNative(Value* out) {
                         "calls.");
         return false;
     }
-    if (!task->mailbox.empty()) {
-        *out = task->mailbox.front();
-        task->mailbox.pop_front();
+    if (!task->mailbox().empty()) {
+        *out = task->popMessage();
         return true;
     }
     if (workerState() == WorkerState::BLOCKED) {
@@ -1473,9 +1446,9 @@ bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
                         "calls.");
         return false;
     }
-    task->sel = ObjTask::SelectiveReceive{};
+    task->resetSelect();
     task->sel.hasWant = hasWant;
-    task->sel.want = want;
+    task->setSelectWant(want);
     task->sel.limited = limited;
     if (limited) {
         task->sel.deadline = Poller::deadlineAfter(seconds);
@@ -1485,17 +1458,16 @@ bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
 
 bool Runtime::selectStep(ObjTask* task, Value* out) {
     auto& sel = task->sel;
-    while (sel.scanned < task->mailbox.size()) {
+    while (sel.scanned < task->mailbox().size()) {
         const std::size_t at = sel.scanned;
         if (!sel.hasWant) {
-            *out = task->mailbox[at];
-            task->mailbox.erase(task->mailbox.begin() +
-                                static_cast<std::ptrdiff_t>(at));
-            sel = ObjTask::SelectiveReceive{};
+            *out = task->mailbox()[at];
+            task->eraseMessage(at);
+            task->resetSelect();
             return true;
         }
-        const Value msg = task->mailbox[at];
-        push(sel.want);
+        const Value msg = task->mailbox()[at];
+        push(task->selectWant());
         push(msg);
         Value verdict;
         bool ok;
@@ -1506,25 +1478,24 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         }
         --m_owned->selectDepth;
         if (!ok) {
-            task->sel = ObjTask::SelectiveReceive{};
+            task->resetSelect();
             return false;
         }
         if (!isFalsy(verdict)) {
             *out = msg;
-            task->mailbox.erase(task->mailbox.begin() +
-                                static_cast<std::ptrdiff_t>(at));
-            task->sel = ObjTask::SelectiveReceive{};
+            task->eraseMessage(at);
+            task->resetSelect();
             return true;
         }
         ++task->sel.scanned;
     }
     if (sel.timedOut) {
-        task->sel = ObjTask::SelectiveReceive{};
+        task->resetSelect();
         raiseFromNative("TimeoutError", "The limit of the receive passed.");
         return false;
     }
     if (workerState() == WorkerState::BLOCKED) {
-        task->sel = ObjTask::SelectiveReceive{};
+        task->resetSelect();
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
         return false;
@@ -1580,7 +1551,7 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
 // The task runs until it suspends or ends, and then makes the move that its
 // exit names: `yield`, `receive`, `wait` or `end`.
 bool Runtime::runTask(ObjTask* task) {
-    ObjCoroutine* co = task->co;
+    ObjCoroutine* co = task->co();
     task->state = TaskState::RUNNING;
     enterTask(task);
 
@@ -1597,19 +1568,18 @@ bool Runtime::runTask(ObjTask* task) {
     if (!co->started) {
         push(from<Nil>(Nil{}));
         if (task->hasStartArg) {
-            push(task->startArg);
+            push(task->startArg());
             task->hasStartArg = false;
-            task->startArg = Value{};
+            task->setStartArg(Value{});
             argCount = 1;
         }
     } else {
         // The network call that the task waited in returns or raises now, so
         // from here on it holds no side.
-        task->io = WaitingCall{};
+        task->clearWait();
         Value received = from<Nil>(Nil{});
-        if (!task->mailbox.empty() && task->receiving) {
-            received = task->mailbox.front();
-            task->mailbox.pop_front();
+        if (!task->mailbox().empty() && task->receiving) {
+            received = task->popMessage();
         } else if (task->hasPendingFault) {
             // The flag is cleared here, and only failWait sets it, with the
             // kind and the message. A fault that nothing raises therefore
@@ -1617,8 +1587,8 @@ bool Runtime::runTask(ObjTask* task) {
             task->hasPendingFault = false;
             m_faultTask = task;
         } else {
-            received = task->pendingValue;
-            task->pendingValue = Value{};
+            received = task->pendingValue();
+            task->setPendingValue(Value{});
         }
         task->receiving = false;
         push(received);
@@ -1702,8 +1672,8 @@ void Runtime::abandonTask(ObjTask* task) {
     // The main task of a session survives the line, but its wait does not:
     // nothing would end it once m_waitingTasks is cleared.
     releaseWait(task);
-    task->io = WaitingCall{};
-    task->pendingValue = Value{};
+    task->clearWait();
+    task->setPendingValue(Value{});
     task->hasPendingFault = false;
 }
 
@@ -1715,7 +1685,7 @@ void Runtime::abandonTasks() {
     for (const auto& entry : m_waitingTasks) {
         left.push_back(entry.second);
         // No deferred call will close the descriptor of a waiting call.
-        if (entry.second->io.op != IoOp::NONE) {
+        if (entry.second->io().op != IoOp::NONE) {
             closeWaitingDescriptor(*this, entry.second);
         }
     }
@@ -1838,8 +1808,8 @@ void Runtime::describeReceivingTasks(std::vector<std::string>& out) const {
               });
     for (const ObjTask* task : tasks) {
         std::string name = "script";
-        if (task->co != nullptr) {
-            Value callee = task->co->callee;
+        if (task->co() != nullptr) {
+            Value callee = task->co()->callee;
             ObjFunction* fn = nullptr;
             if (isClosure(callee)) {
                 fn = asObjClosure(as<Obj*>(callee))->function;
@@ -1887,7 +1857,7 @@ void Runtime::checkWorkingSetEmpty(const WorkingSetMark& mark) const {
         m_frameCount != mark.frameCount ||
         m_handlerStack.size() != mark.handlerCount ||
         stackTop != mark.stackTop || !m_deferLists[mark.frameCount].empty() ||
-        (m_openUpvalues != nullptr && m_openUpvalues->location >= stackTop);
+        (m_openUpvalues != nullptr && m_openUpvalues->location() >= stackTop);
     if (left) {
         std::fprintf(stderr, "A task left its frames, handlers or stack in "
                              "the worker after it ran.\n");
@@ -1970,7 +1940,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
                                           VmAllocator<Value>{&m_mm});
         m_mainTask->serial = m_nextTaskSerial++;
     }
-    m_mainTask->co = mainCo;
+    m_mainTask->setCo(mainCo);
     m_mainTask->state = TaskState::READY;
     m_mainTask->receiving = false;
     m_mainTask->epoch = m_taskEpoch;
@@ -1993,7 +1963,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     }
     // Every line's script is its own coroutine, and the session makes the next
     // one. Kept here, it would root this line's script for the whole session.
-    m_mainTask->co = nullptr;
+    m_mainTask->setCo(nullptr);
     abandonTasks();
     if (!m_sessionMode) {
         m_group->removeWorker(&inbox);
@@ -2113,7 +2083,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
     m_mm.noteMessageNode();
-    task->startArg = m_mm.receiveMessage(msg);
+    task->setStartArg(m_mm.receiveMessage(msg));
     task->hasStartArg = true;
 
     // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
@@ -2169,9 +2139,9 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     // one its declaration made.
     auto* entry = m_mm.create<ObjClosure>(entryFn);
     m_mm.pushTempRoot(entry);
-    task->co = m_mm.create<ObjCoroutine>(m_coroutineClass,
-                                         Value{static_cast<Obj*>(entry)},
-                                         VmAllocator<Value>{&m_mm});
+    task->setCo(m_mm.create<ObjCoroutine>(m_coroutineClass,
+                                          Value{static_cast<Obj*>(entry)},
+                                          VmAllocator<Value>{&m_mm}));
     m_mm.popTempRoot();
     m_mm.popTempRoot();
     // The `spawn-worker` move ends here: the task is the first of this worker.
@@ -2243,11 +2213,11 @@ Runtime::~Runtime() {
 ObjUpvalue* Runtime::captureUpvalue(Value* local) {
     ObjUpvalue* prev = nullptr;
     ObjUpvalue* cur = m_openUpvalues;
-    while (cur != nullptr && cur->location > local) {
+    while (cur != nullptr && cur->location() > local) {
         prev = cur;
         cur = cur->next;
     }
-    if (cur != nullptr && cur->location == local) {
+    if (cur != nullptr && cur->location() == local) {
         return cur;
     }
     ObjUpvalue* uv = m_mm.create<ObjUpvalue>(local);
@@ -2261,11 +2231,9 @@ ObjUpvalue* Runtime::captureUpvalue(Value* local) {
 }
 
 void Runtime::closeUpvalues(Value* last) {
-    while (m_openUpvalues != nullptr && m_openUpvalues->location >= last) {
+    while (m_openUpvalues != nullptr && m_openUpvalues->location() >= last) {
         ObjUpvalue* uv = m_openUpvalues;
-        uv->closed = *uv->location;
-        uv->location = &uv->closed;
-        uv->owner = nullptr;
+        uv->close(m_mm.collector());
         m_openUpvalues = uv->next;
     }
 }
@@ -2304,10 +2272,10 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
         // callee goes first, underneath its arguments, not last.
         Value calleeVal = deferred->callable;
         push(calleeVal);
-        for (const Value& arg : deferred->args) {
+        for (const Value& arg : deferred->args()) {
             push(arg);
         }
-        int argCount = static_cast<int>(deferred->args.size());
+        int argCount = static_cast<int>(deferred->args().size());
 
         // Only these four callable kinds are legal as a deferred call. A
         // class, enum constructor, instance, or non-callable value stays the
@@ -2595,7 +2563,7 @@ Runtime::OpResult Runtime::callBoundNative(ObjBoundNative* bn, int argCount,
 
 bool Runtime::bindMethod(ObjClass* klass, ObjString* name) {
     Value method;
-    if (!klass->methods.get(name, method)) {
+    if (!klass->methods().get(name, method)) {
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return false;
     }
@@ -2759,7 +2727,7 @@ Runtime::tryBinaryMethod(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(left));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2775,7 +2743,7 @@ Runtime::tryBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(left));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2791,7 +2759,7 @@ Runtime::tryReflectedBinaryMethod(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(right));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2813,7 +2781,7 @@ Runtime::tryReflectedBinaryMethodBool(Protocol proto, int stopAtFrameCount) {
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(right));
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(proto)], method)) {
         return std::nullopt;
     }
@@ -2901,7 +2869,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         // Call init() if the class defines one.
         ObjString* initStr = m_mm.findString("init");
         Value initMethod;
-        if (initStr && klass->methods.get(initStr, initMethod)) {
+        if (initStr && klass->methods().get(initStr, initMethod)) {
             return invokeClosure(asObjClosure(as<Obj*>(initMethod)), argCount,
                                  stopAtFrameCount);
         }
@@ -2922,11 +2890,11 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
         ObjEnum* enumVal =
             m_mm.create<ObjEnum>(ctor, VmAllocator<Value>{&m_mm});
         m_mm.pushTempRoot(enumVal);
-        enumVal->fields.resize(static_cast<size_t>(argCount));
+        enumVal->resize(static_cast<size_t>(argCount));
         for (int i = argCount - 1; i >= 0; i--) {
-            enumVal->fields[static_cast<size_t>(i)] = pop();
+            enumVal->set(static_cast<size_t>(i), pop());
         }
-        enumVal->sendable = std::ranges::all_of(enumVal->fields, isMessage);
+        enumVal->sendable = std::ranges::all_of(enumVal->fields(), isMessage);
         m_mm.popTempRoot();
         pop(); // pop the ObjEnumCtor from the callee slot
         push(Value{static_cast<Obj*>(enumVal)});
@@ -2935,7 +2903,7 @@ Runtime::OpResult Runtime::opCall(int argCount, int stopAtFrameCount) {
     if (isInstance(callee)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(callee));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Call)],
                 method)) {
             // The receiver already sits at stackTop[-argCount-1], which
@@ -2956,7 +2924,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         ObjInstance* instance = asObjInstance(as<Obj*>(receiver));
         // A field can shadow a method — check fields first.
         Value fieldVal;
-        if (instance->fields.get(name, fieldVal)) {
+        if (instance->fields().get(name, fieldVal)) {
             stackTop[-argCount - 1] = fieldVal;
             if (isClosure(fieldVal)) {
                 return invokeClosure(asObjClosure(as<Obj*>(fieldVal)), argCount,
@@ -2977,10 +2945,10 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
             Value dunderCall;
             if (isInstance(fieldVal) &&
                 asObjInstance(as<Obj*>(fieldVal))
-                    ->klass->methods.get(
-                        m_protocolNames[static_cast<std::size_t>(
-                            Protocol::Call)],
-                        dunderCall)) {
+                    ->klass->methods()
+                    .get(m_protocolNames[static_cast<std::size_t>(
+                             Protocol::Call)],
+                         dunderCall)) {
                 return opCall(argCount, stopAtFrameCount);
             }
             runtimeError("Can only call functions, classes and enums.");
@@ -2990,7 +2958,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
         // stackTop[-argCount-1], which becomes slot 0 (= this) of the new
         // frame.
         Value method;
-        if (!instance->klass->methods.get(name, method)) {
+        if (!instance->klass->methods().get(name, method)) {
             runtimeError("Undefined property '%s'.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3011,7 +2979,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 return OpResult::Fatal;
             }
             Value val = peek(0); // still on stack — GC-safe during push_back
-            list->elements.push_back(val);
+            list->push(val);
             pop(); // arg
             pop(); // receiver
             push(from<Nil>(Nil{}));
@@ -3022,13 +2990,12 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 runtimeError("'pop' expects 0 arguments but got %d.", argCount);
                 return OpResult::Fatal;
             }
-            if (list->elements.empty()) {
+            if (list->elements().empty()) {
                 return fromThrow(raiseThrowableError(
                     "EmptyListError", "Cannot pop from an empty list.",
                     stopAtFrameCount));
             }
-            Value val = list->elements.back();
-            list->elements.pop_back();
+            Value val = list->pop();
             pop(); // receiver
             push(val);
             return OpResult::OK;
@@ -3040,11 +3007,11 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
                 return OpResult::Fatal;
             }
             Value target = peek(0);
-            auto& elems = list->elements;
+            const auto& elems = list->elements();
             bool found = false;
             for (int i = 0; i < static_cast<int>(elems.size()); i++) {
                 if (elems[i] == target) {
-                    elems.erase(elems.begin() + i);
+                    list->eraseAt(static_cast<std::size_t>(i));
                     found = true;
                     break;
                 }
@@ -3063,7 +3030,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isFile(receiver)) {
         Value method;
-        if (!m_fileClass->methods.get(name, method)) {
+        if (!m_fileClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on file.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3072,7 +3039,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isMap(receiver)) {
         Value method;
-        if (!m_mapClass->methods.get(name, method)) {
+        if (!m_mapClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on map.", name->chars.c_str());
             return OpResult::Fatal;
         }
@@ -3081,7 +3048,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isSocket(receiver)) {
         Value method;
-        if (!m_socketClass->methods.get(name, method)) {
+        if (!m_socketClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on socket.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3091,7 +3058,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isServer(receiver)) {
         Value method;
-        if (!m_serverClass->methods.get(name, method)) {
+        if (!m_serverClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on server.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3101,7 +3068,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isProcess(receiver)) {
         Value method;
-        if (!m_processClass->methods.get(name, method)) {
+        if (!m_processClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on process.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3111,7 +3078,7 @@ Runtime::OpResult Runtime::opInvoke(ObjString* name, int argCount,
     }
     if (isCoroutine(receiver)) {
         Value method;
-        if (!m_coroutineClass->methods.get(name, method)) {
+        if (!m_coroutineClass->methods().get(name, method)) {
             runtimeError("Undefined method '%s' on coroutine.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3142,7 +3109,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isFile(peek(0))) {
         Value method;
-        if (!m_fileClass->methods.get(name, method)) {
+        if (!m_fileClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on file.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3155,7 +3122,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isMap(peek(0))) {
         Value method;
-        if (!m_mapClass->methods.get(name, method)) {
+        if (!m_mapClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on map.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3168,7 +3135,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isSocket(peek(0))) {
         Value method;
-        if (!m_socketClass->methods.get(name, method)) {
+        if (!m_socketClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on socket.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3181,7 +3148,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isServer(peek(0))) {
         Value method;
-        if (!m_serverClass->methods.get(name, method)) {
+        if (!m_serverClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on server.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3194,7 +3161,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isProcess(peek(0))) {
         Value method;
-        if (!m_processClass->methods.get(name, method)) {
+        if (!m_processClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on process.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3207,7 +3174,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     if (isCoroutine(peek(0))) {
         Value method;
-        if (!m_coroutineClass->methods.get(name, method)) {
+        if (!m_coroutineClass->methods().get(name, method)) {
             runtimeError("Undefined property '%s' on coroutine.",
                          name->chars.c_str());
             return OpResult::Fatal;
@@ -3224,7 +3191,7 @@ Runtime::OpResult Runtime::opGetProperty(ObjString* name,
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(peek(0)));
     Value value;
-    if (instance->fields.get(name, value)) {
+    if (instance->fields().get(name, value)) {
         pop(); // instance
         push(value);
         return OpResult::OK;
@@ -3247,7 +3214,7 @@ Runtime::OpResult Runtime::opSuperInvoke(ObjString* name, int argCount,
                                          int stopAtFrameCount) {
     ObjClass* superclass = asObjClass(as<Obj*>(pop()));
     Value method;
-    if (!superclass->methods.get(name, method)) {
+    if (!superclass->methods().get(name, method)) {
         runtimeError("Undefined property '%s'.", name->chars.c_str());
         return OpResult::Fatal;
     }
@@ -3263,8 +3230,8 @@ Runtime::OpResult Runtime::opInherit() {
     }
     ObjClass* superclass = asObjClass(as<Obj*>(superVal));
     ObjClass* subclass = asObjClass(as<Obj*>(peek(0)));
-    subclass->methods.addAll(superclass->methods);
-    subclass->superclass = superclass;
+    subclass->inheritMethods(*superclass);
+    subclass->setSuperclass(superclass);
     pop(); // pop subclass; superclass stays as "super" local
     return OpResult::OK;
 }
@@ -3277,10 +3244,10 @@ bool Runtime::mapKeyValid(const Value& v) const {
     // resolves a collision (the class defines equality for it).
     ObjInstance* inst = asObjInstance(as<Obj*>(v));
     Value ignored;
-    return inst->klass->methods.get(
+    return inst->klass->methods().get(
                m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
                ignored) &&
-           inst->klass->methods.get(
+           inst->klass->methods().get(
                m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
                ignored);
 }
@@ -3318,7 +3285,7 @@ std::optional<uint32_t> Runtime::hashMapKey(const Value& key,
     }
     ObjInstance* inst = asObjInstance(as<Obj*>(key));
     Value method;
-    if (!inst->klass->methods.get(
+    if (!inst->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(Protocol::Hash)],
             method)) {
         // mapKeyValid() rejects this before a hash is asked for; keep a
@@ -3373,7 +3340,7 @@ bool Runtime::mapKeyEq(const Value& stored, const Value& lookup,
     if (isInstance(stored)) {
         ObjInstance* inst = asObjInstance(as<Obj*>(stored));
         Value method;
-        if (inst->klass->methods.get(
+        if (inst->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Eq)],
                 method)) {
             push(stored);
@@ -3633,11 +3600,11 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
     if (isList(collectionVal)) {
         auto* list = asObjList(as<Obj*>(collectionVal));
         int idx = 0;
-        if (auto err = checkSequenceIndex(indexVal, list->elements.size(),
+        if (auto err = checkSequenceIndex(indexVal, list->elements().size(),
                                           "List", stopAtFrameCount, &idx)) {
             return *err;
         }
-        push(list->elements[idx]);
+        push(list->elements()[idx]);
         return OpResult::OK;
     }
     if (isString(collectionVal)) {
@@ -3683,18 +3650,18 @@ Runtime::OpResult Runtime::opGetIndex(int stopAtFrameCount) {
         case IndexKind::Ok:
             break;
         }
-        if (static_cast<std::uint64_t>(idx) >= e->fields.size()) {
+        if (static_cast<std::uint64_t>(idx) >= e->fields().size()) {
             runtimeError("Enum field index %s out of range.",
                          stringify(indexVal).c_str());
             return OpResult::Fatal;
         }
-        push(e->fields[static_cast<size_t>(idx)]);
+        push(e->fields()[static_cast<size_t>(idx)]);
         return OpResult::OK;
     }
     if (isInstance(collectionVal)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(collectionVal));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::IndexGet)],
                 method)) {
             // Receiver is the collection, argument is the index.
@@ -3732,7 +3699,7 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
     if (isInstance(listVal)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(listVal));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::IndexSet)],
                 method)) {
             // Receiver is the collection, arguments are the index and the
@@ -3753,11 +3720,11 @@ Runtime::OpResult Runtime::opSetIndex(int stopAtFrameCount) {
     }
     auto* list = asObjList(as<Obj*>(listVal));
     int idx = 0;
-    if (auto err = checkSequenceIndex(indexVal, list->elements.size(), "List",
+    if (auto err = checkSequenceIndex(indexVal, list->elements().size(), "List",
                                       stopAtFrameCount, &idx)) {
         return *err;
     }
-    list->elements[idx] = val;
+    list->set(static_cast<std::size_t>(idx), val);
     push(val); // assignment is an expression; its value is the assigned value
     return OpResult::OK;
 }
@@ -3768,7 +3735,7 @@ Runtime::OpResult Runtime::opGetIter(int stopAtFrameCount) {
     if (isInstance(iterable)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(iterable));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Iter)],
                 method)) {
             // Receiver is the iterable. The method's result must be a
@@ -3843,7 +3810,7 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
     bool has;
     if (isList(it->collection)) {
         has = it->index <
-              (int)asObjList(as<Obj*>(it->collection))->elements.size();
+              (int)asObjList(as<Obj*>(it->collection))->elements().size();
     } else if (isString(it->collection)) {
         has = it->index <
               (int)asObjString(as<Obj*>(it->collection))->chars.size();
@@ -3855,11 +3822,11 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
         }
         // Scan forward from current index for the next occupied bucket.
         int i = it->index;
-        while (i < map->map.capacity() &&
-               map->map.entryAt(i)->state != MapSlot::OCCUPIED) {
+        while (i < map->entries().capacity() &&
+               map->entries().entryAt(i)->state != MapSlot::OCCUPIED) {
             ++i;
         }
-        has = i < map->map.capacity();
+        has = i < map->entries().capacity();
     } else if (isCoroutine(it->collection)) {
         // The resume is what decides whether an element exists: a coroutine
         // that returns instead of yielding ends the loop. Cache the yielded
@@ -3881,8 +3848,7 @@ Runtime::OpResult Runtime::opIterHasNext(int stopAtFrameCount) {
                 return OpResult::Stop;
             }
             if (co->state == CoroutineState::SUSPENDED) {
-                it->current = yielded;
-                it->hasCurrent = true;
+                it->setCurrent(m_mm.collector(), yielded);
                 has = true;
             } else {
                 has = false;
@@ -3905,7 +3871,7 @@ Runtime::OpResult Runtime::opIterNext() {
     }
     ObjIterator* it = asObjIterator(as<Obj*>(top));
     if (isList(it->collection)) {
-        push(asObjList(as<Obj*>(it->collection))->elements[it->index++]);
+        push(asObjList(as<Obj*>(it->collection))->elements()[it->index++]);
     } else if (isString(it->collection)) {
         char ch = asObjString(as<Obj*>(it->collection))->chars[it->index++];
         // ObjIterator is GC-rooted at iterSlot on the stack; GC is
@@ -3920,20 +3886,18 @@ Runtime::OpResult Runtime::opIterNext() {
         if (mapIterationInvalidated(map, it->expectedVersion)) {
             return OpResult::Fatal;
         }
-        while (it->index < map->map.capacity() &&
-               map->map.entryAt(it->index)->state != MapSlot::OCCUPIED) {
+        while (it->index < map->entries().capacity() &&
+               map->entries().entryAt(it->index)->state != MapSlot::OCCUPIED) {
             ++it->index;
         }
         // ITER_HAS_NEXT was true, so an occupied slot must exist.
-        push(map->map.entryAt(it->index)->key);
+        push(map->entries().entryAt(it->index)->key);
         ++it->index;
     } else if (isCoroutine(it->collection)) {
         // ITER_HAS_NEXT resumed the coroutine and cached the value it yielded;
         // no second resume happens here. Clear the cache so a value that
         // escaped the loop body's last iteration is not retained.
-        Value v = it->current;
-        it->current = Value{Nil{}};
-        it->hasCurrent = false;
+        Value v = it->takeCurrent(m_mm.collector());
         push(v);
     } else {
         runtimeError("BUG: ObjIterator::collection has unexpected type.");
@@ -3994,7 +3958,7 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
         return OpResult::Fatal;
     }
     ObjInstance* instance = asObjInstance(as<Obj*>(peek(1)));
-    instance->fields.set(name, peek(0));
+    instance->setField(name, peek(0));
     Value val = pop(); // value
     pop();             // instance
     push(val);         // assignment is an expression
@@ -4004,7 +3968,7 @@ Runtime::OpResult Runtime::opSetProperty(ObjString* name) {
 void Runtime::opDefineMethod(ObjString* name) {
     Value method = peek(0);                          // ObjClosure* on top
     ObjClass* klass = asObjClass(as<Obj*>(peek(1))); // class below
-    klass->methods.set(name, method);
+    klass->setMethod(name, method);
     pop(); // pop closure; leave class on stack for next method
 }
 
@@ -4017,7 +3981,7 @@ void Runtime::opDeferRecord(int argCount) {
         m_mm.create<ObjDeferredCall>(callee, VmAllocator<Value>{&m_mm});
     m_mm.pushTempRoot(deferred);
     for (int i = argCount - 1; i >= 0; i--) {
-        deferred->args.push_back(stackTop[-(i + 1)]);
+        deferred->addArg(stackTop[-(i + 1)]);
     }
     m_mm.popTempRoot();
     stackTop -= argCount + 1;
@@ -4028,9 +3992,9 @@ void Runtime::opDeferRecord(int argCount) {
 Runtime::OpResult Runtime::opBuildList(int count) {
     ObjList* list = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
     m_mm.pushTempRoot(list); // protect across resize's potential GC
-    list->elements.resize(static_cast<std::size_t>(count));
+    list->resize(static_cast<std::size_t>(count));
     for (int i = count - 1; i >= 0; i--) {
-        list->elements[static_cast<std::size_t>(i)] = pop();
+        list->set(static_cast<std::size_t>(i), pop());
     }
     m_mm.popTempRoot();
     push(Value{static_cast<Obj*>(list)});
@@ -4074,7 +4038,7 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         if (isInstance(seqVal)) {
             ObjInstance* instance = asObjInstance(as<Obj*>(seqVal));
             Value method;
-            if (instance->klass->methods.get(
+            if (instance->klass->methods().get(
                     m_protocolNames[static_cast<std::size_t>(Protocol::Slice)],
                     method)) {
                 // The stack is already [seq, start, end]: the receiver sits
@@ -4092,7 +4056,7 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
     // exact for every Int, so a bound above every reachable index yields the
     // whole tail and never a truncated one.
     const size_t n = isList(seqVal)
-                         ? asObjList(as<Obj*>(seqVal))->elements.size()
+                         ? asObjList(as<Obj*>(seqVal))->elements().size()
                          : asObjString(as<Obj*>(seqVal))->chars.size();
     auto readBound = [&](const Value& value, size_t* out) -> bool {
         Int bound = 0;
@@ -4129,10 +4093,10 @@ Runtime::OpResult Runtime::opSlice(int stopAtFrameCount) {
         ObjList* result = m_mm.create<ObjList>(VmAllocator<Value>{&m_mm});
         // seqVal is still at peek(2), so it is GC-rooted on the stack.
         m_mm.pushTempRoot(result);
-        result->elements.resize(count);           // may GC
+        result->resize(count);                    // may GC
         auto* src = asObjList(as<Obj*>(peek(2))); // re-read after potential GC
         for (size_t i = 0; i < count; i++) {
-            result->elements[i] = src->elements[s + i];
+            result->set(i, src->elements()[s + i]);
         }
         m_mm.popTempRoot();
         pop();
@@ -4191,7 +4155,7 @@ void Runtime::opInstanceof(ObjString* className) {
             ObjClass* klass = asObjInstance(as<Obj*>(val))->klass;
             const ObjClass* found = walkChain<ObjClass>(
                 klass, [target](const ObjClass* k) { return k == target; },
-                [](const ObjClass* k) { return k->superclass; });
+                [](const ObjClass* k) { return k->superclass(); });
             result = found != nullptr;
         }
     }
@@ -4435,7 +4399,7 @@ Runtime::OpResult Runtime::opNegate(int stopAtFrameCount) {
     if (isInstance(operand)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(operand));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Neg)],
                 method)) {
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
@@ -4525,7 +4489,7 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
     if (isList(seq)) {
         auto* list = asObjList(as<Obj*>(seq));
         bool found = false;
-        for (const auto& v : list->elements) {
+        for (const auto& v : list->elements()) {
             if (v == elem) {
                 found = true;
                 break;
@@ -4567,7 +4531,7 @@ Runtime::OpResult Runtime::opIn(int stopAtFrameCount) {
     if (isInstance(seq)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(seq));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Contains)],
                 method)) {
             // __contains__ lives on the container, which is the RIGHT operand
@@ -4589,7 +4553,8 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     Value operand = peek(0);
     if (isList(operand)) {
         auto* list = asObjList(as<Obj*>(operand));
-        stackTop[-1] = from<Number>(static_cast<double>(list->elements.size()));
+        stackTop[-1] =
+            from<Number>(static_cast<double>(list->elements().size()));
         return OpResult::OK;
     }
     if (isString(operand)) {
@@ -4599,13 +4564,14 @@ Runtime::OpResult Runtime::opLen(int stopAtFrameCount) {
     }
     if (isMap(operand)) {
         auto* map = asObjMap(as<Obj*>(operand));
-        stackTop[-1] = from<Number>(static_cast<double>(map->map.count()));
+        stackTop[-1] =
+            from<Number>(static_cast<double>(map->entries().count()));
         return OpResult::OK;
     }
     if (isInstance(operand)) {
         ObjInstance* instance = asObjInstance(as<Obj*>(operand));
         Value method;
-        if (instance->klass->methods.get(
+        if (instance->klass->methods().get(
                 m_protocolNames[static_cast<std::size_t>(Protocol::Len)],
                 method)) {
             return dispatchMethod(asObjClosure(as<Obj*>(method)), 0,
@@ -4656,7 +4622,7 @@ std::string Runtime::stringifyInstanceStr(ObjInstance* instance) {
         return "...";
     }
     Value method;
-    if (!instance->klass->methods.get(
+    if (!instance->klass->methods().get(
             m_protocolNames[static_cast<std::size_t>(Protocol::Str)], method)) {
         return std::string(instance->klass->name->chars.data(),
                            instance->klass->name->chars.size()) +

@@ -41,6 +41,13 @@ class Table {
   public:
     explicit Table(VmAllocator<Entry> alloc);
 
+    [[nodiscard]] VmAllocator<Entry> allocator() const {
+        return m_map.allocator();
+    }
+
+    // See CoreHashMap::ensureRoom.
+    void ensureRoom() { m_map.ensureRoom(); }
+
     bool set(ObjString* key, Value value);
     bool get(ObjString* key, Value& out) const;
     bool del(ObjString* key);

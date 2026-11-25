@@ -30,6 +30,7 @@ MemoryManager::MemoryManager(int workerNumber)
     m_poll.stress = readStressGCEnv();
     m_collector = makeCollector(*this, m_poll, workerNumber);
     m_stw = dynamic_cast<StwCollector*>(m_collector.get());
+    VmAllocBase::barrierCollector = m_collector.get();
 }
 
 MemoryManager::~MemoryManager() {
@@ -58,6 +59,7 @@ MemoryManager::~MemoryManager() {
     }
     // Writes the end record of the trace.
     m_stw = nullptr;
+    VmAllocBase::barrierCollector = nullptr;
     m_collector.reset();
     releaseHeapId(m_heapId);
 }
@@ -127,6 +129,7 @@ std::unique_ptr<Collector>
 MemoryManager::swapCollector(std::unique_ptr<Collector> collector) {
     std::swap(m_collector, collector);
     m_stw = dynamic_cast<StwCollector*>(m_collector.get());
+    VmAllocBase::barrierCollector = m_collector.get();
     return collector;
 }
 

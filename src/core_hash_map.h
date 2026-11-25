@@ -68,6 +68,8 @@ class CoreHashMap {
 
     explicit CoreHashMap(Alloc alloc) : m_buckets(std::move(alloc)) {}
 
+    [[nodiscard]] Alloc allocator() const { return m_buckets.get_allocator(); }
+
     // Returns a pointer to the live matching entry, or nullptr if not found.
     template <typename KeyMatch>
     [[nodiscard]] const Entry* find(uint32_t hash, KeyMatch match) const {
@@ -104,6 +106,15 @@ class CoreHashMap {
         Policy::makeTombstone(*slot);
         --m_count;
         ++m_dead;
+    }
+
+    // Grows now if the next set would grow. A set after this call does not
+    // allocate, so no collection can start between a barrier and the store.
+    void ensureRoom() {
+        int cap = static_cast<int>(m_buckets.size());
+        if (m_count + m_dead + 1 > static_cast<int>(cap * MAX_LOAD)) {
+            grow();
+        }
     }
 
     // Insert or update entry e. Returns true if e's key was newly inserted.

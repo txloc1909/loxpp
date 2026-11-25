@@ -114,7 +114,7 @@ static Value fileReadlinesNative(int /*argc*/, Value* args) {
         ObjString* s = mm->makeString(line);
         // Protect s across push_back, which can GC on vector resize.
         mm->pushTempRoot(s);
-        list->elements.push_back(Value{static_cast<Obj*>(s)});
+        list->push(Value{static_cast<Obj*>(s)});
         mm->popTempRoot();
     }
     mm->popTempRoot();

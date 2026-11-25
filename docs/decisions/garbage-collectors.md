@@ -310,6 +310,13 @@ large heap.
    runs. A script checks that each mutable reference has a mutator in the
    table, and that no code outside the allowed files reads the raw
    container for write (AGENTS.md, "Plans for a language change", rule 2).
+   The table is section 7 of `docs/reference/gc-runtime-contract.md`, and
+   `tools/check_gc_barrier_table.py` checks it. Three rules came with it.
+   A mutator reads the old value after any growth of a buffer, because an
+   allocation in the growth can start a mark (the bug class of 6.1, item 1).
+   A removed or replaced key goes to the hook as a `Value` in its own call,
+   so the hooks keep one old value and one new value. A type whose object
+   holds no allocator takes the collector as an argument of its mutator.
 3. **Types without a barrier yet (Ruby's method).** A type that is not
    converted yet is marked as unprotected. The finish pause traces all
    unprotected objects again. That is correct, but it does not meet goal 1

@@ -56,8 +56,7 @@ static Value mapKeysNative(int /*argc*/, Value* args) {
     mm->pushTempRoot(list);
     // key may be an ObjString; it stays alive via the map (map is rooted
     // as the receiver on the VM stack). push_back may GC — list is rooted.
-    map->map.forEach(
-        [list](const MapEntry& e) { list->elements.push_back(e.key); });
+    map->entries().forEach([list](const MapEntry& e) { list->push(e.key); });
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
 }
@@ -67,8 +66,7 @@ static Value mapValuesNative(int /*argc*/, Value* args) {
     MemoryManager* mm = getActiveMM();
     ObjList* list = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(list);
-    map->map.forEach(
-        [list](const MapEntry& e) { list->elements.push_back(e.value); });
+    map->entries().forEach([list](const MapEntry& e) { list->push(e.value); });
     mm->popTempRoot();
     return Value{static_cast<Obj*>(list)};
 }
@@ -78,15 +76,15 @@ static Value mapEntriesNative(int /*argc*/, Value* args) {
     MemoryManager* mm = getActiveMM();
     ObjList* result = mm->create<ObjList>(VmAllocator<Value>{mm});
     mm->pushTempRoot(result);
-    map->map.forEach([result, mm](const MapEntry& e) {
+    map->entries().forEach([result, mm](const MapEntry& e) {
         // Build [key, value] pair list
         ObjList* pair = mm->create<ObjList>(VmAllocator<Value>{mm});
         mm->pushTempRoot(pair);
-        pair->elements.push_back(e.key);
-        pair->elements.push_back(e.value);
-        // Keep pair rooted until after push_back: result->elements.push_back
+        pair->push(e.key);
+        pair->push(e.value);
+        // Keep pair rooted until after push_back: result->push
         // may trigger GC, and pair would be unreachable if popped too early.
-        result->elements.push_back(Value{static_cast<Obj*>(pair)});
+        result->push(Value{static_cast<Obj*>(pair)});
         mm->popTempRoot(); // pair — now safe, stored in result
     });
     mm->popTempRoot(); // result

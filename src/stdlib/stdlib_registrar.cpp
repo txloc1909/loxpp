@@ -40,7 +40,7 @@ void StdlibRegistrar::addMethod(ObjClass* klass, const char* name, NativeFn fn,
     m_mm.pushTempRoot(native);
     ObjString* key = m_mm.makeString(name);
     m_mm.pushTempRoot(key);
-    klass->methods.set(key, Value{static_cast<Obj*>(native)});
+    klass->setMethod(key, Value{static_cast<Obj*>(native)});
     m_mm.popTempRoot(); // key
     m_mm.popTempRoot(); // native
     m_mm.popTempRoot(); // klass
@@ -61,7 +61,7 @@ void StdlibRegistrar::addField(ObjInstance* inst, const char* name, Value val) {
     }
     ObjString* key = m_mm.makeString(name);
     m_mm.pushTempRoot(key);
-    inst->fields.set(key, val);
+    inst->setField(key, val);
     m_mm.popTempRoot(); // key
     if (is<Obj*>(val)) {
         m_mm.popTempRoot(); // val
@@ -76,7 +76,7 @@ void StdlibRegistrar::addNativeField(ObjInstance* inst, const char* name,
     m_mm.pushTempRoot(native);
     ObjString* key = m_mm.makeString(name);
     m_mm.pushTempRoot(key);
-    inst->fields.set(key, Value{static_cast<Obj*>(native)});
+    inst->setField(key, Value{static_cast<Obj*>(native)});
     m_mm.popTempRoot(); // key
     m_mm.popTempRoot(); // native
     m_mm.popTempRoot(); // inst

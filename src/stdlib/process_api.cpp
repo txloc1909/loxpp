@@ -42,8 +42,8 @@ static bool asStringList(const Value& v, std::vector<std::string>& out) {
         return false;
     }
     ObjList* list = asObjList(as<Obj*>(v));
-    out.reserve(list->elements.size());
-    for (const Value& e : list->elements) {
+    out.reserve(list->elements().size());
+    for (const Value& e : list->elements()) {
         if (!isString(e)) {
             nativeRuntimeError("args must be a list of strings.");
             return false;
@@ -411,7 +411,7 @@ static Value processReadlinesFrom(FILE* stream, MemoryManager* mm) {
         } else if (c == '\n') {
             ObjString* str = mm->makeString(line);
             mm->pushTempRoot(str);
-            list->elements.emplace_back(static_cast<Obj*>(str));
+            list->push(Value{static_cast<Obj*>(str)});
             mm->popTempRoot();
             line.clear();
             sawByte = false;
@@ -423,7 +423,7 @@ static Value processReadlinesFrom(FILE* stream, MemoryManager* mm) {
     if (sawByte) {
         ObjString* str = mm->makeString(line);
         mm->pushTempRoot(str);
-        list->elements.emplace_back(static_cast<Obj*>(str));
+        list->push(Value{static_cast<Obj*>(str)});
         mm->popTempRoot();
     }
     mm->popTempRoot();

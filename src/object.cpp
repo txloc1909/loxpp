@@ -91,11 +91,11 @@ std::string stringifyObj(Obj* obj) {
     case ObjType::LIST: {
         auto* list = static_cast<ObjList*>(obj);
         std::string result = "[";
-        for (size_t i = 0; i < list->elements.size(); i++) {
+        for (size_t i = 0; i < list->elements().size(); i++) {
             if (i > 0) {
                 result += ", ";
             }
-            result += stringify(list->elements[i]);
+            result += stringify(list->elements()[i]);
         }
         result += "]";
         return result;
@@ -104,7 +104,7 @@ std::string stringifyObj(Obj* obj) {
         auto* map = static_cast<ObjMap*>(obj);
         std::string result = "{";
         bool first = true;
-        map->map.forEach([&](const MapEntry& e) {
+        map->entries().forEach([&](const MapEntry& e) {
             if (!first) {
                 result += ", ";
             }
@@ -133,10 +133,10 @@ std::string stringifyObj(Obj* obj) {
         s += "::";
         s += std::string(e->ctor->ctorName->chars.data(),
                          e->ctor->ctorName->chars.size());
-        if (!e->fields.empty()) {
+        if (!e->fields().empty()) {
             s += "(";
             bool first = true;
-            for (auto& f : e->fields) {
+            for (auto& f : e->fields()) {
                 if (!first) {
                     s += ", ";
                 }

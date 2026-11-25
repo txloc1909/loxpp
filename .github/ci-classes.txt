@@ -39,6 +39,9 @@ path tools/check_test_labels.py                ci
 path tools/testdata/ci-classify.txt            ci
 
 # --- documents
+# The table of write-barrier mutators in the contract is read by the test
+# GcBarrierTable, so a change to this one document runs it.
+path docs/reference/gc-runtime-contract.md     gc-barrier-doc,docs
 path docs/**                                   docs
 path spec/**                                   spec
 path *.md                                      docs
@@ -189,6 +192,8 @@ class bench            labels=bench
 # run through the tests that scale them down and compare them, not through the
 # benchmark tests.
 class gc-large-heap    tests=GcLargeHeap,GcStwCounts
+# The contract document holds the table that GcBarrierTable checks.
+class gc-barrier-doc   tests=GcBarrierTable
 class pi               gates=pi
 class cross-probe      gates=cross
 class packaging        gates=release-static,tables

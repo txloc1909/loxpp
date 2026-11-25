@@ -56,7 +56,7 @@ static Value argsNative(int /*argc*/, Value* /*argv*/) {
     for (const std::string& a : getActiveArgs()) {
         ObjString* s = mm->makeString(a);
         mm->pushTempRoot(s);
-        list->elements.emplace_back(static_cast<Obj*>(s));
+        list->push(Value{static_cast<Obj*>(s)});
         mm->popTempRoot();
     }
     mm->popTempRoot();
