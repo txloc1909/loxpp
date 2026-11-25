@@ -1576,8 +1576,10 @@ def stages_streams_large(prog):
         peak = 0
         with open(trace.name) as f:
             for line in f:
-                if line.startswith("gc "):
+                if line.startswith(("gc ", "cycle ")):
                     fields = dict(x.split("=", 1) for x in line.split()[1:])
+                    # A cycle of the incremental collector is a collection
+                    # that ends: it has the same field.
                     peak = max(peak, int(fields["objs_before"]))
         os.unlink(trace.name)
         check("local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection",

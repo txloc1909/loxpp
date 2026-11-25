@@ -326,7 +326,7 @@ The status of a row:
   `tools/check_gc_stall.py`,
   `tools/check_gc_min_heap.py`,
   `tools/check_gc_sweep_linear.py`, `benchmarks/gc_compare.py`, and the Redis
-  example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc`
+  example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc` and `cycle`
   records).
 - `benchmarks/gc_large_heap/` holds the programs that keep a heap of millions
   of objects. `docs/records/gc-stw-baseline-2026-11-21.md` gives the object
