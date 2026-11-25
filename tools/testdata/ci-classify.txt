@@ -317,7 +317,7 @@ case the runner module that the smoke test imports runs the harness and the lang
 files tools/runner_precondition.py
 gates placement,tables,native-unit,probes,lsp,release-static
 labels bootstrap,corpus,harness
-names GcTrace GcTraceV3 GcCollectorChoice GcLargeHeap GcStwCounts GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
+names GcTrace GcTraceV3 GcCollectorChoice GcLargeHeap GcStwCounts GcStall GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
 
 case the library of the spec tables runs the static test that reads it
 files tools/spec_tables.py
