@@ -129,7 +129,7 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
     case ObjType::DEFERRED_CALL: {
         auto* deferred = static_cast<ObjDeferredCall*>(obj);
         m.markValue(deferred->callable);
-        for (auto& v : deferred->args) {
+        for (auto& v : deferred->args()) {
             m.markValue(v);
         }
         break;
@@ -154,42 +154,42 @@ inline void traceObjectEdges(Obj* obj, Marker& m) {
         auto* co = static_cast<ObjCoroutine*>(obj);
         m.markObject(co->klass);
         m.markValue(co->callee);
-        for (const auto& v : co->stack) {
+        for (const auto& v : co->stack()) {
             m.markValue(v);
         }
-        for (const auto& frame : co->frames) {
+        for (const auto& frame : co->frames()) {
             m.markObject(frame.closure);
         }
-        for (const auto& deferList : co->defers) {
+        for (const auto& deferList : co->defers()) {
             for (const auto& v : deferList) {
                 m.markValue(v);
             }
         }
-        for (ObjUpvalue* uv : co->openUpvalues) {
+        for (ObjUpvalue* uv : co->openUpvalues()) {
             m.markObject(uv);
         }
-        for (const auto& v : co->resultOverrides) {
+        for (const auto& v : co->resultOverrides()) {
             m.markValue(v);
         }
-        if (co->waitingInner != nullptr) {
-            m.markObject(co->waitingInner);
+        if (co->waitingInner() != nullptr) {
+            m.markObject(co->waitingInner());
         }
-        if (co->waitingIterator != nullptr) {
-            m.markObject(co->waitingIterator);
+        if (co->waitingIterator() != nullptr) {
+            m.markObject(co->waitingIterator());
         }
         break;
     }
     case ObjType::TASK: {
         auto* task = static_cast<ObjTask*>(obj);
-        if (task->co != nullptr) {
-            m.markObject(task->co);
+        if (task->co() != nullptr) {
+            m.markObject(task->co());
         }
-        for (const auto& v : task->mailbox) {
+        for (const auto& v : task->mailbox()) {
             m.markValue(v);
         }
-        m.markValue(task->startArg);
-        m.markValue(task->pendingValue);
-        m.markValue(task->sel.want);
+        m.markValue(task->startArg());
+        m.markValue(task->pendingValue());
+        m.markValue(task->selectWant());
         if (task->io.target != nullptr) {
             m.markObject(task->io.target);
         }

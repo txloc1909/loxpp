@@ -186,7 +186,8 @@ static Value taskPendingNative(int /*argCount*/, Value* /*argv*/) {
     if (rt == nullptr) {
         return from<Nil>(Nil{});
     }
-    return from<Number>(static_cast<Number>(rt->currentTask()->mailbox.size()));
+    return from<Number>(
+        static_cast<Number>(rt->currentTask()->mailbox().size()));
 }
 
 void registerTaskAPI(StdlibRegistrar& reg) {

@@ -628,10 +628,10 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
                              ? STACK_OVERFLOW_STACK_RESERVE
                              : 0);
         if (static_cast<std::ptrdiff_t>(entry) +
-                    static_cast<std::ptrdiff_t>(co->frames.size()) >
+                    static_cast<std::ptrdiff_t>(co->frames().size()) >
                 frameCeiling ||
             static_cast<std::ptrdiff_t>(base - stack) +
-                    static_cast<std::ptrdiff_t>(co->stack.size()) + 1 >
+                    static_cast<std::ptrdiff_t>(co->stack().size()) + 1 >
                 stackCeiling) {
             if (!m_handlerStack.empty() && !m_owned->unwindingStackOverflow) {
                 m_owned->unwindingStackOverflow = true;
@@ -748,42 +748,42 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
             outcome = r;
         }
     } else {
-        for (const Value& v : co->stack) {
+        for (const Value& v : co->stack()) {
             push(v);
         }
-        for (std::size_t i = 0; i < co->frames.size(); i++) {
-            const CoroutineFrameSnapshot& fs = co->frames[i];
+        for (std::size_t i = 0; i < co->frames().size(); i++) {
+            const CoroutineFrameSnapshot& fs = co->frames()[i];
             CallFrame& f = m_frames[entry + static_cast<int>(i)];
             f.closure = fs.closure;
             f.ip = fs.closure->function->chunk.cbegin() + fs.ipOffset;
             f.slots = base + fs.slotOffset;
             f.compiledState = fs.compiledState;
         }
-        m_frameCount = entry + static_cast<int>(co->frames.size());
-        // `co->handlers` is stored innermost-first (suspend pops the handler
+        m_frameCount = entry + static_cast<int>(co->frames().size());
+        // `co->handlers()` is stored innermost-first (suspend pops the handler
         // stack from the back). Push it back outermost-first so the innermost
         // handler ends on top and handleThrow's LIFO search finds it first.
-        for (std::size_t i = co->handlers.size(); i-- > 0;) {
-            const CoroutineHandlerSnapshot& hs = co->handlers[i];
+        for (std::size_t i = co->handlers().size(); i-- > 0;) {
+            const CoroutineHandlerSnapshot& hs = co->handlers()[i];
             m_handlerStack.push_back(HandlerRecord{entry + hs.frameOffset,
                                                    base + hs.stackOffset,
                                                    hs.catchIp, hs.catchState});
         }
-        for (std::size_t i = 0; i < co->defers.size(); i++) {
+        for (std::size_t i = 0; i < co->defers().size(); i++) {
             auto& frameDefers = m_deferLists[entry + static_cast<int>(i)];
-            frameDefers.assign(co->defers[i].begin(), co->defers[i].end());
+            frameDefers.assign(co->defers()[i].begin(), co->defers()[i].end());
         }
-        for (std::size_t i = 0; i < co->resultChecks.size(); i++) {
+        for (std::size_t i = 0; i < co->resultChecks().size(); i++) {
             m_frameResultCheck[entry + static_cast<int>(i)] =
-                static_cast<ResultCheck>(co->resultChecks[i]);
+                static_cast<ResultCheck>(co->resultChecks()[i]);
             m_frameResultOverrideSet[entry + static_cast<int>(i)] =
-                co->resultOverrideSet[i] != 0;
+                co->resultOverrideSet()[i] != 0;
             m_frameResultOverride[entry + static_cast<int>(i)] =
-                co->resultOverrides[i];
+                co->resultOverrides()[i];
         }
-        for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
-            ObjUpvalue* uv = co->openUpvalues[i];
-            uv->setLocation(base + co->openUpvalueOffsets[i]);
+        for (std::size_t i = 0; i < co->openUpvalues().size(); i++) {
+            ObjUpvalue* uv = co->openUpvalues()[i];
+            uv->setLocation(base + co->openUpvalueOffsets()[i]);
             uv->setOwner(m_mm.collector(), nullptr);
             ObjUpvalue** pp = &m_openUpvalues;
             while (*pp != nullptr && (*pp)->location() > uv->location()) {
@@ -807,15 +807,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         push(received);
         // The snapshot is now live on the shared stack. Clear it so a running
         // coroutine has no stale state and markRoots does not double-mark it.
-        co->stack.clear();
-        co->frames.clear();
-        co->handlers.clear();
-        co->defers.clear();
-        co->openUpvalues.clear();
-        co->openUpvalueOffsets.clear();
-        co->resultChecks.clear();
-        co->resultOverrideSet.clear();
-        co->resultOverrides.clear();
+        co->clearSnapshot();
         frameReady = true;
     }
 
@@ -832,7 +824,7 @@ bool Runtime::resumeCoroutine(ObjCoroutine* co, int argCount, Value* out) {
         WakeResult wake = WakeResult::Run;
         // The coroutine that holds the suspended call is the one at the end
         // of the chain; a waiting call's fault is raised there.
-        const bool innermost = co->waitingInner == nullptr;
+        const bool innermost = co->waitingInner() == nullptr;
         if (!innermost) {
             wake = resumeWaitingInner(co, entry);
         } else if (m_currentTask != nullptr &&
@@ -903,9 +895,9 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
     // field, which keeps the value alive until the resume copies it out.
     m_yieldedValue = yielded;
 
-    co->stack.assign(base, stackTop);
+    co->clearSnapshot();
+    co->captureStack(base, stackTop);
 
-    co->handlers.clear();
     // HandlerRecord::frameCount is the frame COUNT at push time, one more
     // than the pushing frame's index. The coroutine's own frames start at
     // index baseFrame, so their records are `frameCount > baseFrame`. A
@@ -915,45 +907,34 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
            m_handlerStack.back().frameCount > baseFrame) {
         HandlerRecord h = m_handlerStack.back();
         m_handlerStack.pop_back();
-        co->handlers.push_back(CoroutineHandlerSnapshot{
+        co->pushHandler(CoroutineHandlerSnapshot{
             h.frameCount - baseFrame, static_cast<int>(h.stackTop - base),
             h.catchIp, h.catchState});
     }
 
-    co->frames.clear();
-    co->frames.reserve(static_cast<std::size_t>(m_frameCount - baseFrame));
+    co->reserveFrames(static_cast<std::size_t>(m_frameCount - baseFrame));
     for (int i = baseFrame; i < m_frameCount; i++) {
         const CallFrame& f = m_frames[i];
-        co->frames.push_back(CoroutineFrameSnapshot{
+        co->pushFrame(CoroutineFrameSnapshot{
             f.closure,
             static_cast<int>(f.ip - f.closure->function->chunk.cbegin()),
             static_cast<int>(f.slots - base), f.compiledState});
     }
 
-    co->defers.clear();
     for (int i = baseFrame; i < m_frameCount; i++) {
         // The snapshot is on the heap; the live lists are not, so this copies
         // into the snapshot's own allocator.
-        co->defers.push_back(VmVector<Value>(m_deferLists[i].begin(),
-                                             m_deferLists[i].end(),
-                                             co->defers.get_allocator()));
+        co->pushDefers(m_deferLists[i].begin(), m_deferLists[i].end());
         m_deferLists[i].clear();
     }
 
-    co->resultChecks.clear();
-    co->resultOverrideSet.clear();
-    co->resultOverrides.clear();
     for (int i = baseFrame; i < m_frameCount; i++) {
-        co->resultChecks.push_back(
-            static_cast<std::uint8_t>(m_frameResultCheck[i]));
-        co->resultOverrideSet.push_back(m_frameResultOverrideSet[i] ? 1 : 0);
-        co->resultOverrides.push_back(m_frameResultOverride[i]);
+        co->pushResult(static_cast<std::uint8_t>(m_frameResultCheck[i]),
+                       m_frameResultOverrideSet[i], m_frameResultOverride[i]);
         m_frameResultCheck[i] = ResultCheck::None;
         m_frameResultOverrideSet[i] = false;
     }
 
-    co->openUpvalues.clear();
-    co->openUpvalueOffsets.clear();
     // An upvalue that no live closure holds is rooted only by the
     // m_openUpvalues chain, and the loop below unlinks it before it stores it
     // here. Reserve both vectors first, while every upvalue is still a root,
@@ -963,24 +944,18 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
          uv != nullptr && uv->location() >= base; uv = uv->next) {
         ++openCount;
     }
-    co->openUpvalueOffsets.reserve(openCount);
-    co->openUpvalues.reserve(openCount);
+    co->reserveOpenUpvalues(openCount);
     while (m_openUpvalues != nullptr && m_openUpvalues->location() >= base) {
         ObjUpvalue* uv = m_openUpvalues;
         m_openUpvalues = uv->next;
         uv->next = nullptr;
-        co->openUpvalueOffsets.push_back(
-            static_cast<int>(uv->location() - base));
-        co->openUpvalues.push_back(uv);
+        co->pushOpenUpvalue(uv, static_cast<int>(uv->location() - base));
         uv->setOwner(m_mm.collector(), co);
     }
     // Point the open upvalues at the snapshot's own stable storage so a
     // closure that escaped the coroutine still reads the captured cell. The
     // buffer does not move again while the coroutine is suspended.
-    for (std::size_t i = 0; i < co->openUpvalues.size(); i++) {
-        co->openUpvalues[i]->setLocation(co->stack.data() +
-                                         co->openUpvalueOffsets[i]);
-    }
+    co->bindOpenUpvalues();
 
 #ifdef LOXPP_PROFILE
     co->profilerScopes.clear();
@@ -1005,10 +980,9 @@ void Runtime::suspendCurrentCoroutine(Value yielded) {
 // --- workers and tasks (spec/04-semantics.md, Workers and Tasks) ---------
 
 Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
-    ObjCoroutine* inner = co->waitingInner;
-    ObjIterator* iter = co->waitingIterator;
-    co->waitingInner = nullptr;
-    co->waitingIterator = nullptr;
+    ObjCoroutine* inner = co->waitingInner();
+    ObjIterator* iter = co->waitingIterator();
+    co->setWaiting(nullptr, nullptr);
     // The inner coroutine kept the status "running" (or "normal") while the
     // task waited, so no other task could resume it. Its own resume below
     // continues it.
@@ -1062,14 +1036,14 @@ Runtime::WakeResult Runtime::resumeWaitingInner(ObjCoroutine* co, int entry) {
 void Runtime::suspendForTaskSwitch(ObjIterator* iter) {
     ObjCoroutine* co = m_currentCoroutine;
     ObjCoroutine* inner = m_taskSwitchInner;
-    co->waitingInner = inner;
-    co->waitingIterator = iter;
+    co->setWaiting(inner, iter);
     if (inner != nullptr) {
         // spec/04-semantics.md, task.receive: a coroutine that holds a
         // suspended receive keeps the status "running"; one that resumed it
         // stays "normal".
-        inner->state = inner->waitingInner == nullptr ? CoroutineState::RUNNING
-                                                      : CoroutineState::NORMAL;
+        inner->state = inner->waitingInner() == nullptr
+                           ? CoroutineState::RUNNING
+                           : CoroutineState::NORMAL;
     }
     suspendCurrentCoroutine(from<Nil>(Nil{}));
     m_taskSwitchInner = co;
@@ -1128,7 +1102,7 @@ void Runtime::waitTask(ObjTask* task) {
     case WaitEvent::NONE:
         break;
     }
-    task->pendingValue = Value{};
+    task->setPendingValue(Value{});
     if (token == 0 && task->io.op != IoOp::NONE) {
         // A socket that epoll refuses (the kernel is out of watches, for one)
         // cannot be waited on, and the call must not return a value it did not
@@ -1227,7 +1201,7 @@ void Runtime::completeWait(ObjTask* task, Value value) {
     if (task->state != TaskState::WAITING) {
         return;
     }
-    task->pendingValue = value;
+    task->setPendingValue(value);
     waitEndTask(task);
 }
 
@@ -1364,13 +1338,13 @@ void Runtime::retireTask(ObjTask* task) {
         --m_liveTasks;
     }
     task->state = TaskState::ENDED;
-    task->co = nullptr;
-    task->mailbox.clear();
-    task->startArg = Value{};
-    task->pendingValue = Value{};
+    task->setCo(nullptr);
+    task->clearMailbox();
+    task->setStartArg(Value{});
+    task->setPendingValue(Value{});
     task->hasPendingFault = false;
     task->io = WaitingCall{};
-    task->sel = ObjTask::SelectiveReceive{};
+    task->resetSelect();
     releaseWait(task);
     m_receivingTasks.erase(task);
     task->ended.store(true, std::memory_order_release);
@@ -1398,7 +1372,7 @@ void Runtime::deliverMessage(ObjTask* task, Value msg) {
     // keeps the envelope in the draining batch) and the message with it;
     // root the target here as well, so the window is local to this function.
     m_mm.pushTempRoot(task);
-    task->mailbox.push_back(msg);
+    task->pushMessage(msg);
     m_mm.popTempRoot();
     if (task->inStateReceiving()) {
         messageTask(task);
@@ -1449,9 +1423,8 @@ bool Runtime::receiveFromNative(Value* out) {
                         "calls.");
         return false;
     }
-    if (!task->mailbox.empty()) {
-        *out = task->mailbox.front();
-        task->mailbox.pop_front();
+    if (!task->mailbox().empty()) {
+        *out = task->popMessage();
         return true;
     }
     if (workerState() == WorkerState::BLOCKED) {
@@ -1473,9 +1446,9 @@ bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
                         "calls.");
         return false;
     }
-    task->sel = ObjTask::SelectiveReceive{};
+    task->resetSelect();
     task->sel.hasWant = hasWant;
-    task->sel.want = want;
+    task->setSelectWant(want);
     task->sel.limited = limited;
     if (limited) {
         task->sel.deadline = Poller::deadlineAfter(seconds);
@@ -1485,17 +1458,16 @@ bool Runtime::selectiveReceive(Value want, bool hasWant, bool limited,
 
 bool Runtime::selectStep(ObjTask* task, Value* out) {
     auto& sel = task->sel;
-    while (sel.scanned < task->mailbox.size()) {
+    while (sel.scanned < task->mailbox().size()) {
         const std::size_t at = sel.scanned;
         if (!sel.hasWant) {
-            *out = task->mailbox[at];
-            task->mailbox.erase(task->mailbox.begin() +
-                                static_cast<std::ptrdiff_t>(at));
-            sel = ObjTask::SelectiveReceive{};
+            *out = task->mailbox()[at];
+            task->eraseMessage(at);
+            task->resetSelect();
             return true;
         }
-        const Value msg = task->mailbox[at];
-        push(sel.want);
+        const Value msg = task->mailbox()[at];
+        push(task->selectWant());
         push(msg);
         Value verdict;
         bool ok;
@@ -1506,25 +1478,24 @@ bool Runtime::selectStep(ObjTask* task, Value* out) {
         }
         --m_owned->selectDepth;
         if (!ok) {
-            task->sel = ObjTask::SelectiveReceive{};
+            task->resetSelect();
             return false;
         }
         if (!isFalsy(verdict)) {
             *out = msg;
-            task->mailbox.erase(task->mailbox.begin() +
-                                static_cast<std::ptrdiff_t>(at));
-            task->sel = ObjTask::SelectiveReceive{};
+            task->eraseMessage(at);
+            task->resetSelect();
             return true;
         }
         ++task->sel.scanned;
     }
     if (sel.timedOut) {
-        task->sel = ObjTask::SelectiveReceive{};
+        task->resetSelect();
         raiseFromNative("TimeoutError", "The limit of the receive passed.");
         return false;
     }
     if (workerState() == WorkerState::BLOCKED) {
-        task->sel = ObjTask::SelectiveReceive{};
+        task->resetSelect();
         raiseFromNative("YieldAcrossNativeError",
                         "Cannot receive across a native callback.");
         return false;
@@ -1580,7 +1551,7 @@ Runtime::WakeResult Runtime::retrySelectiveReceive(int entry) {
 // The task runs until it suspends or ends, and then makes the move that its
 // exit names: `yield`, `receive`, `wait` or `end`.
 bool Runtime::runTask(ObjTask* task) {
-    ObjCoroutine* co = task->co;
+    ObjCoroutine* co = task->co();
     task->state = TaskState::RUNNING;
     enterTask(task);
 
@@ -1597,9 +1568,9 @@ bool Runtime::runTask(ObjTask* task) {
     if (!co->started) {
         push(from<Nil>(Nil{}));
         if (task->hasStartArg) {
-            push(task->startArg);
+            push(task->startArg());
             task->hasStartArg = false;
-            task->startArg = Value{};
+            task->setStartArg(Value{});
             argCount = 1;
         }
     } else {
@@ -1607,9 +1578,8 @@ bool Runtime::runTask(ObjTask* task) {
         // from here on it holds no side.
         task->io = WaitingCall{};
         Value received = from<Nil>(Nil{});
-        if (!task->mailbox.empty() && task->receiving) {
-            received = task->mailbox.front();
-            task->mailbox.pop_front();
+        if (!task->mailbox().empty() && task->receiving) {
+            received = task->popMessage();
         } else if (task->hasPendingFault) {
             // The flag is cleared here, and only failWait sets it, with the
             // kind and the message. A fault that nothing raises therefore
@@ -1617,8 +1587,8 @@ bool Runtime::runTask(ObjTask* task) {
             task->hasPendingFault = false;
             m_faultTask = task;
         } else {
-            received = task->pendingValue;
-            task->pendingValue = Value{};
+            received = task->pendingValue();
+            task->setPendingValue(Value{});
         }
         task->receiving = false;
         push(received);
@@ -1703,7 +1673,7 @@ void Runtime::abandonTask(ObjTask* task) {
     // nothing would end it once m_waitingTasks is cleared.
     releaseWait(task);
     task->io = WaitingCall{};
-    task->pendingValue = Value{};
+    task->setPendingValue(Value{});
     task->hasPendingFault = false;
 }
 
@@ -1838,8 +1808,8 @@ void Runtime::describeReceivingTasks(std::vector<std::string>& out) const {
               });
     for (const ObjTask* task : tasks) {
         std::string name = "script";
-        if (task->co != nullptr) {
-            Value callee = task->co->callee;
+        if (task->co() != nullptr) {
+            Value callee = task->co()->callee;
             ObjFunction* fn = nullptr;
             if (isClosure(callee)) {
                 fn = asObjClosure(as<Obj*>(callee))->function;
@@ -1970,7 +1940,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
                                           VmAllocator<Value>{&m_mm});
         m_mainTask->serial = m_nextTaskSerial++;
     }
-    m_mainTask->co = mainCo;
+    m_mainTask->setCo(mainCo);
     m_mainTask->state = TaskState::READY;
     m_mainTask->receiving = false;
     m_mainTask->epoch = m_taskEpoch;
@@ -1993,7 +1963,7 @@ InterpretResult Runtime::runTasks(ObjClosure* script) {
     }
     // Every line's script is its own coroutine, and the session makes the next
     // one. Kept here, it would root this line's script for the whole session.
-    m_mainTask->co = nullptr;
+    m_mainTask->setCo(nullptr);
     abandonTasks();
     if (!m_sessionMode) {
         m_group->removeWorker(&inbox);
@@ -2113,7 +2083,7 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     // The task is held for the worker that spawned this one, so it is a root
     // here from the start. Its first resume passes it the message.
     m_mm.noteMessageNode();
-    task->startArg = m_mm.receiveMessage(msg);
+    task->setStartArg(m_mm.receiveMessage(msg));
     task->hasStartArg = true;
 
     // spec/04-semantics.md, task.spawn_worker, step 3: every top-level fun,
@@ -2169,9 +2139,9 @@ Runtime::runWorker(std::shared_ptr<WorkerGroup> group,
     // one its declaration made.
     auto* entry = m_mm.create<ObjClosure>(entryFn);
     m_mm.pushTempRoot(entry);
-    task->co = m_mm.create<ObjCoroutine>(m_coroutineClass,
-                                         Value{static_cast<Obj*>(entry)},
-                                         VmAllocator<Value>{&m_mm});
+    task->setCo(m_mm.create<ObjCoroutine>(m_coroutineClass,
+                                          Value{static_cast<Obj*>(entry)},
+                                          VmAllocator<Value>{&m_mm}));
     m_mm.popTempRoot();
     m_mm.popTempRoot();
     // The `spawn-worker` move ends here: the task is the first of this worker.
@@ -2302,10 +2272,10 @@ InterpretResult Runtime::runPendingDefers(int frameIndex,
         // callee goes first, underneath its arguments, not last.
         Value calleeVal = deferred->callable;
         push(calleeVal);
-        for (const Value& arg : deferred->args) {
+        for (const Value& arg : deferred->args()) {
             push(arg);
         }
-        int argCount = static_cast<int>(deferred->args.size());
+        int argCount = static_cast<int>(deferred->args().size());
 
         // Only these four callable kinds are legal as a deferred call. A
         // class, enum constructor, instance, or non-callable value stays the
@@ -4011,7 +3981,7 @@ void Runtime::opDeferRecord(int argCount) {
         m_mm.create<ObjDeferredCall>(callee, VmAllocator<Value>{&m_mm});
     m_mm.pushTempRoot(deferred);
     for (int i = argCount - 1; i >= 0; i--) {
-        deferred->args.push_back(stackTop[-(i + 1)]);
+        deferred->addArg(stackTop[-(i + 1)]);
     }
     m_mm.popTempRoot();
     stackTop -= argCount + 1;

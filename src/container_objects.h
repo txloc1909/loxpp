@@ -315,6 +315,13 @@ struct ObjMap : public Obj {
     using Entries = CoreHashMap<MapEntry, MapPolicy, VmAllocator<MapEntry>>;
 
     ObjClass* klass; // shared s_mapClass, for method dispatch
+
+  private:
+    // Declared here so that the layout (and the byte count of the heap) is
+    // the one the trace tools expect.
+    Entries m_map;
+
+  public:
     // Structural version, bumped by mapSet on a new key and by mapDel on a
     // real erase only. Overwrites and misses leave it alone. Plain int packs
     // with CoreHashMap's own counts; wrap needs 2B changes in one loop.
@@ -360,8 +367,6 @@ struct ObjMap : public Obj {
     // A removed or overwritten entry. The key and the value go to the barrier
     // in two calls, because a hook reports one old value and one new value.
     void barrierRemoved(Collector* c, const MapEntry& old);
-
-    Entries m_map;
 };
 
 inline bool isObjMap(Obj* o) { return isObjType(o, ObjType::MAP); }
@@ -414,11 +419,27 @@ inline ObjEnum* asObjEnum(Obj* o) { return static_cast<ObjEnum*>(o); }
 // ObjDeferredCall — captured callable and its arguments, pending invocation
 // ---------------------------------------------------------------------------
 struct ObjDeferredCall : public Obj {
-    Value callable;       // ObjClosure* - the function to call
-    VmVector<Value> args; // arguments to pass
+    // The function to call. Set once when the object is made.
+    const Value callable;
 
     ObjDeferredCall(Value fn, VmAllocator<Value> alloc)
-        : Obj(ObjType::DEFERRED_CALL), callable(fn), args(alloc) {}
+        : Obj(ObjType::DEFERRED_CALL), callable(fn), m_args(alloc) {}
+
+    // The arguments to pass.
+    [[nodiscard]] const VmVector<Value>& args() const { return m_args; }
+
+    // The mutator. It runs the write barrier (src/barrier.h) after the
+    // growth of the buffer.
+    void addArg(const Value& v) {
+        m_args.push_back(v);
+        Collector* c = barrier::collectorOf(m_args.get_allocator());
+        if (barrier::active(c)) {
+            c->barrierElement(this, barrier::nil(), v);
+        }
+    }
+
+  private:
+    VmVector<Value> m_args;
 };
 
 inline bool isObjDeferredCall(Obj* o) {
@@ -471,26 +492,25 @@ struct CoroutineHandlerSnapshot {
 };
 
 struct ObjCoroutine : public Obj {
-    ObjClass* klass; // shared Coroutine class; GC-tracked
-    Value callee;    // Function or BoundMethod to run
+    ObjClass* klass;    // shared Coroutine class; GC-tracked
+    const Value callee; // Function or BoundMethod to run; set once
     CoroutineState state{CoroutineState::SUSPENDED};
     bool started{false};
 
-    // Snapshot; meaningful only while suspended and started. Every vector is
-    // on the worker's heap: a large snapshot counts toward the collection
-    // threshold, so a suspended coroutine cannot grow the heap unseen.
-    VmVector<Value> stack;
-    VmVector<CoroutineFrameSnapshot> frames;
-    VmVector<CoroutineHandlerSnapshot> handlers;
-    // One defer list per frame in the snapshot, in frame order.
-    VmVector<VmVector<Value>> defers;
-    VmVector<ObjUpvalue*> openUpvalues; // location offset given by the
-                                        // parallel vector below
-    VmVector<int> openUpvalueOffsets;
-    VmVector<std::uint8_t> resultChecks;
-    VmVector<std::uint8_t> resultOverrideSet;
-    VmVector<Value> resultOverrides;
+  private:
+    // The data members keep the order of the layout that the byte counts of
+    // the trace tools were measured with.
+    VmVector<Value> m_stack;
+    VmVector<CoroutineFrameSnapshot> m_frames;
+    VmVector<CoroutineHandlerSnapshot> m_handlers;
+    VmVector<VmVector<Value>> m_defers;
+    VmVector<ObjUpvalue*> m_openUpvalues;
+    VmVector<int> m_openUpvalueOffsets;
+    VmVector<std::uint8_t> m_resultChecks;
+    VmVector<std::uint8_t> m_resultOverrideSet;
+    VmVector<Value> m_resultOverrides;
 
+  public:
     // Set on resume, used by suspend to find this coroutine's slice.
     int activeFrameBase{0};
     Value* activeStackBase{nullptr};
@@ -505,6 +525,49 @@ struct ObjCoroutine : public Obj {
     // was entered inside the coroutine (a native callback or a defer drain).
     int resumeReentrantDepth{0};
 
+  private:
+    ObjCoroutine* m_waitingInner{nullptr};
+    ObjIterator* m_waitingIterator{nullptr};
+
+  public:
+    ObjCoroutine(ObjClass* k, Value fn, VmAllocator<Value> alloc)
+        : Obj(ObjType::COROUTINE), klass(k), callee(fn), m_stack(alloc),
+          m_frames(alloc), m_handlers(alloc), m_defers(alloc),
+          m_openUpvalues(alloc), m_openUpvalueOffsets(alloc),
+          m_resultChecks(alloc), m_resultOverrideSet(alloc),
+          m_resultOverrides(alloc) {}
+
+    // The snapshot; meaningful only while suspended and started. Every vector
+    // is on the worker's heap: a large snapshot counts toward the collection
+    // threshold, so a suspended coroutine cannot grow the heap unseen.
+    [[nodiscard]] const VmVector<Value>& stack() const { return m_stack; }
+    [[nodiscard]] const VmVector<CoroutineFrameSnapshot>& frames() const {
+        return m_frames;
+    }
+    [[nodiscard]] const VmVector<CoroutineHandlerSnapshot>& handlers() const {
+        return m_handlers;
+    }
+    // One defer list per frame in the snapshot, in frame order.
+    [[nodiscard]] const VmVector<VmVector<Value>>& defers() const {
+        return m_defers;
+    }
+    // The location offset of each is in the parallel vector below.
+    [[nodiscard]] const VmVector<ObjUpvalue*>& openUpvalues() const {
+        return m_openUpvalues;
+    }
+    [[nodiscard]] const VmVector<int>& openUpvalueOffsets() const {
+        return m_openUpvalueOffsets;
+    }
+    [[nodiscard]] const VmVector<std::uint8_t>& resultChecks() const {
+        return m_resultChecks;
+    }
+    [[nodiscard]] const VmVector<std::uint8_t>& resultOverrideSet() const {
+        return m_resultOverrideSet;
+    }
+    [[nodiscard]] const VmVector<Value>& resultOverrides() const {
+        return m_resultOverrides;
+    }
+
     // A task switch at a receive suspends every coroutine that the task
     // resumed, not only the innermost one (spec/04-semantics.md,
     // task.receive). Each outer coroutine then waits at the call that resumed
@@ -514,15 +577,133 @@ struct ObjCoroutine : public Obj {
     // call in progress. With waitingIterator null, that call is a native
     // `resume` and the result replaces its slot; otherwise it is an
     // ITER_HAS_NEXT on that iterator. Null outside a task switch.
-    ObjCoroutine* waitingInner{nullptr};
-    ObjIterator* waitingIterator{nullptr};
+    [[nodiscard]] ObjCoroutine* waitingInner() const { return m_waitingInner; }
+    [[nodiscard]] ObjIterator* waitingIterator() const {
+        return m_waitingIterator;
+    }
 
-    ObjCoroutine(ObjClass* k, Value fn, VmAllocator<Value> alloc)
-        : Obj(ObjType::COROUTINE), klass(k), callee(fn), stack(alloc),
-          frames(alloc), handlers(alloc), defers(alloc), openUpvalues(alloc),
-          openUpvalueOffsets(alloc), resultChecks(alloc),
-          resultOverrideSet(alloc), resultOverrides(alloc) {}
+    // The mutators. Each one runs the write barrier (src/barrier.h), kind
+    // Snapshot. A mutator that grows a buffer calls the barrier after the
+    // growth.
+    //
+    // The snapshot goes back to the shared stack (a resume): every reference
+    // in it is dropped, so each goes to the barrier first.
+    void clearSnapshot() {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (const Value& v : m_stack) {
+                c->barrierSnapshot(this, v, barrier::nil());
+            }
+            for (const auto& f : m_frames) {
+                c->barrierSnapshot(this, barrier::refValue(f.closure),
+                                   barrier::nil());
+            }
+            for (const auto& list : m_defers) {
+                for (const Value& v : list) {
+                    c->barrierSnapshot(this, v, barrier::nil());
+                }
+            }
+            for (ObjUpvalue* uv : m_openUpvalues) {
+                c->barrierSnapshot(this, barrier::refValue(uv), barrier::nil());
+            }
+            for (const Value& v : m_resultOverrides) {
+                c->barrierSnapshot(this, v, barrier::nil());
+            }
+        }
+        m_stack.clear();
+        m_frames.clear();
+        m_handlers.clear();
+        m_defers.clear();
+        m_openUpvalues.clear();
+        m_openUpvalueOffsets.clear();
+        m_resultChecks.clear();
+        m_resultOverrideSet.clear();
+        m_resultOverrides.clear();
+    }
+    // The snapshot is empty (clearSnapshot ran before).
+    void captureStack(const Value* first, const Value* last) {
+        m_stack.assign(first, last);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (const Value& v : m_stack) {
+                c->barrierSnapshot(this, barrier::nil(), v);
+            }
+        }
+    }
+    void reserveFrames(std::size_t count) { m_frames.reserve(count); }
+    void pushFrame(const CoroutineFrameSnapshot& frame) {
+        m_frames.push_back(frame);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierSnapshot(this, barrier::nil(),
+                               barrier::refValue(frame.closure));
+        }
+    }
+    void pushHandler(const CoroutineHandlerSnapshot& handler) {
+        m_handlers.push_back(handler);
+    }
+    // Copies one defer list.
+    template <typename It>
+    void pushDefers(It first, It last) {
+        m_defers.push_back(
+            VmVector<Value>(first, last, m_defers.get_allocator()));
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (const Value& v : m_defers.back()) {
+                c->barrierSnapshot(this, barrier::nil(), v);
+            }
+        }
+    }
+    void pushResult(std::uint8_t check, bool overrideSet,
+                    const Value& overrideValue) {
+        m_resultChecks.push_back(check);
+        m_resultOverrideSet.push_back(overrideSet ? 1 : 0);
+        m_resultOverrides.push_back(overrideValue);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierSnapshot(this, barrier::nil(), overrideValue);
+        }
+    }
+    void reserveOpenUpvalues(std::size_t count) {
+        m_openUpvalueOffsets.reserve(count);
+        m_openUpvalues.reserve(count);
+    }
+    void pushOpenUpvalue(ObjUpvalue* uv, int offset) {
+        m_openUpvalueOffsets.push_back(offset);
+        m_openUpvalues.push_back(uv);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierSnapshot(this, barrier::nil(), barrier::refValue(uv));
+        }
+    }
+    // Points each open upvalue at its cell in this snapshot. A cell is a root
+    // before and a slot of this object after, and the value does not change,
+    // so no barrier runs.
+    void bindOpenUpvalues() {
+        for (std::size_t i = 0; i < m_openUpvalues.size(); i++) {
+            m_openUpvalues[i]->setLocation(m_stack.data() +
+                                           m_openUpvalueOffsets[i]);
+        }
+    }
+    // The task switch of a receive (see waitingInner).
+    void setWaiting(ObjCoroutine* inner, ObjIterator* iter) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierSnapshot(this, barrier::refValue(m_waitingInner),
+                               barrier::refValue(inner));
+            c->barrierSnapshot(this, barrier::refValue(m_waitingIterator),
+                               barrier::refValue(iter));
+        }
+        m_waitingInner = inner;
+        m_waitingIterator = iter;
+    }
 
+  private:
+    [[nodiscard]] Collector* collector() const {
+        return barrier::collectorOf(m_stack.get_allocator());
+    }
+
+  public:
 #ifdef LOXPP_PROFILE
     // Per-coroutine profiler state. The root coroutine uses Runtime's inline
     // ProfilerData instead; a coroutine allocates its own on first resume.
@@ -672,12 +853,6 @@ struct TaskOwned {
 // `ended` and the heap id, and routes a send through the inbound queue of
 // the owner (worker.h). Every other field belongs to the owner's thread.
 struct ObjTask : public Obj {
-    ObjCoroutine* co;
-    // Unbounded by design: a send never waits for room. A bound is a library
-    // over the primitive (spec/04-semantics.md, Bounding a Mailbox).
-    // On the worker's heap: a push can pass the collection threshold and
-    // collect, so the owner roots this task across it (deliverMessage).
-    std::deque<Value, VmAllocator<Value>> mailbox;
     TaskState state{TaskState::READY};
     TaskOwned owned;
     // True while the task waits in task.receive(): its next resume hands it
@@ -691,9 +866,6 @@ struct ObjTask : public Obj {
     // The Poller token of the limit of a connect call that waits for a
     // descriptor, or 0. The limit is a second wait of the same task.
     std::uint64_t waitTimerToken{0};
-    // The value of the waiting call when the task runs again, unless a fault
-    // is set. `hasPendingFault` and the strings are plain C++ data.
-    Value pendingValue;
     // The network call that the task waits in. It is set at the first wait
     // of the call and kept until the task runs again, so it also names the
     // call while the task is READY after its wait ended: such a call still
@@ -707,7 +879,6 @@ struct ObjTask : public Obj {
     struct SelectiveReceive {
         bool pendingRetry{false};
         bool hasWant{false};
-        Value want;
         std::size_t scanned{0};
         bool limited{false};
         std::chrono::steady_clock::time_point deadline{};
@@ -723,7 +894,6 @@ struct ObjTask : public Obj {
     // The first resume calls the function with this one argument when
     // `hasStartArg` is set: the message of task.spawn_worker.
     bool hasStartArg{false};
-    Value startArg;
     // The scheduler's run of the program this task belongs to. A task of an
     // earlier run (an earlier REPL line) has ended with that run.
     std::uint64_t epoch;
@@ -743,7 +913,99 @@ struct ObjTask : public Obj {
     }
 
     ObjTask(ObjCoroutine* c, std::uint64_t e, VmAllocator<Value> alloc)
-        : Obj(ObjType::TASK), co(c), mailbox(alloc), epoch(e) {}
+        : Obj(ObjType::TASK), epoch(e), m_co(c), m_mailbox(alloc) {}
+
+    [[nodiscard]] ObjCoroutine* co() const { return m_co; }
+    // Unbounded by design: a send never waits for room. A bound is a library
+    // over the primitive (spec/04-semantics.md, Bounding a Mailbox).
+    // On the worker's heap: a push can pass the collection threshold and
+    // collect, so the owner roots this task across it (deliverMessage).
+    [[nodiscard]] const std::deque<Value, VmAllocator<Value>>& mailbox() const {
+        return m_mailbox;
+    }
+    // The value of the waiting call when the task runs again, unless a fault
+    // is set. `hasPendingFault` and the strings are plain C++ data.
+    [[nodiscard]] const Value& pendingValue() const { return m_pendingValue; }
+    [[nodiscard]] const Value& startArg() const { return m_startArg; }
+    // The test function of a receive_where call (see SelectiveReceive).
+    [[nodiscard]] const Value& selectWant() const { return m_selectWant; }
+
+    // The mutators. Each one runs the write barrier (src/barrier.h).
+    void setCo(ObjCoroutine* co) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierField(this, barrier::refValue(m_co),
+                            barrier::refValue(co));
+        }
+        m_co = co;
+    }
+    // A push can grow the buffer and collect, so the barrier runs after it.
+    void pushMessage(const Value& v) {
+        m_mailbox.push_back(v);
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierElement(this, barrier::nil(), v);
+        }
+    }
+    // The mailbox must not be empty.
+    Value popMessage() {
+        Value v = m_mailbox.front();
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierElement(this, v, barrier::nil());
+        }
+        m_mailbox.pop_front();
+        return v;
+    }
+    // Each message after `index` moves one place to the front, so the
+    // barrier sees each store.
+    void eraseMessage(std::size_t index) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (std::size_t i = index; i < m_mailbox.size(); ++i) {
+                c->barrierElement(this, m_mailbox[i],
+                                  i + 1 < m_mailbox.size() ? m_mailbox[i + 1]
+                                                           : barrier::nil());
+            }
+        }
+        m_mailbox.erase(m_mailbox.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+    void clearMailbox() {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            for (const Value& v : m_mailbox) {
+                c->barrierElement(this, v, barrier::nil());
+            }
+        }
+        m_mailbox.clear();
+    }
+    void setPendingValue(const Value& v) { storeValue(m_pendingValue, v); }
+    void setStartArg(const Value& v) { storeValue(m_startArg, v); }
+    void setSelectWant(const Value& v) { storeValue(m_selectWant, v); }
+    // The receive_where state goes back to its start, and drops its test
+    // function.
+    void resetSelect() {
+        sel = SelectiveReceive{};
+        setSelectWant(Value{});
+    }
+
+  private:
+    [[nodiscard]] Collector* collector() const {
+        return barrier::collectorOf(m_mailbox.get_allocator());
+    }
+    void storeValue(Value& slot, const Value& v) {
+        Collector* c = collector();
+        if (barrier::active(c)) {
+            c->barrierField(this, slot, v);
+        }
+        slot = v;
+    }
+
+    ObjCoroutine* m_co;
+    std::deque<Value, VmAllocator<Value>> m_mailbox;
+    Value m_pendingValue;
+    Value m_startArg;
+    Value m_selectWant;
 };
 
 inline bool isObjTask(Obj* o) { return isObjType(o, ObjType::TASK); }
