@@ -195,7 +195,7 @@ The status of a row:
 | `ObjIterator` | `collection` | - | - | immutable | - |
 | `ObjIterator` | `m_current` | `setCurrent`, `takeCurrent` | `barrierField` | protected | - |
 | `ObjMap` | `klass` | - | - | immutable | - |
-| `ObjMap` | `m_map` | `mapSet`, `mapDel`, `mapSetHashed`, `mapDelHashed` | `barrierEntry` | protected | A removed entry, and an overwritten key, run the hook twice: first for the key as a Value, then for the value. |
+| `ObjMap` | `m_map` | `mapSet`, `mapDel`, `mapSetHashed`, `mapDelHashed` | `barrierEntry` | protected | A removed entry, and an overwritten key, run the hook twice: first for the key as a Value, then for the value. `mapSet` takes keys that are identical when equal (interned Strings), so it reports the old value only; `mapSetHashed` also reports an old key that is equal but is another object. |
 | `ObjEnumCtor` | `ctorName` | - | - | immutable | - |
 | `ObjEnumCtor` | `enumName` | - | - | immutable | - |
 | `ObjEnum` | `ctor` | - | - | immutable | - |
