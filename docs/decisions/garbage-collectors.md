@@ -196,9 +196,11 @@ it. That read happens only during the mark.
 An unreachable `File`, `Socket`, `Server` or `Process` must close its
 handle soon, even when the program stops allocating. These objects are
 few. The heap keeps them in a separate list, and the finish pause frees the
-unmarked ones at once. The incremental sweep does not free them. The sweep
-also finishes at once before a worker goes idle (before `epoll_wait` or the
-inbox wait), so a quiet program does not keep garbage.
+unmarked ones at once. The incremental sweep does not free them. Before a
+worker goes idle (before `epoll_wait` or the inbox wait), the collector uses
+the idle time for steps of the cycle, for at most 0.5 ms each time. It does
+not run the rest of the cycle at once: a wait can be one millisecond long,
+and a request can arrive at any time (review of #1298).
 
 ### 4.6 Workers and foreign objects
 
@@ -598,8 +600,8 @@ default.
   batch again under their locks, traces what is left, runs the verifier,
   calls `adoptReachedForeign` before `releaseUnreachedForeign`, frees the
   unmarked handle objects, and starts the sweep.
-- **Idle and abort.** `Collector::onIdle` finishes the cycle in steps before
-  a worker sleeps. `collectNow` (and so `retire` and a dead heap) cuts a cycle
+- **Idle and abort.** `Collector::onIdle` runs steps of the cycle for at most
+  0.5 ms before a worker sleeps. `collectNow` (and so `retire` and a dead heap) cuts a cycle
   in progress short and runs one full cycle.
 - **Verifier.** A separate mark from the roots, with a hash set, at the end of
   each mark. It runs in debug builds, or with `LOXPP_GC_VERIFY=1`.

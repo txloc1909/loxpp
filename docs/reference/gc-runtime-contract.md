@@ -126,8 +126,10 @@ changes this file.
   With `incremental` it runs one step of 16 units at each allocation, and a
   new cycle starts when the last one ends.
 - `Collector::onIdle` is called by `Runtime::waitForWork` before a worker with
-  an empty inbox may sleep. `incremental` finishes its cycle there, so a quiet
-  worker keeps no garbage and no OS handle. `stw` does nothing.
+  an empty inbox may sleep. `incremental` runs steps of its cycle there for at
+  most 0.5 ms (`kIdleBurstNs`), so that a wait of a millisecond is not
+  made longer, and a request is not delayed by the rest of a cycle. `stw`
+  does nothing.
 - The threshold: `PollState::pollAt = max(2 × bytesAllocated after the
   sweep, 1 MB)`. `PollState` is in the heap (`MemoryManager::m_poll`), and
   the collector writes it. `MemoryManager::shouldPoll` compares

@@ -3,7 +3,7 @@
 
 Usage: check_gc_incremental.py <loxpp-binary>
 
-Three parts:
+Four parts:
   1. The probes of test/gc_incremental/. Each one moves old objects between
      large containers, writes into closures and coroutines, makes the same
      String again, or runs a deep stack or a second worker, while garbage makes
@@ -23,6 +23,9 @@ Three parts:
   3. A hand-written trace with an exit cycle, so the report is checked on the
      figure that no collector writes in the run of part 2 in a way that a short
      program shows.
+
+  4. The programs of test/gc_incremental/latency/: a worker that waits many
+     times with a large live heap must keep MMU(10 ms) at 50% or more.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
 """
@@ -267,6 +270,41 @@ def check_exit_cycle(work):
     print("ok   hand trace with an exit cycle")
 
 
+# The goal of the latency probe (docs/decisions/garbage-collectors.md, goal 1):
+# MMU(10 ms) of a program that waits.
+MIN_MMU_10MS = 0.5
+
+
+def trace_fields(path, kind):
+    out = []
+    with open(path) as f:
+        for line in f:
+            if line.startswith(kind + " "):
+                out.append(dict(x.split("=", 1) for x in line.split()[1:]))
+    return out
+
+
+def check_idle_latency(binary, work):
+    prog = os.path.join(PROBES, "latency", "idle_wait.lox")
+    # The windows of a run depend on the host, so a run that fails once is
+    # run again: a collector that runs its cycle at idle fails every run.
+    worst = None
+    for attempt in range(3):
+        trace = os.path.join(work, f"idle_wait.{attempt}.trace")
+        r = run(binary, prog, {"LOXPP_GC": "incremental",
+                               "LOXPP_GC_TRACE": trace}, work)
+        if r.returncode != 0:
+            fail(f"idle_wait.lox: exit {r.returncode}, {r.stderr[:200]!r}")
+        mmu = gc_report.summarise(trace, [10])["mmu"]["10"]
+        worst = mmu if worst is None else max(worst, mmu)
+        if mmu >= MIN_MMU_10MS:
+            print(f"ok   idle_wait.lox: MMU(10 ms) {100 * mmu:.1f}%")
+            return
+    fail(f"idle_wait.lox: MMU(10 ms) {100 * worst:.1f}% in 3 runs, at least "
+         f"{100 * MIN_MMU_10MS:.0f}% needed: a worker that goes idle runs "
+         "the steps of a cycle with no break")
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -280,6 +318,7 @@ def main():
         check_programs(binary, work)
         check_trace(binary, work)
         check_exit_cycle(work)
+        check_idle_latency(binary, work)
     print("OK")
 
 

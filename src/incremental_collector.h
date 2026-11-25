@@ -45,8 +45,8 @@ class IncrementalCollector final : public Collector {
         return m_collectionCount;
     }
     void releaseAll() override;
-    // Finishes the cycle in progress, so that a quiet worker keeps no garbage
-    // and no handle of the operating system.
+    // Uses the idle time of a worker for steps of the cycle in progress, for
+    // a short time (kIdleBurstNs).
     void onIdle() override;
 #ifdef LOXPP_PROFILE
     void mergeCoroutineProfilers() override;
@@ -71,6 +71,8 @@ class IncrementalCollector final : public Collector {
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     // Bytes that the program allocates between two looks of the pacing.
     static constexpr std::size_t kPollBytes = 16 * 1024;
+    // The time that a worker uses for the cycle each time it goes idle.
+    static constexpr std::uint64_t kIdleBurstNs = 500'000;
     // The units of a step in stress mode.
     static constexpr std::size_t kStressUnits = 16;
 

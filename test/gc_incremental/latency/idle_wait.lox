@@ -1,0 +1,17 @@
+// A large live heap, then rounds of garbage and a short wait. The wait calls
+// the collector as the worker goes idle, and the collector must not run the
+// rest of its cycle in that call: MMU(10 ms) of this run must stay above 50%.
+class Node { init(i) { this.i = i; } }
+var keep = [];
+var i = 0;
+while (i < 1500000) { keep.append(Node(i)); i = i + 1; }
+var round = 0;
+var sum = 0;
+while (round < 400) {
+    i = 0;
+    while (i < 20000) { var t = Node(i); sum = sum + t.i; i = i + 1; }
+    sleep(0.001);
+    round = round + 1;
+}
+print sum;
+print len(keep);

@@ -625,9 +625,13 @@ void IncrementalCollector::collectNow(CollectCause cause) {
 }
 
 void IncrementalCollector::onIdle() {
-    // The steps follow each other with no wait, and each has its own limit, so
-    // that the trace shows the work as steps and no step grows with the heap.
-    while (m_phase != Phase::Idle) {
+    // A worker that waits has no program to delay, but the wait can be short
+    // (a timer of a millisecond), and a request can arrive at any time. So
+    // the idle time is used in one burst of steps with a time limit, and the
+    // next idle time goes on. A cycle that must end at once is the job of
+    // collectNow.
+    const std::uint64_t end = gcMonotonicNs() + kIdleBurstNs;
+    while (m_phase != Phase::Idle && gcMonotonicNs() < end) {
         runStep(0, kStepUnits);
     }
 }
