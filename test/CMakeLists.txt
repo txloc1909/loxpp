@@ -44,6 +44,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/collector.cpp
     ${PROJECT_SOURCE_DIR}/src/stw_collector.cpp
+    ${PROJECT_SOURCE_DIR}/src/size_class_heap.cpp
     ${PROJECT_SOURCE_DIR}/src/worker.cpp
     ${PROJECT_SOURCE_DIR}/src/poller.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
@@ -111,6 +112,8 @@ loxpp_add_test(test_collector_gc    test_collector.cpp       CORE loxpp_test_cor
 loxpp_add_test(test_barrier        test_barrier.cpp         CORE loxpp_test_core)
 loxpp_add_test(test_barrier_gc     test_barrier.cpp         CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_size_class_heap    test_size_class_heap.cpp    CORE loxpp_test_core)
+loxpp_add_test(test_size_class_heap_gc test_size_class_heap.cpp    CORE loxpp_test_core)
 loxpp_add_test(test_value           test_value.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_token_roundtrip test_token_roundtrip.cpp CORE loxpp_test_core PROBE)
 loxpp_add_test(test_local_variables test_local_variables.cpp CORE loxpp_test_core)
@@ -284,6 +287,16 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(GcStwCounts PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # The heap writes a `stall` record for each call into the C allocator that
+    # takes longer than the limit, and gc_report.py reads it.
+    add_test(NAME GcStall
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_stall.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcStall PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
@@ -574,7 +587,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
-    test_table_gc test_allocator_gc test_collector_gc test_barrier_gc test_net_process_gc test_coroutine_gc
+    test_table_gc test_allocator_gc test_size_class_heap_gc test_collector_gc test_barrier_gc test_net_process_gc test_coroutine_gc
     test_task_gc test_task_wait_gc test_socket_wait_gc test_connect_wait_gc
     test_worker_gc
     test_repl_gc)
@@ -585,7 +598,7 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
-    test_allocator test_allocator_gc test_collector test_collector_gc
+    test_allocator test_allocator_gc test_size_class_heap test_size_class_heap_gc test_collector test_collector_gc
     test_barrier test_barrier_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_file_readline

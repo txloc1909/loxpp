@@ -100,7 +100,8 @@ static std::FILE* openTraceFile(int workerNumber) {
 
 StwCollector::StwCollector(MemoryManager& heap, PollState& poll,
                            int workerNumber)
-    : Collector(poll), m_heap(heap), m_trace(openTraceFile(workerNumber)) {
+    : Collector(poll), m_heap(heap), m_store(heap.store()),
+      m_trace(openTraceFile(workerNumber)) {
     m_poll.pollAt = kMinHeap;
 }
 
@@ -113,10 +114,7 @@ StwCollector::~StwCollector() {
 }
 
 void StwCollector::releaseAll() {
-    for (Obj* o : allObjects) {
-        delete o;
-    }
-    allObjects.clear();
+    m_store.destroyAllObjects();
     m_heap.bytesAllocated = 0;
 }
 
@@ -134,10 +132,9 @@ void StwCollector::markObject(Obj* obj) {
         m_heap.markForeign(obj);
         return;
     }
-    if (obj->marked) {
+    if (!m_store.tryMark(obj)) {
         return;
     }
-    obj->marked = true;
     m_grayStack.push_back(obj);
 #ifdef LOXPP_DEBUG_LOG_GC
     fprintf(stderr, "[GC] mark   %p %s\n", static_cast<void*>(obj),
@@ -155,7 +152,7 @@ void StwCollector::traceReferences() {
 
 bool StwCollector::isMarkedHere(const Obj* obj) const {
     if (obj->heapId == m_heap.heapId()) {
-        return obj->marked;
+        return m_store.isMarked(obj);
     }
     return m_heap.foreignMarked(obj);
 }
@@ -165,59 +162,54 @@ void StwCollector::removeWhiteStrings() {
         [this](const ObjString* key) { return !isMarkedHere(key); });
 }
 
-void StwCollector::sweep() {
+std::size_t StwCollector::sweep() {
 #ifdef LOXPP_PROFILE
     // An abandoned coroutine is only reachable through its snapshot; sweep is
     // the last chance to fold its profile into the report. The merge can
-    // allocate and throw, so it runs before the compaction changes anything.
+    // allocate and throw, so it runs before any object is freed.
     if (m_heap.m_profilerData) {
-        for (Obj* obj : allObjects) {
-            if (obj->marked || obj->type != ObjType::COROUTINE)
-                continue;
+        m_store.forEachObject([this](Obj* obj, bool marked) {
+            if (marked || obj->type != ObjType::COROUTINE)
+                return;
             auto* co = static_cast<ObjCoroutine*>(obj);
             if (co->profiler)
                 m_heap.m_profilerData->mergeFrom(*co->profiler);
-        }
+        });
     }
 #endif
-    // Survivors are compacted in place with a write index: erasing each dead
-    // object separately would shift the tail every time and make a sweep
-    // quadratic in the heap size.
-    std::size_t kept = 0;
-    for (Obj* obj : allObjects) {
-        if (obj->marked) {
-            obj->marked = false;
-            allObjects[kept++] = obj;
-        } else {
+    std::size_t survivors = 0;
+    for (SizeClassHeap::Span* s = m_store.firstObjectSpan(); s != nullptr;
+         s = SizeClassHeap::nextObjectSpan(s)) {
+        survivors += m_store.sweepSpan(s, [this](Obj* obj) {
 #ifdef LOXPP_DEBUG_LOG_GC
             // Use type-only log: stringifyObj dereferences fn->name which may
-            // already be freed if the name ObjString appeared earlier in
-            // allObjects.
+            // already be freed if the name ObjString appeared earlier.
             fprintf(stderr, "[GC] free   %p (%s)\n", static_cast<void*>(obj),
                     objTypeName(obj->type));
 #endif
             m_heap.bytesAllocated -= objAllocatedSize(obj);
-            delete obj;
-        }
+        });
+        // A freed large block goes back to the kernel one slice for each span.
+        m_store.releaseStep();
     }
-    allObjects.resize(kept);
     m_poll.pollAt =
         std::max(m_heap.bytesAllocated * GC_HEAP_GROW_FACTOR, kMinHeap);
+    return survivors;
 }
 
 #ifdef LOXPP_PROFILE
 void StwCollector::mergeCoroutineProfilers() {
     if (!m_heap.m_profilerData)
         return;
-    for (Obj* obj : allObjects) {
+    m_store.forEachObject([this](Obj* obj, bool) {
         if (obj->type != ObjType::COROUTINE)
-            continue;
+            return;
         auto* co = static_cast<ObjCoroutine*>(obj);
         if (!co->profiler)
-            continue;
+            return;
         m_heap.m_profilerData->mergeFrom(*co->profiler);
         co->profiler->clearStats();
-    }
+    });
 }
 #endif
 
@@ -259,7 +251,7 @@ void StwCollector::runCollection() {
     m_heap.beginForeignCycle();
     if constexpr (Traced) {
         bytesBefore = m_heap.bytesAllocated;
-        objsBefore = allObjects.size();
+        objsBefore = m_store.objectCount();
         t0 = monotonicNs();
     }
     m_heap.markAllRoots();
@@ -277,12 +269,10 @@ void StwCollector::runCollection() {
     if constexpr (Traced) {
         t3 = monotonicNs();
     }
-    sweep();
+    std::size_t marked = sweep();
     m_heap.releaseUnreachedForeign();
     if constexpr (Traced) {
         t4 = monotonicNs();
-        // Survivors are exactly the objects that were marked.
-        std::size_t marked = allObjects.size();
         // Flushed per line so a process that stops without stdio cleanup (a
         // signal, abort(), _exit()) still leaves every collection so far.
         std::fprintf(m_trace,

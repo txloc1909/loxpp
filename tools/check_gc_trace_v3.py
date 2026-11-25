@@ -11,8 +11,9 @@ Four parts:
   2. A hand-written v2 trace. It must read as before.
   3. Malformed files. Each one must be rejected with a message that names the
      file and the line.
-  4. A real run of the binary. Its trace, with the header changed to v2, must
-     give the same report as the v3 file, on every figure that both have.
+  4. A real run of the binary. Its trace, without stall records and with the
+     header changed to v2, must give the same report as the v3 file, on every
+     figure that both have.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
 """
@@ -195,8 +196,14 @@ def check_real_run(binary, d):
     if not text.startswith("# loxpp-gc-trace v3\n"):
         fail(f"the writer does not write the v3 header: {text.splitlines()[0]}")
     for line in text.splitlines():
-        if line.split()[0] in ("cycle", "step", "stall"):
+        if line.split()[0] in ("cycle", "step"):
             fail(f"the stop-the-world collector wrote '{line.split()[0]}'")
+    # The heap writes a stall record when a call into the C allocator is slow,
+    # so a real run may have some (tools/check_gc_stall.py forces them). A
+    # version 2 file has none, so the two readings compare without them.
+    text = "".join(l + "\n" for l in text.splitlines()
+                   if not l.startswith("stall "))
+    trace = write(d, "real_nostall.trace", text)
     v2 = write(d, "real_v2.trace", text.replace("v3", "v2", 1))
     a = gc_report.summarise(trace, [10, 100])
     b = gc_report.summarise(v2, [10, 100])

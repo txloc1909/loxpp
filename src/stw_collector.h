@@ -2,6 +2,7 @@
 
 #include "collector.h"
 #include "object.h"
+#include "size_class_heap.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -12,7 +13,7 @@ class MemoryManager;
 // The stop-the-world mark-sweep collector, the reference collector of
 // docs/decisions/garbage-collectors.md (section 3). It marks from the roots,
 // traces every gray object, removes the unmarked Strings from the intern
-// table, and sweeps the list of all objects, in one pause.
+// table, and sweeps the spans of the heap, in one pause.
 class StwCollector final : public Collector {
   public:
     // `workerNumber` names the worker of the heap; the GC trace of worker
@@ -22,7 +23,10 @@ class StwCollector final : public Collector {
     ~StwCollector() override;
 
     void poll() override { collectNow(CollectCause::Auto); }
-    void onCreate(Obj* obj) override { allObjects.push_back(obj); }
+    // The heap registers the object in its own spans, so the collector has
+    // nothing to do.
+    void onCreate(Obj*) override {}
+    [[nodiscard]] std::FILE* traceFile() const override { return m_trace; }
     void markObject(Obj* obj) override;
     void collectNow(CollectCause cause) override;
     [[nodiscard]] std::size_t collectionCount() const override {
@@ -42,15 +46,16 @@ class StwCollector final : public Collector {
     void runCollection();
     void traceReferences();
     void removeWhiteStrings();
-    void sweep();
+    // Frees every unmarked object. Returns the number that live on.
+    std::size_t sweep();
     [[nodiscard]] bool isMarkedHere(const Obj* obj) const;
     // The `cause` field of a GC trace record.
     [[nodiscard]] const char* collectionCause() const;
 
     MemoryManager& m_heap;
+    SizeClassHeap& m_store;
     // Plain std::vector: a VmAllocator here would recurse into rawAlloc when
     // push_back reallocates.
-    std::vector<Obj*> allObjects;
     std::vector<Obj*> m_grayStack;
     // Open when LOXPP_GC_TRACE names a file, read once when the heap starts.
     // Null otherwise, and a collection then pays one test of this pointer.

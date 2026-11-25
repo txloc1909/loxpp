@@ -88,6 +88,9 @@ GcTraceV3 core
 GcCollectorChoice core
 GcLargeHeap core
 GcStwCounts core
+GcStall core
+test_size_class_heap core
+test_size_class_heap_gc core
 GcBarrierTable core
 GcSweepLinear core
 GcMinHeap core

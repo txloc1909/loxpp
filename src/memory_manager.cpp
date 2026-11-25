@@ -23,6 +23,16 @@ static bool readStressGCEnv() {
     return v != nullptr && v[0] != '\0';
 }
 
+// The limit of a `stall` record, in nanoseconds. LOXPP_GC_STALL_LIMIT_US
+// changes it; 0 records every call that reaches the C allocator.
+static std::uint64_t stallLimitNs() {
+    const char* v = std::getenv("LOXPP_GC_STALL_LIMIT_US");
+    if (v == nullptr || v[0] == '\0') {
+        return SizeClassHeap::kDefaultStallLimitNs;
+    }
+    return std::strtoull(v, nullptr, 10) * 1000;
+}
+
 MemoryManager::MemoryManager(int workerNumber)
     : m_strings(VmAllocator<Entry>{this}), m_workerNumber(workerNumber),
       m_heapId(acquireHeapId(this)) {
@@ -31,6 +41,7 @@ MemoryManager::MemoryManager(int workerNumber)
     m_collector = makeCollector(*this, m_poll, workerNumber);
     m_stw = dynamic_cast<StwCollector*>(m_collector.get());
     VmAllocBase::barrierCollector = m_collector.get();
+    m_store.setStallTrace(m_collector->traceFile(), stallLimitNs());
 }
 
 MemoryManager::~MemoryManager() {
@@ -57,7 +68,8 @@ MemoryManager::~MemoryManager() {
             releaseValue(env.msg);
         }
     }
-    // Writes the end record of the trace.
+    // The collector closes the trace file.
+    m_store.setStallTrace(nullptr, 0);
     m_stw = nullptr;
     VmAllocBase::barrierCollector = nullptr;
     m_collector.reset();
@@ -69,12 +81,18 @@ void* MemoryManager::rawAlloc(std::size_t bytes) {
     if (shouldPoll()) {
         m_collector->poll();
     }
-    return ::operator new(bytes);
+    return m_store.allocBuffer(bytes);
+}
+
+void MemoryManager::rawFree(void* p, std::size_t bytes) noexcept {
+    bytesAllocated -= bytes;
+    m_store.freeBuffer(p, bytes);
 }
 
 void MemoryManager::release(Obj* obj, std::size_t size) {
     bytesAllocated -= size;
-    delete obj;
+    obj->~Obj();
+    m_store.freeObject(obj);
 }
 
 ObjString* MemoryManager::makeString(std::string_view sv) {
@@ -130,6 +148,7 @@ MemoryManager::swapCollector(std::unique_ptr<Collector> collector) {
     std::swap(m_collector, collector);
     m_stw = dynamic_cast<StwCollector*>(m_collector.get());
     VmAllocBase::barrierCollector = m_collector.get();
+    m_store.setStallTrace(m_collector->traceFile(), stallLimitNs());
     return collector;
 }
 

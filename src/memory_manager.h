@@ -2,6 +2,7 @@
 
 #include "collector.h"
 #include "object.h"
+#include "size_class_heap.h"
 #include "stw_collector.h"
 #include "table.h"
 #include "vm_allocator.h"
@@ -46,9 +47,23 @@ class MemoryManager : public VmAllocBase {
         if (shouldPoll()) {
             m_collector->poll();
         }
+        static_assert(sizeof(T) <= SizeClassHeap::kMaxObject &&
+                          alignof(T) <= SizeClassHeap::kSlotAlign,
+                      "an object must fit a size class of the heap");
         bytesAllocated += sizeof(T);
-        T* p = new T(std::forward<Args>(args)...);
+        void* mem = m_store.allocObject(sizeof(T));
+        T* p;
+        try {
+            p = new (mem) T(std::forward<Args>(args)...);
+        } catch (...) {
+            m_store.freeObject(mem, false);
+            bytesAllocated -= sizeof(T);
+            throw;
+        }
         p->heapId = m_heapId;
+        // The slot is an object of the heap only now. A collection that ran
+        // inside the constructor did not see it.
+        m_store.commitObject(p);
         // Every boxed Obj* goes through here. A pointer the NaN tag cannot
         // hold would be silently truncated by Value's constructor, so reject it
         // before it can be stored anywhere (src/value.h: pointerFitsInValue).
@@ -96,6 +111,11 @@ class MemoryManager : public VmAllocBase {
     swapCollector(std::unique_ptr<Collector> collector);
 
     void* rawAlloc(std::size_t bytes) override;
+    void rawFree(void* p, std::size_t bytes) noexcept override;
+
+    // The memory of this heap: size classes and mark bitmaps. A collector
+    // marks and sweeps through it.
+    [[nodiscard]] SizeClassHeap& store() { return m_store; }
 
     void pushTempRoot(Obj* obj);
     void popTempRoot();
@@ -221,6 +241,10 @@ class MemoryManager : public VmAllocBase {
             m_collector->internHit(s);
         }
     }
+
+    // Declared first: every container of the heap frees its buffer into it,
+    // so it must be destroyed last.
+    SizeClassHeap m_store;
 
     Table m_strings;
 

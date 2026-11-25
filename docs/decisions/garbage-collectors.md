@@ -349,6 +349,21 @@ must check every other place that uses the same data.
 4. **A stall in the C allocator** (section 13, item 4). The layer: the heap
    layout of phase 8. A call of `malloc` or `free` can take longer than the
    step budget. No collector step can bound it.
+5. **A call of the C allocator on a heap path that is not timed or not
+   bounded** (the review of N8, PR #1293). The layer: the allocator of the
+   size-class heap (N8). Three forms came up: a large block that goes back to
+   the kernel in one call (its cost follows the block, and one block can be
+   most of the heap); a claim of "no call" that the code did not keep,
+   because the `std::` containers that objects and the collector own call
+   `malloc` and `free` themselves; and a freed slot that no tool could
+   report any more. The constraint: each call of the C allocator or the
+   kernel on a heap path is timed, is bounded by a fixed size, and has a
+   test that does not depend on time (a count, such as
+   `largestReleaseBytes()`). A call that is not covered is listed in
+   `docs/reference/gc-runtime-contract.md`, section 1, with an issue (#1294,
+   #1295, #1296). N5 and N6 must check every other pass that uses the same
+   data: the gray stack, the pause log, the gates, and every container that
+   the sweep or a step frees.
 
 ## 7. How we show that it is correct
 

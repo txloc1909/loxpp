@@ -20,15 +20,72 @@ changes this file.
   status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
   its own API (`create<T>`, `makeString`, `pushTempRoot`, `markObject`,
   `collectGarbage`, `collectionCount`) and forwards to the collector.
-- `MemoryManager::create<T>` makes each object with one `new`, and gives the
-  pointer to the collector (`Collector::onCreate`). `StwCollector` keeps it
-  in `allObjects`, a plain `std::vector<Obj*>` that only the collector
-  touches. Its sweep calls `delete` on each dead object.
+- The memory of a heap is `SizeClassHeap` (`src/size_class_heap.{h,cpp}`),
+  the member `MemoryManager::m_store`. It cuts chunks of 1 MiB into spans of
+  64 KiB. A span holds slots of one size class (24 classes, 16 to 2048
+  bytes), and the span of a pointer is `ptr & ~0xFFFF`. Objects and buffers
+  use separate spans. A block over 2048 bytes is a large block with its own
+  allocation, in a class of the form m * 2^k (m = 4 to 7).
+- `MemoryManager::create<T>` takes a slot with `allocObject`, runs the
+  constructor, and then calls `commitObject`. Only a committed object is in
+  the allocation bitmap of its span, so a collection that runs inside the
+  constructor does not see it. Then it calls `Collector::onCreate`, which is
+  empty for `stw`. There is no list of all objects: the collector finds
+  the objects through the spans (`firstObjectSpan`, `sweepSpan`,
+  `forEachObject`). `sizeof(T)` must be at most 2048 and the alignment at
+  most 16 (a `static_assert` in `create<T>`).
+- The mark bit of an object is a bit in the mark bitmap of its span
+  (`SizeClassHeap::tryMark`, `isMarked`). Only a collector reads or writes
+  it, for the objects of its own heap. The sweep frees `alloc & ~mark` of a
+  span, word by word, runs the destructor, and puts the slot on the free
+  list of the span. An object never moves.
 - The header (`struct Obj`, `src/object.h`) has a vtable pointer, `type`
-  (1 byte), `marked` (1 byte) and `heapId` (2 bytes). Four bytes of padding
-  follow. `marked` is private. Only `StwCollector` is its friend, so a use
-  anywhere else does not compile. `heapId` is set once and never changes, so
-  another thread can read it at any time.
+  (1 byte) and `heapId` (2 bytes). Five bytes of padding follow. `heapId`
+  is set once and never changes, so another thread can read it at any time.
+- The allocator limits its own stalls. A small allocation or free of the
+  memory of the heap (an object slot, or a `VmAllocator` buffer of at most
+  2048 bytes) never calls the C allocator or the kernel. An empty span goes
+  to a pool that every class takes from. A span or a chunk is not returned
+  to the operating system before the heap ends. A freed large block waits in
+  a cache for its class. The cache holds at most the larger of the bytes of
+  the large blocks in use and 4 MiB. A block over that limit, and a cached
+  block when the large blocks in use fall under the cache, waits in a queue.
+  One slice of at most 1 MiB goes back to the kernel (`munmap`) for each
+  allocation of a large block, each free of a large block, and each span of a
+  sweep (`SizeClassHeap::releaseStep`). `largestReleaseBytes()` gives the
+  largest slice that one call gave back. The release rate is tied to the map
+  rate: before the heap maps N new bytes (a large block that the cache does
+  not hold, or a new chunk), it gives back N bytes from the queue, in slices
+  of at most 1 MiB, and it moves cached blocks to the queue if the queue is
+  empty. So the queue never grows while the program grows, and during a
+  make-and-drop pattern the footprint stays at most 2.5 times the largest
+  live heap (`AGrowingBufferThatIsMadeAndDroppedStaysInGoal3`). No operation walks or copies an
+  array whose size follows the heap size: free lists are intrusive, the
+  lists of spans are linked through the span headers, and a bitmap has a
+  fixed size for each span.
+- The calls that the heap itself makes to the C allocator or the kernel are
+  these, and the heap times each one: a new chunk (`operator new`, 1 MiB and
+  64 KiB), the map of a large block (`mmap`), and a slice of the release of a
+  large block (`munmap`). The heap writes a `stall` record to the GC trace
+  (section 8) for each one longer than 100 us (`LOXPP_GC_STALL_LIMIT_US`
+  changes the limit in microseconds, and 0 records every call). A test
+  (`EveryCallToTheCAllocatorOfTheHeapIsTimed`) counts these calls and the
+  records.
+- These calls to the C allocator are **not** timed, and no `stall` record
+  covers them. The C allocator serves them through `std::` containers that
+  an object or the collector owns. They are known gaps, each with an issue:
+  the containers of the objects (`ObjClosure::m_upvalues`, the `Chunk` of an
+  `ObjFunction`, the `std::string` and `std::shared_ptr` members of the
+  container objects, the profiler members), #1294; the gray stack of
+  the collector, #1295; the containers of `MemoryManager` (`m_foreign`,
+  `m_reachedForeign`, `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
+  sweep runs the destructors of the objects, so the `free` calls of the first
+  class run inside the sweep. The test
+  `TheUntimedCallsAreTheOnesTheContractNames` pins the first class.
+- A freed slot, and a cached large block, are poisoned for AddressSanitizer
+  (`ASAN_POISON_MEMORY_REGION`), and a slot that the heap hands out again is
+  unpoisoned. A debug build then reports a read of a freed object or buffer
+  as `use-after-poison`.
 - `Collector` has the hooks of the write barrier (`barrierField`,
   `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
   and the read barrier of the intern table (`internHit`). They are empty for
@@ -62,7 +119,8 @@ changes this file.
   `bytesAllocated` with it on each allocation, and calls
   `Collector::poll` when the heap is above it (or when stress is on).
 - Byte accounting: `bytesAllocated` counts `sizeof(T)` for each object
-  plus each buffer that `VmAllocator` allocates. `objAllocatedSize`
+  plus the requested bytes of each buffer that `VmAllocator` allocates. It
+  does not count the rounding of a size class. `objAllocatedSize`
   (`src/object_trace.h`) gives the size that the sweep subtracts.
 
 ## 3. Roots
@@ -234,11 +292,14 @@ The status of a row:
 
 - `LOXPP_GC_TRACE=<file>` writes one record for each collection (format
   v3, described in `tools/gc_report.py`). The stop-the-world collector writes
-  `gc` records only. The format also has `cycle`, `step` and `stall` records,
-  for an incremental collector and for the heap allocator. Nothing writes them
-  yet. These read the trace: `tools/gc_report.py` (and
+  `gc` records and `stall` records. The heap writes a `stall` record
+  (`stall kind=<new|free> t0= t1=`) for each call into the C allocator (a new
+  chunk or a large block) that takes longer than 100 us. The format also
+  has `cycle` and `step` records, for an incremental collector. Nothing
+  writes them yet. These read the trace: `tools/gc_report.py` (and
   `tools/jvm_gc_log.py` through `summarise_gcs`), `tools/check_gc_trace.py`,
-  `tools/check_gc_trace_v3.py`, `tools/check_gc_min_heap.py`,
+  `tools/check_gc_trace_v3.py`, `tools/check_gc_stall.py`,
+  `tools/check_gc_min_heap.py`,
   `tools/check_gc_sweep_linear.py`, `benchmarks/gc_compare.py`, and the Redis
   example's `tests/run_stages.py` (probe S10 reads `objs_before` of `gc`
   records).

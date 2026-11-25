@@ -105,7 +105,7 @@ TEST(MemoryManagerTest, MakeString_LoxStringOfAnInternedText) {
 
 TEST(MemoryManagerTest, HeapPointers_RemainValidAfterMoreAllocations) {
     // Ensures that adding more strings doesn't invalidate earlier ObjString*
-    // pointers (heap objects are stable; only the allObjects vector reallocs).
+    // pointers (heap objects never move).
     MemoryManager mm;
     ObjString* s1 = rootedString(mm, "first");
     ObjString* s2 = rootedString(mm, "second");
