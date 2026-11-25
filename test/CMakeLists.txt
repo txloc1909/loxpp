@@ -42,6 +42,8 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/container_objects.cpp
     ${PROJECT_SOURCE_DIR}/src/table.cpp
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
+    ${PROJECT_SOURCE_DIR}/src/collector.cpp
+    ${PROJECT_SOURCE_DIR}/src/stw_collector.cpp
     ${PROJECT_SOURCE_DIR}/src/worker.cpp
     ${PROJECT_SOURCE_DIR}/src/poller.cpp
     ${PROJECT_SOURCE_DIR}/src/token.cpp
@@ -104,6 +106,8 @@ loxpp_add_test(test_parser_bytecode test_parser_bytecode.cpp CORE loxpp_test_cor
 loxpp_add_test(test_table           test_table.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_collector       test_collector.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_collector_gc    test_collector.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_value           test_value.cpp           CORE loxpp_test_core)
 loxpp_add_test(test_token_roundtrip test_token_roundtrip.cpp CORE loxpp_test_core PROBE)
@@ -251,6 +255,13 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # LOXPP_GC chooses the collector when a heap starts: the default and "stw"
+    # run a program, and an unknown name ends the process with status 64.
+    add_test(NAME GcCollectorChoice
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_collector_choice.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # The large-heap programs of benchmarks/gc_large_heap/ must print the value
     # that their constants give, and must make collections. The check runs
     # each one with smaller constants. Like GcSweepLinear, it skips on a build
@@ -260,6 +271,17 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(GcLargeHeap PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # The stop-the-world collector must collect at the same points as when the
+    # counts were pinned: the same cause, objects and bytes for each collection
+    # of the scaled-down large-heap programs. Skips like GcLargeHeap.
+    add_test(NAME GcStwCounts
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_stw_counts.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcStwCounts PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
@@ -544,7 +566,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_reflect_api_gc test_stress_gc test_gc_regression test_list_gc
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
-    test_table_gc test_allocator_gc test_net_process_gc test_coroutine_gc
+    test_table_gc test_allocator_gc test_collector_gc test_net_process_gc test_coroutine_gc
     test_task_gc test_task_wait_gc test_socket_wait_gc test_connect_wait_gc
     test_worker_gc
     test_repl_gc)
@@ -555,7 +577,7 @@ set(LOXPP_GC_STRESS_TARGETS
 # names would otherwise collide.
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
-    test_allocator test_allocator_gc test_value
+    test_allocator test_allocator_gc test_collector test_collector_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_file_readline
     test_os_api test_net_process test_net_process_gc

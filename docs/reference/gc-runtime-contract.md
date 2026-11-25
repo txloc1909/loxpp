@@ -1,10 +1,9 @@
 # What the native runtime needs from a collector
 
-This document states facts about the native heap as it is (main at
-36284862). Other code relies on these facts, so any collector that replaces
-or joins the current one must keep them, or change the code that relies on
-them in the same pull request. `docs/decisions/garbage-collectors.md` uses
-this list.
+This document states facts about the native heap as it is. Other code relies
+on these facts, so any collector that replaces or joins the current one must
+keep them, or change the code that relies on them in the same pull request.
+`docs/decisions/garbage-collectors.md` uses this list.
 
 Keep this document current: a pull request that changes one of these facts
 changes this file.
@@ -14,14 +13,28 @@ changes this file.
 - The heap is `MemoryManager` (`src/memory_manager.h`). There is one heap
   for each worker. Only the thread of that worker allocates in it and
   collects it.
-- `MemoryManager::create<T>` makes each object with one `new`, and keeps
-  the pointer in `allObjects`, a plain `std::vector<Obj*>`. `sweep` calls
-  `delete` on each dead object.
+- The heap has one collector, an object of a class that derives from
+  `Collector` (`src/collector.h`). `LOXPP_GC` names it when the heap starts.
+  The only name is `stw`, the default: `StwCollector`
+  (`src/stw_collector.{h,cpp}`). An unknown name ends the process with
+  status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
+  its own API (`create<T>`, `makeString`, `pushTempRoot`, `markObject`,
+  `collectGarbage`, `collectionCount`) and forwards to the collector.
+- `MemoryManager::create<T>` makes each object with one `new`, and gives the
+  pointer to the collector (`Collector::onCreate`). `StwCollector` keeps it
+  in `allObjects`, a plain `std::vector<Obj*>` that only the collector
+  touches. Its sweep calls `delete` on each dead object.
 - The header (`struct Obj`, `src/object.h`) has a vtable pointer, `type`
   (1 byte), `marked` (1 byte) and `heapId` (2 bytes). Four bytes of padding
-  follow. `marked` belongs to the collector of the heap that owns the
-  object. `heapId` is set once and never changes, so another thread can
-  read it at any time.
+  follow. `marked` is private. Only `StwCollector` is its friend, so a use
+  anywhere else does not compile. `heapId` is set once and never changes, so
+  another thread can read it at any time.
+- `Collector` has the hooks of the write barrier (`barrierField`,
+  `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
+  and the read barrier of the intern table (`internHit`). They are empty for
+  `stw`, which never sets `PollState::marking`. Only `internHit` has callers
+  today (the lookups of the intern table). The runtime does not call the
+  store hooks yet.
 - There are 23 object types (`enum class ObjType`). These own OS handles
   and close them in their destructor: `ObjFile`, `ObjSocket`, `ObjServer`,
   `ObjProcess`. So the time of the sweep is the time when an unreachable
@@ -43,14 +56,22 @@ changes this file.
   moment the old buffer is still complete and the container is consistent:
   the new buffer is allocated before any element moves.
 - `LOXPP_STRESS_GC=1` runs a full collection at each allocation.
-- The threshold: `m_nextGC = max(2 × bytesAllocated after the sweep,
-  1 MB)`.
+- The threshold: `PollState::pollAt = max(2 × bytesAllocated after the
+  sweep, 1 MB)`. `PollState` is in the heap (`MemoryManager::m_poll`), and
+  the collector writes it. `MemoryManager::shouldPoll` compares
+  `bytesAllocated` with it on each allocation, and calls
+  `Collector::poll` when the heap is above it (or when stress is on).
 - Byte accounting: `bytesAllocated` counts `sizeof(T)` for each object
-  plus each buffer that `VmAllocator` allocates. `objAllocatedSize` gives
-  the size that `sweep` subtracts.
+  plus each buffer that `VmAllocator` allocates. `objAllocatedSize`
+  (`src/object_trace.h`) gives the size that the sweep subtracts.
 
 ## 3. Roots
 
+- The runtime marks each root through `MemoryManager::markObject` and
+  `markValue`, which call the collector. `MemoryManager::markAllRoots` calls
+  every source below. The references of each object type are in
+  `traceObjectEdges` (`src/object_trace.h`), a template over the marker, so
+  every collector uses the same code.
 - `Runtime::markRoots` (`src/runtime.cpp`): the value stack from `stack` to
   `stackTop`, the closure and the deferred calls of each frame, the open
   upvalues, the globals table, the built-in classes, the current coroutine,
@@ -85,8 +106,9 @@ changes this file.
 ## 5. Weak references
 
 - The String intern table (`m_strings`) holds its Strings weakly.
-  `removeWhiteStrings` removes each unmarked String after the trace and
-  before the sweep.
+  `StwCollector::removeWhiteStrings` removes each unmarked String after the
+  trace and before the sweep. Each lookup that finds a String calls
+  `Collector::internHit` (`makeString`, `findString`, `receiveMessage`).
 - Every String is interned, so String equality is pointer equality. A
   collector must not free an interned String that is still reachable, and
   must remove each dead String from the table before it is freed.

@@ -51,7 +51,3 @@ ObjString* Table::findString(const char* chars, int length,
         index = (index + 1) & (static_cast<uint32_t>(cap) - 1);
     }
 }
-
-void Table::removeUnmarkedKeys() {
-    m_map.removeIf([](const Entry& e) { return !e.key->marked; });
-}

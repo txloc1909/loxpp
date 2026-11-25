@@ -154,11 +154,11 @@ labels bench
 legs debug
 targets test_richards_benchmark
 
-case a large-heap program runs the test that scales it down
-files benchmarks/gc_large_heap/live_then_churn.lox
+case a large-heap program runs the tests that scale it down and compare it
+files benchmarks/gc_large_heap/live_then_churn.lox benchmarks/gc_large_heap/stw_counts.txt
 gates placement,native-unit
 labels -
-names GcLargeHeap
+names GcLargeHeap GcStwCounts
 legs debug
 targets loxpp
 
@@ -309,7 +309,7 @@ case the runner module that the smoke test imports runs the harness and the lang
 files tools/runner_precondition.py
 gates placement,tables,native-unit,probes,lsp,release-static
 labels bootstrap,corpus,harness
-names GcTrace GcTraceV3 GcLargeHeap GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
+names GcTrace GcTraceV3 GcCollectorChoice GcLargeHeap GcStwCounts GcSweepLinear GcMinHeap ReplSession RunnerPrecondition
 
 case the library of the spec tables runs the static test that reads it
 files tools/spec_tables.py

@@ -46,7 +46,6 @@ class Table {
     bool del(ObjString* key);
     void addAll(const Table& from);
     ObjString* findString(const char* chars, int length, uint32_t hash) const;
-    void removeUnmarkedKeys();
     // Removes every entry whose key `drop(key)` says to drop.
     template <typename F>
     void removeKeysIf(F&& drop) {

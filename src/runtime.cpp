@@ -2516,7 +2516,7 @@ Runtime::ThrowOutcome Runtime::raiseThrowableError(const char* kind_str,
     }
 
     // GC safety: root msg_obj/kind_obj only for the window before err_obj
-    // holds them. Once err_obj exists, its own traceObject marks both, so
+    // holds them. Once err_obj exists, its own traceObjectEdges marks both, so
     // their liveness after that rides on err_obj staying reachable —
     // guaranteed for the whole call below by handleThrow()'s own root on
     // thrownValue (see its comment), not by anything here.

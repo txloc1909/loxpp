@@ -1,6 +1,8 @@
 #pragma once
 
+#include "collector.h"
 #include "object.h"
+#include "stw_collector.h"
 #include "table.h"
 #include "vm_allocator.h"
 #include "worker.h"
@@ -8,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
@@ -36,11 +39,12 @@ class MemoryManager : public VmAllocBase {
     // Creates and takes ownership of a new Obj subclass.
     template <typename T, typename... Args>
     T* create(Args&&... args) {
-        // m_stressGC fires a collection on every allocation to surface rooting
-        // bugs. It is a runtime flag, not a build flag, so this stays one
-        // member read and one `||` on the hot allocation path.
-        if (m_stressGC || bytesAllocated > m_nextGC) {
-            collectGarbage();
+        // Stress mode of the collector fires a collection on every allocation
+        // to surface rooting bugs. It is a runtime flag, not a build flag,
+        // so this stays one member read and one `||` on the hot allocation
+        // path.
+        if (shouldPoll()) {
+            m_collector->poll();
         }
         bytesAllocated += sizeof(T);
         T* p = new T(std::forward<Args>(args)...);
@@ -51,7 +55,14 @@ class MemoryManager : public VmAllocBase {
         if (!pointerFitsInValue(reinterpret_cast<uintptr_t>(p))) {
             reportPointerOutOfRange(reinterpret_cast<uintptr_t>(p));
         }
-        allObjects.push_back(p);
+        // m_stw is the same object as m_collector when the collector is
+        // "stw". StwCollector is final, so this is a direct call that the
+        // compiler inlines: the allocation path pays no virtual call.
+        if (m_stw != nullptr) {
+            m_stw->onCreate(p);
+        } else {
+            m_collector->onCreate(p);
+        }
         return p;
     }
 
@@ -69,7 +80,20 @@ class MemoryManager : public VmAllocBase {
     }
     [[nodiscard]] ObjString* findString(std::string_view sv) const;
 
-    void collectAll();
+    // Frees every object of the heap.
+    void collectAll() { m_collector->releaseAll(); }
+
+    // The collector of this heap, chosen when the heap started (LOXPP_GC).
+    [[nodiscard]] Collector& collector() { return *m_collector; }
+    // For tests. The state that the allocation path and the barriers read.
+    [[nodiscard]] PollState& pollState() { return m_poll; }
+    // For tests. Puts `collector` in the place of the collector of this heap
+    // and returns the old one. `collector` must use pollState(). An object
+    // that the heap makes while `collector` is in place is not known to the
+    // old collector, so a test makes none, and puts the old collector back
+    // before the heap ends.
+    std::unique_ptr<Collector>
+    swapCollector(std::unique_ptr<Collector> collector);
 
     void* rawAlloc(std::size_t bytes) override;
 
@@ -85,13 +109,14 @@ class MemoryManager : public VmAllocBase {
     // not count it again.
     void mergeCoroutineProfilers();
 #endif
-    void markObject(Obj* obj);
-    void markValue(const Value& v);
-    void collectGarbage();
+    // The roots and the references that the runtime finds go to the collector.
+    void markObject(Obj* obj) { m_collector->markObject(obj); }
+    void markValue(const Value& v) { m_collector->markValue(v); }
+    void collectGarbage() { m_collector->collectNow(CollectCause::Auto); }
     // The number of completed collectGarbage() calls of this heap. Tests read
     // it to prove that an allocation path reaches the threshold check.
     [[nodiscard]] std::size_t collectionCount() const {
-        return m_collectionCount;
+        return m_collector->collectionCount();
     }
 
     // The nodes of a message graph that the send and receive path of this
@@ -164,50 +189,52 @@ class MemoryManager : public VmAllocBase {
     void dropOwner();
 
   private:
-    template <bool Traced>
-    void runCollection();
-    void traceReferences();
-    void traceObject(Obj* obj);
-    void removeWhiteStrings();
-    void sweep();
+    // The collector reaches the roots, the foreign set and the intern table
+    // of its heap through these calls and this friend declaration.
+    friend class StwCollector;
+    // Calls markObject and markValue of the collector for each root: the
+    // root callback, the compiler, the temp roots, the held objects, the
+    // inbox targets and the batch that the drain took out.
+    void markAllRoots();
+    // The foreign set at the start of a collection: no side mark is set, and
+    // no foreign object is reached yet.
+    void beginForeignCycle();
+    // Sets the side mark of `obj`, an object of another heap.
+    void markForeign(Obj* obj);
+    [[nodiscard]] bool foreignMarked(const Obj* obj) const;
     void markHeldRoots();
     void markInboxTargets();
     void adoptReachedForeign();
     void releaseUnreachedForeign();
-    [[nodiscard]] bool isMarkedHere(const Obj* obj) const;
-    // The `cause` field of a GC trace record.
-    [[nodiscard]] const char* collectionCause() const;
 
-    // Plain std::vector — using VmAllocator here would cause infinite recursion
-    // inside rawAlloc when push_back triggers a reallocation.
-    std::vector<Obj*> allObjects;
+    // True when the allocation that is about to happen is a safe point at
+    // which the collector has work. One compare of members of the heap.
+    [[nodiscard]] bool shouldPoll() const {
+        return m_poll.stress || bytesAllocated > m_poll.pollAt;
+    }
+
+    // The lookup of the intern table found `s`. The test of the flag is on the
+    // state of the heap, so a lookup that finds a String (the common case)
+    // pays one load, not three.
+    void noteInternHit(ObjString* s) const {
+        if (m_poll.marking) {
+            m_collector->internHit(s);
+        }
+    }
+
     Table m_strings;
 
-    std::vector<Obj*> m_grayStack;
+    // The state that shouldPoll reads. Declared before the collector, which
+    // holds a reference to it.
+    PollState m_poll;
+    std::unique_ptr<Collector> m_collector;
+    StwCollector* m_stw{nullptr};
     std::vector<Obj*> m_tempRoots; // objects transiently protected from GC
     std::function<void()> m_markRoots;
     Compiler* m_currentCompiler{nullptr};
 #ifdef LOXPP_PROFILE
     ProfilerData* m_profilerData{nullptr};
 #endif
-    // Set from the LOXPP_STRESS_GC environment variable, read once in the
-    // constructor. When true, every allocation triggers a full collection.
-    // When false, m_nextGC growth and the trigger point are exactly as they
-    // are with no stress: this flag adds one branch and nothing else.
-    bool m_stressGC{false};
-    // Open when LOXPP_GC_TRACE names a file, read once in the constructor.
-    // Null otherwise, and collectGarbage() then pays one test of this pointer
-    // per collection. The allocation paths never read it.
-    std::FILE* m_trace{nullptr};
-    // The threshold never drops below kMinHeap. Without a floor, a program
-    // with a small live heap and heavy allocation gets a threshold of a few
-    // kilobytes and collects thousands of times. Pause time follows the
-    // garbage swept, so a larger floor trades fewer collections for longer
-    // pauses; one megabyte already removes the excess collections.
-    static constexpr std::size_t kMinHeap = 1024 * 1024;
-    static constexpr int GC_HEAP_GROW_FACTOR = 2;
-    std::size_t m_nextGC{kMinHeap};
-    std::size_t m_collectionCount{0};
     std::size_t m_messageNodes{0};
 
     int m_workerNumber{0};
@@ -224,7 +251,6 @@ class MemoryManager : public VmAllocBase {
     // An envelope batch that the drain took out of the inbox and has not
     // delivered yet: the receiver's roots while it delivers.
     std::vector<Envelope> m_draining;
-    bool m_exitCollection{false};
     Inbox m_inbox;
 
     // The holder counts of the objects of this heap, under m_holdMutex.
