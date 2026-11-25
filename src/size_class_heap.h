@@ -128,7 +128,15 @@ class SizeClassHeap {
     // one cached block that is over the cache limit to the blocks that wait.
     // The allocation paths and the sweep call it, so a large release is
     // spread over many steps.
-    void releaseStep();
+    // Returns the bytes that it gave back.
+    // With evictCache, a cached block also goes to the queue when the queue is
+    // empty, over the cache limit or not: the caller maps new memory, and the
+    // cached blocks of other classes are the least useful memory.
+    std::size_t releaseStep(bool evictCache = false);
+    // Gives back `bytes` from the queue, in calls of at most kReleaseSlice, or
+    // all of it when the queue holds less. The heap calls it before it maps
+    // new memory, so the queue falls at least as fast as the mappings grow.
+    void releaseBytes(std::size_t bytes);
     // The `stall` records go to `trace`, one for each timed call that takes
     // longer than the limit. nullptr turns them off, and then a timed call
     // reads no clock.

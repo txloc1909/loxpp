@@ -53,7 +53,13 @@ changes this file.
   One slice of at most 1 MiB goes back to the kernel (`munmap`) for each
   allocation of a large block, each free of a large block, and each span of a
   sweep (`SizeClassHeap::releaseStep`). `largestReleaseBytes()` gives the
-  largest slice that one call gave back. No operation walks or copies an
+  largest slice that one call gave back. The release rate is tied to the map
+  rate: before the heap maps N new bytes (a large block that the cache does
+  not hold, or a new chunk), it gives back N bytes from the queue, in slices
+  of at most 1 MiB, and it moves cached blocks to the queue if the queue is
+  empty. So the queue never grows while the program grows, and during a
+  make-and-drop pattern the footprint stays at most 2.5 times the largest
+  live heap (`AGrowingBufferThatIsMadeAndDroppedStaysInGoal3`). No operation walks or copies an
   array whose size follows the heap size: free lists are intrusive, the
   lists of spans are linked through the span headers, and a bitmap has a
   fixed size for each span.

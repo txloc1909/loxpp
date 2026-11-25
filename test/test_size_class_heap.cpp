@@ -410,6 +410,38 @@ TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
     }
 }
 
+TEST(SizeClassHeap, AGrowingBufferThatIsMadeAndDroppedStaysInGoal3) {
+    // A List grows by doubling, is dropped, and is made again. The blocks that
+    // wait to go back must not pile up beside the new ones: the heap gives
+    // back as many bytes as it maps. Goal 3 of the decision: the peak is at
+    // most 2.5 times the largest live heap.
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    constexpr std::size_t kFinal = std::size_t{128} << 20;
+    std::size_t base = store.footprintBytes();
+    std::size_t peak = 0;
+    std::size_t largestLive = 0;
+    for (int round = 0; round < 3; ++round) {
+        void* buffer = nullptr;
+        std::size_t size = 0;
+        for (std::size_t next = std::size_t{1} << 20; next <= kFinal;
+             next *= 2) {
+            void* bigger = mm.rawAlloc(next);
+            largestLive = std::max(largestLive, size + next);
+            peak = std::max(peak, store.footprintBytes() - base);
+            if (buffer != nullptr) {
+                mm.rawFree(buffer, size);
+            }
+            buffer = bigger;
+            size = next;
+        }
+        mm.rawFree(buffer, size);
+        peak = std::max(peak, store.footprintBytes() - base);
+    }
+    EXPECT_LE(static_cast<double>(peak),
+              2.5 * static_cast<double>(largestLive));
+}
+
 TEST(SizeClassHeap, TheCacheShrinksWhenTheLiveLargeBytesFall) {
     MemoryManager mm;
     SizeClassHeap& store = mm.store();

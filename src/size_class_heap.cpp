@@ -214,6 +214,7 @@ std::size_t SizeClassHeap::largeClass(std::size_t bytes, std::size_t& rounded) {
 Span* SizeClassHeap::carveSpan() {
     if (m_nextSpan == m_chunkEnd) {
         std::size_t raw = (kChunkSpans + 1) * kSpanSize;
+        releaseBytes(raw);
         char* block = static_cast<char*>(osNew(raw));
         *reinterpret_cast<void**>(block) = m_chunks;
         m_chunks = block;
@@ -419,6 +420,16 @@ void SizeClassHeap::freeBuffer(void* p, std::size_t bytes) noexcept {
     freeLarge(p, bytes);
 }
 
+void SizeClassHeap::releaseBytes(std::size_t bytes) {
+    while (bytes > 0) {
+        std::size_t released = releaseStep(true);
+        if (released == 0) {
+            return;
+        }
+        bytes -= std::min(bytes, released);
+    }
+}
+
 void* SizeClassHeap::allocLarge(std::size_t bytes) {
     std::size_t rounded;
     std::size_t cls = largeClass(bytes, rounded);
@@ -429,6 +440,8 @@ void* SizeClassHeap::allocLarge(std::size_t bytes) {
         m_largeFree[cls] = *static_cast<void**>(p);
         m_largeCachedBytes -= mapBytes;
     } else {
+        // New memory: give back as much from the queue first.
+        releaseBytes(mapBytes);
         p = osMap(mapBytes);
     }
     m_largeLiveBytes += mapBytes;
@@ -462,12 +475,13 @@ void SizeClassHeap::queueRelease(void* p, std::size_t bytes) noexcept {
     m_largePendingBytes += bytes;
 }
 
-void SizeClassHeap::releaseStep() {
+std::size_t SizeClassHeap::releaseStep(bool evictCache) {
     if (m_pending == nullptr) {
         // Trim the cache when the live large bytes have fallen under it. One
         // block for each step, the largest class first: the scan is over a
         // fixed number of classes.
-        if (m_largeCachedBytes > std::max(m_largeLiveBytes, kLargeCacheFloor)) {
+        if (evictCache ||
+            m_largeCachedBytes > std::max(m_largeLiveBytes, kLargeCacheFloor)) {
             for (std::size_t cls = kLargeClasses; cls-- > 0;) {
                 void* p = m_largeFree[cls];
                 if (p == nullptr) {
@@ -487,7 +501,7 @@ void SizeClassHeap::releaseStep() {
             }
         }
         if (m_pending == nullptr) {
-            return;
+            return 0;
         }
     }
     ReleaseNode* node = m_pending;
@@ -496,9 +510,10 @@ void SizeClassHeap::releaseStep() {
         m_pending = node->next;
         m_largePendingBytes -= bytes;
         osUnmap(node, bytes);
-        return;
+        return bytes;
     }
     node->remaining -= kReleaseSlice;
     m_largePendingBytes -= kReleaseSlice;
     osUnmap(reinterpret_cast<char*>(node) + node->remaining, kReleaseSlice);
+    return kReleaseSlice;
 }
