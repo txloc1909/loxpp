@@ -2,6 +2,7 @@
 #include "memory_manager.h"
 #include "size_class_heap.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <gtest/gtest.h>
@@ -12,6 +13,34 @@
 // The layout of the heap: size classes, the mark bitmaps, a footprint that
 // stays bounded under churn, and the calls into the C allocator
 // (docs/decisions/garbage-collectors.md, phase 8).
+
+// The calls of operator new and operator delete that happen inside a window
+// that a test opens. A std:: container that an object owns calls them, and
+// the heap does not time those calls (docs/reference/gc-runtime-contract.md,
+// section 1).
+namespace {
+std::atomic<bool> g_countCalls{false};
+std::atomic<std::size_t> g_news{0};
+std::atomic<std::size_t> g_deletes{0};
+} // namespace
+
+void* operator new(std::size_t n) {
+    if (g_countCalls.load(std::memory_order_relaxed)) {
+        g_news.fetch_add(1, std::memory_order_relaxed);
+    }
+    void* p = std::malloc(n != 0 ? n : 1);
+    if (p == nullptr) {
+        throw std::bad_alloc();
+    }
+    return p;
+}
+void operator delete(void* p) noexcept {
+    if (p != nullptr && g_countCalls.load(std::memory_order_relaxed)) {
+        g_deletes.fetch_add(1, std::memory_order_relaxed);
+    }
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept { operator delete(p); }
 
 namespace {
 
@@ -350,6 +379,77 @@ TEST(SizeClassHeap, TheCacheShrinksWhenTheLiveLargeBytesFall) {
         store.releaseStep();
     }
     EXPECT_LE(store.footprintBytes(), base + (4u << 20));
+}
+
+TEST(SizeClassHeap, EveryCallToTheCAllocatorOfTheHeapIsTimed) {
+    std::FILE* f = std::tmpfile();
+    ASSERT_NE(f, nullptr);
+    {
+        MemoryManager mm;
+        SizeClassHeap& store = mm.store();
+        store.setStallTrace(f, 0);
+        // Warm up: one span of each size class.
+        for (std::size_t n = 16; n <= SizeClassHeap::kMaxSmall; n += 16) {
+            mm.rawFree(mm.rawAlloc(n), n);
+        }
+        std::fflush(f);
+        std::fseek(f, 0, SEEK_END);
+        long recordsBefore = std::ftell(f);
+        std::size_t callsBefore = store.osCalls();
+        g_news = 0;
+        g_deletes = 0;
+        g_countCalls = true;
+        // The heap path: small buffers, and a large block that goes through
+        // the map, the cache and the release.
+        for (int i = 0; i < 20000; ++i) {
+            std::size_t n = 16 + static_cast<std::size_t>(i % 128) * 16;
+            mm.rawFree(mm.rawAlloc(n), n);
+        }
+        std::size_t big = std::size_t{6} << 20;
+        mm.rawFree(mm.rawAlloc(big), big);
+        while (store.pendingReleaseBytes() != 0) {
+            store.releaseStep();
+        }
+        g_countCalls = false;
+        std::fflush(f);
+        // No call of operator new or operator delete: the heap does not use
+        // them on this path, and every call that it makes is the map or the
+        // release of a large block.
+        EXPECT_EQ(g_news.load(), 0u);
+        EXPECT_EQ(g_deletes.load(), 0u);
+        std::size_t calls = store.osCalls() - callsBefore;
+        EXPECT_GT(calls, 0u);
+        store.setStallTrace(nullptr, 0);
+        std::fseek(f, recordsBefore, SEEK_SET);
+        std::size_t records = 0;
+        char line[256];
+        while (std::fgets(line, sizeof line, f) != nullptr) {
+            ++records;
+            EXPECT_TRUE(std::string(line).rfind("stall kind=", 0) == 0) << line;
+        }
+        // With the limit at 0, one record for each call.
+        EXPECT_EQ(records, calls);
+    }
+    std::fclose(f);
+}
+
+TEST(SizeClassHeap, TheUntimedCallsAreTheOnesTheContractNames) {
+    // docs/reference/gc-runtime-contract.md, section 1, lists the calls to the
+    // C allocator that nothing times: the std:: containers that an object or
+    // the collector owns. A closure with upvalues is one of them. This test
+    // keeps the contract and the code in step: if the vector of a closure
+    // moves to the heap, change this test and the contract together.
+    MemoryManager mm;
+    ObjFunction* fn = mm.create<ObjFunction>();
+    mm.pushTempRoot(fn);
+    fn->upvalueCount = 3;
+    g_news = 0;
+    g_countCalls = true;
+    ObjClosure* closure = mm.create<ObjClosure>(fn);
+    g_countCalls = false;
+    EXPECT_NE(closure, nullptr);
+    EXPECT_GT(g_news.load(), 0u);
+    mm.popTempRoot();
 }
 
 #if defined(__SANITIZE_ADDRESS__) ||                                           \

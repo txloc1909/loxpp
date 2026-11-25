@@ -42,20 +42,44 @@ changes this file.
 - The header (`struct Obj`, `src/object.h`) has a vtable pointer, `type`
   (1 byte) and `heapId` (2 bytes). Five bytes of padding follow. `heapId`
   is set once and never changes, so another thread can read it at any time.
-- The allocator limits its own stalls. A small allocation or free never
-  calls the C allocator. An empty span goes to a pool that every class takes
-  from. A span or a chunk is not returned to the operating system before the
-  heap ends. Freed large blocks wait in a cache for their class. The cache
-  holds at most the larger of the bytes of the large blocks in use and 4
-  MiB. A block over that limit goes back to the C allocator in one call, and
-  that call costs what its own size costs. No operation walks or copies an
-  array whose size follows the heap size: free lists are intrusive, the lists
-  of spans are linked through the span headers, and a bitmap has a fixed size
-  for each span.
-- Only two calls reach the C allocator: a new chunk and a large block. The
-  heap times them, and writes a `stall` record to the GC trace (section 8)
-  for each one longer than 100 us (`LOXPP_GC_STALL_LIMIT_US` changes the limit
-  in microseconds, and 0 records every call).
+- The allocator limits its own stalls. A small allocation or free of the
+  memory of the heap (an object slot, or a `VmAllocator` buffer of at most
+  2048 bytes) never calls the C allocator or the kernel. An empty span goes
+  to a pool that every class takes from. A span or a chunk is not returned
+  to the operating system before the heap ends. A freed large block waits in
+  a cache for its class. The cache holds at most the larger of the bytes of
+  the large blocks in use and 4 MiB. A block over that limit, and a cached
+  block when the large blocks in use fall under the cache, waits in a queue.
+  One slice of at most 1 MiB goes back to the kernel (`munmap`) for each
+  allocation of a large block, each free of a large block, and each span of a
+  sweep (`SizeClassHeap::releaseStep`). `largestReleaseBytes()` gives the
+  largest slice that one call gave back. No operation walks or copies an
+  array whose size follows the heap size: free lists are intrusive, the
+  lists of spans are linked through the span headers, and a bitmap has a
+  fixed size for each span.
+- The calls that the heap itself makes to the C allocator or the kernel are
+  these, and the heap times each one: a new chunk (`operator new`, 1 MiB and
+  64 KiB), the map of a large block (`mmap`), and a slice of the release of a
+  large block (`munmap`). The heap writes a `stall` record to the GC trace
+  (section 8) for each one longer than 100 us (`LOXPP_GC_STALL_LIMIT_US`
+  changes the limit in microseconds, and 0 records every call). A test
+  (`EveryCallToTheCAllocatorOfTheHeapIsTimed`) counts these calls and the
+  records.
+- These calls to the C allocator are **not** timed, and no `stall` record
+  covers them. The C allocator serves them through `std::` containers that
+  an object or the collector owns. They are known gaps, each with an issue:
+  the containers of the objects (`ObjClosure::m_upvalues`, the `Chunk` of an
+  `ObjFunction`, the `std::string` and `std::shared_ptr` members of the
+  container objects, the profiler members), #1294; the gray stack of
+  the collector, #1295; the containers of `MemoryManager` (`m_foreign`,
+  `m_reachedForeign`, `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
+  sweep runs the destructors of the objects, so the `free` calls of the first
+  class run inside the sweep. The test
+  `TheUntimedCallsAreTheOnesTheContractNames` pins the first class.
+- A freed slot, and a cached large block, are poisoned for AddressSanitizer
+  (`ASAN_POISON_MEMORY_REGION`), and a slot that the heap hands out again is
+  unpoisoned. A debug build then reports a read of a freed object or buffer
+  as `use-after-poison`.
 - `Collector` has the hooks of the write barrier (`barrierField`,
   `barrierElement`, `barrierEntry`, `barrierUpvalue`, `barrierSnapshot`)
   and the read barrier of the intern table (`internHit`). They are empty for
