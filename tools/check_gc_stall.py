@@ -17,6 +17,12 @@ Three runs of one program:
      long, and no `free` record may be longer than MAX_FREE_STALL_NS. A free
      of one large block in one call took 1.6 ms for 120 M elements before the
      heap gave memory back in slices.
+  The length bound in part 2 is a guard on the host, not the proof of the
+  slices: one free of the whole 128 MB block took 4.7 to 4.9 ms on one host
+  and stayed under the 3 ms limit on another. The proof that a release is at
+  most one slice is the count test `AFreedLargeBlockGoesBackInSlices`
+  (`largestReleaseBytes()`), which does not use time.
+
   3. With a limit that no call reaches, the trace holds no stall record.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that does not exist or
