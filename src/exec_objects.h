@@ -63,7 +63,7 @@ struct ObjUpvalue : public Obj {
 
     // Points into the stack while open, at the cell in the snapshot of a
     // suspended coroutine while owned, and at the closed value once closed.
-    [[nodiscard]] Value* location() const { return m_location; }
+    [[nodiscard]] const Value* location() const { return m_location; }
     [[nodiscard]] const Value& closed() const { return m_closed; }
     // While this upvalue's cell lives inside a suspended coroutine's stack
     // snapshot, the coroutine, so marking the upvalue (through an escaping

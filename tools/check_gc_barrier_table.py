@@ -16,8 +16,9 @@ headers of the object types and checks that:
      each hook of the row (directly, or through a helper or another mutator
      of the type);
   6. a status "immutable" names a const member;
-  7. no object type has a friend, and no public function of an object type
-     returns a non-const reference or pointer to a private member, except the
+  7. no object type has a friend, and no function of an object type, with or
+     without arguments, const or not, returns a non-const reference or a
+     pointer to a Value or a container that points into a member, except the
      functions in RAW_ACCESSORS (they have a row with the status exempt);
   8. each RAW_ACCESSORS function is called only in its allowed files;
   9. const_cast does not appear in the source tree, except a cast to a char
@@ -121,7 +122,7 @@ class Struct:
         self.methods = {}  # name -> body text (may be "")
         self.public_methods = set()
         self.has_friend = False
-        self.nonconst_accessors = []
+        self.defs = []  # (name, signature, body) of each function in the type
         self._parse()
 
     def _parse(self):
@@ -144,13 +145,7 @@ class Struct:
                     self.methods[name] += sig + inner
                     if access == "public":
                         self.public_methods.add(name)
-                    if (
-                        re.search(r"[&*]\s*\w+\s*\(\s*\)\s*(?!const)\{?$", sig.strip())
-                        and "return" in inner
-                        and re.search(r"return\s+m_", inner)
-                        and not re.search(r"\)\s*const\s*$", sig.strip())
-                    ):
-                        self.nonconst_accessors.append(name)
+                    self.defs.append((name, sig, inner))
                     stmt = ""
                     i = end + 1
                     # A function ends its statement.
@@ -196,6 +191,30 @@ class Struct:
         type_, name = m.group(1), m.group(2)
         # `ObjClass* const klass` has the const in the type part.
         self.members[name] = Member(name, type_.strip(), access)
+
+
+# A pointer to one of these, or any reference, that a function returns gives
+# write access. A pointer to an object (`ObjCoroutine*`) is the value of a
+# field and does not.
+POINTEE_WRITABLE = re.compile(
+    r"\b(Value|Entry|MapEntry|WaitingCall|\w*Snapshot|Table|\w*Vector\w*)\s*\*"
+)
+
+
+def raw_accessors_of(st):
+    """Functions of a type that return a non-const reference or pointer into a
+    member, with or without arguments, const or not."""
+    found = []
+    for name, sig, inner in st.defs:
+        head = sig.split(name + "(")[0].split("{}")[-1]
+        head = re.sub(r"\[\[[^\]]*\]\]|\binline\b|\bstatic\b|\bvirtual\b|template\s*<[^>]*>", "", head)
+        head = head.strip()
+        if head.startswith("const"):
+            continue
+        writable = "&" in head or POINTEE_WRITABLE.search(head)
+        if writable and re.search(r"return[^;]*\bm_\w+", inner):
+            found.append(name)
+    return found
 
 
 def parse_structs(path, text):
@@ -407,10 +426,10 @@ def check(root):
     for name, st in sorted(structs.items()):
         if st.has_friend:
             problems.append(f"{name} has a friend, which can write a private member")
-        for acc in st.nonconst_accessors:
+        for acc in raw_accessors_of(st):
             if f"{name}::{acc}" not in RAW_ACCESSORS:
                 problems.append(
-                    f"{name}::{acc} returns a non-const reference or pointer to a private member"
+                    f"{name}::{acc} returns a non-const reference or pointer into a private member"
                 )
     for acc, files in RAW_ACCESSORS.items():
         tname, fn = acc.split("::")
