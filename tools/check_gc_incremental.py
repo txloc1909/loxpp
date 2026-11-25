@@ -117,7 +117,10 @@ def check_programs(binary, work):
         # step at each allocation does not end on a heap of this size.
         modes = [("incremental", {})]
         if not name.endswith("_big.lox"):
-            modes.append(("incremental, stress", {"LOXPP_STRESS_GC": "1"}))
+            # A program with a second worker races with it, so a defect shows
+            # in some runs only: it runs more than once.
+            reps = 6 if name.startswith("foreign_") else 1
+            modes.extend([("incremental, stress", {"LOXPP_STRESS_GC": "1"})] * reps)
         for label, extra in modes:
             env = {"LOXPP_GC": "incremental", "LOXPP_GC_VERIFY": "1", **extra}
             r = run(binary, prog, env, work)

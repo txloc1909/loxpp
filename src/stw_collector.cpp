@@ -235,9 +235,6 @@ void StwCollector::runCollection() {
         t1 = monotonicNs();
     }
     traceReferences();
-    // Raise before any release: a foreign object reached only now may be
-    // reachable only through one that the release below drops.
-    m_heap.adoptReachedForeign();
     if constexpr (Traced) {
         t2 = monotonicNs();
     }

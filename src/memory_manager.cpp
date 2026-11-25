@@ -192,13 +192,18 @@ void MemoryManager::beginForeignCycle() {
     for (auto& entry : m_foreign) {
         entry.second = false;
     }
-    m_reachedForeign.clear();
 }
 
 void MemoryManager::markForeign(Obj* obj) {
     auto [it, inserted] = m_foreign.try_emplace(obj, true);
     if (inserted) {
-        m_reachedForeign.push_back(obj);
+        // The count moves when the mark reaches the object, not at the end of
+        // the mark. The object is held now (the way to it is a count of an
+        // envelope in flight or of this set), but this thread can give that
+        // count back before the mark ends: a drain that receives the same
+        // object releases the count of the envelope. Without the count of
+        // this set, the owner could free the object in between.
+        heapOf(obj)->hold(obj);
     } else {
         it->second = true;
     }
@@ -279,13 +284,6 @@ void MemoryManager::markInboxTargets() {
     for (const Envelope& env : m_inbox.queue) {
         markObject(env.target);
     }
-}
-
-void MemoryManager::adoptReachedForeign() {
-    for (Obj* obj : m_reachedForeign) {
-        heapOf(obj)->hold(obj);
-    }
-    m_reachedForeign.clear();
 }
 
 void MemoryManager::releaseUnreachedForeign(bool dropStrings) {

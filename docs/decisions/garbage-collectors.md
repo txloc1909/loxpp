@@ -604,8 +604,12 @@ default.
   half, so that MMU(10 ms) stays above 50%.
 - **Finish pause.** It reads the held objects, the inbox targets and the drain
   batch again under their locks, traces what is left, runs the verifier,
-  calls `adoptReachedForeign` before `releaseUnreachedForeign`, frees the
-  unmarked handle objects, and starts the sweep.
+  frees the unmarked handle objects, calls `releaseUnreachedForeign`, and
+  starts the sweep. The count of a foreign object is raised when the mark
+  reaches it (`markForeign`), not in the finish pause: the program can give
+  back the count of an envelope in flight during a mark of many steps, and
+  the owner would free the object. This was a defect of the first version of
+  N5 (review of #1298, found with `foreign_string.lox`).
 - **Idle and abort.** `Collector::onIdle` runs steps of the cycle for at most
   0.5 ms before a worker sleeps. `collectNow` (and so `retire` and a dead heap) cuts a cycle
   in progress short and runs one full cycle.

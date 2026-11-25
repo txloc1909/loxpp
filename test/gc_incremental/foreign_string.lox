@@ -1,0 +1,50 @@
+// A String that a second worker sends is an object of that worker, and the
+// intern table of the main worker holds it. When the main worker drops the
+// String, its collector must remove the String from the table before it gives
+// back its hold: the second worker frees the String then, and the main worker
+// makes the same text again and must get a String of its own.
+class Node { init(i) { this.i = i; } }
+
+fun make(main) {
+    var i = 0;
+    while (i < 2000) { task.send(main, "fs-" + str(i) + "-text"); i = i + 1; }
+    task.send(main, "sent");
+    task.receive();
+    // The main worker has dropped the Strings. Garbage makes this worker
+    // collect, and its collector frees each String that nobody holds.
+    var round = 0;
+    while (round < 20) {
+        var j = 0;
+        while (j < 20000) { var g = Node(j); var h = "reuse-" + str(round) + "-" + str(j); j = j + 1; }
+        round = round + 1;
+    }
+    task.send(main, "freed");
+}
+
+var w = task.spawn_worker(make, task.self());
+var total = 0;
+while (true) {
+    var m = task.receive();
+    if (m == "sent") { break; }
+    total = total + len(m);
+}
+// The Strings are garbage here. Churn makes this worker collect and give
+// back its holds.
+var round = 0;
+while (round < 20) {
+    var j = 0;
+    while (j < 20000) { var g = Node(j); j = j + 1; }
+    round = round + 1;
+}
+task.send(w, "go");
+var f = task.receive();
+var bad = 0;
+var i = 0;
+while (i < 2000) {
+    var s = "fs-" + str(i) + "-text";
+    if (s != "fs-" + str(i) + "-text" or len(s) != len(str(i)) + 8) { bad = bad + 1; }
+    i = i + 1;
+}
+print total;
+print f;
+print bad;

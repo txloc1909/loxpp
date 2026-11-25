@@ -86,7 +86,7 @@ changes this file.
   have this gap: its gray stack and its handle list are linked blocks of 2048
   bytes from the buffer classes of the heap, `src/seg_stack.h`, so no push or
   pop calls the C allocator); the containers of `MemoryManager` (`m_foreign`,
-  `m_reachedForeign`, `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
+  `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
   sweep runs the destructors of the objects, so the `free` calls of the first
   class run inside the sweep. The test
   `TheUntimedCallsAreTheOnesTheContractNames` pins the first class.
@@ -206,9 +206,13 @@ workers":
 - `m_foreign` is the set of objects of other heaps that this heap holds,
   and their side marks. The owner's collector marks them there, never in
   their header.
-- Order rule: a collection raises the counts of newly reached foreign
-  objects (`adoptReachedForeign`) before it releases any count
-  (`releaseUnreachedForeign`).
+- Order rule: the count of a foreign object that a mark reaches for the first
+  time is raised in `markForeign`, at once, so every count that a collection
+  raises comes before any count that it releases (`releaseUnreachedForeign`).
+  A mark that lasts many steps cannot raise the counts at its end: the
+  program can give back the count of an envelope in flight (a drain that
+  receives the same object) before the end, and the owner would free the
+  object.
 - `retire` runs one last collection whose only roots are the held objects
   (trace cause `exit`). A dead heap stays until its last hold is released,
   and the last `releaseHold`, on any thread, frees it.
@@ -317,8 +321,8 @@ The status of a row:
   `gc` records and `stall` records. The incremental collector writes `cycle`
   and `step` records instead of `gc` records (one `step` for each pause, of
   kind `start`, `mark`, `finish`, `sweep` or `end`, with the `units` of the
-  step, and one `cycle` at the end of the cycle, with `bytes_peak` and
-  `bytes_live`). A cycle with cause `exit` is
+  step, and one `cycle` at the end of the cycle, with `bytes_peak`,
+  `bytes_live` and `objs_finish`). A cycle with cause `exit` is
   the collection that a worker runs as it ends: its steps are not pauses of
   the program, and `tools/gc_report.py` gives them their own line. The heap writes a `stall` record
   (`stall kind=<new|free> t0= t1=`) for each call into the C allocator (a new

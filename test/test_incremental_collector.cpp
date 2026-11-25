@@ -559,6 +559,23 @@ TEST_F(IncrementalTest, ADeadStringThatNobodyFindsIsFreedAndLeavesTheTable) {
 
 // --- The finish pause and the handle list ---------------------------------
 
+// The finish pause gives back the hold on a foreign String that nothing
+// reached. The owner frees the String as soon as its count is zero, so the
+// table of this heap must not hold it by then.
+TEST_F(IncrementalTest, AForeignStringThatNothingReachedLeavesTheTable) {
+    MemoryManager other;
+    ObjString* theirs = other.makeString("a string of another heap");
+    MemoryManager::holdValue(Value{static_cast<Obj*>(theirs)});
+    mm.receiveMessage(Value{static_cast<Obj*>(theirs)});
+    EXPECT_EQ(mm.findString("a string of another heap"), theirs);
+    ic->startCycle("test");
+    finishTracing();
+    ic->finishMark();
+    while (!ic->sweepStep(1000)) {
+    }
+    EXPECT_EQ(mm.findString("a string of another heap"), nullptr);
+}
+
 TEST_F(IncrementalTest, AnUnreachableFileIsFreedInTheFinishPause) {
     ObjClass* klass = newClass("File");
     mm.pushTempRoot(klass);

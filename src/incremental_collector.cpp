@@ -392,6 +392,7 @@ void IncrementalCollector::startCycle(const char* cause) {
     m_cycleT0 = t0;
     m_cycleBytesBefore = m_heap.bytesAllocated;
     m_cycleObjsBefore = m_store.objectCount();
+    m_cycleObjsFinish = m_cycleObjsBefore;
     m_cycleSteps = 0;
     m_cycleFreed = 0;
     m_cycleFreedBytes = 0;
@@ -450,6 +451,11 @@ void IncrementalCollector::finishMark() {
     const std::uint64_t t0 = gcMonotonicNs();
     const std::size_t u0 = m_units;
     // A worker can have raised a hold, or sent an envelope, since the start.
+    // The snapshot already keeps what such a hold names: an object that a
+    // hold names was reachable at the start (the holds were roots then) or is
+    // new, so no program makes this call necessary for the result. It is a
+    // second root scan under the lock that the decision asks for (4.6), and
+    // no probe can show its absence.
     m_heap.markFinishRoots();
     traceUntil(kNoLimit, 0);
     if (m_verifyAtFinish && verify() != 0) {
@@ -457,11 +463,8 @@ void IncrementalCollector::finishMark() {
                      "GC verifier: the mark missed a reachable object\n");
         std::abort();
     }
-    // Raise the counts of the foreign objects that this cycle reached before
-    // any release: one of them can be reachable only through an object that
-    // the release drops.
-    m_heap.adoptReachedForeign();
     m_units += m_heap.foreignCount();
+    m_cycleObjsFinish = m_store.objectCount();
     freeUnmarkedHandles();
     m_heap.releaseUnreachedForeign(true);
     m_store.beginSweep();
@@ -585,12 +588,12 @@ void IncrementalCollector::writeCycleRecord(std::uint64_t t1) {
                      "cycle cause=%s t0=%llu t1=%llu steps=%zu "
                      "bytes_before=%zu bytes_after=%zu objs_before=%zu "
                      "objs_after=%zu marked=%zu freed=%zu "
-                     "bytes_peak=%zu bytes_live=%zu\n",
+                     "bytes_peak=%zu bytes_live=%zu objs_finish=%zu\n",
                      m_cycleCause, static_cast<unsigned long long>(m_cycleT0),
                      static_cast<unsigned long long>(t1), m_cycleSteps,
                      m_cycleBytesBefore, m_heap.bytesAllocated,
                      m_cycleObjsBefore, objs, objs, m_cycleFreed,
-                     m_cyclePeakBytes, m_liveBytes);
+                     m_cyclePeakBytes, m_liveBytes, m_cycleObjsFinish);
         // Flushed once for each cycle, so that a process that stops without
         // stdio cleanup still leaves every cycle so far.
         std::fflush(m_trace);
@@ -609,9 +612,6 @@ void IncrementalCollector::abortCycle() {
         m_gray.pop();
     }
     m_cur = nullptr;
-    // Every foreign object that the mark put in the set needs its count, or
-    // the next cycle would release a count that nobody raised.
-    m_heap.adoptReachedForeign();
     m_store.clearAllMarks();
     m_sweepCursor = nullptr;
     setPhase(Phase::Idle);

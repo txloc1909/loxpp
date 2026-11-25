@@ -180,6 +180,9 @@ class IncrementalCollector final : public Collector {
     std::uint64_t m_cycleT0{0};
     std::size_t m_cycleBytesBefore{0};
     std::size_t m_cycleObjsBefore{0};
+    // The object count in the finish pause: the program has made objects
+    // since the start, and the sweep has not freed any yet.
+    std::size_t m_cycleObjsFinish{0};
     std::size_t m_cycleSteps{0};
     std::size_t m_cycleFreed{0};
     const char* m_cycleCause{"threshold"};

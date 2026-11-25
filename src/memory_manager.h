@@ -229,7 +229,6 @@ class MemoryManager : public VmAllocBase {
     // objects, the inbox targets and the batch of the drain. An incremental
     // collector reads them again in its finish pause.
     void markFinishRoots();
-    void adoptReachedForeign();
     // Drops the count on each foreign object that the cycle did not reach.
     // With dropStrings, a String among them leaves the intern table first: a
     // collector that does not scan the table (decision 4.7) removes the
@@ -278,10 +277,6 @@ class MemoryManager : public VmAllocBase {
     // is the side mark of the collection in progress. The header mark bit of
     // a foreign object belongs to its owner's collector.
     std::unordered_map<Obj*, bool> m_foreign;
-    // Foreign objects the collection in progress reached that were not in
-    // the set yet. The collection raises their counts before it releases
-    // any count.
-    std::vector<Obj*> m_reachedForeign;
     // An envelope batch that the drain took out of the inbox and has not
     // delivered yet: the receiver's roots while it delivers.
     std::vector<Envelope> m_draining;
