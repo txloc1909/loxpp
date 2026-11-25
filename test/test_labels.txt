@@ -24,6 +24,7 @@ test_table_gc core
 test_allocator core
 test_collector core
 test_collector_gc core
+test_incremental_collector core
 test_barrier core
 test_barrier_gc core
 test_allocator_gc core
