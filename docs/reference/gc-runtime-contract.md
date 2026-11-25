@@ -198,7 +198,7 @@ The status of a row:
 | `ObjEnumCtor` | `ctorName` | - | - | immutable | - |
 | `ObjEnumCtor` | `enumName` | - | - | immutable | - |
 | `ObjEnum` | `ctor` | - | - | immutable | - |
-| `ObjEnum` | `m_fields` | `set` | `barrierElement` | protected | The constructor of the value fills the fields once. A new slot is Nil. |
+| `ObjEnum` | `m_fields` | `resize`, `set` | `barrierElement` | protected | The constructor of the value fills the fields once. A new slot is Nil. |
 | `ObjError` | `klass` | - | - | immutable | - |
 | `ObjError` | `message` | - | - | immutable | - |
 | `ObjError` | `kind` | - | - | immutable | - |

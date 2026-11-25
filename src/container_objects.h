@@ -435,7 +435,15 @@ struct ObjEnum : public Obj {
     // constructor of the value calls them while it fills the fields, and
     // none after that. A new slot is Nil, so the barrier sees no old
     // reference.
-    void resize(std::size_t count) { m_fields.resize(count); }
+    void resize(std::size_t count) {
+        Collector* c = barrier::collectorOf(m_fields.get_allocator());
+        if (barrier::active(c)) {
+            for (std::size_t i = count; i < m_fields.size(); ++i) {
+                c->barrierElement(this, m_fields[i], barrier::nil());
+            }
+        }
+        m_fields.resize(count);
+    }
     void set(std::size_t index, const Value& v) {
         Collector* c = barrier::collectorOf(m_fields.get_allocator());
         if (barrier::active(c)) {

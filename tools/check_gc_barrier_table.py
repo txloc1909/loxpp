@@ -122,6 +122,7 @@ class Struct:
         self.body = body
         self.members = {}
         self.methods = {}  # name -> body text (may be "")
+        self.public_methods = set()
         self.has_friend = False
         self.nonconst_accessors = []
         self._parse()
@@ -144,6 +145,8 @@ class Struct:
                     sig = stmt
                     self.methods.setdefault(name, "")
                     self.methods[name] += sig + inner
+                    if access == "public":
+                        self.public_methods.add(name)
                     if (
                         re.search(r"[&*]\s*\w+\s*\(\s*\)\s*(?!const)\{?$", sig.strip())
                         and "return" in inner
@@ -380,6 +383,28 @@ def check(root):
                         problems.append(f"{name}::{mut} does not reach {h}")
         elif muts and status == "immutable":
             problems.append(f"{name}::{member}: an immutable row has mutators")
+
+    # 6b. a public function that writes a reference member is in the table
+    write = re.compile(
+        r"\b(m_\w+)\s*(=(?!=)|\[[^\]]*\]\s*=(?!=)|\.(push_back|pop_back|pop_front|"
+        r"erase|clear|resize|assign|emplace_back|insert|set|remove|removeAt)\b)"
+    )
+    for name, st in sorted(structs.items()):
+        listed = set()
+        for r in by_type.get(name, []):
+            listed.update(split_names(r["Mutators"]))
+        ref_members = {m.name for m in st.members.values() if m.holds_reference}
+        for mname in sorted(st.public_methods):
+            if mname == name:
+                continue
+            body = st.methods.get(mname, "")
+            body += bodies.get((name, mname), "")
+            for w in write.finditer(body):
+                if w.group(1) in ref_members and mname not in listed:
+                    problems.append(
+                        f"{name}::{mname} writes {w.group(1)} and is not in the table"
+                    )
+                    break
 
     # 7. no friend, no raw accessor
     for name, st in sorted(structs.items()):
