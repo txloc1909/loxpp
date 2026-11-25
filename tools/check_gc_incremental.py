@@ -25,7 +25,10 @@ Four parts:
      program shows.
 
   4. The programs of test/gc_incremental/latency/: a worker that waits many
-     times with a large live heap must keep MMU(10 ms) at 50% or more.
+     times with a large live heap must keep MMU(10 ms) at 50% or more, and a
+     long churn on a fixed live heap must keep the peak heap within 2.5 times
+     the live heap (the live heap is the largest bytes_after of a stw
+     collection of the same program).
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
 """
@@ -270,9 +273,10 @@ def check_exit_cycle(work):
     print("ok   hand trace with an exit cycle")
 
 
-# The goal of the latency probe (docs/decisions/garbage-collectors.md, goal 1):
-# MMU(10 ms) of a program that waits.
+# The goal of the latency probes (docs/decisions/garbage-collectors.md, goals 1
+# and 3): MMU(10 ms) of a program that waits, and the heap of a long churn.
 MIN_MMU_10MS = 0.5
+MAX_PEAK_OVER_LIVE = 2.5
 
 
 def trace_fields(path, kind):
@@ -305,6 +309,28 @@ def check_idle_latency(binary, work):
          "the steps of a cycle with no break")
 
 
+def check_peak(binary, work):
+    prog = os.path.join(PROBES, "latency", "churn_peak.lox")
+    ref = os.path.join(work, "churn_peak.stw.trace")
+    r = run(binary, prog, {"LOXPP_GC": "stw", "LOXPP_GC_TRACE": ref}, work)
+    if r.returncode != 0:
+        fail(f"churn_peak.lox with stw: exit {r.returncode}")
+    live = max(int(g["bytes_after"]) for g in trace_fields(ref, "gc")
+               if g["cause"] == "threshold")
+    trace = os.path.join(work, "churn_peak.inc.trace")
+    r = run(binary, prog, {"LOXPP_GC": "incremental", "LOXPP_GC_TRACE": trace},
+            work)
+    if r.returncode != 0:
+        fail(f"churn_peak.lox with incremental: exit {r.returncode}")
+    peak = max(int(c["bytes_peak"]) for c in trace_fields(trace, "cycle")
+               if c["cause"] != "exit")
+    if peak > MAX_PEAK_OVER_LIVE * live:
+        fail(f"churn_peak.lox: the heap peaked at {peak} bytes, "
+             f"{peak / live:.2f} times the live heap of {live} bytes "
+             f"(at most {MAX_PEAK_OVER_LIVE})")
+    print(f"ok   churn_peak.lox: peak {peak / live:.2f} times the live heap")
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -319,6 +345,7 @@ def main():
         check_trace(binary, work)
         check_exit_cycle(work)
         check_idle_latency(binary, work)
+        check_peak(binary, work)
     print("OK")
 
 

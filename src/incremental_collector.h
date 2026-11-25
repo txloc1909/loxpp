@@ -62,11 +62,14 @@ class IncrementalCollector final : public Collector {
     static constexpr std::size_t kChunkUnits = 64;
     // The share of the time that the collector may use while a cycle runs.
     static constexpr double kShare = 0.25;
-    // A cycle starts when the heap reaches this factor of the heap after the
-    // last cycle, and never below kMinHeap.
+    // The share when the heap is past the limit of the cycle. It is below
+    // one half, so that MMU(10 ms) stays above 50%.
+    static constexpr double kUrgentShare = 0.45;
+    // A cycle starts when the heap reaches this factor of the live heap that
+    // the last cycle found, and never below kMinHeap.
     static constexpr double kStartFactor = 1.5;
     // When the heap grows past this factor of its size at the start of the
-    // cycle, the program no longer waits between steps.
+    // cycle, the collector uses kUrgentShare of the time, not kShare.
     static constexpr double kEmergencyFactor = 1.5;
     static constexpr std::size_t kMinHeap = 1024 * 1024;
     // Bytes that the program allocates between two looks of the pacing.
@@ -165,6 +168,12 @@ class IncrementalCollector final : public Collector {
     // The pacing.
     std::uint64_t m_nextStepNs{0};
     std::size_t m_cycleStartBytes{0};
+    std::size_t m_emergencyAt{0};
+    // The live heap that the last cycle found, and the largest heap that the
+    // pacing saw in this cycle.
+    std::size_t m_liveBytes{0};
+    std::size_t m_cyclePeakBytes{0};
+    std::size_t m_cycleFreedBytes{0};
 
     // The cycle in progress.
     std::size_t m_cycleId{0};

@@ -594,8 +594,14 @@ default.
   rehashes between two parts is traced again from bucket 0.
 - **Pacing.** A step stops at 8192 units or 100 us. The program runs until
   the collector has 25% of the time since the cycle began. A cycle starts at
-  1.5 times the heap after the last cycle (at least 1 MiB). When the heap
-  reaches 1.5 times the heap of the cycle start, the gap drops to zero.
+  1.5 times the live heap that the last cycle found (at least 1 MiB), where
+  the live heap is the heap at the start of that cycle less the bytes that
+  its sweep freed. The heap after a cycle is not used: it holds the objects
+  that the program made during the cycle (they are black), and a pacing that
+  counted them as live let the peak grow to 2.4 to 3.5 times the live heap
+  on a long churn (review of #1298). When the heap passes 1.5 times its size
+  at the start of the cycle, the share rises to 45%. It stays under one
+  half, so that MMU(10 ms) stays above 50%.
 - **Finish pause.** It reads the held objects, the inbox targets and the drain
   batch again under their locks, traces what is left, runs the verifier,
   calls `adoptReachedForeign` before `releaseUnreachedForeign`, frees the

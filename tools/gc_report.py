@@ -28,11 +28,15 @@ comparable inside one file and meaningless across files or hosts.
        marked          objects found reachable (equals objs_after)
        freed           objects swept (objs_before - objs_after)
     cycle cause=<...> t0= t1= steps= bytes_before= bytes_after=
-          objs_before= objs_after= marked= freed=
+          objs_before= objs_after= marked= freed= [bytes_peak= bytes_live=]
                                  one record at the end of an incremental
                                  cycle. t0 is the start of the cycle and t1
                                  its end. It is a summary, not a pause: the
                                  pauses of the cycle are its step records.
+                                 bytes_peak is the largest bytesAllocated that
+                                 the pacing saw in the cycle. bytes_live is
+                                 the heap at the start less the bytes that the
+                                 cycle swept: what the cycle found live.
     step cycle=<n> kind=<start|mark|finish|sweep|end> t0=<ns> t1=<ns>
          units=<n>               one bounded step of a cycle, and one pause.
                                  units counts the work of the step: objects

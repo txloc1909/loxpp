@@ -317,7 +317,8 @@ The status of a row:
   `gc` records and `stall` records. The incremental collector writes `cycle`
   and `step` records instead of `gc` records (one `step` for each pause, of
   kind `start`, `mark`, `finish`, `sweep` or `end`, with the `units` of the
-  step, and one `cycle` at the end of the cycle). A cycle with cause `exit` is
+  step, and one `cycle` at the end of the cycle, with `bytes_peak` and
+  `bytes_live`). A cycle with cause `exit` is
   the collection that a worker runs as it ends: its steps are not pauses of
   the program, and `tools/gc_report.py` gives them their own line. The heap writes a `stall` record
   (`stall kind=<new|free> t0= t1=`) for each call into the C allocator (a new

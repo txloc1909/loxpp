@@ -1,0 +1,14 @@
+// A live heap that does not change, and a long churn of garbage. The heap of
+// the collector must stay near a fixed multiple of the live heap however long
+// the churn goes on: objects that the program makes during a cycle are black
+// and stay to the end of the cycle, and a pacing that counts them as live
+// lets the heap grow cycle after cycle.
+class Node { init(i) { this.i = i; } }
+var keep = [];
+var i = 0;
+while (i < 400000) { keep.append(Node(i)); i = i + 1; }
+var sum = 0;
+i = 0;
+while (i < 12000000) { var t = Node(i); sum = sum + t.i; i = i + 1; }
+print sum;
+print len(keep);

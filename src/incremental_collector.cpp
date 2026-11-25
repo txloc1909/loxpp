@@ -394,6 +394,7 @@ void IncrementalCollector::startCycle(const char* cause) {
     m_cycleObjsBefore = m_store.objectCount();
     m_cycleSteps = 0;
     m_cycleFreed = 0;
+    m_cycleFreedBytes = 0;
 #ifdef LOXPP_PROFILE
     m_cyclePauseNs = 0;
     m_cycleMaxStepNs = 0;
@@ -404,6 +405,9 @@ void IncrementalCollector::startCycle(const char* cause) {
     // The mark runs from now: an allocation is black and a store is a barrier.
     setPhase(Phase::Mark);
     m_cycleStartBytes = m_heap.bytesAllocated;
+    m_cyclePeakBytes = m_cycleStartBytes;
+    m_emergencyAt = static_cast<std::size_t>(
+        static_cast<double>(m_cycleStartBytes) * kEmergencyFactor);
     const std::uint64_t t1 = gcMonotonicNs();
     logStep("start", t0, t1, m_units - u0);
     m_nextStepNs =
@@ -426,6 +430,7 @@ bool IncrementalCollector::markStep(std::size_t units,
 void IncrementalCollector::freeUnmarkedHandles() {
     // The marks of this cycle are complete, so an unmarked handle object is
     // unreachable. Its destructor closes the handle of the operating system.
+    const std::size_t bytes0 = m_heap.bytesAllocated;
     SegStack<Obj*> keep(m_store);
     while (!m_handles.empty()) {
         Obj* obj = m_handles.pop();
@@ -438,6 +443,7 @@ void IncrementalCollector::freeUnmarkedHandles() {
         m_heap.release(obj, objAllocatedSize(obj));
     }
     m_handles.swap(keep);
+    m_cycleFreedBytes += bytes0 - m_heap.bytesAllocated;
 }
 
 void IncrementalCollector::finishMark() {
@@ -501,6 +507,7 @@ void IncrementalCollector::freeDeadObject(Obj* obj) {
 bool IncrementalCollector::sweepStep(std::size_t units,
                                      std::uint64_t deadlineNs) {
     const std::uint64_t t0 = gcMonotonicNs();
+    const std::size_t bytes0 = m_heap.bytesAllocated;
     std::size_t done = 0;
     while (m_sweepCursor != nullptr) {
         SizeClassHeap::Span* s = m_sweepCursor;
@@ -524,6 +531,7 @@ bool IncrementalCollector::sweepStep(std::size_t units,
             break;
         }
     }
+    m_cycleFreedBytes += bytes0 - m_heap.bytesAllocated;
     const bool over = m_sweepCursor == nullptr;
     logStep("sweep", t0, gcMonotonicNs(), done);
     if (over) {
@@ -535,10 +543,17 @@ bool IncrementalCollector::sweepStep(std::size_t units,
 void IncrementalCollector::endCycle() {
     const std::uint64_t t0 = gcMonotonicNs();
     setPhase(Phase::Idle);
+    // The objects that the program made during the cycle are black, so they
+    // are in the heap after the sweep, and most of them can be garbage. The
+    // next cycle starts from the heap that the cycle found live, not from the
+    // heap that it left.
+    m_liveBytes = m_cycleStartBytes > m_cycleFreedBytes
+                      ? m_cycleStartBytes - m_cycleFreedBytes
+                      : 0;
     m_poll.pollAt =
-        std::max(static_cast<std::size_t>(
-                     static_cast<double>(m_heap.bytesAllocated) * kStartFactor),
-                 kMinHeap);
+        std::max({static_cast<std::size_t>(static_cast<double>(m_liveBytes) *
+                                           kStartFactor),
+                  m_heap.bytesAllocated, kMinHeap});
     ++m_collectionCount;
     const std::uint64_t t1 = gcMonotonicNs();
     logStep("end", t0, t1, 0);
@@ -569,11 +584,13 @@ void IncrementalCollector::writeCycleRecord(std::uint64_t t1) {
         std::fprintf(m_trace,
                      "cycle cause=%s t0=%llu t1=%llu steps=%zu "
                      "bytes_before=%zu bytes_after=%zu objs_before=%zu "
-                     "objs_after=%zu marked=%zu freed=%zu\n",
+                     "objs_after=%zu marked=%zu freed=%zu "
+                     "bytes_peak=%zu bytes_live=%zu\n",
                      m_cycleCause, static_cast<unsigned long long>(m_cycleT0),
                      static_cast<unsigned long long>(t1), m_cycleSteps,
                      m_cycleBytesBefore, m_heap.bytesAllocated,
-                     m_cycleObjsBefore, objs, objs, m_cycleFreed);
+                     m_cycleObjsBefore, objs, objs, m_cycleFreed,
+                     m_cyclePeakBytes, m_liveBytes);
         // Flushed once for each cycle, so that a process that stops without
         // stdio cleanup still leaves every cycle so far.
         std::fflush(m_trace);
@@ -646,8 +663,7 @@ void IncrementalCollector::releaseAll() {
 // --- The pacing ------------------------------------------------------------
 
 bool IncrementalCollector::emergency() const {
-    return static_cast<double>(m_heap.bytesAllocated) >
-           static_cast<double>(m_cycleStartBytes) * kEmergencyFactor;
+    return m_heap.bytesAllocated > m_emergencyAt;
 }
 
 void IncrementalCollector::setNextPoll() {
@@ -668,9 +684,10 @@ void IncrementalCollector::runStep(std::uint64_t deadlineNs,
 }
 
 void IncrementalCollector::pace() {
+    m_cyclePeakBytes = std::max(m_cyclePeakBytes, m_heap.bytesAllocated);
     const std::uint64_t now = gcMonotonicNs();
     const bool urgent = emergency();
-    if (now < m_nextStepNs && !urgent) {
+    if (now < m_nextStepNs) {
         setNextPoll();
         return;
     }
@@ -680,9 +697,10 @@ void IncrementalCollector::pace() {
     }
     const std::uint64_t end = gcMonotonicNs();
     // The program runs until the collector's share of the time is back at the
-    // target. In an emergency it does not wait.
-    const double gap =
-        urgent ? 0.0 : static_cast<double>(end - now) * (1.0 - kShare) / kShare;
+    // target. In an emergency the target is larger, but it stays under one
+    // half, so that the program still gets the larger part of each window.
+    const double share = urgent ? kUrgentShare : kShare;
+    const double gap = static_cast<double>(end - now) * (1.0 - share) / share;
     m_nextStepNs = end + static_cast<std::uint64_t>(gap);
     setNextPoll();
 }
