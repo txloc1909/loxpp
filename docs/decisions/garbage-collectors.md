@@ -479,8 +479,12 @@ exists, needs a new decision and does not block this choice.
 
 **Decided on 2026-11-26 (#1285): the default is `incremental`.** All four
 criteria held on `main` at 7b50fc53, with the size-class heap of phase 8.
-The owner said that the choice can follow from the data of the earlier
-nodes, after N5, N6 and N8 merged, and the choice follows the criteria. The
+The choice follows the criteria of this section. It also follows an
+instruction of the owner in the agent session of 2026-11-26, which the
+mission orchestrator relayed to the implementer: the choice can follow from
+the data of the earlier nodes, after N5, N6 and N8 merged. That instruction
+is not in a GitHub comment by the owner; the owner's approval of the pull
+request that sets this default is the owner's record of the choice. The
 evidence, with each run and each command, is in the [comment on
 #1285](https://github.com/txloc1909/loxpp/issues/1285#issuecomment-7193262258):
 
