@@ -659,9 +659,12 @@ printed.
   - two bytes other than CRLF after a bulk string (Redis 7.0 does not check
     them);
   - an array header above 1048576 (Redis waits for the arguments).
-- A client that sends more than 64 commands during one `BLPOP` or
-  `XREAD BLOCK` is closed.
+- A client is closed when it has about 128 commands in all queued during
+  one `BLPOP` or `XREAD BLOCK`. The count includes the commands that the
+  reader read before the wait started. A client library that pipelines more
+  than about 120 commands behind a wait loses its reply stream.
   Redis keeps them in its query buffer, up to `client-query-buffer-limit`.
+  Issue #1318 tracks a change that stops reading at the bound.
 - A malformed request during `BLPOP` or `XREAD BLOCK` closes the client at
   once, with no reply, and the `BLPOP` takes no element. Redis keeps the client blocked,
   serves it, then sends the error and closes it.
@@ -711,9 +714,11 @@ ruling on PR #1204. Every stage group keeps them.
    reader may send `HOLD` (64) commands past its credit, and the mailbox
    holds at most 128 messages. The bound is small because 1000 clients that
    reset during a wait hold their queues at the same time, and the heap of
-   the server must stay under the 64 MB of rule 2 of the probe. The session sets `conn.blocked` and sends
-   `Msg.Blocked`, which wakes a reader that already waits for credit. A
-   client that sends more than `HOLD` commands during one wait is closed.
+   the server must stay under the 64 MB limit of probe P2 (see the table
+   below).
+   The session sets `conn.blocked` and sends `Msg.Blocked`, which wakes a
+   reader that already waits for credit. A client with more than 128
+   commands in all queued during one wait is closed.
 5. **A command is atomic, and its work is linear** (atomic: no suspend point
    between the start of its keyspace work and its reply), as in the Redis
    documentation of the command. `upper` gives a word longer than any
@@ -748,6 +753,7 @@ ruling on PR #1204. Every stage group keeps them.
 | P8: the first `LPUSH` on a list of 4194292 elements that `RPUSH` built | PING within 0.1 s (when the push copies the list: 0.32 s) | 0.001 s |
 | P9: `BLPOP` on 1048574 keys, the most that one command can name | PING within 1.0 s while it joins the queue of each key in one step (before the change: 1.51 s; redis-server 7.0: 0.62 s) | 0.55–0.63 s |
 | P9: an `RPUSH` serves it, and it leaves the other 1048573 queues | PING within 0.2 s (without the yield of `leaveQueues`: 0.48 s) | 0.002 s |
+| Group `fairness`: 1000 clients send `BLPOP` (or `XREAD BLOCK`) and 900 `PING`, then reset | server RSS at most 64 MB (with a bound of 1024 messages: 201–211 MB) | 49–52 MB |
 | Group `lists`: 150 waiters that reset the connection just before a push | each element stays in its list | as required (before the change: 249–283 of 300 lost) |
 | Group `lists`: the same, with a second waiter behind each one | each element goes to the second waiter | as required |
 | P10 (group `lists`): `LPOP k 4194291` of a list of 8388584 elements that `LPUSH` built | PING within 0.14 s (when the pop removes the elements one by one: 0.19–0.23 s) | 0.07–0.08 s |
