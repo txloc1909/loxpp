@@ -1296,8 +1296,8 @@ jobs:
         run: python3 tests/mutate.py --check redis.lox tests/mutations/*.json
 
       # A change of the challenge runs the shards with `incremental`, the
-      # default collector. A change of the heap runs them with `stw` too
-      # (decision, section 7).
+      # default collector. A change of the heap runs them with each collector,
+      # `incremental` and `stw` (decision, section 7).
       - id: plan
         name: Print the shard matrix
         env:
@@ -1306,7 +1306,7 @@ jobs:
         run: |
           collectors=
           if [ "$CODECRAFTERS" = true ]; then collectors=incremental; fi
-          if [ "$GC" = true ]; then collectors="${collectors:+$collectors,}stw"; fi
+          if [ "$GC" = true ]; then collectors=incremental,stw; fi
           echo "matrix=$(python3 examples/codecrafters/build-your-own-redis/tests/shards.py --matrix --collectors "$collectors")" >> "$GITHUB_OUTPUT"
 
   redis-stage-shards:
