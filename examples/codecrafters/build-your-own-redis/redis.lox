@@ -2636,6 +2636,33 @@ fun loadRdb(path) {
     loadRdbData(data, store, false, false);
 }
 
+// The greatest RDB version that redis-server loads: 11, the version of
+// Redis 7.2, which the Codecrafters tester writes.
+var RDB_VERSION_MAX = 11;
+
+// The number that atoi gives for the 4 bytes of the version: leading white
+// space, an optional sign, then digits up to the first other byte; 0 when
+// there is no digit.
+fun rdbVersion(text) {
+    var i = 0;
+    while (i < len(text) and (ord(text[i]) == 32 or (ord(text[i]) >= 9 and ord(text[i]) <= 13))) {
+        i = i + 1;
+    }
+    var sign = 1;
+    if (i < len(text) and (text[i] == "-" or text[i] == "+")) {
+        if (text[i] == "-") {
+            sign = -1;
+        }
+        i = i + 1;
+    }
+    var v = 0;
+    while (i < len(text) and ord(text[i]) >= 48 and ord(text[i]) <= 57) {
+        v = v * 10 + (ord(text[i]) - 48);
+        i = i + 1;
+    }
+    return sign * v;
+}
+
 // Loads the string keys of database 0 from the bytes of an RDB file into the
 // Map target: the file at start, or the file that a master sends with
 // FULLRESYNC, or the base of an AOF. A replica, and an AOF base, keep an
@@ -2649,9 +2676,9 @@ fun loadRdbData(data, target, forReplica, keepExpired) {
     if (r.take(5) != "REDIS") {
         throw RdbError("the file does not start with REDIS");
     }
-    var version = r.take(4);
-    if (!isDigits(version) or version == "0000") {
-        throw RdbError("the version of the file is not a number from 1");
+    var version = rdbVersion(r.take(4));
+    if (version < 1 or version > RDB_VERSION_MAX) {
+        throw RdbError("the version of the file is not a number from 1 to " + str(RDB_VERSION_MAX));
     }
     var db = 0;
     var expiresAt = nil;
@@ -2677,12 +2704,21 @@ fun loadRdbData(data, target, forReplica, keepExpired) {
             expiresAt = expiresAt * 1000;
         } else if (op == 252) {
             // Redis reads the 8 bytes as a signed number; a negative time
-            // has passed. The sign is the top bit of the last byte: the sum
-            // in a Number rounds near 2^63, so it cannot show the sign.
+            // has passed, except -1, which is no expiry. The sign is the top
+            // bit of the last byte: the sum in a Number rounds near 2^63, so
+            // it cannot show the sign or the -1.
             r.need(8);
             var top = ord(r.data[r.pos + 7]);
+            var allOnes = true;
+            for (var c in r.data[r.pos:r.pos + 8]) {
+                if (ord(c) != 255) {
+                    allOnes = false;
+                }
+            }
             expiresAt = r.le(8);
-            if (top >= 128) {
+            if (allOnes) {
+                expiresAt = nil;
+            } else if (top >= 128) {
                 expiresAt = 0;
             }
         } else if (op == 248) {

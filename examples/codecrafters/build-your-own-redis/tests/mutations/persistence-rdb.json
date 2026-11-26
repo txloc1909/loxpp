@@ -209,16 +209,16 @@
  },
  {
   "name": "no version check",
-  "old": "    if (!isDigits(version) or version == \"0000\") {",
-  "new": "    if (version == \"\") {",
+  "old": "    if (version < 1 or version > RDB_VERSION_MAX) {",
+  "new": "    if (false) {",
   "cases": [
    "local: a version that is not a number stops the start"
   ]
  },
  {
   "name": "a negative expiry is far away",
-  "old": "            if (top >= 128) {\n                expiresAt = 0;\n            }",
-  "new": "",
+  "old": "            } else if (top >= 128) {\n                expiresAt = 0;\n            }",
+  "new": "            }",
   "cases": [
    "local: a negative expiry in ms has passed"
   ]
@@ -321,16 +321,16 @@
  },
  {
   "name": "FC sign from the rounded sum",
-  "old": "            if (top >= 128) {",
-  "new": "            if (expiresAt >= 9223372036854775808) {",
+  "old": "            } else if (top >= 128) {",
+  "new": "            } else if (expiresAt >= 9223372036854775808) {",
   "cases": [
    "local: the greatest expiry in ms has not passed"
   ]
  },
  {
   "name": "version 0 accepted",
-  "old": "    if (!isDigits(version) or version == \"0000\") {",
-  "new": "    if (!isDigits(version)) {",
+  "old": "    if (version < 1 or version > RDB_VERSION_MAX) {",
+  "new": "    if (version > RDB_VERSION_MAX) {",
   "cases": [
    "local: version 0 stops the start"
   ]
@@ -349,6 +349,70 @@
   "new": "            // The idle time of the next key, for an LRU policy.\n            r.byte();",
   "cases": [
    "local: an RDB file with an LRU idle time of 14 bits loads"
+  ]
+ },
+ {
+  "name": "FD bound at 4294967295",
+  "old": "            if (expiresAt >= 2147483648) {",
+  "new": "            if (expiresAt >= 4294967295) {",
+  "cases": [
+   "local: an expiry in seconds of 2^31 has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 is a negative time",
+  "old": "            if (allOnes) {\n                expiresAt = nil;\n            } else if (top >= 128) {",
+  "new": "            if (top >= 128) {",
+  "cases": [
+   "local: an expiry in ms of -1 is no expiry"
+  ]
+ },
+ {
+  "name": "FC of any negative time is no expiry",
+  "old": "            if (allOnes) {",
+  "new": "            if (top >= 128) {",
+  "cases": [
+   "local: a negative expiry in ms has passed"
+  ]
+ },
+ {
+  "name": "version above 11 accepted",
+  "old": "    if (version < 1 or version > RDB_VERSION_MAX) {",
+  "new": "    if (version < 1 or version > 9999) {",
+  "cases": [
+   "local: version 12 stops the start"
+  ]
+ },
+ {
+  "name": "version sign ignored",
+  "old": "        if (text[i] == \"-\") {\n            sign = -1;\n        }\n",
+  "new": "",
+  "cases": [
+   "local: a negative version stops the start"
+  ]
+ },
+ {
+  "name": "version plus sign refused",
+  "old": "    if (i < len(text) and (text[i] == \"-\" or text[i] == \"+\")) {",
+  "new": "    if (i < len(text) and text[i] == \"-\") {",
+  "cases": [
+   "local: a version with a plus sign loads"
+  ]
+ },
+ {
+  "name": "version white space refused",
+  "old": "    while (i < len(text) and (ord(text[i]) == 32 or (ord(text[i]) >= 9 and ord(text[i]) <= 13))) {\n        i = i + 1;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: a version with leading spaces loads"
+  ]
+ },
+ {
+  "name": "version stops at no digit",
+  "old": "        v = v * 10 + (ord(text[i]) - 48);\n        i = i + 1;\n    }\n    return sign * v;",
+  "new": "        v = v * 10 + (ord(text[i]) - 48);\n        i = i + 1;\n    }\n    if (i < len(text)) {\n        return 0;\n    }\n    return sign * v;",
+  "cases": [
+   "local: a version with letters after the digits loads"
   ]
  }
 ]
