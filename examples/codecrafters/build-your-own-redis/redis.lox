@@ -1643,12 +1643,23 @@ fun cmdXrange(ctx, argv) {
 }
 
 // What one XREAD BLOCK waits for: for each key (for a key named twice, the
-// last one), the ID after which it reads, or for "$" the Stream that the key
-// held, and the most entries for each stream (0 for no limit).
+// last one), the ID after which it reads, or for "$" a DollarAt, and the most
+// entries for each stream (0 for no limit).
 class StreamRead {
     init(count) {
         this.after = {};
         this.count = count;
+    }
+}
+
+// What "$" names: the Stream that the key held at the wait, and its top ID
+// at that time (ms, seq). The Stream can grow after the wait, in an EXEC that
+// then replaces the key, so its own top is not the top at the wait.
+class DollarAt {
+    init(held, ms, seq) {
+        this.held = held;
+        this.ms = ms;
+        this.seq = seq;
     }
 }
 
@@ -1776,14 +1787,13 @@ fun cmdXread(ctx, argv) {
         }
         var id = args.ids[j];
         if (id == "$") {
-            // No entry is above the top, so only a wait needs it. A wait
-            // stores the Stream itself, with no new object; see
+            // No entry is above the top, so only a wait needs it; see
             // wakeReaders.
             if (blocking) {
                 if (stream == nil) {
                     read.after[key] = ZERO_ID;
                 } else {
-                    read.after[key] = stream;
+                    read.after[key] = DollarAt(stream, stream.ms[stream.size() - 1], stream.seq[stream.size() - 1]);
                 }
             }
         } else {
@@ -1841,12 +1851,9 @@ fun wakeReaders(key, stream, firstNew) {
             // above the top that "$" named are the new ones, from firstNew.
             var from = firstNew;
             var waits = false;
-            if (after != stream) {
-                if (hasField(after, "fields")) {
-                    // "$" on a Stream that the key no longer holds: nothing
-                    // appends to it now, so its top is the top at the wait.
-                    after = StreamId(after.topMs(), after.topSeq());
-                }
+            if (!hasField(after, "held") or after.held != stream) {
+                // "$" on a Stream that the key no longer holds compares with
+                // the top at the wait.
                 waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);
                 if (!waits) {
                     from = stream.find(after.ms, after.seq, false);
