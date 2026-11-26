@@ -7,7 +7,10 @@ Usage: diff_gc_collectors.py <loxpp-binary> <examples-dir> [--stress]
 
 Runs each example that tools/check_examples.py runs (a file with a CHECK
 directive, not excluded, with its .input file as stdin) with LOXPP_GC=stw and
-with LOXPP_GC=incremental. The stdout and the exit status must be equal. Every
+with LOXPP_GC=incremental. The stdout, the stderr and the exit status must be
+equal. Only the examples are compared: the translation probes have expected
+output that the native checks already hold under each collector, and the QBE
+step compares them with the native VM. Every
 program gives the same output with each collector (decision, goal 4), so a
 difference is a defect of one collector. --stress adds LOXPP_STRESS_GC=1 to
 the incremental run.
@@ -39,11 +42,11 @@ def run(runner, prog, extra, timeout):
     stdin = open(inp, "rb") if inp.exists() else subprocess.DEVNULL
     try:
         r = subprocess.run([runner, str(prog)], env=env, stdin=stdin,
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            timeout=timeout)
-        return r.returncode, r.stdout
+        return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
-        return "timeout", b""
+        return "timeout", b"", b""
     except OSError as exc:
         refuse_unrunnable(runner, exc)
     finally:
@@ -77,7 +80,8 @@ def compare(binary, examples, excluded, stress, timeout, incremental_runner=None
         elif want != got:
             bad.append(f"{f.name}: stw exit {want[0]}, incremental exit "
                        f"{got[0]}; stdout "
-                       f"{'differs' if want[1] != got[1] else 'is equal'}")
+                       f"{'differs' if want[1] != got[1] else 'is equal'}, "
+                       f"stderr {'differs' if want[2] != got[2] else 'is equal'}")
     print(f"{len(eligible)} examples have a CHECK directive; compared "
           f"{len(compared)}, excluded {len(skipped)}")
     if len(compared) + len(skipped) != len(eligible) or not compared:
@@ -103,7 +107,11 @@ def self_test(binary):
         other.write_text(
             f'#!/bin/sh\n"{binary}" "$@"; s=$?\n'
             'if [ "$LOXPP_GC" = incremental ]; then echo extra; fi\nexit $s\n')
-        for p in (same, other):
+        noisy = d / "noisy.sh"
+        noisy.write_text(
+            f'#!/bin/sh\n"{binary}" "$@"; s=$?\n'
+            'if [ "$LOXPP_GC" = incremental ]; then echo fault >&2; fi\nexit $s\n')
+        for p in (same, other, noisy):
             p.chmod(0o755)
         ex = d / "ex"
         if compare(str(same), ex, {}, False, 60):
@@ -111,6 +119,9 @@ def self_test(binary):
             sys.exit(1)
         if not compare(str(same), ex, {}, False, 60, str(other)):
             print("FAIL: a changed output did not fail the comparison")
+            sys.exit(1)
+        if not compare(str(same), ex, {}, False, 60, str(noisy)):
+            print("FAIL: a difference on stderr did not fail the comparison")
             sys.exit(1)
         bad = compare(str(same), ex, {"a.lox", "b.lox"}, False, 60)
         if not bad:
