@@ -1087,14 +1087,29 @@ jobs:
       # (GcCollectorChoice, GcStwCounts) sets LOXPP_GC itself.
       - name: Test with the incremental collector
         if: matrix.preset == 'debug' && needs.changes.outputs.gate-gc == 'true' && needs.changes.outputs.gate-native-unit == 'true' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
+        env:
+          CTEST_ALL: ${{ needs.changes.outputs.ctest-all }}
+          CTEST_REGEX: ${{ needs.changes.outputs.ctest-regex }}
+          CTEST_NAMES: ${{ needs.changes.outputs.ctest-names }}
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             -e LOXPP_GC=incremental \
+            -e CTEST_ALL \
+            -e CTEST_REGEX \
+            -e CTEST_NAMES \
             loxpp-dev:latest \
-            bash -c "python3 tools/check_gc_collector_runs.py build-examples/loxpp incremental &&
-              ctest --test-dir build --output-on-failure -j\$(nproc)"
+            bash -c 'python3 tools/check_gc_collector_runs.py build-examples/loxpp incremental || exit 1
+              status=0
+              run() { ctest --test-dir build --output-on-failure -j$(nproc) "$@" || status=1; }
+              if [ "$CTEST_ALL" = true ]; then
+                run
+              else
+                if [ -n "$CTEST_REGEX" ]; then run -L "$CTEST_REGEX"; fi
+                if [ -n "$CTEST_NAMES" ]; then run -R "$CTEST_NAMES"; fi
+              fi
+              exit $status'
 
       # The release leg runs the corpus with `incremental`, and compares the
       # output of each example with `stw` and with `incremental`. The check

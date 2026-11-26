@@ -280,6 +280,27 @@ def check_ctest_steps(class_map, yml, labels):
     return errors
 
 
+def check_ctest_selection(yml):
+    """A step that runs ctest in the build directory must follow the selection
+    of the change. A full `ctest` on a partial build runs about a hundred
+    placeholder tests that cannot run, and ends with status 8."""
+    errors = []
+    for job, text in job_texts(yml).items():
+        _, steps = job_steps(text)
+        for step in steps:
+            body = without_comments(step)
+            if "ctest --test-dir build" not in body:
+                continue
+            name = re.search(r"(?m)^      - (?:name|uses): (.*)$", step).group(1)
+            selected = "-R " in body or "-L " in body or "-R\\" in body
+            if "CTEST_ALL" not in body and not selected:
+                errors.append(
+                    f"ci.yml: the step {name!r} of the job {job} runs the whole ctest "
+                    "and does not follow CTEST_ALL, CTEST_REGEX and CTEST_NAMES"
+                )
+    return errors
+
+
 def check_job_gates(class_map, yml):
     """The gates that the `if:` of a job tests are the gates of its job line, a
     step tests only gates that its job allows, and the `changes` job publishes
@@ -548,6 +569,7 @@ def check(class_map, files, yml, cmake, labels):
             errors.append(f"{file} matches no path line")
     errors += check_job_references(class_map, files, yml)
     errors += check_job_gates(class_map, yml)
+    errors += check_ctest_selection(yml)
     errors += check_ctest_steps(class_map, yml, labels)
     errors += check_build_steps(class_map, yml)
     errors += check_test_references(class_map, files, cmake, labels)
