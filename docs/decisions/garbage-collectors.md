@@ -1,8 +1,6 @@
 # More than one garbage collector in the native runtime
 
-**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165). Mission: #1277.
-
-**Mission:** #1277 (closed 2026-11-26). Tracking issue: #1277.
+**Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165). Mission: #1277, which closes when #1308 merges.
 
 Related: #1165 (the pause grows with the live heap), #1134 (the cost of a
 large String). Facts about the current heap: `docs/reference/gc-runtime-contract.md`.
@@ -712,7 +710,7 @@ later work:
 
 ## 15. Shipped
 
-The mission #1277 is closed on 2026-11-26. The default collector is
+The mission #1277 closes when #1308 merges. The default collector is
 `incremental`. `stw` stays in the binary, and `LOXPP_GC=stw` chooses it. The
 mission changed no language rule and no spec text. This section changes no
 accepted text above it.
