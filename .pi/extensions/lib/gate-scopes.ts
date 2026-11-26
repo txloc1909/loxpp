@@ -131,6 +131,13 @@ export const QBE_GATE_STEPS: readonly { name: string; script: string }[] = [
     script: `python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/`,
   },
   {
+    name: "QBE with the incremental collector",
+    script: `export LOXPP_GC=incremental
+python3 tools/check_gc_collector_runs.py tools/loxpp_qbe.sh incremental
+python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/
+tools/check_qbe_s8_promotion.sh`,
+  },
+  {
     name: "--target qbe front end - standalone binary",
     // Compile to a standalone executable, DELETE the source, and run the
     // executable without it. Deleting the source is the point: an
