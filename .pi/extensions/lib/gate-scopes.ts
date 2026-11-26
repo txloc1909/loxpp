@@ -128,12 +128,15 @@ export const QBE_GATE_STEPS: readonly { name: string; script: string }[] = [
   },
   {
     name: "QBE differential suite - full example corpus",
-    script: `python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/`,
+    // LOXPP_GC unset: the QBE runner must run the default collector.
+    script: `unset LOXPP_GC
+python3 tools/check_gc_collector_runs.py tools/loxpp_qbe.sh incremental
+python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/`,
   },
   {
-    name: "QBE with the incremental collector",
-    script: `export LOXPP_GC=incremental
-python3 tools/check_gc_collector_runs.py tools/loxpp_qbe.sh incremental
+    name: "QBE with the stw collector",
+    script: `export LOXPP_GC=stw
+python3 tools/check_gc_collector_runs.py tools/loxpp_qbe.sh stw
 python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/
 tools/check_qbe_s8_promotion.sh`,
   },
