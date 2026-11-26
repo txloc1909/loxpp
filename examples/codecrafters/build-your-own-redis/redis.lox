@@ -1518,6 +1518,14 @@ fun cmdXadd(ctx, argv) {
     if (len(argv) < 5 or len(argv) % 2 == 0) {
         return parsed;
     }
+    // Redis checks the ID before the key kind; only the "not above the top"
+    // error needs the stream, so it comes after.
+    if (type(parsed) == "String" and parsed != "*") {
+        return parsed;
+    }
+    if (parsed != "*" and parsed.ms == 0 and parsed.seq == 0) {
+        return ID_ZERO;
+    }
     var key = argv[1];
     var stream = streamEntry(key);
     if (stream == false) {
@@ -1528,9 +1536,6 @@ fun cmdXadd(ctx, argv) {
     if (stream != nil and len(stream.ms) > 0) {
         topMs = stream.ms[len(stream.ms) - 1];
         topSeq = stream.seq[len(stream.seq) - 1];
-    }
-    if (type(parsed) == "String" and parsed != "*") {
-        return parsed;
     }
     var id = nextParsedId(parsed, topMs, topSeq);
     if (type(id) == "String") {

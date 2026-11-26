@@ -268,6 +268,12 @@ SCRIPTS = {
             ["LLEN", "st"], ["TYPE", "str"], ["TYPE", "nope"], ["type", "st"],
             ["TYPE"], ["TYPE", "a", "b"],
         ]),
+        ("xadd-id-before-type", [
+            ["SET", "s", "x"], ["XADD", "s", "bad", "f", "v"],
+            ["XADD", "s", "0-0", "f", "v"], ["XADD", "s", "1-1", "f", "v"],
+            ["XADD", "s", "0-*", "f", "v"], ["XADD", "s", "*", "f", "v"],
+            ["TYPE", "s"],
+        ]),
     ],
     "lists": [
         ("push-and-range", [
