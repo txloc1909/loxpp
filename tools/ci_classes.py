@@ -289,9 +289,9 @@ def native_legs(gates):
     """The presets of the native job that have work: debug for the unit tests
     and the checks under sanitizers, release for the build and the checks."""
     legs = []
-    if gates & {"native-unit", "native-checks", "probes"}:
+    if gates & {"native-unit", "native-checks", "probes", "gc"}:
         legs.append("debug")
-    if gates & {"native-build", "native-checks", "probes"}:
+    if gates & {"native-build", "native-checks", "probes", "gc"}:
         legs.append("release")
     return legs
 

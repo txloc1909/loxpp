@@ -24,6 +24,7 @@ jobs:
       gate-probes: ${{ steps.select.outputs.gate-probes }}
       gate-jvm: ${{ steps.select.outputs.gate-jvm }}
       gate-qbe: ${{ steps.select.outputs.gate-qbe }}
+      gate-gc: ${{ steps.select.outputs.gate-gc }}
       gate-cross: ${{ steps.select.outputs.gate-cross }}
       gate-codecrafters: ${{ steps.select.outputs.gate-codecrafters }}
       gate-tree-sitter: ${{ steps.select.outputs.gate-tree-sitter }}
@@ -1058,6 +1059,66 @@ jobs:
             loxpp-dev:latest \
             bash -c "ctest --test-dir build -R GcMinHeap --output-on-failure --no-tests=error"
 
+      # Goal 4 of docs/decisions/garbage-collectors.md: each collector runs each
+      # suite. The binary is the same, and LOXPP_GC chooses the collector when a
+      # heap starts. Each of the next steps first runs
+      # tools/check_gc_collector_runs.py, which reads the GC trace of a probe
+      # and prints the collector that ran. It fails when LOXPP_GC does not
+      # select the expected collector, so no step runs `stw` twice and calls
+      # it `incremental`.
+      #
+      # The debug leg runs the example corpus with `incremental` under GC stress
+      # (a step at each allocation), on the build with ASan and the verifier.
+      - name: Run example checks with the incremental collector, under stress GC
+        if: matrix.preset == 'debug' && needs.changes.outputs.gate-gc == 'true' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            -e LOXPP_STRESS_GC=1 \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_gc_collector_runs.py build-examples/loxpp incremental &&
+              python3 tools/check_examples.py build-examples/loxpp examples/"
+
+      # The whole ctest again, with `incremental`. The debug leg builds with
+      # ASan and the verifier, which runs at the end of each mark. The *_gc
+      # tests stay under stress GC. A test that pins its own collector
+      # (GcCollectorChoice, GcStwCounts) sets LOXPP_GC itself.
+      - name: Test with the incremental collector
+        if: matrix.preset == 'debug' && needs.changes.outputs.gate-gc == 'true' && needs.changes.outputs.gate-native-unit == 'true' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_gc_collector_runs.py build-examples/loxpp incremental &&
+              ctest --test-dir build --output-on-failure -j\$(nproc)"
+
+      # The release leg runs the corpus with `incremental`, and compares the
+      # output of each example with `stw` and with `incremental`. The check
+      # counts the programs that it compares, and prints the count.
+      - name: Run example checks with the incremental collector
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-gc == 'true' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_gc_collector_runs.py build/loxpp incremental &&
+              python3 tools/check_examples.py build/loxpp examples/"
+
+      - name: Compare the output of the collectors on the examples
+        if: matrix.preset == 'release' && needs.changes.outputs.gate-gc == 'true' && (needs.changes.outputs.gate-native-checks == 'true' || needs.changes.outputs.gate-probes == 'true')
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            loxpp-dev:latest \
+            python3 tools/diff_gc_collectors.py build/loxpp examples/
+
       # The suite expects `-0` for negative zero; Lox++ prints `0` by decision
       # (docs/decisions/number-print-format.md). The sed adjusts that one line.
       - name: Run Lox interpreter test suite (craftinginterpreters)
@@ -1202,7 +1263,7 @@ jobs:
   redis-shard-plan:
     name: Redis stage shards (plan)
     needs: changes
-    if: needs.changes.outputs.gate-codecrafters == 'true'
+    if: needs.changes.outputs.gate-codecrafters == 'true' || needs.changes.outputs.gate-gc == 'true'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -1217,14 +1278,23 @@ jobs:
         working-directory: examples/codecrafters/build-your-own-redis
         run: python3 tests/mutate.py --check redis.lox tests/mutations/*.json
 
+      # A change of the challenge runs the shards with `stw`. A change of the
+      # heap runs them with `incremental` too (decision, section 7).
       - id: plan
         name: Print the shard matrix
-        run: echo "matrix=$(python3 examples/codecrafters/build-your-own-redis/tests/shards.py --matrix)" >> "$GITHUB_OUTPUT"
+        env:
+          CODECRAFTERS: ${{ needs.changes.outputs.gate-codecrafters }}
+          GC: ${{ needs.changes.outputs.gate-gc }}
+        run: |
+          collectors=
+          if [ "$CODECRAFTERS" = true ]; then collectors=stw; fi
+          if [ "$GC" = true ]; then collectors="${collectors:+$collectors,}incremental"; fi
+          echo "matrix=$(python3 examples/codecrafters/build-your-own-redis/tests/shards.py --matrix --collectors "$collectors")" >> "$GITHUB_OUTPUT"
 
   redis-stage-shards:
     name: Redis stage suite (${{ matrix.name }})
     needs: [changes, redis-shard-plan]
-    if: needs.changes.outputs.gate-codecrafters == 'true'
+    if: needs.changes.outputs.gate-codecrafters == 'true' || needs.changes.outputs.gate-gc == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1265,6 +1335,16 @@ jobs:
             loxpp-dev:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp"
 
+      # The log names the collector that runs the shard.
+      - name: Check the collector of the shard
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e "LOXPP_GC=${{ matrix.gc }}" \
+            loxpp-dev:latest \
+            python3 tools/check_gc_collector_runs.py build/loxpp ${{ matrix.gc }}
+
       # -u: the log shows each check when it runs, not in bursts at the end.
       - name: Build your own Redis - transcribed stage suite
         run: |
@@ -1272,8 +1352,78 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             -e "REDIS_STAGE_GROUPS=${{ matrix.groups }}" \
+            -e "LOXPP_GC=${{ matrix.gc }}" \
             loxpp-dev:latest \
             python3 -u examples/codecrafters/build-your-own-redis/tests/run_stages.py
+
+  # Goal 1 of docs/decisions/garbage-collectors.md for `incremental`, on a
+  # release build: the programs of benchmarks/gc_large_heap/ and the Redis
+  # example with the load of #1165 (524286 streams). The gate reads the GC
+  # trace. It checks a count first: the largest number of work units in one
+  # step, which does not depend on the host. Then it checks the 99.99th
+  # percentile of the steps and MMU(10 ms) on the best of three runs, because
+  # a shared host stalls a process now and then. The allocator stall is
+  # printed on its own and is not part of the goal. tools/check_gc_pause.py
+  # says the limits.
+  gc-pause:
+    name: GC pause gate (incremental)
+    needs: changes
+    if: needs.changes.outputs.gate-gc == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          target: dev
+          tags: loxpp-dev:latest
+          cache-from: type=gha,scope=dev
+          cache-to: type=gha,mode=max,scope=dev
+
+      # Restore only: the build-and-test job saves the release entry.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-gc-pause-${{ github.sha }}
+          restore-keys: |
+            ccache-release-
+
+      - name: Build loxpp
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e CCACHE_DIR=/workspace/.ccache \
+            -e CCACHE_MAXSIZE=400M \
+            -e CCACHE_COMPRESS=1 \
+            loxpp-dev:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp"
+
+      - name: Gate the pause on the large-heap programs
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            loxpp-dev:latest \
+            bash -c "python3 tools/check_gc_collector_runs.py build/loxpp incremental &&
+              python3 tools/check_gc_pause.py build/loxpp"
+
+      - name: Gate the pause on the Redis load of #1165
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            loxpp-dev:latest \
+            python3 -u examples/codecrafters/build-your-own-redis/tests/gc_load.py
 
   managed-toolchains:
     name: Managed toolchains (JVM)
@@ -1937,6 +2087,27 @@ jobs:
             -w /workspace \
             loxpp-dev-qbe:latest \
             bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) && python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/"
+
+      # Goal 4 of docs/decisions/garbage-collectors.md on the QBE backend. The
+      # compiled program links the same heap, so LOXPP_GC chooses its collector.
+      # A change of the QBE backend runs it too. The first command proves that the
+      # QBE runner runs `incremental`. Then
+      # the example corpus and the probe corpus under stress GC run with
+      # `incremental`, and the native run of each is the oracle. The same
+      # variable is in the environment of both runners, so the oracle is the
+      # native VM with `incremental`; tools/diff_gc_collectors.py in the
+      # build-and-test job compares that with `stw`.
+      - name: QBE with the incremental collector
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e LOXPP_GC=incremental \
+            loxpp-dev-qbe:latest \
+            bash -c "cmake --preset release && cmake --build build --target loxpp qbe_emit_program loxrt -j\$(nproc) &&
+              python3 tools/check_gc_collector_runs.py tools/loxpp_qbe.sh incremental &&
+              python3 tools/diff_runtimes.py build/loxpp tools/loxpp_qbe.sh examples/ &&
+              tools/check_qbe_s8_promotion.sh"
 
       # The --target qbe front end (#503): compile to a standalone executable,
       # DELETE the source, and run the executable without it. Deleting the

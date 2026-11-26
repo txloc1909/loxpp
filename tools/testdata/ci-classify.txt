@@ -154,13 +154,33 @@ labels bench
 legs debug
 targets test_richards_benchmark
 
-case a large-heap program runs the tests that scale it down and compare it
+case a large-heap program runs the suites with each collector and the pause gate
 files benchmarks/gc_large_heap/live_then_churn.lox benchmarks/gc_large_heap/stw_counts.txt
-gates placement,native-unit
-labels -
-names GcLargeHeap GcStwCounts
-legs debug
-targets loxpp
+gates placement,native-build,native-unit,native-checks,qbe,codecrafters,gc
+labels all
+legs debug,release
+targets all
+
+case a change of the heap runs the suites with each collector
+files src/incremental_collector.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
+labels all
+legs debug,release
+targets all
+
+case the Redis load of the pause gate runs the Redis shards and the gate
+files examples/codecrafters/build-your-own-redis/tests/gc_load.py
+gates placement,native-build,native-unit,native-checks,qbe,codecrafters,gc
+labels all
+legs debug,release
+targets all
+
+case a change of the compiler does not run the suites with each collector
+files src/compiler.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
+labels all
+legs debug,release
+targets all
 
 case the barrier table in the contract runs the test that checks it
 files docs/reference/gc-runtime-contract.md
@@ -315,7 +335,7 @@ names RunnerPrecondition
 
 case the runner module that the smoke test imports runs the harness and the language server job
 files tools/runner_precondition.py
-gates placement,tables,native-unit,probes,lsp,release-static
+gates placement,tables,native-unit,probes,lsp,release-static,gc
 labels bootstrap,corpus,harness
 names GcTrace GcTraceV3 GcCollectorChoice GcLargeHeap GcStwCounts GcStall GcSweepLinear GcMinHeap GcIncremental GcPauseGate GcCollectorRuns GcCollectorDiff ReplSession RunnerPrecondition
 

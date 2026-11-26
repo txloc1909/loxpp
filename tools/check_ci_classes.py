@@ -224,7 +224,7 @@ def check_job_references(class_map, files, yml):
     return errors
 
 
-NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes"}
+NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes", "gc"}
 
 
 def check_build_steps(class_map, yml):
