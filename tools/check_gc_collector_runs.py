@@ -7,11 +7,11 @@ Usage: check_gc_collector_runs.py <runner> <stw|incremental>
 A CI step picks the collector with LOXPP_GC in its environment. A step that
 silently runs `stw` twice proves nothing about `incremental`, so each such step
 runs this check first. It requires that the environment holds the expected
-collector (an unset variable is `stw`), runs a program that makes garbage
-with a trace on, and requires the records of that collector: `gc` records for
+collector (an unset or empty variable is the default collector, DEFAULT of
+check_gc_collector_choice.py), runs a program that makes garbage with a trace on, and requires the records of that collector: `gc` records for
 `stw`, and `cycle` and `step` records and no `gc` record for `incremental`.
---self-test runs the check with each collector, and with a collector that the
-environment does not select, which must fail. The runner can be the native binary or a wrapper script of another backend.
+--self-test runs the check with each collector and with the variable unset,
+and with a collector that the environment does not select, which must fail. The runner can be the native binary or a wrapper script of another backend.
 It prints one line that names the collector.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a runner that cannot run, 125
@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 
+from check_gc_collector_choice import DEFAULT
 from runner_precondition import refuse_unrunnable, require_runner
 
 PROGRAM = """\
@@ -36,6 +37,9 @@ print len(keep);
 """
 
 
+OTHER = "stw" if DEFAULT == "incremental" else "incremental"
+
+
 def fail(msg):
     print(f"FAIL: {msg}")
     sys.exit(1)
@@ -47,9 +51,11 @@ def self_test(runner):
         sys.exit(125)
     me = os.path.abspath(__file__)
     for have, want, rc in (("stw", "stw", 0), ("incremental", "incremental", 0),
-                           ("stw", "incremental", 1), ("incremental", "stw", 1)):
+                           ("stw", "incremental", 1), ("incremental", "stw", 1),
+                           (None, DEFAULT, 0), (None, OTHER, 1)):
         env = {k: v for k, v in os.environ.items() if k != "LOXPP_GC"}
-        env["LOXPP_GC"] = have
+        if have is not None:
+            env["LOXPP_GC"] = have
         r = subprocess.run([sys.executable, me, runner, want], env=env,
                            capture_output=True, text=True)
         if r.returncode != rc:
@@ -80,7 +86,7 @@ def main():
                                capture_output=True, text=True, timeout=300)
         except OSError as exc:
             refuse_unrunnable(runner, exc)
-        have = os.environ.get("LOXPP_GC") or "stw"
+        have = os.environ.get("LOXPP_GC") or DEFAULT
         if have != want:
             fail(f"LOXPP_GC selects {have!r}, the step expects {want!r}")
         if r.returncode != 0 or r.stdout.strip() != "60000":

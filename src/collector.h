@@ -153,9 +153,15 @@ std::uint64_t gcMonotonicNs();
 // not set.
 std::FILE* openGcTraceFile(int workerNumber);
 
+// The collector that an unset or empty LOXPP_GC chooses. The native VM and
+// the QBE runtime (libloxrt.a) both start their heaps through makeCollector,
+// so this one value is the default of each. The criteria of section 10.1 of
+// docs/decisions/garbage-collectors.md choose it.
+inline constexpr const char* kDefaultCollector = "incremental";
+
 // The collector that LOXPP_GC names, for `heap`. An unset or empty variable
-// gives the default, the stop-the-world collector "stw". An unknown name
-// prints a message and ends the process with status 64.
+// gives kDefaultCollector. An unknown name prints a message and ends the
+// process with status 64.
 std::unique_ptr<Collector> makeCollector(MemoryManager& heap, PollState& poll,
                                          int workerNumber);
 // The same for a name: nullptr for a name that is not a collector.
