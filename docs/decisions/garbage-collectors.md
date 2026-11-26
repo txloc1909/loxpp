@@ -477,6 +477,31 @@ binary and a program can choose it. The owner can choose it as the default
 later, when the failed criterion holds. The `generational` mode, when it
 exists, needs a new decision and does not block this choice.
 
+**Decided on 2026-11-26 (#1285): the default is `incremental`.** All four
+criteria held on `main` at 7b50fc53, with the size-class heap of phase 8.
+The owner said that the choice can follow from the data of the earlier
+nodes, after N5, N6 and N8 merged, and the choice follows the criteria. The
+evidence, with each run and each command, is in the [comment on
+#1285](https://github.com/txloc1909/loxpp/issues/1285#issuecomment-7193262258):
+
+1. Large-heap programs and the Redis load, 3 runs each, 15 runs: the largest
+   step 8374 units (limit 10420), p99.99 of the steps 115 to 257 us, MMU(10
+   ms) 56.3 to 61.3%. Each run meets each limit.
+2. `benchmarks/`, 18 programs, interleaved: geometric mean 1.005 of the time
+   of `stw` (range 0.983 to 1.062). Peak heap over live heap: 1.81 to 2.03 on
+   the large-heap programs, 2.20 on `churn_peak.lox`.
+3. The whole ctest passes with each collector, the examples pass with
+   `incremental` under stress GC, and the output of the collectors is the
+   same on the 132 examples.
+4. The measurements use the heap of phase 8.
+
+`stw` stays in the binary, and `LOXPP_GC=stw` chooses it. The default is
+`kDefaultCollector` in `src/collector.h`, and the native VM and the QBE
+runtime both read it. `incremental` runs the large-heap programs 1.09 to
+1.49 times longer in wall time than `stw`, because of the pacing (section
+14). No criterion measures this. A program that does not need short pauses
+can choose `stw`.
+
 ## 11. Risks
 
 - **A missed barrier.** The largest risk. Sections 6 and 7 reduce it: the
@@ -525,7 +550,8 @@ now:
 7. **The numbers of goal 3:** phases 4 and 5 measure them on `benchmarks/`.
    The prototype did not.
 8. **Which collector is the default:** the owner decides at phase 7, by
-   the criteria in section 10.1.
+   the criteria in section 10.1. Decided on 2026-11-26: `incremental`
+   (section 10.1, #1285).
 
 ## 13. Evidence from the prototype (#1278)
 
@@ -572,8 +598,8 @@ probes for the barriers of Instance fields, Map entries and upvalues.
 ## 14. What N5 chose (#1282)
 
 `IncrementalCollector` (`src/incremental_collector.{h,cpp}`) is the
-`incremental` collector. `LOXPP_GC=incremental` chooses it. `stw` stays the
-default.
+`incremental` collector. `LOXPP_GC=incremental` chooses it. At N5, `stw` stayed
+the default; N7 made `incremental` the default (section 10.1).
 
 - **One white color.** The sweep does not use a second color. Each span has an
   epoch (`Span::sweepEpoch`). An object that the heap makes during the sweep
