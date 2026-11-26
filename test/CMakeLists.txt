@@ -346,6 +346,12 @@ if(LOXPP_PYTHON3)
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_barrier_table.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+    # The barrier check must refuse a heap type that gets a public function
+    # which returns the address of a slot.
+    add_test(NAME GcBarrierMutants
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_barrier_mutants.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # tools/jvm_gc_log.py converts a JVM -Xlog:gc log into the gc_report.py
     # format. The check parses checked-in logs, so it needs no JVM.
     add_test(NAME JvmGcLog

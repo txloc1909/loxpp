@@ -97,6 +97,7 @@ GcCollectorDiff core,harness
 test_size_class_heap core
 test_size_class_heap_gc core
 GcBarrierTable core
+GcBarrierMutants core
 GcSweepLinear core
 GcMinHeap core
 ReplSession core
