@@ -313,6 +313,32 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
+    # The pause gate of tools/check_gc_pause.py must fail a step over the unit
+    # limit, steps that are too long, and a program with too little run time
+    # between steps, and must pass an allocator stall and an exit step.
+    add_test(NAME GcPauseGate
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_pause.py --self-test
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    # The check that names the collector of a CI step must fail when LOXPP_GC
+    # does not select the collector that the step expects. It skips on a build
+    # that traces execution.
+    add_test(NAME GcCollectorRuns
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_collector_runs.py
+                --self-test $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcCollectorRuns PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # The comparison of the collectors on the examples must fail when the
+    # output of one collector differs, and when the count of programs does not
+    # fit.
+    add_test(NAME GcCollectorDiff
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/diff_gc_collectors.py
+                --self-test $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
     # The table of write-barrier mutators in the contract (section 7) must
     # match the headers of the object types.
     add_test(NAME GcBarrierTable
