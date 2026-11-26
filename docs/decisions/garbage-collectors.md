@@ -620,27 +620,60 @@ default.
 
 ### Measurement
 
-`release` build, no verifier. Programs of `benchmarks/gc_large_heap/`. Largest
-`units` of one step, 99.99th percentile of the step time, MMU(10 ms) (from
-`tools/gc_report.py`), and the largest pause of `stw`:
+`release` build, no verifier, 3 runs of each program (median, or worst of 3).
+Programs of `benchmarks/gc_large_heap/`. Largest `units` of one step,
+99.99th percentile of the step time, MMU(10 ms) (from `tools/gc_report.py`),
+and the peak heap over the live heap. The peak is the largest `bytes_peak` of
+a cycle record (the pacing looks every 16 KiB). The live heap is the largest
+`bytes_after` of a `stw` threshold collection of the same program.
 
-| Program | largest units | p99.99 | MMU(10 ms) | `stw` pause |
+| Program | largest units | p99.99 | MMU(10 ms), worst | peak / live, median, worst |
 |---|---|---|---|---|
-| big_map | 8334 | 133 us | 75% | 162 ms |
-| list_write | 8200 | 215 us | 52% | 214 ms |
-| live_then_churn | 8224 | 134 us | 75% | 88 ms |
-| long_chain | 8203 | 118 us | 75% | 89 ms |
+| big_map | 8370 | 233 us | 56.5% | 1.81, 1.82 |
+| list_write | 8202 | 214 us | 57.5% | 2.01, 2.01 |
+| live_then_churn | 8224 | 208 us | 60.9% | 2.02, 2.09 |
+| long_chain | 8203 | 116 us | 60.5% | 1.97, 1.97 |
+| live_then_churn, churn 24000000 | 8224 | 187 us | 60.6% | 2.16, 2.17 |
 
-Goal 1 holds on these four programs. The `benchmarks/` suite, 18 programs, had
-a geometric mean of 1.000 of the time of `stw`. The peak resident memory of
-the large-heap programs was 1.04 to 1.26 times that of `stw`.
+`stw` has one pause of 88 to 214 ms on the same programs and MMU(10 ms) of 0%.
+`test/gc_incremental/latency/idle_wait.lox` (a live heap of 1.5 million
+objects and 400 short waits) has MMU(10 ms) of 62 to 70%; with the cycle run
+to its end at each idle it was 0.3%. The `benchmarks/` suite, 18 programs, has
+a geometric mean of 0.996 of the time of `stw` (range 0.966 to 1.059). The
+programs of `benchmarks/gc_large_heap/` themselves run longer than with `stw`
+(wall time, one run: big_map 4.40 s against 3.51 s, list_write 2.43 s against
+1.64 s, live_then_churn 1.94 s against 1.74 s, long_chain 2.10 s against
+1.83 s), because the cycles start from the live heap and run at a share of 25
+to 45% of the time.
 
 Known gaps, and where they are filed:
 
-- The finish pause follows the size of the handle list and the foreign set.
+- The finish pause follows the size of the handle list and the foreign set,
+  and so do `beginForeignCycle` (start pause) and `markForeign` (a mark step:
+  the set can rehash). The finish pause also reads the held objects, the inbox
+  targets, the drain batch and what these make gray. #1299.
 - A cycle with cause `exit` is one step of the whole heap. It runs after the
-  program ends, and `tools/gc_report.py` shows it on its own line.
+  program ends, and `tools/gc_report.py` shows it on its own line. #1300.
 - Function, Closure, Enum, DeferredCall and Bound* objects are not cut into
-  parts. The language bounds the size of each.
+  parts. The language bounds the size of each. #1301.
+- The start pause reads all roots at once: it grows with the number of tasks
+  and of globals (100000 tasks: 2.25 ms; 32000 globals: 1.25 ms). #1302.
+- A worker that waits for a long time on one wait runs 0.5 ms of its cycle
+  and sleeps. #1303.
 - The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
-  them.
+  them (#1294, #1295, #1296).
+
+Named bug classes that the review of #1298 found, as constraints for all
+later work:
+
+- **A structure that the tracer cuts by index needs a rule for a removal that
+  moves the elements that stay.** The barrier of a pop sees the element that
+  leaves, not the ones that move. The Task mailbox counts the messages that
+  left the front (`ObjTask::poppedCount`), and the tracer moves its index by
+  the change. A List removal (`eraseAt`) and a mailbox erase shade each moved
+  element. Every other structure that the tracer cuts (Map, Instance, Class,
+  Coroutine stack) was checked: a Map cut by bucket restarts when it
+  rehashes, and a deleted entry is a tombstone, so nothing moves.
+- **A count that a mark reaches must be raised at the reach, not at the end of
+  the mark.** See the finish pause above.
+- **A pacing that counts the objects of the cycle as live.** See Pacing.
