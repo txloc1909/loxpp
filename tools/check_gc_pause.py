@@ -19,10 +19,11 @@ Two gates, in this order:
      The run must also make at least MIN_CYCLES cycles and no stop-the-world
      record: a program that never collects, or that ran the other collector,
      measures nothing.
-  2. Time, from the best of the runs of a program, because a shared host
-     stalls a process for more than 1 ms now and then: the 99.99th percentile
-     of the steps is at most MAX_P9999_US, and MMU(10 ms) from the steps is at
-     least MIN_MMU_10MS.
+  2. Time, from the runs of a program, because a shared host stalls a process
+     for more than 1 ms now and then: at least one run must meet both limits.
+     The 99.99th percentile of its steps is at most MAX_P9999_US, and its
+     MMU(10 ms) from the steps is at least MIN_MMU_10MS. A trace shorter than
+     10 ms has no MMU, and it fails.
 
 The allocator stall is not part of goal 1. It is printed on its own, with MMU
 with and without it.
@@ -133,19 +134,20 @@ def gate(label, runs, show=True):
             print(describe(f"{label} run {i}", m))
         for p in m["problems"]:
             out.append(f"{label} run {i}: {p}")
-    best_p = min(m["p9999_us"] for m in runs)
-    best_mmu = max((m["mmu10"] for m in runs if m["mmu10"] is not None),
-                   default=None)
+    # One run must meet both limits. Taking the best of each figure from
+    # different runs could pass when no run meets goal 1.
+    def meets(m):
+        return (m["p9999_us"] <= MAX_P9999_US and m["mmu10"] is not None
+                and m["mmu10"] >= MIN_MMU_10MS)
+
     if show:
-        print(f"{label}: best of {len(runs)}: p99.99 {best_p:.0f} us (limit "
-              f"{MAX_P9999_US:.0f}), MMU(10 ms) {pct(best_mmu)} (limit "
-              f"{100 * MIN_MMU_10MS:.0f}%)")
-    if best_p > MAX_P9999_US:
-        out.append(f"{label}: p99.99 of the steps {best_p:.0f} us in every "
-                   f"run, over {MAX_P9999_US:.0f}")
-    if best_mmu is not None and best_mmu < MIN_MMU_10MS:
-        out.append(f"{label}: MMU(10 ms) {pct(best_mmu)} in every run, under "
-                   f"{100 * MIN_MMU_10MS:.0f}%")
+        print(f"{label}: limits: p99.99 {MAX_P9999_US:.0f} us, MMU(10 ms) "
+              f"{100 * MIN_MMU_10MS:.0f}%; {sum(map(meets, runs))} of "
+              f"{len(runs)} runs meet both")
+    if not any(meets(m) for m in runs):
+        out.append(f"{label}: no run of {len(runs)} meets both limits "
+                   "(p99.99 and MMU(10 ms); an MMU of n/a is a failure: the "
+                   "trace has no 10 ms window)")
     return out
 
 
@@ -200,7 +202,8 @@ def run_programs(binary, runs):
 
 # --- the gate on hand-written traces
 
-def hand(units, step_ns, gap_ns, cycles=4, exit_units=0, stall_ns=0):
+def hand(units, step_ns, gap_ns, cycles=4, exit_units=0, stall_ns=0,
+         tail_ns=100_000_000):
     """A trace with `cycles` cycles. Each has a mark step of `units` units and
     `step_ns` long, a start, a finish and an end step, and `gap_ns` of
     program time after each step."""
@@ -231,7 +234,7 @@ def hand(units, step_ns, gap_ns, cycles=4, exit_units=0, stall_ns=0):
         lines.append(f"stall kind=new t0={t} t1={t + stall_ns}")
         t += stall_ns
     # Program time after the last step, so that a 10 ms window fits.
-    lines.append(f"end t={t + 100_000_000}")
+    lines.append(f"end t={t + tail_ns}")
     return "\n".join(lines) + "\n"
 
 
@@ -271,6 +274,22 @@ def self_test():
             f.write(hand(300, 100_000, 400_000))
         if gate("best of two", [measure(slow), measure(quick)]):
             fail("self-test: a slow run beside a quick run failed the gate")
+        # One run must meet both time limits. A run with long steps and a run
+        # with no time between steps each fail alone, and must fail together.
+        longrun, packed = os.path.join(d, "longrun"), os.path.join(d, "packed")
+        with open(longrun, "w") as f:
+            f.write(hand(300, 2_000_000, 40_000_000))
+        with open(packed, "w") as f:
+            f.write(hand(300, 100_000, 1_000, cycles=100))
+        if not gate("two bad runs", [measure(longrun), measure(packed)]):
+            fail("self-test: two runs that each fail one time limit passed")
+        # A trace shorter than the MMU window measures no MMU, so it fails.
+        short = os.path.join(d, "short")
+        with open(short, "w") as f:
+            f.write(hand(300, 500_000, 0, cycles=3, tail_ns=0))
+        m = measure(short)
+        if m["mmu10"] is not None or not gate("short", [m]):
+            fail("self-test: a trace with no 10 ms window passed")
         big = os.path.join(d, "big")
         with open(big, "w") as f:
             f.write(hand(MAX_STEP_UNITS + 1, 100_000, 400_000))
