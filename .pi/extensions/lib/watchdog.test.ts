@@ -33,23 +33,55 @@ import { PS_PROBE, shellQuote, WATCHDOG_MARKER } from "./watchdog.ts";
 /** Fast enough for a test, and still several real poll cycles. */
 const WATCH = { watchPollS: 0.05, watchGraceS: 0.3 };
 
-/** The longest one wait may take. */
+/**
+ * The longest one wait may take once the run is up. Such a wait measures the
+ * watch, which polls every 50 ms, so a regression in the watch shows well
+ * inside this limit; the rest is slack for a loaded host.
+ */
 const TIMEOUT_MS = 8000;
+/**
+ * The longest the wait for a run to show its child may take. That wait measures
+ * the host, not the watch: a shell start and one short write, which a loaded
+ * runner delays far past any interval that a regression in the watch needs.
+ * `readPid` says which events end the wait before this limit does.
+ */
+const CHILD_START_TIMEOUT_MS = 30_000;
+/**
+ * How late a child start can be while its run is alive, in the test that proves
+ * the start allowance. One second more than `TIMEOUT_MS`: a wait that kept the
+ * watch's limit instead of the allowance fails at that limit.
+ */
+const SLOW_START_S = 9;
+/**
+ * A limit short enough to probe the end of a wait, in the test that forces that
+ * end: the run it passes starts no child, so the file can never arrive.
+ */
+const LIMIT_PROBE_MS = 200;
 /** Every wait in one test draws on this budget, so their sum cannot exceed it. */
-const WAIT_BUDGET_MS = 45_000;
+const WAIT_BUDGET_MS = 90_000;
 
 /**
  * A test that drives real processes. Its waits share one deadline, so no sum of
  * waits can reach the outer bound first: each wait asks for what is left and
- * fails with the cause it names. One wait is capped at `TIMEOUT_MS`, so a
- * single slow step cannot take the whole budget and hide a regression. The
- * outer bound holds the whole budget, which holds five capped waits and the
- * fixed sleeps, plus the setup and the teardown.
+ * fails with the cause it names. The body picks the limit its wait measures:
+ * `startLeft` for a wait on a spawned run to come up, which the host decides, and
+ * `left` for a wait on the watch, which is capped at `TIMEOUT_MS` so a single
+ * slow step cannot take the whole budget and hide a regression. The outer bound
+ * holds the whole budget, which holds the two start waits and the three watch
+ * waits that the longest test uses, plus the fixed sleeps, the setup and the
+ * teardown.
  */
-function processTest(name: string, body: (left: () => number) => Promise<void>, skip: false | string = false): void {
+function processTest(
+  name: string,
+  body: (left: () => number, startLeft: () => number) => Promise<void>,
+  skip: false | string = false,
+): void {
   test(name, { skip, timeout: WAIT_BUDGET_MS + 15_000 }, async () => {
     const until = Date.now() + WAIT_BUDGET_MS;
-    await body(() => Math.min(TIMEOUT_MS, Math.max(1, until - Date.now())));
+    await body(
+      () => Math.min(TIMEOUT_MS, Math.max(1, until - Date.now())),
+      () => Math.min(CHILD_START_TIMEOUT_MS, Math.max(1, until - Date.now())),
+    );
   });
 }
 
@@ -235,17 +267,46 @@ async function readOr(file: string, fallback: string): Promise<string> {
   }
 }
 
-async function readPid(file: string, timeoutMs: number): Promise<number> {
-  let pid = 0;
-  await waitFor(
-    file,
-    async () => {
-      pid = Number.parseInt((await readOr(file, "")).trim(), 10);
-      return Number.isInteger(pid) && pid > 1;
-    },
-    timeoutMs,
-  );
-  return pid;
+/**
+ * The pid a run's child writes into `file`.
+ *
+ * Two events end this wait. The pid landing is the progress it exists for. The
+ * end of `run` is a proven failure: the caller passes the process whose end
+ * means that no writer of the file is left. That holds for a file the run
+ * writes itself and for a file of the run's own child, because that child ends
+ * with its run. The wait then fails at once and names the run's exit instead of
+ * sitting out the limit.
+ *
+ * A file that a descendant writes needs no such process, and `undefined` says
+ * so: a grandchild outlives the shell that starts it, so its file can arrive
+ * after the run ends, and only the limit then bounds the wait.
+ *
+ * Until one of the two events happens the run is alive and working, so a host
+ * that is slow to start its shell keeps the wait. The limit is therefore the
+ * test's start allowance, not the one a wait on the watch uses.
+ *
+ * The listener goes on before the first check, because an `exit` that lands
+ * between a check and the attach is never replayed.
+ */
+async function readPid(file: string, run: ChildProcess | undefined, timeoutMs: number): Promise<number> {
+  // The argument is required, but `node --test` strips types without checking
+  // them, so a call site that omits it must fail here and not hang.
+  assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${file} needs a finite limit, and got ${timeoutMs}`);
+  let ended = false;
+  if (run !== undefined) {
+    run.once("exit", () => {
+      ended = true;
+    });
+    if (run.exitCode !== null || run.signalCode !== null) ended = true;
+  }
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const pid = Number.parseInt((await readOr(file, "")).trim(), 10);
+    if (Number.isInteger(pid) && pid > 1) return pid;
+    if (ended && run !== undefined) assert.fail(`the run ended (${run.exitCode ?? run.signalCode}) before its child wrote ${file}`);
+    if (Date.now() >= until) assert.fail(`timed out waiting for ${file}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /** A `kitten` stand-in that records the calls the watcher makes. */
@@ -398,7 +459,7 @@ test("every script builder carries the watchdog", () => {
   assert.ok(watched.includes("command cd"), "the watched run enters the caller's directory through command");
 });
 
-processTest("a watched run ends its child and closes its window when the parent dies", async (left) => {
+processTest("a watched run ends its child and closes its window when the parent dies", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -417,7 +478,7 @@ processTest("a watched run ends its child and closes its window when the parent 
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(alive(childPid), true, "the child lives while the parent lives");
 
@@ -439,7 +500,81 @@ processTest("a watched run ends its child and closes its window when the parent 
   });
 });
 
-processTest("a parent pid that another process holds does not keep the run alive", async (left) => {
+processTest("a run that ends before its child writes the pid fails with that cause", async (left, startLeft) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+
+    // No parent pid: the script refuses to run and starts no child, so the pid
+    // file can never appear. The wait must name the run's end rather than sit
+    // out the load allowance: a run that is gone cannot write the file, and the
+    // allowance is for a run that is alive and slow to start its shell.
+    const script = spawn("/bin/sh", [scriptPath], { detached: true, stdio: "ignore" });
+    try {
+      await assert.rejects(readPid(childPidFile, script, startLeft()), /the run ended \(1\) before its child wrote/);
+    } finally {
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("the wait for a run's child ends at its limit, and says so", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    // A run that starts no child keeps answering, so the file can never appear
+    // and no process end can prove it gone: only the limit can end this wait.
+    const run = spawn("/bin/sh", ["-c", "sleep 60"], { detached: true, stdio: "ignore" });
+    try {
+      await assert.rejects(readPid(childPidFile, run, LIMIT_PROBE_MS), /timed out waiting for .*child\.pid/);
+    } finally {
+      await stopRun(run, left());
+    }
+  });
+});
+
+processTest("a run that is slow to start its child keeps its wait", async (left, startLeft) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    const scriptPath = await watchedScript(dir, {
+      child: `printf '%s' $$ > ${shellQuote(childPidFile)}; sleep 60`,
+      kitten: await fakeKitten(dir),
+      exitPath: path.join(dir, "exit.code"),
+    });
+    // The run #1305 lost was alive and its child came late, which is what a
+    // loaded host does to a shell start. The delay stands in for that load and
+    // outlasts the limit a wait on the watch uses, so a wait that kept the
+    // watch's limit instead of the start allowance fails here.
+    const slowPath = path.join(dir, "slow.sh");
+    await fs.promises.writeFile(
+      slowPath,
+      ["#!/bin/sh", `sleep ${SLOW_START_S}`, `exec /bin/sh ${shellQuote(scriptPath)} "$@"`, ""].join("\n"),
+      { mode: 0o700 },
+    );
+
+    const parent = standInParent();
+    const script = spawn("/bin/sh", [slowPath, ...parentArgs(parent)], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, KITTY_WINDOW_ID: "42" },
+    });
+    try {
+      const began = Date.now();
+      const childPid = await readPid(childPidFile, script, startLeft());
+      assert.ok(Date.now() - began > TIMEOUT_MS, "the child came after the limit a wait on the watch uses");
+      await killParent(parent);
+      await waitFor("the child to end", () => !alive(childPid), left());
+    } finally {
+      parent.kill("SIGKILL");
+      await stopRun(script, left());
+    }
+  });
+});
+
+processTest("a parent pid that another process holds does not keep the run alive", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -481,7 +616,7 @@ processTest("a parent pid that another process holds does not keep the run alive
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await waitFor("the child to end", () => !alive(childPid), left());
       assert.equal(alive(parent.pid!), true, "the run ended while the pid it watched still answered");
     } finally {
@@ -491,7 +626,7 @@ processTest("a parent pid that another process holds does not keep the run alive
   });
 });
 
-processTest("a parent token read in another time zone still names the same process", async (left) => {
+processTest("a parent token read in another time zone still names the same process", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -518,7 +653,7 @@ processTest("a parent token read in another time zone still names the same proce
       env: { ...process.env, TZ: zone, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(alive(childPid), true, `the run outlives its parent in ${zone}`);
       await killParent(parent);
@@ -530,7 +665,7 @@ processTest("a parent token read in another time zone still names the same proce
   });
 });
 
-processTest("a run started without a parent start time still ends when the parent dies", async (left) => {
+processTest("a run started without a parent start time still ends when the parent dies", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -549,7 +684,7 @@ processTest("a run started without a parent start time still ends when the paren
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -559,7 +694,7 @@ processTest("a run started without a parent start time still ends when the paren
   });
 });
 
-processTest("a child that ignores SIGTERM is killed after the grace", async (left) => {
+processTest("a child that ignores SIGTERM is killed after the grace", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -577,7 +712,7 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
       // The script records how the child ended only after `wait` returns, so
@@ -594,7 +729,7 @@ processTest("a child that ignores SIGTERM is killed after the grace", async (lef
   });
 });
 
-processTest("a ps that cannot read pid 1 still lets the run end", async (left) => {
+processTest("a ps that cannot read pid 1 still lets the run end", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -622,7 +757,7 @@ processTest("a ps that cannot read pid 1 still lets the run end", async (left) =
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -632,7 +767,7 @@ processTest("a ps that cannot read pid 1 still lets the run end", async (left) =
   });
 });
 
-processTest("a watcher ends when its script is signalled alone", async (left) => {
+processTest("a watcher ends when its script is signalled alone", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -649,7 +784,7 @@ processTest("a watcher ends when its script is signalled alone", async (left) =>
       env: { ...process.env, KITTY_WINDOW_ID: "42" },
     });
     try {
-      await readPid(childPidFile, left());
+      await readPid(childPidFile, script, startLeft());
       // The script dies alone here, as it did when a fake kitten closed a
       // window by its pid. Its watcher must still end when its child does:
       // `pid_gone` asks `ps` to list any pid, not about the script, because a
@@ -708,7 +843,7 @@ function oneShadow(name: string, body: string): string[] {
 
 processTest(
   "a shadowed tr does not make every pid read as gone",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -722,7 +857,7 @@ processTest(
     // first poll: the run then outlives the parent.
     const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("tr", ":"));
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -736,7 +871,7 @@ processTest(
 
 processTest(
   "a shadowed head does not turn the watch off",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -749,7 +884,7 @@ processTest(
     // the fallback takes as "leave the run alone".
     const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("head", ":"));
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -763,7 +898,7 @@ processTest(
 
 processTest(
   "a shadowed sleep does not stop the poll",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -776,7 +911,7 @@ processTest(
     // the dead parent.
     const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("sleep", "command sleep 60"));
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -816,7 +951,7 @@ processTest(
 
 processTest(
   "a shadowed command does not turn the watch off",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const scriptPath = await watchedScript(dir, {
@@ -831,7 +966,7 @@ processTest(
     // builtin, and `unset` is one.
     const script = shadowedRun(scriptPath, parentArgs(parent), oneShadow("command", ":"));
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
     } finally {
@@ -845,7 +980,7 @@ processTest(
 
 processTest(
   "a shadowed [, wait or cd does not change the run",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const cwdFile = path.join(dir, "cwd");
@@ -865,7 +1000,7 @@ processTest(
       "export -f '[' wait cd",
     ]);
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       assert.equal((await fs.promises.readFile(cwdFile, "utf8")).trim(), dir, "the child runs where the caller asked");
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
@@ -906,7 +1041,7 @@ processTest(
 
 processTest(
   "a shadowed [ does not lose the group signal",
-  async (left) => {
+  async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const grandchildPidFile = path.join(dir, "grandchild.pid");
@@ -929,8 +1064,10 @@ processTest(
     // leading" and signal the child alone.
     const wrapper = shadowedRun(wrapperPath, parentArgs(parent), oneShadow("[", "return 1"));
     try {
-      const childPid = await readPid(childPidFile, left());
-      const grandchildPid = await readPid(grandchildPidFile, left());
+      const childPid = await readPid(childPidFile, wrapper, startLeft());
+      // A grandchild outlives the shell that starts it, so the wrapper's end
+      // proves nothing about this file.
+      const grandchildPid = await readPid(grandchildPidFile, undefined, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
       await waitFor("the grandchild to end", () => !alive(grandchildPid), left());
@@ -977,7 +1114,7 @@ processTest("a run that ends on its own leaves its held window alone when the pa
   });
 });
 
-processTest("the unattended wrapper never signals a group it does not lead", async (left) => {
+processTest("the unattended wrapper never signals a group it does not lead", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const script = buildPrintScript({
@@ -991,7 +1128,7 @@ processTest("the unattended wrapper never signals a group it does not lead", asy
     const bystander = standInParent();
     const wrapper = spawn("/bin/sh", ["-c", script, "loxpp-subagent", ...parentArgs(parent)], { stdio: "ignore" });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, wrapper, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
       assert.equal(alive(bystander.pid!), true, "a process in the caller's group is untouched");
@@ -1008,7 +1145,7 @@ processTest("the unattended wrapper never signals a group it does not lead", asy
   });
 });
 
-processTest("a ps that cannot answer does not make a live parent look dead", async (left) => {
+processTest("a ps that cannot answer does not make a live parent look dead", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -1031,7 +1168,7 @@ processTest("a ps that cannot answer does not make a live parent look dead", asy
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, KITTY_WINDOW_ID: "42" },
     });
     try {
-      const childPid = await readPid(childPidFile, left());
+      const childPid = await readPid(childPidFile, script, startLeft());
       await new Promise((resolve) => setTimeout(resolve, 600));
       assert.equal(alive(childPid), true, "a parent that ps cannot read is not a dead parent");
       assert.equal(await readOr(path.join(dir, "kitten.log"), ""), "", "no close call without evidence of death");
@@ -1047,7 +1184,7 @@ processTest("a ps that cannot answer does not make a live parent look dead", asy
   });
 });
 
-processTest("a zombie parent counts as dead, so its run ends", async (left) => {
+processTest("a zombie parent counts as dead, so its run ends", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const kitten = await fakeKitten(dir);
     const childPidFile = path.join(dir, "child.pid");
@@ -1075,7 +1212,7 @@ processTest("a zombie parent counts as dead, so its run ends", async (left) => {
       { stdio: "ignore" },
     );
     try {
-      const zombie = await readPid(zombiePidFile, left());
+      const zombie = await readPid(zombiePidFile, holder, startLeft());
       process.kill(zombie, "SIGKILL");
       await waitFor("the state to become a zombie", () => /^Z/.test(state(zombie)), Math.min(5000, left()));
       assert.equal(alive(zombie), false, "the test helper counts a zombie as gone");
@@ -1089,7 +1226,7 @@ processTest("a zombie parent counts as dead, so its run ends", async (left) => {
         env: { ...process.env, KITTY_WINDOW_ID: "42" },
       });
       try {
-        const childPid = await readPid(childPidFile, left());
+        const childPid = await readPid(childPidFile, script, startLeft());
         await waitFor("the child to end", () => !alive(childPid), left());
       } finally {
         await stopRun(script, left());
@@ -1100,7 +1237,7 @@ processTest("a zombie parent counts as dead, so its run ends", async (left) => {
   });
 });
 
-processTest("an unattended wrapper ends its child and its grandchild when the parent dies", async (left) => {
+processTest("an unattended wrapper ends its child and its grandchild when the parent dies", async (left, startLeft) => {
   await withTempDir(async (dir) => {
     const childPidFile = path.join(dir, "child.pid");
     const grandchildPidFile = path.join(dir, "grandchild.pid");
@@ -1120,8 +1257,10 @@ processTest("an unattended wrapper ends its child and its grandchild when the pa
       stdio: "ignore",
     });
     try {
-      const childPid = await readPid(childPidFile, left());
-      const grandchildPid = await readPid(grandchildPidFile, left());
+      const childPid = await readPid(childPidFile, wrapper, startLeft());
+      // A grandchild outlives the shell that starts it, so the wrapper's end
+      // proves nothing about this file.
+      const grandchildPid = await readPid(grandchildPidFile, undefined, startLeft());
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(alive(childPid), true, "the child lives while the parent lives");
 
