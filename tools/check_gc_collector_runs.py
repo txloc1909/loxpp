@@ -11,7 +11,7 @@ collector (an unset variable is `stw`), runs a program that makes garbage
 with a trace on, and requires the records of that collector: `gc` records for
 `stw`, and `cycle` and `step` records and no `gc` record for `incremental`.
 --self-test runs the check with each collector, and with a collector that the
-environment does not select, which must fail. The runner can be the native binary or a wrapper such as tools/loxpp_qbe.sh.
+environment does not select, which must fail. The runner can be the native binary or a wrapper script of another backend.
 It prints one line that names the collector.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a runner that cannot run, 125
@@ -68,9 +68,6 @@ def main():
         sys.exit(2)
     runner, want = os.path.abspath(sys.argv[1]), sys.argv[2]
     require_runner(runner)
-    have = os.environ.get("LOXPP_GC") or "stw"
-    if have != want:
-        fail(f"LOXPP_GC selects {have!r}, the step expects {want!r}")
     with tempfile.TemporaryDirectory() as d:
         prog = os.path.join(d, "churn.lox")
         trace = os.path.join(d, "churn.trace")
@@ -83,6 +80,9 @@ def main():
                                capture_output=True, text=True, timeout=300)
         except OSError as exc:
             refuse_unrunnable(runner, exc)
+        have = os.environ.get("LOXPP_GC") or "stw"
+        if have != want:
+            fail(f"LOXPP_GC selects {have!r}, the step expects {want!r}")
         if r.returncode != 0 or r.stdout.strip() != "60000":
             fail(f"the probe program gave exit {r.returncode}, stdout "
                  f"{r.stdout[:100]!r}, stderr {r.stderr[:200]!r}")

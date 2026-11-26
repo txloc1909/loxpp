@@ -8,8 +8,8 @@ Usage: check_gc_pause.py <loxpp-binary> [--runs N]
 The first form runs each program of benchmarks/gc_large_heap/ with its full
 constants and the incremental collector, N times (default 3), and gates the
 GC trace of each run. The second form gates traces that another tool wrote,
-such as the Redis load of examples/codecrafters/build-your-own-redis/tests/
-gc_load.py. The third form checks the gate itself on hand-written traces.
+such as the one that the Redis load writes (gc_load.py, in the tests
+directory of the Redis example). The third form checks the gate itself on hand-written traces.
 
 Two gates, in this order:
 
