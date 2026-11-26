@@ -6812,10 +6812,10 @@ var WINDOW = 64;
 // read on: the end of the stream comes after the bytes before it, and
 // without it a wait with no time limit outlives a client that has gone. So
 // during a wait the reader may send HOLD commands past its credit, which
-// keeps the session mailbox at most WINDOW + HOLD = 1024 messages. A client
+// keeps the session mailbox at most WINDOW + HOLD = 128 messages. A client
 // that sends more during one wait is closed. Redis keeps such commands in
 // the query buffer of the client up to client-query-buffer-limit.
-var HOLD = 1024 - WINDOW;
+var HOLD = 128 - WINDOW;
 
 // Waits until the session gives back at least one credit or starts a wait
 // in BLPOP. Returns the credits that it got (0 for Blocked alone), or nil

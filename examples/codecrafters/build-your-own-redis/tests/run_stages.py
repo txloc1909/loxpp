@@ -741,6 +741,37 @@ def stages_fairness(prog):
     finally:
         srv.stop()
 
+    # 1000 clients that wait and send commands behind the wait, then reset.
+    # During a wait the reader holds commands past its credit, so a bound
+    # that is too large lets 1000 queues fill the heap at the same time.
+    for label, wait in (("BLPOP", encode("BLPOP", "q", "0")),
+                        ("XREAD BLOCK", encode("XREAD", "BLOCK", "0",
+                                               "STREAMS", "s", "$"))):
+        srv = Server(prog, [])
+        try:
+            if not srv.up:
+                check("fairness: server starts for the %s reset probe" % label,
+                      False, srv.log_text())
+                continue
+            burst = wait + encode("PING") * 900
+            for _ in range(1000):
+                r = socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+                r.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                             struct.pack("ii", 1, 0))
+                try:
+                    r.sendall(burst)
+                except OSError:
+                    pass
+                r.close()
+            time.sleep(2)
+            rss = rss_kib(srv.proc.pid)
+            print("       measured: RSS %d KiB after 1000 resets during %s"
+                  % (rss, label))
+            check("local: 1000 resets during %s leave server RSS at most 64 MB"
+                  % label, 0 < rss <= 64 * 1024, "RSS %d KiB" % rss)
+        finally:
+            srv.stop()
+
 
 def stages_lists(prog):
     srv = Server(prog, [])
@@ -1030,15 +1061,15 @@ def stages_lists(prog):
 
         key = rand_word()
         waiting = srv.client()
-        waiting.send_raw(encode("BLPOP", key, "5") + encode("PING") * 900)
+        waiting.send_raw(encode("BLPOP", key, "5") + encode("PING") * 60)
         time.sleep(0.2)
         pusher.call("RPUSH", key, "v")
         got = waiting.try_read(5)
         pongs = 0
-        while pongs < 900 and waiting.try_read(5) == "PONG":
+        while pongs < 60 and waiting.try_read(5) == "PONG":
             pongs += 1
-        check("local: 900 commands sent during BLPOP run after it, in order",
-              got == [key, "v"] and pongs == 900, "%r, %d PONG" % (got, pongs))
+        check("local: 60 commands sent during BLPOP run after it, in order",
+              got == [key, "v"] and pongs == 60, "%r, %d PONG" % (got, pongs))
         waiting.close()
 
         # A waiter that resets its connection just before a push, and a

@@ -659,7 +659,7 @@ printed.
   - two bytes other than CRLF after a bulk string (Redis 7.0 does not check
     them);
   - an array header above 1048576 (Redis waits for the arguments).
-- A client that sends more than 960 commands during one `BLPOP` or
+- A client that sends more than 64 commands during one `BLPOP` or
   `XREAD BLOCK` is closed.
   Redis keeps them in its query buffer, up to `client-query-buffer-limit`.
 - A malformed request during `BLPOP` or `XREAD BLOCK` closes the client at
@@ -708,8 +708,10 @@ ruling on PR #1204. Every stage group keeps them.
    While the session waits in `BLPOP`, it gives no credit, but the reader
    must read on to see the end of the stream: a wait with no time limit
    would otherwise outlive a client that has gone. So during a wait the
-   reader may send `HOLD` (960) commands past its credit, and the mailbox
-   holds at most 1024 messages. The session sets `conn.blocked` and sends
+   reader may send `HOLD` (64) commands past its credit, and the mailbox
+   holds at most 128 messages. The bound is small because 1000 clients that
+   reset during a wait hold their queues at the same time, and the heap of
+   the server must stay under the 64 MB of rule 2 of the probe. The session sets `conn.blocked` and sends
    `Msg.Blocked`, which wakes a reader that already waits for credit. A
    client that sends more than `HOLD` commands during one wait is closed.
 5. **A command is atomic, and its work is linear** (atomic: no suspend point
