@@ -49,7 +49,8 @@ def measure(binary):
     """The lines of the pinned file, from a run of each program."""
     lines = []
     env = {k: v for k, v in os.environ.items() if k != "LOXPP_STRESS_GC"}
-    env.pop("LOXPP_GC", None)
+    # The pinned counts are of `stw`, which is not the default collector.
+    env["LOXPP_GC"] = "stw"
     with tempfile.TemporaryDirectory() as d:
         for name, (consts, _want) in sorted(large.CASES.items()):
             with open(os.path.join(large.PROGRAMS, f"{name}.lox")) as f:
