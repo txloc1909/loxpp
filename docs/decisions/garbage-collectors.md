@@ -2,6 +2,8 @@
 
 **Status:** accepted. 2026-11-17, owner review of #1257 (part of #1165). Mission: #1277.
 
+**Mission:** #1277 (closed 2026-11-26). Tracking issue: #1277.
+
 Related: #1165 (the pause grows with the live heap), #1134 (the cost of a
 large String). Facts about the current heap: `docs/reference/gc-runtime-contract.md`.
 Other runtimes: `docs/reference/gc-survey.md`.
@@ -707,3 +709,60 @@ later work:
 - **A count that a mark reaches must be raised at the reach, not at the end of
   the mark.** See the finish pause above.
 - **A pacing that counts the objects of the cycle as live.** See Pacing.
+
+## 15. Shipped
+
+The mission #1277 is closed on 2026-11-26. The default collector is
+`incremental`. `stw` stays in the binary, and `LOXPP_GC=stw` chooses it. The
+mission changed no language rule and no spec text. This section changes no
+accepted text above it.
+
+### 15.1 The nodes
+
+| Node | Issue | PR | Merge commit | What it delivered | Evidence |
+|---|---|---|---|---|---|
+| N1 | #1278 | #1288 (the result, in section 13). The prototype branch is never merged. | `9deb416f` | The prototype, the choice of the barrier kind (Yuasa), and the new form of goal 1. | Section 13. |
+| N2 | #1279 | #1289 | `cb3678d9` | Trace format 3, the MMU report in `tools/gc_report.py`, the large-heap programs in `benchmarks/gc_large_heap/`. | `docs/records/gc-stw-baseline-2026-11-21.md`. |
+| N3 | #1280 | #1290 | `e6d2d330` | The collector interface. The old collector is `stw` behind it. | `tools/check_gc_stw_counts.py` and the pinned counts. The review compared 48 collections of 4 programs with the baseline of N2: all equal. |
+| N4 | #1281 | #1291 | `8ac21c37` | The write-barrier layer: private references behind mutators, the table, and `tools/check_gc_barrier_table.py`. | The review measured the cost of the barrier on `benchmarks/` at 1.0001 of the base (limit 1.02). |
+| N8 | #1284 | #1293 | `ef3888cc` | The size-class heap, mark bitmaps and the heap's own allocator. Stall records. Large blocks go back to the operating system in slices. | The review measured the geometric mean of `benchmarks/` at 0.971 of the base. A program that drops a 60 M-element List three times has a peak RSS of 725 MB (ratio 1.89 over the live heap). |
+| N5 | #1282 | #1298 | `4016b571` | The `incremental` collector (section 14). | Section 14, "Measurement". The review found 4 blocking defects and each fix has a check that fails without it. |
+| N6 | #1283 | #1304 | `7b50fc53` | CI runs each suite with each collector. The gate `tools/check_gc_pause.py`, the check `tools/check_gc_collector_runs.py` and the comparison `tools/diff_gc_collectors.py`. | The review ran `ctest` with each collector: 2392 of 2392. The gate holds a self-test with a case for each of its limits. |
+| N7 | #1285 | #1306 | `11bef6b2` | `incremental` is the default. | The comment https://github.com/txloc1909/loxpp/issues/1285#issuecomment-7193262258 (issue #1285). All four criteria of section 10.1 held. |
+
+The evidence of N7 for the goals: 15 of 15 runs of the large-heap programs
+and of the Redis load (524286 streams) have a largest step of 8201 to 8374
+units, a p99.99 of 115 to 257 us and an MMU(10 ms) of 56.3 to 61.3%. The
+geometric mean of `benchmarks/` is 1.005 of `stw` (limit 1.10). The peak is
+at most 2.20 times the live heap (limit 2.5).
+
+### 15.2 The follow-ups
+
+Each follow-up is one open issue. This list is the state of the issues at the
+close, and the issues answer "is it done".
+
+| Issue | What it is | Where the decision speaks of it |
+|---|---|---|
+| #1292 | The barrier check misses a function that returns a pointer to a pointer to a slot. | Section 6, item 1. |
+| #1294 | The `std` containers that objects own are not timed. | Section 14, allocator stalls. |
+| #1295 | The gray stack of `stw` is one array. | Section 14, allocator stalls. |
+| #1296 | The `std` containers of `MemoryManager` are not timed. | Section 14, allocator stalls. |
+| #1297 | The large-block release work of one step is not bounded as a sum. | Sections 4.2 and 6.1, item 5. |
+| #1299 | The finish pause, the start pause and `markForeign` follow the foreign set and the handle list. | Section 14, known gaps. |
+| #1300 | The `exit` cycle is one step of the whole heap. | Section 14, known gaps. |
+| #1301 | Function, Closure, Enum, DeferredCall and Bound objects are not cut into parts. | Section 14, known gaps. |
+| #1302 | The start pause grows with the number of tasks and globals. | Section 14, known gaps. |
+| #1303 | A worker that waits for a long time keeps a cycle in the middle of its mark. | Section 14, known gaps. |
+| #1305 | The test of the `pi` watchdog is flaky on CI. | None. It is a harness test. |
+| #1307 | The peak-ratio check of `churn_peak` can fail under host load. | Sections 10.1 and 14. |
+
+The problem #1165 stays open. The mission removed the pause that grows with
+the heap for the programs in the gate. The gaps above are the cases where a
+step still grows, and the owner decides when #1165 closes.
+
+The wall time of the large-heap programs is 1.09 to 1.49 times the time with
+`stw`, as the #1285 comment shows. This is a cost of the pacing, it is no
+defect, and no issue exists for it. A program that needs no short pauses
+chooses `LOXPP_GC=stw`.
+
+The retrospective is `docs/records/garbage-collectors-retro.md`.
