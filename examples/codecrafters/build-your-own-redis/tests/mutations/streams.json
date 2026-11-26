@@ -48,6 +48,15 @@
   ]
  },
  {
+  "name": "XADD checks the key kind before the ID",
+  "old": "    if (type(parsed) == \"String\" and parsed != \"*\") {\n        return parsed;\n    }\n    if (parsed != \"*\" and parsed.ms == 0 and parsed.seq == 0) {\n        return ID_ZERO;\n    }\n    var key = argv[1];\n    var stream = streamEntry(key);\n    if (stream == false) {\n        return WRONGTYPE;\n    }\n",
+  "new": "    var key = argv[1];\n    var stream = streamEntry(key);\n    if (stream == false) {\n        return WRONGTYPE;\n    }\n    if (type(parsed) == \"String\" and parsed != \"*\") {\n        return parsed;\n    }\n    if (parsed != \"*\" and parsed.ms == 0 and parsed.seq == 0) {\n        return ID_ZERO;\n    }\n",
+  "cases": [
+   "local: XADD with a bad ID on a string key is the ID error, not WRONGTYPE",
+   "local: XADD 0-0 on a string key is the 0-0 error, not WRONGTYPE"
+  ]
+ },
+ {
   "name": "XADD does not check the key kind",
   "old": "    var stream = streamEntry(key);\n    if (stream == false) {\n        return WRONGTYPE;\n    }\n    var topMs = 0;",
   "new": "    var stream = streamEntry(key);\n    if (stream == false) {\n        stream = nil;\n    }\n    var topMs = 0;",

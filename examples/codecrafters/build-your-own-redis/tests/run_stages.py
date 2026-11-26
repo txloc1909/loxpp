@@ -1403,6 +1403,12 @@ def stages_streams(prog):
             got = c.call(*args)
             check("local: %s on a string key is WRONGTYPE" % args[0],
                   isinstance(got, Error) and got.startswith("WRONGTYPE"), repr(got))
+        got = c.call("XADD", key, "bad", "f", "v")
+        check("local: XADD with a bad ID on a string key is the ID error, not WRONGTYPE",
+              got == "ERR Invalid stream ID specified as stream command argument", repr(got))
+        got = c.call("XADD", key, "0-0", "f", "v")
+        check("local: XADD 0-0 on a string key is the 0-0 error, not WRONGTYPE",
+              got == "ERR The ID specified in XADD must be greater than 0-0", repr(got))
         c.close()
     finally:
         srv.stop()

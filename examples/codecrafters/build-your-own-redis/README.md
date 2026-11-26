@@ -646,7 +646,8 @@ printed.
 - A stream ID part is digits with no leading zero and no sign. Redis also
   accepts `007-1` and `+8-1`.
 - Some errors come in another order when a command has two of them: `XADD`
-  on a key of another kind with a bad ID, `XRANGE` with a bad `COUNT` and a
+  with an even argument count and a bad ID (`XADD s bad f v g`: here the
+  arity error comes first, in Redis the ID error), `XRANGE` with a bad `COUNT` and a
   bad ID (here the `COUNT` error comes first), and `XREAD` with a key of
   another kind before a bad ID (here the ID error comes first).
 - An `XREAD BLOCK` that names one key twice waits for entries above the
