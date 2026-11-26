@@ -262,8 +262,9 @@ if(LOXPP_PYTHON3)
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
-    # LOXPP_GC chooses the collector when a heap starts: the default and "stw"
-    # run a program, and an unknown name ends the process with status 64.
+    # LOXPP_GC chooses the collector when a heap starts: an unset or empty
+    # variable runs the default collector ("incremental"), each name runs its
+    # collector, and an unknown name ends the process with status 64.
     add_test(NAME GcCollectorChoice
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_collector_choice.py
                 $<TARGET_FILE:loxpp>

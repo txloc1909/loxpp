@@ -54,7 +54,7 @@ std::unique_ptr<Collector> makeCollector(MemoryManager& heap, PollState& poll,
                                          int workerNumber) {
     const char* name = std::getenv("LOXPP_GC");
     if (name == nullptr || name[0] == '\0') {
-        name = "stw";
+        name = kDefaultCollector;
     }
     std::unique_ptr<Collector> collector =
         makeCollectorByName(name, heap, poll, workerNumber);

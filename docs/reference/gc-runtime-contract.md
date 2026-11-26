@@ -15,10 +15,12 @@ changes this file.
   collects it.
 - The heap has one collector, an object of a class that derives from
   `Collector` (`src/collector.h`). `LOXPP_GC` names it when the heap starts.
-  The names are `stw`, the default: `StwCollector`
-  (`src/stw_collector.{h,cpp}`), and `incremental`: `IncrementalCollector`
-  (`src/incremental_collector.{h,cpp}`). An unknown name ends the process
-  with status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
+  The names are `incremental`, the default: `IncrementalCollector`
+  (`src/incremental_collector.{h,cpp}`), and `stw`: `StwCollector`
+  (`src/stw_collector.{h,cpp}`). An unset or empty `LOXPP_GC` chooses the
+  default, `kDefaultCollector` (`src/collector.h`). The native VM and the QBE
+  runtime start each heap through `makeCollector`, so they have the same
+  default. An unknown name ends the process with status 64. `MemoryManager::collector()` gives it. `MemoryManager` keeps
   its own API (`create<T>`, `makeString`, `pushTempRoot`, `markObject`,
   `collectGarbage`, `collectionCount`) and forwards to the collector.
 - The memory of a heap is `SizeClassHeap` (`src/size_class_heap.{h,cpp}`),
