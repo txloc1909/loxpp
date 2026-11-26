@@ -1340,6 +1340,22 @@ def stages_streams(prog):
         check("local: XREAD BLOCK $ gets an entry above the old top of a replaced key",
               r.try_read(3) == [[key, [["9-1", ["f", "high"]]]]])
 
+        # One EXEC adds to the stream and then replaces the key. The wait
+        # keeps the top at the time of the wait, not the top that the EXEC
+        # made, so an entry above the first top wakes the reader.
+        key = rand_word()
+        c.call("XADD", key, "1-1", "f", "v")
+        r.send_raw(encode("XREAD", "BLOCK", "3000", "STREAMS", key, "$"))
+        time.sleep(0.1)
+        c.call("MULTI")
+        c.call("XADD", key, "5-1", "f", "v")
+        c.call("SET", key, "str", "PX", "200")
+        c.call("EXEC")
+        time.sleep(0.4)
+        c.call("XADD", key, "3-1", "f", "v")
+        check("local: an EXEC that adds to a stream and replaces its key does not skip the $ reader",
+              r.try_read(3) == [[key, [["3-1", ["f", "v"]]]]])
+
         # The commands that the client sends during the wait run after it,
         # in order.
         key = rand_word()
