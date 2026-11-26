@@ -765,4 +765,7 @@ The wall time of the large-heap programs is 1.09 to 1.49 times the time with
 defect, and no issue exists for it. A program that needs no short pauses
 chooses `LOXPP_GC=stw`.
 
-The retrospective is `docs/records/garbage-collectors-retro.md`.
+The retrospective is `docs/records/garbage-collectors-retro.md`. It
+proposes four rules for `AGENTS.md` and the playbook (#1309, #1310, #1311,
+#1312) and one proposal for a generational mode (#1313). Each is an open
+issue and binds nothing until a PR lands it.

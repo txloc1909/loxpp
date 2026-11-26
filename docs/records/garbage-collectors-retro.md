@@ -47,36 +47,39 @@ claim cites a PR, a commit or an issue.
 
 ## Rules that the mission produces (proposed, not written)
 
-Each rule below is for all work. Each one needs its own PR to `AGENTS.md`.
+Each rule below is for all work. Each one is an open issue and needs its own PR to `AGENTS.md`. The issue binds nothing until that PR lands.
 
 1. **A copy of a CI job must have a check that ties it to the job.** Two
-   PRs of this mission broke the same list. (Source: #1304, #1306.) The
+   PRs of this mission broke the same list. (Source: #1304, #1306. Issue: #1309.) The
    mission shows that the existing rule "give each new path a class" does not
    cover a list inside a script.
 2. **A test for a structure that code traverses by index must make a removal
-   during the traversal.** (Source: #1298, B1.) This is a case of the rule
+   during the traversal.** (Source: #1298, review finding 1. Issue: #1310.) This is a case of the rule
    "give each side, kind, or value that a rule names its own probe case". The
    proposal is to add the removal case to the plan template for a language or
    runtime change that cuts a traversal.
 3. **A fix that bounds a cost must state where the cost goes.** (Source:
-   #1293, 4.9 times peak.) The fix needs a test of the total, not only of one
+   #1293, 4.9 times peak. Issue: #1311.) The fix needs a test of the total, not only of one
    step.
 
 I did not find a rule for the `pgrep` stall in this record. The rule "stop
 only a process that you started, by its exact name or process ID" exists in
 `AGENTS.md`. The playbook may need one sentence: never wait on a pattern
-that can match the waiting command.
+that can match the waiting command. Issue: #1312.
 
 ## Design changes that the mission produces (proposed, not written)
 
-- **A generational mode.** The decision names it as a later, separate
+Each item is an issue, and binds nothing until a proposal lands.
+
+- **A generational mode** (#1313). The decision names it as a later, separate
   decision (section 10, phase 9). The proposal would be a new file under
   `docs/proposals/`.
-- **A bound for the C allocator calls that the heap does not own** (#1294,
-  #1295, #1296). If the issues show that no bound is possible without a
-  change of the containers, that is a new proposal.
+- **A bound for the C allocator calls that the heap does not own.** The
+  issues #1294, #1295 and #1296 already hold it, so no new issue exists. If
+  they show that no bound is possible without a change of the containers,
+  that is a new proposal.
 - **Program control of the collector** (a standard-library call). It stays a
-  non-goal, and it is a language change.
+  non-goal, and it is a language change, so it has no issue.
 
 ## Open follow-ups
 
