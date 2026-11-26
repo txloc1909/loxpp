@@ -100,6 +100,12 @@ path src/container_objects.*                   core,gc-heap
 path src/table.*                               core,gc-heap
 path src/core_hash_map.h                       core,gc-heap
 path src/value.*                               core,gc-heap
+# The roots that each collector reads (Runtime::markRoots, Compiler::markRoots),
+# the stack and the worker heaps.
+path src/runtime.*                             core,gc-heap
+path src/compiler.*                            core,gc-heap
+path src/vm.*                                  core,gc-heap
+path src/worker.*                              core,gc-heap
 path src/**                                    core
 path runtime/jvm/**                            jvm
 

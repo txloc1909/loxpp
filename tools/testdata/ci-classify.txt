@@ -29,7 +29,7 @@ targets -
 
 case a change of the VM core runs everything the VM reaches
 files src/vm.cpp
-gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
 labels all
 legs debug,release
 targets all
@@ -162,7 +162,7 @@ legs debug,release
 targets all
 
 case a change of the heap runs the suites with each collector
-files src/incremental_collector.cpp
+files src/incremental_collector.cpp src/runtime.cpp src/compiler.cpp src/vm.cpp src/worker.cpp
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
 labels all
 legs debug,release
@@ -175,8 +175,8 @@ labels all
 legs debug,release
 targets all
 
-case a change of the compiler does not run the suites with each collector
-files src/compiler.cpp
+case a change of the parser does not run the suites with each collector
+files src/parser.cpp
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static
 labels all
 legs debug,release
