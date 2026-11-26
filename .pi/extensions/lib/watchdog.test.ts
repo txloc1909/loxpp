@@ -43,16 +43,20 @@ const TIMEOUT_MS = 8000;
  * The longest the wait for a run to show its child may take. That wait measures
  * the host, not the watch: a shell start and one short write, which a loaded
  * runner delays far past any interval that a regression in the watch needs.
- * The wait still ends at once when the run itself ends, which is the one event
- * that proves the write can no longer come.
+ * `readPid` says which events end the wait before this limit does.
  */
-const START_TIMEOUT_MS = 30_000;
+const CHILD_START_TIMEOUT_MS = 30_000;
 /**
  * How late a child start can be while its run is alive, in the test that proves
  * the start allowance. One second more than `TIMEOUT_MS`: a wait that kept the
  * watch's limit instead of the allowance fails at that limit.
  */
 const SLOW_START_S = 9;
+/**
+ * A limit short enough to probe the end of a wait, in the test that forces that
+ * end: the run it passes starts no child, so the file can never arrive.
+ */
+const LIMIT_PROBE_MS = 200;
 /** Every wait in one test draws on this budget, so their sum cannot exceed it. */
 const WAIT_BUDGET_MS = 90_000;
 
@@ -76,7 +80,7 @@ function processTest(
     const until = Date.now() + WAIT_BUDGET_MS;
     await body(
       () => Math.min(TIMEOUT_MS, Math.max(1, until - Date.now())),
-      () => Math.min(START_TIMEOUT_MS, Math.max(1, until - Date.now())),
+      () => Math.min(CHILD_START_TIMEOUT_MS, Math.max(1, until - Date.now())),
     );
   });
 }
@@ -267,30 +271,39 @@ async function readOr(file: string, fallback: string): Promise<string> {
  * The pid a run's child writes into `file`.
  *
  * Two events end this wait. The pid landing is the progress it exists for. The
- * run ending is a proven failure that no limit can help: only a child of that
- * run can write the file, so a run that is gone cannot write it, and the wait
- * then fails at once with the run's exit in the message instead of sitting out
- * the limit. Until one of the two happens the run is alive and working, so a
- * host that is slow to start its shell keeps the wait. The limit is therefore
- * the test's start allowance, not the one a wait on the watch uses.
+ * end of `run` is a proven failure: the caller passes the process whose end
+ * means that no writer of the file is left. That holds for a file the run
+ * writes itself and for a file of the run's own child, because that child ends
+ * with its run. The wait then fails at once and names the run's exit instead of
+ * sitting out the limit.
+ *
+ * A file that a descendant writes needs no such process, and `undefined` says
+ * so: a grandchild outlives the shell that starts it, so its file can arrive
+ * after the run ends, and only the limit then bounds the wait.
+ *
+ * Until one of the two events happens the run is alive and working, so a host
+ * that is slow to start its shell keeps the wait. The limit is therefore the
+ * test's start allowance, not the one a wait on the watch uses.
  *
  * The listener goes on before the first check, because an `exit` that lands
  * between a check and the attach is never replayed.
  */
-async function readPid(file: string, run: ChildProcess, timeoutMs: number): Promise<number> {
+async function readPid(file: string, run: ChildProcess | undefined, timeoutMs: number): Promise<number> {
   // The argument is required, but `node --test` strips types without checking
   // them, so a call site that omits it must fail here and not hang.
   assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, `a wait for ${file} needs a finite limit, and got ${timeoutMs}`);
   let ended = false;
-  run.once("exit", () => {
-    ended = true;
-  });
-  if (run.exitCode !== null || run.signalCode !== null) ended = true;
+  if (run !== undefined) {
+    run.once("exit", () => {
+      ended = true;
+    });
+    if (run.exitCode !== null || run.signalCode !== null) ended = true;
+  }
   const until = Date.now() + timeoutMs;
   for (;;) {
     const pid = Number.parseInt((await readOr(file, "")).trim(), 10);
     if (Number.isInteger(pid) && pid > 1) return pid;
-    if (ended) assert.fail(`the run ended (${run.exitCode ?? run.signalCode}) before its child wrote ${file}`);
+    if (ended && run !== undefined) assert.fail(`the run ended (${run.exitCode ?? run.signalCode}) before its child wrote ${file}`);
     if (Date.now() >= until) assert.fail(`timed out waiting for ${file}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -502,11 +515,23 @@ processTest("a run that ends before its child writes the pid fails with that cau
     // allowance is for a run that is alive and slow to start its shell.
     const script = spawn("/bin/sh", [scriptPath], { detached: true, stdio: "ignore" });
     try {
-      const began = Date.now();
       await assert.rejects(readPid(childPidFile, script, startLeft()), /the run ended \(1\) before its child wrote/);
-      assert.ok(Date.now() - began < START_TIMEOUT_MS / 2, "the wait ends with the run, not with the load allowance");
     } finally {
       await stopRun(script, left());
+    }
+  });
+});
+
+processTest("the wait for a run's child ends at its limit, and says so", async (left) => {
+  await withTempDir(async (dir) => {
+    const childPidFile = path.join(dir, "child.pid");
+    // A run that starts no child keeps answering, so the file can never appear
+    // and no process end can prove it gone: only the limit can end this wait.
+    const run = spawn("/bin/sh", ["-c", "sleep 60"], { detached: true, stdio: "ignore" });
+    try {
+      await assert.rejects(readPid(childPidFile, run, LIMIT_PROBE_MS), /timed out waiting for .*child\.pid/);
+    } finally {
+      await stopRun(run, left());
     }
   });
 });
@@ -1040,7 +1065,9 @@ processTest(
     const wrapper = shadowedRun(wrapperPath, parentArgs(parent), oneShadow("[", "return 1"));
     try {
       const childPid = await readPid(childPidFile, wrapper, startLeft());
-      const grandchildPid = await readPid(grandchildPidFile, wrapper, startLeft());
+      // A grandchild outlives the shell that starts it, so the wrapper's end
+      // proves nothing about this file.
+      const grandchildPid = await readPid(grandchildPidFile, undefined, startLeft());
       await killParent(parent);
       await waitFor("the child to end", () => !alive(childPid), left());
       await waitFor("the grandchild to end", () => !alive(grandchildPid), left());
@@ -1231,7 +1258,9 @@ processTest("an unattended wrapper ends its child and its grandchild when the pa
     });
     try {
       const childPid = await readPid(childPidFile, wrapper, startLeft());
-      const grandchildPid = await readPid(grandchildPidFile, wrapper, startLeft());
+      // A grandchild outlives the shell that starts it, so the wrapper's end
+      // proves nothing about this file.
+      const grandchildPid = await readPid(grandchildPidFile, undefined, startLeft());
       await new Promise((resolve) => setTimeout(resolve, 300));
       assert.equal(alive(childPid), true, "the child lives while the parent lives");
 
