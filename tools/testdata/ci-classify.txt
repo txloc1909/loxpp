@@ -162,7 +162,35 @@ legs debug,release
 targets all
 
 case a change of the heap runs the suites with each collector
-files src/incremental_collector.cpp src/runtime.cpp src/compiler.cpp src/vm.cpp src/worker.cpp
+files src/incremental_collector.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
+labels all
+legs debug,release
+targets all
+
+case a change of src/runtime.cpp, which holds roots, runs the suites with each collector
+files src/runtime.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
+labels all
+legs debug,release
+targets all
+
+case a change of src/compiler.cpp, which holds roots, runs the suites with each collector
+files src/compiler.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
+labels all
+legs debug,release
+targets all
+
+case a change of src/vm.cpp, which holds roots, runs the suites with each collector
+files src/vm.cpp
+gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
+labels all
+legs debug,release
+targets all
+
+case a change of src/worker.cpp, which holds roots, runs the suites with each collector
+files src/worker.cpp
 gates placement,tables,format,native-build,native-unit,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static,gc
 labels all
 legs debug,release
