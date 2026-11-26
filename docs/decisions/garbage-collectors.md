@@ -196,9 +196,11 @@ it. That read happens only during the mark.
 An unreachable `File`, `Socket`, `Server` or `Process` must close its
 handle soon, even when the program stops allocating. These objects are
 few. The heap keeps them in a separate list, and the finish pause frees the
-unmarked ones at once. The incremental sweep does not free them. The sweep
-also finishes at once before a worker goes idle (before `epoll_wait` or the
-inbox wait), so a quiet program does not keep garbage.
+unmarked ones at once. The incremental sweep does not free them. Before a
+worker goes idle (before `epoll_wait` or the inbox wait), the collector uses
+the idle time for steps of the cycle, for at most 0.5 ms each time. It does
+not run the rest of the cycle at once: a wait can be one millisecond long,
+and a request can arrive at any time (review of #1298).
 
 ### 4.6 Workers and foreign objects
 
@@ -566,3 +568,112 @@ What the data showed:
 What the prototype did not check: the `benchmarks/` suite (goal 3), a deep
 stack, a very large globals table, coroutines, a second worker, and the
 probes for the barriers of Instance fields, Map entries and upvalues.
+
+## 14. What N5 chose (#1282)
+
+`IncrementalCollector` (`src/incremental_collector.{h,cpp}`) is the
+`incremental` collector. `LOXPP_GC=incremental` chooses it. `stw` stays the
+default.
+
+- **One white color.** The sweep does not use a second color. Each span has an
+  epoch (`Span::sweepEpoch`). An object that the heap makes during the sweep
+  is marked when its span is not swept, and is left white when its span is
+  swept. This is the rule of 4.4 without a bit in the header.
+- **String read barrier.** During a mark, a lookup that finds a String marks
+  it. During a sweep, it marks the String only when the span of the String is
+  not swept. `PollState::internBarrier` is true in the mark and the sweep.
+  `PollState::marking` is true in the mark only, so the store hooks cost
+  nothing in the sweep.
+- **Weak String table.** The sweep removes a String from the table when it
+  frees it. The finish pause removes the foreign Strings that it releases. No
+  step scans the table.
+- **Gray stack and handle list.** Linked blocks of 2048 bytes from the buffer
+  classes of the heap (`src/seg_stack.h`). No step copies an array.
+- **Chunks.** The tracer cuts a List, a Map, an Instance, a Class, a Coroutine
+  stack and a Task mailbox into parts of 64 units. A Map or a Table that
+  rehashes between two parts is traced again from bucket 0.
+- **Pacing.** A step stops at 8192 units or 100 us. The program runs until
+  the collector has 25% of the time since the cycle began. A cycle starts at
+  1.5 times the live heap that the last cycle found (at least 1 MiB), where
+  the live heap is the heap at the start of that cycle less the bytes that
+  its sweep freed. The heap after a cycle is not used: it holds the objects
+  that the program made during the cycle (they are black), and a pacing that
+  counted them as live let the peak grow to 2.4 to 3.5 times the live heap
+  on a long churn (review of #1298). When the heap passes 1.3 times its size
+  at the start of the cycle, the share rises to 45%. It stays under one
+  half, so that MMU(10 ms) stays above 50%.
+- **Finish pause.** It reads the held objects, the inbox targets and the drain
+  batch again under their locks, traces what is left, runs the verifier,
+  frees the unmarked handle objects, calls `releaseUnreachedForeign`, and
+  starts the sweep. The count of a foreign object is raised when the mark
+  reaches it (`markForeign`), not in the finish pause: the program can give
+  back the count of an envelope in flight during a mark of many steps, and
+  the owner would free the object. This was a defect of the first version of
+  N5 (review of #1298, found with `foreign_string.lox`).
+- **Idle and abort.** `Collector::onIdle` runs steps of the cycle for at most
+  0.5 ms before a worker sleeps. `collectNow` (and so `retire` and a dead heap) cuts a cycle
+  in progress short and runs one full cycle.
+- **Verifier.** A separate mark from the roots, with a hash set, at the end of
+  each mark. It runs in debug builds, or with `LOXPP_GC_VERIFY=1`.
+- **Stress.** `LOXPP_STRESS_GC=1` runs one step of 16 units at each
+  allocation.
+
+### Measurement
+
+`release` build, no verifier, 3 runs of each program (median, or worst of 3).
+Programs of `benchmarks/gc_large_heap/`. Largest `units` of one step,
+99.99th percentile of the step time, MMU(10 ms) (from `tools/gc_report.py`),
+and the peak heap over the live heap. The peak is the largest `bytes_peak` of
+a cycle record (the pacing looks every 16 KiB). The live heap is the largest
+`bytes_after` of a `stw` threshold collection of the same program.
+
+| Program | largest units | p99.99 | MMU(10 ms), worst | peak / live, median, worst |
+|---|---|---|---|---|
+| big_map | 8370 | 233 us | 56.5% | 1.81, 1.82 |
+| list_write | 8202 | 214 us | 57.5% | 2.01, 2.01 |
+| live_then_churn | 8224 | 208 us | 60.9% | 2.02, 2.09 |
+| long_chain | 8203 | 116 us | 60.5% | 1.97, 1.97 |
+| live_then_churn, churn 24000000 | 8224 | 187 us | 60.6% | 2.16, 2.17 |
+
+`stw` has one pause of 88 to 214 ms on the same programs and MMU(10 ms) of 0%.
+`test/gc_incremental/latency/idle_wait.lox` (a live heap of 1.5 million
+objects and 400 short waits) has MMU(10 ms) of 62 to 70%; with the cycle run
+to its end at each idle it was 0.3%. The `benchmarks/` suite, 18 programs, has
+a geometric mean of 0.996 of the time of `stw` (range 0.966 to 1.059). The
+programs of `benchmarks/gc_large_heap/` themselves run longer than with `stw`
+(wall time, one run: big_map 4.40 s against 3.51 s, list_write 2.43 s against
+1.64 s, live_then_churn 1.94 s against 1.74 s, long_chain 2.10 s against
+1.83 s), because the cycles start from the live heap and run at a share of 25
+to 45% of the time.
+
+Known gaps, and where they are filed:
+
+- The finish pause follows the size of the handle list and the foreign set,
+  and so do `beginForeignCycle` (start pause) and `markForeign` (a mark step:
+  the set can rehash). The finish pause also reads the held objects, the inbox
+  targets, the drain batch and what these make gray. #1299.
+- A cycle with cause `exit` is one step of the whole heap. It runs after the
+  program ends, and `tools/gc_report.py` shows it on its own line. #1300.
+- Function, Closure, Enum, DeferredCall and Bound* objects are not cut into
+  parts. The language bounds the size of each. #1301.
+- The start pause reads all roots at once: it grows with the number of tasks
+  and of globals (100000 tasks: 2.25 ms; 32000 globals: 1.25 ms). #1302.
+- A worker that waits for a long time on one wait runs 0.5 ms of its cycle
+  and sleeps. #1303.
+- The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
+  them (#1294, #1295, #1296).
+
+Named bug classes that the review of #1298 found, as constraints for all
+later work:
+
+- **A structure that the tracer cuts by index needs a rule for a removal that
+  moves the elements that stay.** The barrier of a pop sees the element that
+  leaves, not the ones that move. The Task mailbox counts the messages that
+  left the front (`ObjTask::poppedCount`), and the tracer moves its index by
+  the change. A List removal (`eraseAt`) and a mailbox erase shade each moved
+  element. Every other structure that the tracer cuts (Map, Instance, Class,
+  Coroutine stack) was checked: a Map cut by bucket restarts when it
+  rehashes, and a deleted entry is a tombstone, so nothing moves.
+- **A count that a mark reaches must be raised at the reach, not at the end of
+  the mark.** See the finish pause above.
+- **A pacing that counts the objects of the cycle as live.** See Pacing.

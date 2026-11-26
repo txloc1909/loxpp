@@ -98,7 +98,7 @@ TEST(CollectorHooksTest, InternHitReportsTheStringWhileAMarkRuns) {
     ObjString* s = mm.makeString("found");
     mm.pushTempRoot(s);
     PollState poll;
-    poll.marking = true;
+    poll.internBarrier = true;
     RecordingCollector c(poll);
     c.internHit(s);
     ASSERT_EQ(c.interned.size(), 1u);
@@ -133,19 +133,23 @@ TEST(CollectorHooksTest, TheHooksOfTheStopTheWorldCollectorChangeNothing) {
 }
 
 TEST(CollectorHooksTest, TheStopTheWorldCollectorNeverSetsTheMarkFlag) {
-    // The flag gates every barrier hook. A stop-the-world collector that set it
-    // would make each hook do work that this collector does not need.
+    // The flags gate every barrier hook. A stop-the-world collector that set
+    // one would make each hook do work that this collector does not need.
     MemoryManager mm;
+    mm.swapCollector(makeCollectorByName("stw", mm, mm.pollState(), 0));
     EXPECT_FALSE(mm.pollState().marking);
+    EXPECT_FALSE(mm.pollState().internBarrier);
     mm.collectGarbage();
     mm.collector().collectNow(CollectCause::Exit);
     EXPECT_FALSE(mm.pollState().marking);
+    EXPECT_FALSE(mm.pollState().internBarrier);
     // Enough allocation to pass the threshold of the first collection.
     for (int i = 0; i < 6; ++i) {
         mm.makeString(std::string(300000, static_cast<char>('a' + i)));
     }
     EXPECT_GT(mm.collectionCount(), 0u);
     EXPECT_FALSE(mm.pollState().marking);
+    EXPECT_FALSE(mm.pollState().internBarrier);
 }
 
 TEST(CollectorHooksTest, AFreshPollStateNeverPollsBeforeACollectorSetsIt) {
@@ -161,10 +165,16 @@ TEST(CollectorChoiceTest, TheStopTheWorldCollectorIsAKnownName) {
     EXPECT_NE(makeCollectorByName("stw", mm, poll, 0), nullptr);
 }
 
+TEST(CollectorChoiceTest, TheIncrementalCollectorIsAKnownName) {
+    MemoryManager mm;
+    PollState poll;
+    EXPECT_NE(makeCollectorByName("incremental", mm, poll, 0), nullptr);
+}
+
 TEST(CollectorChoiceTest, AnUnknownNameIsNotACollector) {
     MemoryManager mm;
     PollState poll;
-    EXPECT_EQ(makeCollectorByName("incremental", mm, poll, 0), nullptr);
+    EXPECT_EQ(makeCollectorByName("Incremental", mm, poll, 0), nullptr);
     EXPECT_EQ(makeCollectorByName("", mm, poll, 0), nullptr);
 }
 
@@ -200,6 +210,8 @@ TEST(CollectorHeapTest, EachLookupOfTheInternTableCallsTheHook) {
     // its Strings.
     MemoryManager other;
     MemoryManager mm;
+    // No cycle may be open when the recording collector comes in.
+    mm.swapCollector(makeCollectorByName("stw", mm, mm.pollState(), 0));
     ObjString* shared = mm.makeString("shared");
     mm.pushTempRoot(shared);
     ObjString* theirs = other.makeString("shared"); // same text, other heap
@@ -217,7 +229,7 @@ TEST(CollectorHeapTest, EachLookupOfTheInternTableCallsTheHook) {
     EXPECT_EQ(mm.findString("shared"), shared);
     EXPECT_TRUE(rec.interned.empty());
 
-    mm.pollState().marking = true;
+    mm.pollState().internBarrier = true;
     std::size_t hits = 0;
     auto expectOneMoreHit = [&](const char* site) {
         ++hits;
@@ -249,7 +261,7 @@ TEST(CollectorHeapTest, EachLookupOfTheInternTableCallsTheHook) {
     mm.receiveMessage(Value{static_cast<Obj*>(fresh)});
     expectOneMoreHit("receiveMessage, the same String again");
 
-    mm.pollState().marking = false;
+    mm.pollState().internBarrier = false;
     mm.swapCollector(std::move(stw));
 }
 

@@ -1,0 +1,38 @@
+// Entries move between two large Maps in both directions, while garbage makes
+// the collector run: a set over an old key, a delete, and an insert of a key
+// that was deleted before.
+class Node { init(i) { this.i = i; } }
+
+var N = 2000;
+var keys = [];
+var i = 0;
+while (i < N) { keys.append("k" + str(i)); i = i + 1; }
+
+var m1 = {};
+var m2 = {};
+i = 0;
+while (i < N) { m1[keys[i]] = Node(i); m2[keys[i]] = Node(i + N); i = i + 1; }
+
+var round = 0;
+while (round < 12) {
+    i = 0;
+    while (i < N) {
+        var k = keys[(i * 7) % N];
+        var v1 = m1[k];
+        var v2 = m2[k];
+        m1[k] = v2;
+        m2[k] = v1;
+        if (i % 5 == 0) {
+            m1.del(k);
+            m1[k] = v2;
+        }
+        var garbage = Node(i);
+        i = i + 1;
+    }
+    round = round + 1;
+}
+var sum = 0;
+i = 0;
+while (i < N) { sum = sum + m1[keys[i]].i + m2[keys[i]].i; i = i + 1; }
+print len(m1);
+print sum;

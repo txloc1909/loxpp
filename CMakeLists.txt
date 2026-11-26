@@ -114,6 +114,7 @@ set(LOXPP_CORE_SOURCES
     src/memory_manager.cpp
     src/collector.cpp
     src/stw_collector.cpp
+    src/incremental_collector.cpp
     src/size_class_heap.cpp
     src/worker.cpp
     src/poller.cpp

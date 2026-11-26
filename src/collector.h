@@ -31,11 +31,14 @@ struct PollState {
     // A non-empty LOXPP_STRESS_GC value asks for a collection at each
     // allocation. Read once, when the heap starts.
     bool stress{false};
-    // True while the barriers must run. Only an incremental collector sets
-    // it. The write barriers and the read barrier of the intern table
-    // (decision 4.7) test it. The read barrier must also run during a sweep, so
-    // that collector sets the flag for the sweep too, or adds a second flag.
+    // True while a mark runs: the write barriers test it. Only an incremental
+    // collector sets it.
     bool marking{false};
+    // True while a mark or a sweep runs: the read barrier of the intern table
+    // (decision 4.7) tests it. The sweep needs it too, because a lookup must
+    // stop the sweep from freeing a String that it has not reached yet. Only
+    // an incremental collector sets it.
+    bool internBarrier{false};
 };
 
 // Why a caller asks for a collection now. Auto is the cause that the
@@ -76,8 +79,12 @@ class Collector {
 
     // --- Explicit collection and the end of a heap ---------------------
 
-    // A full collection now (the exit of a worker, the idle point, tests).
+    // A full collection now (the exit of a worker, tests).
     virtual void collectNow(CollectCause cause) = 0;
+    // The worker has no work and is about to wait. A collector that keeps a
+    // cycle open finishes it, so that a quiet worker keeps no garbage and no
+    // handle of the operating system.
+    virtual void onIdle() {}
     [[nodiscard]] virtual std::size_t collectionCount() const = 0;
     // Frees every object of the heap. The destructor of the heap calls it.
     virtual void releaseAll() = 0;
@@ -126,7 +133,7 @@ class Collector {
     // The read barrier of the weak String table (section 4.7): a lookup of
     // the intern table found `s`.
     void internHit(ObjString* s) {
-        if (m_poll.marking) {
+        if (m_poll.internBarrier) {
             onInternHit(s);
         }
     }
@@ -137,6 +144,14 @@ class Collector {
 
     PollState& m_poll;
 };
+
+// The clock of the GC trace and of the pacing, in nanoseconds.
+std::uint64_t gcMonotonicNs();
+// Opens the file of LOXPP_GC_TRACE for the heap of worker `workerNumber` and
+// writes the header and the start record. Worker N > 0 writes its own file,
+// `<path>.w<N>`, so two heaps never share one. nullptr when the variable is
+// not set.
+std::FILE* openGcTraceFile(int workerNumber);
 
 // The collector that LOXPP_GC names, for `heap`. An unset or empty variable
 // gives the default, the stop-the-world collector "stw". An unknown name

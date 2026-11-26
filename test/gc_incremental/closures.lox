@@ -1,0 +1,35 @@
+// Closures keep variables that move to the heap when their function returns
+// (closed upvalues). The program writes into them while garbage makes the
+// collector run.
+class Node { init(i) { this.i = i; } }
+
+fun counter(start) {
+    var held = Node(start);
+    fun get() { return held; }
+    fun set(n) { held = n; }
+    return [get, set];
+}
+
+var N = 2000;
+var pairs = [];
+var i = 0;
+while (i < N) { pairs.append(counter(i)); i = i + 1; }
+
+var round = 0;
+while (round < 20) {
+    i = 0;
+    while (i < N) {
+        var p = pairs[i];
+        var q = pairs[(i * 3 + 1) % N];
+        var old = p[0]();
+        p[1](q[0]());
+        q[1](old);
+        var garbage = Node(i);
+        i = i + 1;
+    }
+    round = round + 1;
+}
+var sum = 0;
+i = 0;
+while (i < N) { sum = sum + pairs[i][0]().i; i = i + 1; }
+print sum;

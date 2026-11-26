@@ -73,6 +73,8 @@ FIELDS = (
 
 def run(binary, workdir, env_extra, unset=(), program=PROGRAM):
     env = {k: v for k, v in os.environ.items() if k not in unset}
+    # These checks read the records of the stop-the-world collector.
+    env["LOXPP_GC"] = "stw"
     env.update(env_extra)
     src = os.path.join(workdir, "prog.lox")
     with open(src, "w") as f:

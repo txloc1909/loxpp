@@ -212,6 +212,7 @@ class MemoryManager : public VmAllocBase {
     // The collector reaches the roots, the foreign set and the intern table
     // of its heap through these calls and this friend declaration.
     friend class StwCollector;
+    friend class IncrementalCollector;
     // Calls markObject and markValue of the collector for each root: the
     // root callback, the compiler, the temp roots, the held objects, the
     // inbox targets and the batch that the drain took out.
@@ -224,8 +225,16 @@ class MemoryManager : public VmAllocBase {
     [[nodiscard]] bool foreignMarked(const Obj* obj) const;
     void markHeldRoots();
     void markInboxTargets();
-    void adoptReachedForeign();
-    void releaseUnreachedForeign();
+    // The roots that another thread can change while a mark runs: the held
+    // objects, the inbox targets and the batch of the drain. An incremental
+    // collector reads them again in its finish pause.
+    void markFinishRoots();
+    // Drops the count on each foreign object that the cycle did not reach.
+    // With dropStrings, a String among them leaves the intern table first: a
+    // collector that does not scan the table (decision 4.7) removes the
+    // Strings of this heap when it frees them, and these are the others.
+    void releaseUnreachedForeign(bool dropStrings = false);
+    [[nodiscard]] std::size_t foreignCount() const { return m_foreign.size(); }
 
     // True when the allocation that is about to happen is a safe point at
     // which the collector has work. One compare of members of the heap.
@@ -237,7 +246,7 @@ class MemoryManager : public VmAllocBase {
     // state of the heap, so a lookup that finds a String (the common case)
     // pays one load, not three.
     void noteInternHit(ObjString* s) const {
-        if (m_poll.marking) {
+        if (m_poll.internBarrier) {
             m_collector->internHit(s);
         }
     }
@@ -268,10 +277,6 @@ class MemoryManager : public VmAllocBase {
     // is the side mark of the collection in progress. The header mark bit of
     // a foreign object belongs to its owner's collector.
     std::unordered_map<Obj*, bool> m_foreign;
-    // Foreign objects the collection in progress reached that were not in
-    // the set yet. The collection raises their counts before it releases
-    // any count.
-    std::vector<Obj*> m_reachedForeign;
     // An envelope batch that the drain took out of the inbox and has not
     // delivered yet: the receiver's roots while it delivers.
     std::vector<Envelope> m_draining;

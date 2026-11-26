@@ -1748,6 +1748,18 @@ Poller& Runtime::poller() {
 
 Runtime::WaitResult Runtime::waitForWork() {
     Inbox& inbox = m_mm.inbox();
+    {
+        bool quiet;
+        {
+            std::lock_guard<std::mutex> lock(inbox.mutex);
+            quiet = inbox.queue.empty();
+        }
+        // The worker may sleep. A collector with a cycle open ends it now, so
+        // that a quiet worker keeps no garbage and no handle.
+        if (quiet) {
+            m_mm.collector().onIdle();
+        }
+    }
     std::unique_lock<std::mutex> lock(inbox.mutex);
     std::vector<Poller::Token> ready;
     for (;;) {

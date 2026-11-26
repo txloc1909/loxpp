@@ -184,6 +184,7 @@ def check_real_run(binary, d):
     prog = write(d, "prog.lox", 'var s = "x";\nfor (var i = 0; i < 22; i = i + 1) { s = s + s; }\n')
     trace = os.path.join(d, "real.trace")
     env = {k: v for k, v in os.environ.items() if k != "LOXPP_STRESS_GC"}
+    env["LOXPP_GC"] = "stw"
     env["LOXPP_GC_TRACE"] = trace
     try:
         r = subprocess.run([binary, prog], env=env, cwd=d, capture_output=True,

@@ -89,8 +89,20 @@ class SizeClassHeap {
     // then the destructor, then the slot goes to its free list. Clears the
     // marks of `s`. Returns the number of objects that live on. A destructor
     // may free a buffer, never an object.
+    // Stamps the span as swept in the current sweep (beginSweep).
     template <typename OnDead>
     std::size_t sweepSpan(Span* s, OnDead&& onDead);
+    // A sweep that goes through the spans in more than one step starts here.
+    // Every span is unswept until sweepSpan visits it, and a span that the heap
+    // takes after this call counts as swept, because the sweep does not need
+    // to visit it. The sweep is by epoch, not by a flag in each span, so the
+    // start costs one increment, whatever the number of spans.
+    void beginSweep() { ++m_sweepEpoch; }
+    [[nodiscard]] bool spanSwept(const Span* s) const;
+    // True when `obj` is in a span that the current sweep has not visited.
+    [[nodiscard]] bool isUnswept(const Obj* obj) const;
+    // Clears every mark bit. A collection that stops before its sweep uses it.
+    void clearAllMarks();
     // Calls fn(obj, marked) for each committed object, in no set order.
     template <typename Fn>
     void forEachObject(Fn&& fn);
@@ -201,6 +213,7 @@ class SizeClassHeap {
     std::size_t m_chunkBytes{0};
     std::size_t m_chunkCount{0};
     std::size_t m_objects{0};
+    std::uint32_t m_sweepEpoch{0};
     std::size_t m_osCalls{0};
     std::FILE* m_stallTrace{nullptr};
     std::uint64_t m_stallLimitNs{kDefaultStallLimitNs};
@@ -213,12 +226,15 @@ struct SizeClassHeap::Span {
     Span* partialPrev;
     Span* objectNext; // the list of object spans; never unlinked
     void* freeHead;   // intrusive: the first word of a free slot
-    std::uint32_t bump;
-    std::uint32_t used; // slots handed out, committed or not
-    std::uint32_t slotSize;
-    std::uint32_t slots;
-    std::uint32_t slotsOffset;
     std::uint32_t reciprocal;
+    // The sweep epoch of the last sweep that visited the span, or of the
+    // epoch in which the heap took the span (SizeClassHeap::beginSweep).
+    std::uint32_t sweepEpoch;
+    std::uint16_t bump;
+    std::uint16_t used; // slots handed out, committed or not
+    std::uint16_t slotSize;
+    std::uint16_t slots;
+    std::uint16_t slotsOffset;
     std::uint16_t cls;
     std::uint16_t bitmapWords;
     std::uint8_t kind;
@@ -257,6 +273,14 @@ inline SizeClassHeap::Span* spanOf(const void* p) {
         reinterpret_cast<std::uintptr_t>(p) & ~(SizeClassHeap::kSpanSize - 1));
 }
 } // namespace size_class_heap_detail
+
+inline bool SizeClassHeap::spanSwept(const Span* s) const {
+    return s->sweepEpoch == m_sweepEpoch;
+}
+
+inline bool SizeClassHeap::isUnswept(const Obj* obj) const {
+    return size_class_heap_detail::spanOf(obj)->sweepEpoch != m_sweepEpoch;
+}
 
 inline bool SizeClassHeap::isMarked(const Obj* obj) const {
     Span* s = size_class_heap_detail::spanOf(obj);
@@ -301,6 +325,7 @@ std::size_t SizeClassHeap::sweepSpan(Span* s, OnDead&& onDead) {
         }
         marks[w] = 0;
     }
+    s->sweepEpoch = m_sweepEpoch;
     releaseIfEmpty(s);
     return live;
 }

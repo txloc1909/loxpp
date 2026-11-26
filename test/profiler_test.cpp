@@ -160,6 +160,28 @@ TEST_F(ProfilerTest, SelfTimeLeTotalTime) {
 // ---------------------------------------------------------------------------
 
 TEST_F(ProfilerTest, GcStatsPopulated) {
+    // The profile counts a collection when it ends. A program this short ends
+    // before an incremental cycle does, so the test names the collector whose
+    // collection ends inside one allocation.
+    struct PinnedCollector {
+        PinnedCollector() {
+            const char* old = std::getenv("LOXPP_GC");
+            had = old != nullptr;
+            if (had) {
+                saved = old;
+            }
+            setenv("LOXPP_GC", "stw", 1);
+        }
+        ~PinnedCollector() {
+            if (had) {
+                setenv("LOXPP_GC", saved.c_str(), 1);
+            } else {
+                unsetenv("LOXPP_GC");
+            }
+        }
+        bool had{false};
+        std::string saved;
+    } pinned;
     VM vm;
     // Build many short-lived strings to trigger at least one GC cycle.
     const ProfilerData& data = runAndGetProfile(vm, R"(

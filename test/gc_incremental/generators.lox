@@ -1,0 +1,36 @@
+// Suspended coroutines keep their stack in the heap. They resume and suspend
+// while garbage makes the collector run, so the snapshots are written and
+// cleared during a mark.
+class Node { init(i) { this.i = i; } }
+
+fun makeGen(n) {
+  fun gen() {
+    var local = Node(n);
+    var keep = [Node(n), Node(n + 1), Node(n + 2)];
+    var k = 0;
+    while (true) {
+        yield local.i + keep[k % 3].i;
+        local = Node(local.i + 1);
+        keep[k % 3] = Node(k);
+        k = k + 1;
+    }
+  }
+  return gen;
+}
+
+var N = 300;
+var gens = [];
+var i = 0;
+while (i < N) { gens.append(coroutine.create(makeGen(i))); i = i + 1; }
+var sum = 0;
+var round = 0;
+while (round < 40) {
+    i = 0;
+    while (i < N) {
+        sum = sum + gens[i].resume();
+        var garbage = Node(i);
+        i = i + 1;
+    }
+    round = round + 1;
+}
+print sum;

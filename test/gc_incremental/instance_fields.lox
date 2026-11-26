@@ -1,0 +1,35 @@
+// A field of an old Instance is overwritten with an object that was in a field
+// of another old Instance, and the other way round, while garbage makes the
+// collector run. Each object stays in some field, so none is garbage. The
+// object that leaves a field that the mark has not traced can arrive in one
+// that it has traced already. Only the barrier on the old value keeps it.
+class Box { init(v) { this.v = v; this.w = nil; } }
+class Node { init(i) { this.i = i; } }
+
+var N = 3000;
+var boxes = [];
+var i = 0;
+while (i < N) {
+    var b = Box(Node(i));
+    b.w = Node(i + N);
+    boxes.append(b);
+    i = i + 1;
+}
+var round = 0;
+while (round < 25) {
+    i = 0;
+    while (i < N) {
+        var bi = boxes[i];
+        var bj = boxes[(i * 7 + 13 + round) % N];
+        var t = bi.v;
+        bi.v = bj.w;
+        bj.w = t;
+        var garbage = Node(i);
+        i = i + 1;
+    }
+    round = round + 1;
+}
+var sum = 0;
+i = 0;
+while (i < N) { sum = sum + boxes[i].v.i + boxes[i].w.i; i = i + 1; }
+print sum;

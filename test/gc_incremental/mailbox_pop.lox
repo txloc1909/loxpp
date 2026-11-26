@@ -1,0 +1,17 @@
+// A task sends many Strings to itself, then receives them one by one. Each
+// receive takes the first message, and each message that stays moves one
+// place to the front. A collector that traces the mailbox in parts must not
+// lose a message that moves into a part that it traced already. This copy has
+// a mailbox that a run with a step at each allocation can finish.
+var n = 3000;
+var i = 0;
+while (i < n) { task.send(task.self(), "m" + str(i) + "-" + str(i * 7)); i = i + 1; }
+var j = 0;
+var ok = 0;
+while (j < n) {
+    var m = task.receive();
+    var g = [j, j, j];
+    if (m == "m" + str(j) + "-" + str(j * 7)) { ok = ok + 1; }
+    j = j + 1;
+}
+print ok;

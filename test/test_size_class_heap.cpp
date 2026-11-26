@@ -109,6 +109,8 @@ TEST(SizeClassHeap, AMarkBitBelongsToOneObject) {
 
 TEST(SizeClassHeap, ASweepFreesTheUnmarkedAndKeepsTheMarked) {
     MemoryManager mm;
+    // The test marks and sweeps by hand, so no collector may run beside it.
+    mm.swapCollector(makeCollectorByName("stw", mm, mm.pollState(), 0));
     SizeClassHeap& store = mm.store();
     std::vector<ObjString*> strings;
     for (int i = 0; i < 500; ++i) {

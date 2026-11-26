@@ -1,0 +1,19 @@
+// A deep recursion, so the roots are many when the cycle starts, and objects
+// that live only in the frames.
+class Node { init(i) { this.i = i; } }
+
+fun down(n) {
+    var mine = Node(n);
+    var spare = [Node(n), Node(n)];
+    if (n == 0) { return 0; }
+    var r = down(n - 1);
+    return r + mine.i + spare[0].i;
+}
+
+var total = 0;
+var round = 0;
+while (round < 60) {
+    total = total + down(900);
+    round = round + 1;
+}
+print total;

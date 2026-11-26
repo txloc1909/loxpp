@@ -44,6 +44,7 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/memory_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/collector.cpp
     ${PROJECT_SOURCE_DIR}/src/stw_collector.cpp
+    ${PROJECT_SOURCE_DIR}/src/incremental_collector.cpp
     ${PROJECT_SOURCE_DIR}/src/size_class_heap.cpp
     ${PROJECT_SOURCE_DIR}/src/worker.cpp
     ${PROJECT_SOURCE_DIR}/src/poller.cpp
@@ -109,6 +110,7 @@ loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_cor
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector       test_collector.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector_gc    test_collector.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_incremental_collector test_incremental_collector.cpp CORE loxpp_test_core)
 loxpp_add_test(test_barrier        test_barrier.cpp         CORE loxpp_test_core)
 loxpp_add_test(test_barrier_gc     test_barrier.cpp         CORE loxpp_test_core)
 loxpp_add_test(test_allocator_gc    test_allocator.cpp       CORE loxpp_test_core)
@@ -297,6 +299,17 @@ if(LOXPP_PYTHON3)
                 $<TARGET_FILE:loxpp>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(GcStall PROPERTIES
+        ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
+        SKIP_RETURN_CODE 125)
+
+    # The incremental collector must give the output of the reference collector
+    # on the probes of test/gc_incremental/, with a step at each allocation and
+    # with the verifier on, and it must write a trace that gc_report.py reads.
+    add_test(NAME GcIncremental
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_gc_incremental.py
+                $<TARGET_FILE:loxpp>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(GcIncremental PROPERTIES
         ENVIRONMENT "LOXPP_EXEC_TRACE_ENABLED=${LOXPP_SWEEP_TRACE_ENABLED}"
         SKIP_RETURN_CODE 125)
 
@@ -599,6 +612,7 @@ set(LOXPP_GC_STRESS_TARGETS
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
     test_allocator test_allocator_gc test_size_class_heap test_size_class_heap_gc test_collector test_collector_gc
+    test_incremental_collector
     test_barrier test_barrier_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
     test_file_readline
