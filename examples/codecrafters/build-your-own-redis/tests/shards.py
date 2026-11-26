@@ -8,6 +8,9 @@
 #
 # The split balances the local wall time of each group (about 115 to 125 s a
 # shard, against 473 s for one run of all groups).
+#
+# --collectors stw,incremental lists the collectors. Each shard then runs once
+# for each of them, with LOXPP_GC set to its name. The default is stw.
 import json
 import os
 import sys
@@ -33,8 +36,17 @@ def main():
         print("shards.py: missing %r, unknown %r, repeated %r" % (missing, unknown, repeated))
         return 1
     if "--matrix" in sys.argv[1:]:
+        collectors = ["stw"]
+        if "--collectors" in sys.argv[1:]:
+            collectors = sys.argv[sys.argv.index("--collectors") + 1].split(",")
+        unknown = sorted(set(collectors) - {"stw", "incremental"})
+        if unknown or not collectors or "" in collectors:
+            print("shards.py: unknown collectors %r" % (unknown or collectors,))
+            return 1
         print(json.dumps({"include": [
-            {"name": "shard %d" % (i + 1), "groups": ",".join(shard)}
+            {"name": "shard %d" % (i + 1) + ("" if gc == "stw" else ", " + gc),
+             "groups": ",".join(shard), "gc": gc}
+            for gc in collectors
             for i, shard in enumerate(SHARDS)]}))
         return 0
     print("shards.py: %d groups in %d shards, each once" % (len(groups), len(SHARDS)))

@@ -224,7 +224,7 @@ def check_job_references(class_map, files, yml):
     return errors
 
 
-NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes"}
+NATIVE_LEG_GATES = {"native-build", "native-unit", "native-checks", "probes", "gc"}
 
 
 def check_build_steps(class_map, yml):
@@ -277,6 +277,27 @@ def check_ctest_steps(class_map, yml, labels):
                             f"ci.yml: a step of the job {job} runs the test {test} for the gates {sorted(here)}, "
                             f"but the class {name} selects that test and does not select those gates"
                         )
+    return errors
+
+
+def check_ctest_selection(yml):
+    """A step that runs ctest in the build directory must follow the selection
+    of the change. A full `ctest` on a partial build runs about a hundred
+    placeholder tests that cannot run, and ends with status 8."""
+    errors = []
+    for job, text in job_texts(yml).items():
+        _, steps = job_steps(text)
+        for step in steps:
+            body = without_comments(step)
+            if "ctest --test-dir build" not in body:
+                continue
+            name = re.search(r"(?m)^      - (?:name|uses): (.*)$", step).group(1)
+            selected = "-R " in body or "-L " in body or "-R\\" in body
+            if "CTEST_ALL" not in body and not selected:
+                errors.append(
+                    f"ci.yml: the step {name!r} of the job {job} runs the whole ctest "
+                    "and does not follow CTEST_ALL, CTEST_REGEX and CTEST_NAMES"
+                )
     return errors
 
 
@@ -548,6 +569,7 @@ def check(class_map, files, yml, cmake, labels):
             errors.append(f"{file} matches no path line")
     errors += check_job_references(class_map, files, yml)
     errors += check_job_gates(class_map, yml)
+    errors += check_ctest_selection(yml)
     errors += check_ctest_steps(class_map, yml, labels)
     errors += check_build_steps(class_map, yml)
     errors += check_test_references(class_map, files, cmake, labels)

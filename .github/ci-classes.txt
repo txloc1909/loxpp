@@ -21,6 +21,9 @@
 #                  probes, the examples or a differential through a harness tool.
 #                  A job runs for its own gate or for this one, and its other
 #                  steps test their own gate.
+#   gc             the steps that run each collector: the suites with `incremental`,
+#                  the comparison of the collectors, the pause gate and the Redis
+#                  load. A change of the heap or of the collector selects them.
 #   jvm            the JVM backend job
 #   qbe            the QBE backend job
 #   cross          the checks that compare native with the bootstrap interpreter
@@ -78,6 +81,31 @@ path src/backend/capture_analysis.*            shared-backend
 path src/backend/native_pops.*                 shared-backend
 path src/tooling/**                            tooling
 path src/lsp/**                                tooling
+# The heap and the collectors. These files also select the work of `core`.
+path src/memory_manager.*                      core,gc-heap
+path src/collector.*                           core,gc-heap
+path src/stw_collector.*                       core,gc-heap
+path src/incremental_collector.*               core,gc-heap
+path src/size_class_heap.*                     core,gc-heap
+path src/seg_stack.h                           core,gc-heap
+path src/barrier.h                             core,gc-heap
+path src/memory.h                              core,gc-heap
+path src/vm_allocator.h                        core,gc-heap
+path src/object.*                              core,gc-heap
+path src/object_trace.h                        core,gc-heap
+path src/objects.h                             core,gc-heap
+path src/class_objects.h                       core,gc-heap
+path src/exec_objects.h                        core,gc-heap
+path src/container_objects.*                   core,gc-heap
+path src/table.*                               core,gc-heap
+path src/core_hash_map.h                       core,gc-heap
+path src/value.*                               core,gc-heap
+# The roots that each collector reads (Runtime::markRoots, Compiler::markRoots),
+# the stack and the worker heaps.
+path src/runtime.*                             core,gc-heap
+path src/compiler.*                            core,gc-heap
+path src/vm.*                                  core,gc-heap
+path src/worker.*                              core,gc-heap
 path src/**                                    core
 path runtime/jvm/**                            jvm
 
@@ -91,6 +119,7 @@ path test/*.cpp                                test-source
 
 # --- programs. The sweeps of examples/ and test/ are not recursive, so
 # examples/codecrafters/ is a class of its own.
+path examples/codecrafters/build-your-own-redis/tests/gc_load.py codecrafters,gc-heap
 path examples/codecrafters/**                  codecrafters
 path examples/**                               programs
 path test/translation-probes/29_os_access.lox  programs,cross-probe
@@ -100,8 +129,8 @@ path test/print-lines/**                       programs
 path test/translation-probes/**                programs
 path test/coroutine-probes/**                  programs
 path bootstrap/**                              bootstrap
-path benchmarks/gc_large_heap/**                gc-large-heap
-path test/gc_incremental/**                    gc-incremental
+path benchmarks/gc_large_heap/**                gc-large-heap,gc-heap
+path test/gc_incremental/**                    gc-incremental,gc-heap
 path benchmarks/**                             bench
 
 # --- tools, by the consumer that runs them
@@ -138,8 +167,9 @@ path tools/check_diff_runtimes_*               harness
 path tools/diff_runtimes.py                    harness
 path tools/check_coroutine_probes.sh           harness
 path tools/check_file_durability.sh            harness
-path tools/gc_report.py                        core
-path tools/check_gc_*                          core
+path tools/gc_report.py                        core,gc-heap
+path tools/check_gc_*                          core,gc-heap
+path tools/diff_gc_collectors.py               core,gc-heap
 path tools/check_repl_session.py               core
 path tools/count_instructions.py               core
 path tools/build_release.sh                    packaging
@@ -179,7 +209,7 @@ class harness          gates=tables,probes labels=harness,corpus
 class lsp-smoke        gates=lsp,release-static
 # tools/runner_precondition.py is a module of the tools that start a runner. Each
 # test that runs such a tool and has the label core runs by name.
-class runner-lib       gates=lsp,release-static,probes labels=bootstrap tests=GcTrace,GcTraceV3,GcCollectorChoice,GcLargeHeap,GcStwCounts,GcStall,GcSweepLinear,GcMinHeap,GcIncremental,ReplSession
+class runner-lib       gates=lsp,release-static,probes,gc labels=bootstrap tests=GcTrace,GcTraceV3,GcCollectorChoice,GcLargeHeap,GcStwCounts,GcStall,GcSweepLinear,GcMinHeap,GcIncremental,GcPauseGate,GcCollectorRuns,GcCollectorDiff,ReplSession
 # test/CMakeLists.txt runs RunnerPrecondition, which scans every tools/*.py
 # file for one that starts a process, so each of them selects it.
 class py-tool          tests=RunnerPrecondition
@@ -195,6 +225,10 @@ class bench            labels=bench
 class gc-large-heap    tests=GcLargeHeap,GcStwCounts
 # The contract document holds the table that GcBarrierTable checks.
 class gc-barrier-doc   tests=GcBarrierTable
+# A change of the heap runs the suites with each collector: the native tests,
+# the example corpus, the QBE job, the Redis shards and the pause gate. It
+# does not run the JVM and the editor jobs, which the heap does not reach.
+class gc-heap          gates=gc,native-build,native-checks,qbe,codecrafters labels=all
 # The probes of the incremental collector run through GcIncremental.
 class gc-incremental   tests=GcIncremental
 class pi               gates=pi
@@ -214,10 +248,11 @@ job tree-sitter           gates=tree-sitter
 job loxpp-lsp             gates=lsp
 job neovim-plugin         gates=neovim
 job vscode-extension      gates=vscode
-job build-and-test        gates=native-build,native-unit,native-checks,probes
+job build-and-test        gates=native-build,native-unit,native-checks,probes,gc
 job codecrafters          gates=codecrafters
-job redis-shard-plan      gates=codecrafters
-job redis-stage-shards    gates=codecrafters
+job redis-shard-plan      gates=codecrafters,gc
+job redis-stage-shards    gates=codecrafters,gc
+job gc-pause              gates=gc
 job managed-toolchains    gates=jvm,probes
 job cross-consumer        gates=cross,probes
 job qbe-toolchain         gates=qbe,probes

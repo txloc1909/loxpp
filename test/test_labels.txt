@@ -91,6 +91,9 @@ GcLargeHeap core
 GcStwCounts core
 GcStall core
 GcIncremental core
+GcPauseGate core
+GcCollectorRuns core
+GcCollectorDiff core,harness
 test_size_class_heap core
 test_size_class_heap_gc core
 GcBarrierTable core
