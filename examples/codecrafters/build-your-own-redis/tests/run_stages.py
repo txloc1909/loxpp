@@ -8,6 +8,7 @@
 #
 # Usage: tests/run_stages.py [your_program.sh]
 
+import fcntl
 import hashlib
 import os
 import random
@@ -39,12 +40,60 @@ def check(name, cond, detail=""):
         print("  FAIL %s  %s" % (name, detail))
 
 
-def free_port():
+# The ports of the servers a suite starts. The range is outside the one the OS
+# hands to client sockets on the hosts these suites run on, so a connection
+# cannot take a port between the moment free_port() picks it and the moment the
+# server binds it; the retry of the start covers a host that differs. The counter
+# file is at a fixed path, not under tempfile.gettempdir(), so suites that run with
+# a different TMPDIR share one counter. The path names the uid, so the suites of
+# two users keep one counter each.
+PORT_LOW = 20000
+PORT_HIGH = 30000
+PORT_FILE = "/tmp/loxpp-test-ports-%d" % os.getuid()
+START_ATTEMPTS = 5
+
+
+def port_taken(port):
+    """True when a socket holds the port now."""
     s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        return True
+    finally:
+        s.close()
+    return False
+
+
+def free_port():
+    """A port that is free now and that no other suite of this user has taken.
+
+    Binding port 0 and closing the socket races: a second suite reads the same
+    port, and then the two servers fight for it. One of them fails to bind, or,
+    worse, the loser is still starting while the winner serves, and a suite
+    talks to the server of another suite. The counter under the lock gives
+    every caller a port of its own instead.
+    """
+    with open(PORT_FILE, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            text = f.read().strip()
+            port = int(text) if text.isdigit() else PORT_LOW
+            if not PORT_LOW <= port < PORT_HIGH:
+                port = PORT_LOW
+            for _ in range(PORT_HIGH - PORT_LOW):
+                if not port_taken(port):
+                    f.seek(0)
+                    f.truncate()
+                    f.write("%d\n" % (port + 1 if port + 1 < PORT_HIGH else PORT_LOW))
+                    f.flush()
+                    return port
+                port = PORT_LOW if port + 1 == PORT_HIGH else port + 1
+            raise RuntimeError("no free port in %d..%d" % (PORT_LOW, PORT_HIGH))
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def rand_word(n=8):
@@ -57,17 +106,32 @@ def rand_word(n=8):
 
 
 class Server:
-    def __init__(self, prog, args, cwd=None, env=None):
-        self.port = free_port()
+    def __init__(self, prog, args, cwd=None, env=None, port=None):
+        """`port` names the port of the first attempt, so a case can force a
+        port that another process takes. Later attempts take a fresh one."""
         self.log = tempfile.NamedTemporaryFile(
             prefix="loxpp-redis-", suffix=".log", delete=False)
-        self.proc = subprocess.Popen(
-            [prog, "--port", str(self.port)] + args,
-            stdout=self.log, stderr=subprocess.STDOUT, cwd=cwd,
-            env=None if env is None else dict(os.environ, **env))
-        self.up = self._wait_up()
+        for attempt in range(START_ATTEMPTS):
+            self.port = free_port() if attempt or port is None else port
+            self.proc = subprocess.Popen(
+                [prog, "--port", str(self.port)] + args,
+                stdout=self.log, stderr=subprocess.STDOUT, cwd=cwd,
+                env=None if env is None else dict(os.environ, **env))
+            self.up = self._wait_up()
+            if self.up or self.proc.poll() is None or not port_taken(self.port):
+                break
+            # The server exited and another process holds its port: the port
+            # was taken from it, so start the server on a fresh one.
+            self.proc.wait()
 
     def _wait_up(self):
+        """True when a server answers on the port.
+
+        A process outside the suites that binds the port in this window answers
+        too, and no portable check tells whose listener it is. free_port() has
+        proved the port free and the counter keeps the other suites of this
+        user off it, so only such a process can be that one.
+        """
         deadline = time.time() + 5
         while time.time() < deadline:
             if self.proc.poll() is not None:
@@ -213,6 +277,21 @@ def stages_base(prog):
         check("base-01 bind to a port", srv.up, srv.log_text())
         if not srv.up:
             return
+
+        # A port that another process takes between free_port() and the bind
+        # must not silence the suite: the server starts on the next port.
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", 0))
+        taken = blocker.getsockname()[1]
+        again = Server(prog, [], port=taken)
+        try:
+            check("local: a port another process takes starts the server on another one",
+                  again.up and again.port != taken,
+                  "up %r, port %r, taken %r, log %r"
+                  % (again.up, again.port, taken, again.log_text()[-200:]))
+        finally:
+            again.stop()
+            blocker.close()
 
         c = srv.client()
         check("base-02 respond to PING", c.call("PING") == "PONG")

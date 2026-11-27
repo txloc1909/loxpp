@@ -21,7 +21,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from run_stages import free_port, start_server  # noqa: E402
+from run_stages import start_server  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -57,8 +57,7 @@ def main():
     with open(os.path.join(directory, "payload"), "wb") as f:
         f.write(bytes(range(256)) * 4)
 
-    port = free_port()
-    proc, log_path, up = start_server(prog, directory, port)
+    proc, port, log_path, up = start_server(prog, directory)
     if not up:
         print("server did not start:\n%s" % open(log_path).read())
         return 1
