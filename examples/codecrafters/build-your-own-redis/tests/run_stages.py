@@ -1417,7 +1417,7 @@ def stages_streams(prog):
 
 class Asker:
     """A client whose call() never raises: when a reply does not come or
-    cannot be read, it gives TIMEOUT or CLOSED and opens a new connection.
+    cannot be read, it gives TIMEOUT, CLOSED or BAD_REPLY and opens a new connection.
     So one broken reply fails its own case, and the cases after it still
     run."""
 
