@@ -368,6 +368,22 @@
   ]
  },
  {
+  "name": "FC of -1 tested by the top byte only",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos + 7:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -2 has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without the lowest byte",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos + 1:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -2 has passed"
+  ]
+ },
+ {
   "name": "FC of -1 is a negative time",
   "old": "            if (allOnes) {\n                expiresAt = nil;\n            } else if (top >= 128) {",
   "new": "            if (top >= 128) {",
