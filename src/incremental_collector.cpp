@@ -44,7 +44,7 @@ bool isLeaf(ObjType t) {
 IncrementalCollector::IncrementalCollector(MemoryManager& heap, PollState& poll,
                                            int workerNumber)
     : Collector(poll), m_heap(heap), m_store(heap.store()), m_gray(m_store),
-      m_handles(m_store), m_verifyStack(m_store),
+      m_handles(m_store), m_handlesKeep(m_store), m_verifyStack(m_store),
       m_verifyAtFinish(verifyEnabled()),
       m_trace(openGcTraceFile(workerNumber)) {
     m_poll.pollAt = kMinHeap;
@@ -126,9 +126,11 @@ void IncrementalCollector::onStore(Store, Obj*, const Value& oldv,
 
 void IncrementalCollector::onInternHit(ObjString* s) {
     if (s->heapId != m_heap.heapId()) {
-        // A foreign String is kept or dropped in the finish pause, with the
-        // other foreign objects.
-        if (m_phase == Phase::Mark) {
+        // A foreign String is kept or dropped with the other foreign objects:
+        // in the mark, and while the stage of the sweep that drops them runs
+        // (the stage has not reached the String yet, and the program holds it
+        // now).
+        if (m_phase == Phase::Mark || m_foreignStage) {
             shade(s);
         }
         return;
@@ -144,7 +146,9 @@ void IncrementalCollector::onInternHit(ObjString* s) {
 
 void IncrementalCollector::onCreate(Obj* obj) {
     if (ownsHandle(obj->type)) {
-        m_handles.push(obj);
+        // The stage that frees the unmarked handles must not see an object
+        // that the program made after the mark: it is white.
+        (m_handleStage ? m_handlesKeep : m_handles).push(obj);
     }
     if (m_phase == Phase::Mark) {
         m_store.tryMark(obj);
@@ -428,23 +432,60 @@ bool IncrementalCollector::markStep(std::size_t units,
     return done;
 }
 
-void IncrementalCollector::freeUnmarkedHandles() {
-    // The marks of this cycle are complete, so an unmarked handle object is
-    // unreachable. Its destructor closes the handle of the operating system.
-    const std::size_t bytes0 = m_heap.bytesAllocated;
-    SegStack<Obj*> keep(m_store);
-    while (!m_handles.empty()) {
-        Obj* obj = m_handles.pop();
-        ++m_units;
-        if (m_store.isMarked(obj)) {
-            keep.push(obj);
-            continue;
+std::size_t IncrementalCollector::runReleaseStages(std::size_t units,
+                                                   std::uint64_t deadlineNs) {
+    // The marks of this cycle are complete and no span is swept yet, so an
+    // unmarked handle object is unreachable. Its destructor closes the handle
+    // of the operating system.
+    std::size_t done = 0;
+    while (m_handleStage) {
+        if (m_handles.empty()) {
+            m_handles.swap(m_handlesKeep);
+            m_handleStage = false;
+            break;
         }
-        ++m_cycleFreed;
-        m_heap.release(obj, objAllocatedSize(obj));
+        if (done >= units) {
+            return done;
+        }
+        Obj* obj = m_handles.pop();
+        ++done;
+        if (m_store.isMarked(obj)) {
+            m_handlesKeep.push(obj);
+        } else {
+            ++m_cycleFreed;
+            m_heap.release(obj, objAllocatedSize(obj));
+        }
+        if (deadlineNs != 0 && done % kChunkUnits == 0 &&
+            gcMonotonicNs() >= deadlineNs) {
+            return done;
+        }
     }
-    m_handles.swap(keep);
-    m_cycleFreedBytes += bytes0 - m_heap.bytesAllocated;
+    while (m_foreignStage) {
+        if (!m_heap.foreignReleasing()) {
+            m_foreignStage = false;
+            break;
+        }
+        if (done >= units) {
+            return done;
+        }
+        done += m_heap.releaseForeignStep(std::min(units - done, kChunkUnits),
+                                          true);
+        if (deadlineNs != 0 && gcMonotonicNs() >= deadlineNs) {
+            return done;
+        }
+    }
+    return done;
+}
+
+void IncrementalCollector::cancelReleaseStages() {
+    if (m_handleStage) {
+        while (!m_handlesKeep.empty()) {
+            m_handles.push(m_handlesKeep.pop());
+        }
+        m_handleStage = false;
+    }
+    m_foreignStage = false;
+    m_heap.endForeignRelease();
 }
 
 void IncrementalCollector::finishMark() {
@@ -463,10 +504,12 @@ void IncrementalCollector::finishMark() {
                      "GC verifier: the mark missed a reachable object\n");
         std::abort();
     }
-    m_units += m_heap.foreignCount();
     m_cycleObjsFinish = m_store.objectCount();
-    freeUnmarkedHandles();
-    m_heap.releaseUnreachedForeign(true);
+    // The handle list and the foreign set are visited in parts at the start
+    // of the sweep, so this pause does not follow their size.
+    m_handleStage = true;
+    m_foreignStage = true;
+    m_heap.beginForeignRelease();
     m_store.beginSweep();
     m_sweepCursor = m_store.firstObjectSpan();
     setPhase(Phase::Sweep);
@@ -511,8 +554,10 @@ bool IncrementalCollector::sweepStep(std::size_t units,
                                      std::uint64_t deadlineNs) {
     const std::uint64_t t0 = gcMonotonicNs();
     const std::size_t bytes0 = m_heap.bytesAllocated;
-    std::size_t done = 0;
-    while (m_sweepCursor != nullptr) {
+    std::size_t done = runReleaseStages(units, deadlineNs);
+    // A span is not swept while a stage runs: a stage reads the marks.
+    while (m_sweepCursor != nullptr && !m_handleStage && !m_foreignStage &&
+           done < units) {
         SizeClassHeap::Span* s = m_sweepCursor;
         if (m_store.spanSwept(s)) {
             m_sweepCursor = SizeClassHeap::nextObjectSpan(s);
@@ -535,7 +580,8 @@ bool IncrementalCollector::sweepStep(std::size_t units,
         }
     }
     m_cycleFreedBytes += bytes0 - m_heap.bytesAllocated;
-    const bool over = m_sweepCursor == nullptr;
+    const bool over =
+        m_sweepCursor == nullptr && !m_handleStage && !m_foreignStage;
     logStep("sweep", t0, gcMonotonicNs(), done);
     if (over) {
         endCycle();
@@ -612,6 +658,7 @@ void IncrementalCollector::abortCycle() {
         m_gray.pop();
     }
     m_cur = nullptr;
+    cancelReleaseStages();
     m_store.clearAllMarks();
     m_sweepCursor = nullptr;
     setPhase(Phase::Idle);
@@ -656,6 +703,7 @@ void IncrementalCollector::onIdle() {
 void IncrementalCollector::releaseAll() {
     abortCycle();
     m_handles.clear();
+    m_handlesKeep.clear();
     m_store.destroyAllObjects();
     m_heap.bytesAllocated = 0;
 }

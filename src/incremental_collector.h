@@ -142,7 +142,12 @@ class IncrementalCollector final : public Collector {
     void pace();
     [[nodiscard]] bool emergency() const;
     void setPhase(Phase p);
-    void freeUnmarkedHandles();
+    // The work that follows the mark and that is not a sweep of spans: the
+    // handle list and the foreign set. Each runs in parts at the start of the
+    // sweep. Returns the units done; the stages are over when m_handleStage
+    // and m_foreignStage are false.
+    std::size_t runReleaseStages(std::size_t units, std::uint64_t deadlineNs);
+    void cancelReleaseStages();
     void freeDeadObject(Obj* obj);
     void logStep(const char* kind, std::uint64_t t0, std::uint64_t t1,
                  std::size_t units);
@@ -155,6 +160,11 @@ class IncrementalCollector final : public Collector {
     SegStack<Obj*> m_gray;
     // Objects that own a handle of the operating system (decision 4.5).
     SegStack<Obj*> m_handles;
+    // While m_handleStage is set, the handles that the stage kept and the
+    // ones that the program made since the finish pause. They are black.
+    SegStack<Obj*> m_handlesKeep;
+    bool m_handleStage{false};
+    bool m_foreignStage{false};
     // The object that the tracer is inside, and where.
     Obj* m_cur{nullptr};
     std::size_t m_curPos{0};

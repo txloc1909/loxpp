@@ -1,0 +1,33 @@
+// A second worker sends many Strings, and the main worker keeps them. Each is
+// an object of the second worker, so the foreign set of the main heap holds
+// one entry for each. The churn that follows makes the collector run cycles
+// while the set is large. A step of a cycle must not follow the size of the
+// set: the start pause, a mark step that adds an entry, and the work that the
+// finish of the cycle leaves.
+class Node { init(i) { this.i = i; } }
+
+fun make(main) {
+    var i = 0;
+    while (i < 400000) { task.send(main, "fo-" + str(i) + "-text"); i = i + 1; }
+    task.send(main, "sent");
+    task.receive();
+}
+
+var w = task.spawn_worker(make, task.self());
+var keep = [];
+while (true) {
+    var m = task.receive();
+    if (m == "sent") { break; }
+    keep.append(m);
+}
+var sum = 0;
+var j = 0;
+while (j < 3000000) { var t = Node(j); sum = sum + t.i; j = j + 1; }
+// Half of the Strings go, so that the finish of a cycle has entries to drop.
+var k = 0;
+while (k < 200000) { keep.pop(); k = k + 1; }
+j = 0;
+while (j < 3000000) { var t = Node(j); sum = sum + t.i; j = j + 1; }
+task.send(w, "go");
+print len(keep);
+print sum;

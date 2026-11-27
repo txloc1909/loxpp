@@ -1,4 +1,6 @@
 #include "memory_manager.h"
+
+#include <limits>
 #include "compiler.h"
 #include "objects.h"
 #include "table.h"
@@ -51,9 +53,7 @@ MemoryManager::~MemoryManager() {
     // held.
     std::vector<Obj*> foreign;
     foreign.reserve(m_foreign.size());
-    for (auto& entry : m_foreign) {
-        foreign.push_back(entry.first);
-    }
+    m_foreign.forEach([&foreign](Obj* obj) { foreign.push_back(obj); });
     m_foreign.clear();
     for (Obj* obj : foreign) {
         heapOf(obj)->releaseHold(obj);
@@ -188,15 +188,10 @@ void MemoryManager::markAllRoots() {
     }
 }
 
-void MemoryManager::beginForeignCycle() {
-    for (auto& entry : m_foreign) {
-        entry.second = false;
-    }
-}
+void MemoryManager::beginForeignCycle() { m_foreign.beginCycle(); }
 
 void MemoryManager::markForeign(Obj* obj) {
-    auto [it, inserted] = m_foreign.try_emplace(obj, true);
-    if (inserted) {
+    if (m_foreign.touch(obj)) {
         // The count moves when the mark reaches the object, not at the end of
         // the mark. The object is held now (the way to it is a count of an
         // envelope in flight or of this set), but this thread can give that
@@ -204,14 +199,11 @@ void MemoryManager::markForeign(Obj* obj) {
         // object releases the count of the envelope. Without the count of
         // this set, the owner could free the object in between.
         heapOf(obj)->hold(obj);
-    } else {
-        it->second = true;
     }
 }
 
 bool MemoryManager::foreignMarked(const Obj* obj) const {
-    auto it = m_foreign.find(const_cast<Obj*>(obj));
-    return it != m_foreign.end() && it->second;
+    return m_foreign.marked(obj);
 }
 
 #ifdef LOXPP_PROFILE
@@ -286,33 +278,34 @@ void MemoryManager::markInboxTargets() {
     }
 }
 
-void MemoryManager::releaseUnreachedForeign(bool dropStrings) {
-    std::vector<Obj*> dropped;
-    for (auto it = m_foreign.begin(); it != m_foreign.end();) {
-        if (it->second) {
-            ++it;
-        } else {
-            dropped.push_back(it->first);
-            it = m_foreign.erase(it);
+void MemoryManager::beginForeignRelease() { m_foreign.beginScan(); }
+
+void MemoryManager::endForeignRelease() { m_foreign.endScan(); }
+
+bool MemoryManager::foreignReleasing() const { return m_foreign.scanning(); }
+
+std::size_t MemoryManager::releaseForeignStep(std::size_t maxEntries,
+                                              bool dropStrings) {
+    return m_foreign.scanStep(maxEntries, [this, dropStrings](Obj* obj) {
+        // Before the release: the owner can free a String as soon as its
+        // count drops, and the table must not hold it by then.
+        if (dropStrings && obj->type == ObjType::STRING) {
+            m_strings.del(static_cast<ObjString*>(obj));
         }
-    }
-    if (dropStrings) {
-        // Before any release: the owner can free a String as soon as its count
-        // drops, and the table must not hold it by then.
-        for (Obj* obj : dropped) {
-            if (obj->type == ObjType::STRING) {
-                m_strings.del(static_cast<ObjString*>(obj));
-            }
-        }
-    }
-    for (Obj* obj : dropped) {
         heapOf(obj)->releaseHold(obj);
+    });
+}
+
+void MemoryManager::releaseUnreachedForeign(bool dropStrings) {
+    beginForeignRelease();
+    while (foreignReleasing()) {
+        releaseForeignStep(std::numeric_limits<std::size_t>::max(),
+                           dropStrings);
     }
 }
 
 void MemoryManager::adoptForeign(Obj* obj) {
-    auto [it, inserted] = m_foreign.try_emplace(obj, true);
-    if (!inserted) {
+    if (!m_foreign.touch(obj)) {
         heapOf(obj)->releaseHold(obj);
     }
 }

@@ -86,6 +86,7 @@ path src/memory_manager.*                      core,gc-heap
 path src/collector.*                           core,gc-heap
 path src/stw_collector.*                       core,gc-heap
 path src/incremental_collector.*               core,gc-heap
+path src/foreign_set.*                          core,gc-heap
 path src/size_class_heap.*                     core,gc-heap
 path src/seg_stack.h                           core,gc-heap
 path src/barrier.h                             core,gc-heap
