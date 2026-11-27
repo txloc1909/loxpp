@@ -145,11 +145,13 @@
   ]
  },
  {
-  "name": "GEOSEARCH spends no elements",
-  "old": "    if (!spendElements(len(members))) {\n        return EXEC_TOO_LARGE;\n    }\n    return GeoSearchReply",
-  "new": "    return GeoSearchReply",
+  "name": "GEOSEARCH is not counted into the pool of EXEC",
+  "old": "var WEIGHT_GEO = 4;\n",
+  "new": "var WEIGHT_GEO = 0;\n",
   "cases": [
-   "local: EXEC refuses a GEOSEARCH over the element budget"
+   "local: EXEC refuses a GEOSEARCH over the pool that LRANGE used",
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+   "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget"
   ]
  },
  {
@@ -225,14 +227,6 @@
   ]
  },
  {
-  "name": "EXEC does not set the GEOSEARCH limit",
-  "old": "    geoExecCandidates = GEO_EXEC_CANDIDATES;\n",
-  "new": "",
-  "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
-  ]
- },
- {
   "name": "no pruning of the boxes",
   "old": "    if (steps >= 2) {\n        if (area[2] < minLat) {",
   "new": "    if (false) {\n        if (area[2] < minLat) {",
@@ -290,16 +284,8 @@
  },
  {
   "name": "no GEOSEARCH limit in EXEC",
-  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n",
+  "old": "            if (execWork != nil and len(members) * WEIGHT_GEO > execWork) {\n                // The walk spent what was left, so a later command of this\n                // EXEC does no more.\n                execWork = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n",
   "new": "",
-  "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
-  ]
- },
- {
-  "name": "the GEOSEARCH limit is checked after the walk",
-  "old": "            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {\n                // The walk spent what was left, so a later GEOSEARCH of this\n                // EXEC walks no more.\n                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;\n            }\n        }\n    }\n    if (geoExecCandidates != nil) {\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
-  "new": "        }\n    }\n    if (geoExecCandidates != nil) {\n        if (len(members) > geoExecCandidates) {\n            return GEO_EXEC_TOO_MANY;\n        }\n        geoExecCandidates = geoExecCandidates - len(members);\n    }",
   "cases": [
    "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
   ]
@@ -330,7 +316,7 @@
  },
  {
   "name": "a refused GEOSEARCH spends nothing",
-  "old": "                geoExecCandidates = 0;\n                return GEO_EXEC_TOO_MANY;",
+  "old": "                execWork = 0;\n                return GEO_EXEC_TOO_MANY;",
   "new": "                return GEO_EXEC_TOO_MANY;",
   "cases": [
    "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"

@@ -97,8 +97,8 @@
  },
  {
   "name": "EXEC stops at the first error",
-  "old": "        replies.append(reply);\n    }\n    execElements = nil;",
-  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    execElements = nil;",
+  "old": "        replies.append(reply);\n    }\n    execWork = nil;",
+  "new": "        replies.append(reply);\n        if (type(reply) == \"String\" and len(reply) > 0 and reply[0] == \"-\") {\n            break;\n        }\n    }\n    execWork = nil;",
   "cases": [
    "transactions-10 a failed command does not stop the others"
   ]
@@ -225,8 +225,8 @@
  },
  {
   "name": "EXEC serves no waiter after it",
-  "old": "    aclExecWork = nil;\n    endExecReplication();\n    serveReady();",
-  "new": "    aclExecWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreamList = nil;",
+  "old": "    execWork = nil;\n    endExecReplication();\n    serveReady();",
+  "new": "    execWork = nil;\n    endExecReplication();\n    readyLists = nil;\n    readyListSeen = nil;\n    readyStreamKeys = nil;\n    readyStreamList = nil;",
   "cases": [
    "local: the waiter gets the first element after EXEC"
   ]
@@ -256,11 +256,13 @@
   ]
  },
  {
-  "name": "T6 no element budget in EXEC",
-  "old": "    if (k > execElements) {\n        return false;\n    }",
+  "name": "no check of the pool of EXEC",
+  "old": "    if (cost > execWork) {\n        return false;\n    }",
   "new": "    if (false) {\n        return false;\n    }",
   "cases": [
-   "local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192"
+   "local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192",
+   "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget",
+   "local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work"
   ]
  },
  {
@@ -301,6 +303,18 @@
   "new": "",
   "cases": [
    "local: T7 EXEC of 65535 XADD with 50 readers above the top on each key stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "EXEC sets no pool",
+  "old": "    execWork = EXEC_WORK;\n    replInExec",
+  "new": "    replInExec",
+  "cases": [
+   "local: T6 EXEC of 200 LRANGE of 1048573 elements gives 8 and refuses 192",
+   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+   "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget",
+   "local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work"
   ]
  }
 ]

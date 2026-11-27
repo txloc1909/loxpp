@@ -89,8 +89,8 @@
  },
  {
   "name": "a transaction is not wrapped",
-  "old": "    aclExecWork = ACL_EXEC_WORK;\n    replInExec = true;",
-  "new": "    aclExecWork = ACL_EXEC_WORK;",
+  "old": "    execWork = EXEC_WORK;\n    replInExec = true;",
+  "new": "    execWork = EXEC_WORK;",
   "cases": [
    "local: a transaction is propagated in MULTI and EXEC"
   ]

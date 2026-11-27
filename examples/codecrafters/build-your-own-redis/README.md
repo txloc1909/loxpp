@@ -195,10 +195,32 @@ A transaction holds at most 65536 commands, 1048576 arguments and the query
 limit of bytes (`--client-query-buffer-limit`, 1 GB by default). A command
 over a bound gets an error and makes `EXEC` give `EXECABORT`.
 
-In one `EXEC`, the replies of `LRANGE` and `LPOP` with a count may copy at
-most 8388608 list elements in all (`spendElements`), because `EXEC` keeps
-every reply until its step ends. A command over that budget gets an error
-and does nothing, so the transaction stays atomic.
+One `EXEC` has one pool of work, 8388608 units (`spendWork`), because
+`EXEC` keeps every reply until its step ends and runs its commands in one
+step (rule 6). Each budgeted command takes units from the pool, so a mix of
+them is bounded as one of them is. A unit is one list element that a reply
+copies (`LRANGE`, `LPOP` with a count, twice the size of the keyspace for
+`KEYS`). A kind that costs more for each item takes a weight, which is the
+pool divided by the limit that the kind had alone:
+
+| Kind | Item | Units | Limit alone |
+|---|---|---|---|
+| list elements (`LRANGE`, `LPOP`, `KEYS`, `PUBLISH`) | element | 1 | 8388608 |
+| `ZRANGE` | element of the reply | 4 | 2097152 |
+| `GEOSEARCH` | member of the boxes | 4 | 2097152 |
+| bitmap work | unit of bitmap work | 8 | 1048576 |
+| ACL work | unit of ACL work | 16 | 524288 |
+| sorted set work | insert or delete | 256 | 32768 |
+
+A command that is over what is left of the pool gets an error of its kind
+and does nothing, so the transaction stays atomic. A command that is over
+the limit alone gets the same error as before the pool. For example, 3
+`ZRANGE` of 524288 elements and one `GEOSEARCH` of 524288 members use the
+whole pool (6291456 and 2097152 units), and the next `GEOSEARCH`, `ZRANGE`
+or `LRANGE` is refused, where each of them is under its own limit alone.
+Redis has no such pool: this is a difference of the example (see Known
+differences from Redis). Case M1 measures such an `EXEC`, and case M2 shows
+that the sorted set, bitmap and ACL work take from the pool too.
 
 The probes T1-T7 measure large steps of `EXEC` under these bounds. They do
 not prove a bound on every step: the cost of a command depends on the data
@@ -244,8 +266,8 @@ has no yield: no client is connected then.
 `KEYS` takes the keys and the entries of the keyspace with two native calls
 in its step, and the time of that step. The session filters them with the
 glob pattern and writes them in steps (`writeKeys`): the reply is the keys
-that were live at that time. In `EXEC`, each `KEYS` spends twice the size
-of the keyspace from the element budget. The glob match (`globMatch`) has
+that were live at that time. In `EXEC`, each `KEYS` takes twice the size
+of the keyspace from the pool. The glob match (`globMatch`) has
 the rules of Redis 7.0 (`stringmatchlen`), also `[a-]` and an empty key. It
 counts each byte of the pattern that it reads as a step, in a set too, so
 it takes at most len(key) x len(pattern) steps, and it yields every 65536
@@ -336,14 +358,13 @@ one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
 at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
 sorted sets, where a new score of a member is a delete and an insert, also
 for a member that comes again in the same `ZADD`, and a pair that changes
-nothing is one unit (rule 6); `ZRANGE` in
-`EXEC` spends the element budget, and parses its options before it runs,
-with yields. One `EXEC` also takes at most 2097152 elements in the replies
-of its `ZRANGE` (a member, or a member and its score, with `WITHSCORES`),
-because the walk is Lox++ code in the step of `EXEC` (rule 6). A `ZRANGE`
-whose reply is over what is left gives `-ERR the ZRANGE work of this
-transaction is over its limit`, does nothing and spends nothing. A `ZRANGE`
-that is not in `EXEC` has no such limit.
+nothing is one unit (rule 6); `ZRANGE` parses its options before it runs,
+with yields. In `EXEC`, each element of its reply (a member, or a member
+and its score, with `WITHSCORES`) takes 4 units of the pool, because the
+walk is Lox++ code in the step of `EXEC` (rule 6): 2097152 elements alone.
+A `ZRANGE` whose reply is over what is left of the pool gives `-ERR the
+ZRANGE work of this transaction is over its limit`, does nothing and
+spends nothing. A `ZRANGE` that is not in `EXEC` has no such limit.
 
 ### Geospatial
 
@@ -367,9 +388,9 @@ stream, also after a half-close (rule 7). The order of the reply is the order of
 of 2400 searches and distances against redis-server 7.0 gave no
 difference. As in Redis 7.0, it reads the key first, decodes a
 `FROMMEMBER` member while it parses, and takes the last of an option that
-comes again. In `EXEC`, `GEOSEARCH` spends the element budget for each
-member of its boxes, and one `EXEC` walks at most 2097152 members of boxes
-(rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
+comes again. In `EXEC`, `GEOSEARCH` takes 4 units of the pool for
+each member of its boxes, so one `EXEC` walks at most 2097152 members of
+boxes alone (rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
 work of `EXEC`.
 
 ### Bitmaps
@@ -605,7 +626,8 @@ printed.
   `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
   members, a score has at most 64 bytes, and one `EXEC` does at most 32768
   inserts and deletes of sorted sets, and at most 2097152 elements in the
-  replies of the `ZRANGE` of one `EXEC`; Redis has no such limits. A `ZRANGE`
+  replies of its `ZRANGE`, as part of the pool of `EXEC` below; Redis has
+  no such limits. A `ZRANGE`
   index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
   gives an empty range. The RDB load does not read a sorted set.
 - Geospatial: `GEOPOS` writes a coordinate as the shortest text, as the
@@ -617,8 +639,7 @@ printed.
   converts it to an unsigned 64-bit value. `GEOPOS` names at most 16384
   members, and one `EXEC` walks at most 2097152 members of `GEOSEARCH`
   boxes. As for `ZADD`, the limit on the names of `GEOPOS` comes before
-  `WRONGTYPE`. The budgets of `EXEC` (elements, sorted set work, `ZRANGE` elements, `GEOSEARCH`
-  walk) are separate, so one `EXEC` can spend each of them (#1202). The coordinates in the error of `GEOADD`, and a distance, are
+  `WRONGTYPE`. The coordinates in the error of `GEOADD`, and a distance, are
   rounded from the product by 10^d, so a value within one unit of the last
   place of a tie can round the other way from `printf`, and a coordinate
   of 1e15 or more is not written with all its digits. There is no
@@ -670,8 +691,11 @@ printed.
 - A client may watch at most 1048576 keys at a time. Redis has no such
   bound.
 - A transaction holds at most 65536 commands, 1048576 arguments and the
-  query limit of bytes, and its `LRANGE` and `LPOP` replies copy at most
-  8388608 list elements. Redis has no such bound.
+  query limit of bytes. One `EXEC` has one pool of 8388608 units of work,
+  shared by the list elements that its replies copy, its `ZRANGE` and
+  `GEOSEARCH` walks, and its sorted set, bitmap and ACL work (a table is in
+  the section on transactions), so a mix of them is bounded as one of them
+  is. Redis has no such pool and no such bound.
 - `XADD` takes no options (`NOMKSTREAM`, `MAXLEN`, `MINID`, `LIMIT`): the
   word in the ID place must be an ID. `XRANGE` takes no exclusive bounds
   (`(1-1`).
@@ -844,6 +868,7 @@ ruling on PR #1204. Every stage group keeps them.
 | G1 (group `geospatial`, on a server of its own): `GEOSEARCH` whose boxes hold 524288 members, all in the radius | every member; PING within 1.0 s (rule 6 only) | 0.38 s |
 | G2: `GEOADD` of 16384 members to that set | PING within 1.0 s (rule 6 only) | 0.30 s |
 | G3: `EXEC` of 64 `GEOSEARCH` of that set with one member more (524289, which does not divide the limit) | 3 run and 61 are refused; the walk of the fourth stops as soon as it passes the limit and spends what is left, so the others walk no more; PING within 1.0 s (when the limit is checked after the walk: 5.3 s; when a refused walk spends nothing: 6.9–7.1 s). On a host with every CPU busy it can fail. | 0.45–0.50 s |
+| M1 (group `geospatial`): `EXEC` of 3 `ZRANGE` of 524288 members, 3 `GEOSEARCH` of the same set and 4 `LRANGE` of 1048576 elements, each kind under its own limit alone | 3 `ZRANGE` and 1 `GEOSEARCH` run, 2 `GEOSEARCH` and 4 `LRANGE` are refused; PING within 1.0 s (with a separate budget for each kind, all 10 run: 0.40–0.43 s on this host, so the stall bound alone does not fail; the replies do) | 0.11–0.15 s |
 | G4: the same `GEOADD` again, which changes nothing, so only the parse is work | PING within 0.1 s (when the parse has no yield: 0.18–0.20 s). Its margin is small: on a host with every CPU busy it can fail. | 0.04–0.05 s |
 | B1 (group `bitmaps`, on a server of its own): `SETBIT` at offset 2^32 - 1 | a string of 512 MB with the bit set; PING within 1.0 s (rule 6 only) | 0.01–0.02 s |
 | B2: `BITCOUNT` of a dense 8 MB | PING within 1.0 s; the scan yields after each chunk of 4096 bytes (rule 6 only) | 0.003–0.027 s (1.2 s of CPU in all) |

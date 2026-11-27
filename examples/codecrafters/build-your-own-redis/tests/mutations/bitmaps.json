@@ -504,5 +504,13 @@
   "cases": [
    "local: a count after INCR does not take a count of the cache that INCR dropped"
   ]
+ },
+ {
+  "name": "bitmap work is not counted into the pool of EXEC",
+  "old": "var WEIGHT_BITMAP = 8;\n",
+  "new": "var WEIGHT_BITMAP = 0;\n",
+  "cases": [
+   "local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work"
+  ]
  }
 ]
