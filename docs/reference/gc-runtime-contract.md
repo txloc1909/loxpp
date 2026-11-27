@@ -87,8 +87,10 @@ changes this file.
   the stop-the-world collector, #1295 (the incremental collector does not
   have this gap: its gray stack and its handle list are linked blocks of 2048
   bytes from the buffer classes of the heap, `src/seg_stack.h`, so no push or
-  pop calls the C allocator); the containers of `MemoryManager` (`m_foreign`,
-  `m_tempRoots`, `m_draining`, `m_holders`), #1296. The
+  pop calls the C allocator); the containers of `MemoryManager` (`m_tempRoots`, `m_draining`,
+  `m_holders`), #1296. The foreign set (`ForeignSet`) is not a `std::`
+  container: its table and its nodes come from `calloc`, `new` and `free`, and
+  the size of its table follows the set, so these calls are untimed too, #1296. The
   sweep runs the destructors of the objects, so the `free` calls of the first
   class run inside the sweep. The test
   `TheUntimedCallsAreTheOnesTheContractNames` pins the first class.
@@ -185,12 +187,13 @@ changes this file.
 - The String intern table (`m_strings`) holds its Strings weakly.
   `StwCollector::removeWhiteStrings` removes each unmarked String after the
   trace and before the sweep. The incremental collector does not scan the
-  table: its sweep removes a String when it frees it, and its finish pause
-  removes the foreign Strings that it releases
-  (`releaseUnreachedForeign(true)`). Each lookup that finds a String calls
+  table: its sweep removes a String when it frees it, and the foreign stage of
+  its first sweep steps removes the foreign Strings that it releases
+  (`releaseForeignStep`, in parts of at most the step units). Each lookup that finds a String calls
   `Collector::internHit` (`makeString`, `findString`, `receiveMessage`). The
   incremental collector marks that String during a mark, and during a sweep
-  when the sweep has not reached its span.
+  when the sweep has not reached its span. It marks a foreign String also
+  while the foreign stage runs.
 - Every String is interned, so String equality is pointer equality. A
   collector must not free an interned String that is still reachable, and
   must remove each dead String from the table before it is freed.
