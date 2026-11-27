@@ -5048,6 +5048,8 @@ def stages_zset_limits(prog):
                  "local: Z2 ZRANGE of 524288 members stalls PING at most 1 s",
                  "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
                  "local: EXEC refuses a ZRANGE over the element budget",
+                 "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
+                 "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
                  "local: a new score costs two units of the sorted set work of EXEC",
                  "local: a member twice in one ZADD costs a delete and an insert",
                  "local: a pair that changes nothing costs one unit of the sorted set work of EXEC",
@@ -5113,22 +5115,62 @@ def stages_zset_limits(prog):
             worst, wrong, _ = measure_while(srv, zrange)
             check(names[4], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s" % worst)
-            # The element budget of EXEC: 8 ZRANGE WITHSCORES of 524288
-            # members fill it, and the ninth is refused.
+            # The element budget of EXEC: 8 LRANGE of 1048576 elements fill
+            # it, and a ZRANGE after them is refused by the budget (the
+            # limit of ZRANGE alone is lower, so only other commands can
+            # fill the budget). An empty range first: it must spend
+            # nothing, and give back nothing either.
+            for _ in range(2):
+                c.raw().send_raw(encode("RPUSH", "L", *["v"] * 524288))
+                c.raw().try_read(60)
             x = Client(srv.port)
             x.sock.settimeout(120)
-            # An empty range first: it must spend nothing, and give back
-            # nothing either.
             x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "524287", "0") * 3
-                       + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") * 9 + encode("EXEC"))
+                       + encode("LRANGE", "L", "0", "-1") * 8 + encode("ZRANGE", "Z", "0", "0") + encode("EXEC"))
             for _ in range(13):
                 x.read()
             reply = x.read()
             x.close()
+            c.call("DEL", "L")
             check("local: EXEC refuses a ZRANGE over the element budget",
                   isinstance(reply, list) and len(reply) == 12 and reply[:3] == [[], [], []]
                   and all(len(r) == 1048576 for r in reply[3:11])
-                  and isinstance(reply[11], Error), repr(reply[11])[:80] if isinstance(reply, list) else repr(reply)[:80])
+                  and isinstance(reply[11], Error) and "elements" in reply[11],
+                  repr(reply[11])[:80] if isinstance(reply, list) else repr(reply)[:80])
+            # The limit of ZRANGE in one EXEC is 2097152 elements. 3 ranges of
+            # 524288 take 1572864; a range of 1048576 is over what is left and
+            # is refused, and spends nothing, so the next of 524288 takes the
+            # last of the limit; after that the limit is used up.
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "0", "-1") * 3
+                       + encode("ZRANGE", "Z", "0", "-1", "WITHSCORES") + encode("ZRANGE", "Z", "0", "-1")
+                       + encode("ZRANGE", "Z", "0", "0") + encode("EXEC"))
+            for _ in range(7):
+                x.read()
+            reply = x.read()
+            x.close()
+            check("local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
+                  isinstance(reply, list) and len(reply) == 6 and all(len(r) == 524288 for r in reply[:3])
+                  and isinstance(reply[3], Error) and "ZRANGE" in reply[3] and len(reply[4]) == 524288
+                  and isinstance(reply[5], Error) and "ZRANGE" in reply[5], repr(reply)[:100])
+
+            # Z7: 16 ZRANGE of 524288 members in one EXEC. Without the limit
+            # the walk of 8388608 nodes stalls PING for 1.8 s.
+            def exec_ranges():
+                x = Client(srv.port)
+                x.sock.settimeout(120)
+                x.send_raw(encode("MULTI") + encode("ZRANGE", "Z", "0", "-1") * 16 + encode("EXEC"))
+                for _ in range(17):
+                    x.read()
+                got[0] = x.read()
+                x.close()
+            worst, wrong, _ = measure_while(srv, exec_ranges)
+            r = got[0]
+            check("local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 16
+                  and all(len(e) == 524288 for e in r[:4]) and all(isinstance(e, Error) for e in r[4:]),
+                  "worst %.3f s" % worst)
 
             def exec_two():
                 x = Client(srv.port)
@@ -5531,16 +5573,20 @@ def stages_geo_limits(prog):
                   worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524289 for x in r[:3])
                   and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[3:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
             c.call("ZREM", "dense", "extra")
-            # The element budget: 8 ZRANGE WITHSCORES of 524288 fill it, and a
-            # GEOSEARCH after them is refused.
+            # The element budget: 8 LRANGE of 1048576 fill it, and a GEOSEARCH
+            # after them is refused.
+            for _ in range(2):
+                c.raw().send_raw(encode("RPUSH", "L", *["v"] * 524288))
+                c.raw().try_read(60)
             x = Client(srv.port)
             x.sock.settimeout(120)
-            x.send_raw(encode("MULTI") + encode("ZRANGE", "dense", "0", "-1", "WITHSCORES") * 8
+            x.send_raw(encode("MULTI") + encode("LRANGE", "L", "0", "-1") * 8
                        + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") + encode("EXEC"))
             for _ in range(10):
                 x.read()
             reply = x.read()
             x.close()
+            c.call("DEL", "L")
             check("local: EXEC refuses a GEOSEARCH over the element budget",
                   isinstance(reply, list) and len(reply) == 9 and isinstance(reply[8], Error)
                   and "elements" in reply[8], repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])

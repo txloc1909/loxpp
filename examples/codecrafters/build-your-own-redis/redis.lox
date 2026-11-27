@@ -2182,6 +2182,7 @@ fun execQueued(tx) {
     execElements = EXEC_ELEMENTS;
     zsetExecWork = ZSET_EXEC_WORK;
     geoExecCandidates = GEO_EXEC_CANDIDATES;
+    zrangeExecElements = ZRANGE_EXEC_ELEMENTS;
     bitmapExecWork = BITMAP_EXEC_WORK;
     aclExecWork = ACL_EXEC_WORK;
     replInExec = true;
@@ -2202,6 +2203,7 @@ fun execQueued(tx) {
     execElements = nil;
     zsetExecWork = nil;
     geoExecCandidates = nil;
+    zrangeExecElements = nil;
     bitmapExecWork = nil;
     aclExecWork = nil;
     endExecReplication();
@@ -4550,6 +4552,13 @@ fun parseZrange(argv, mayYield) {
     return withScores;
 }
 
+// At most ZRANGE_EXEC_ELEMENTS elements in the replies of ZRANGE in one EXEC:
+// the walk of a range is Lox++ code in the step of EXEC (rule 6). A ZRANGE
+// over what is left does nothing and spends nothing.
+var ZRANGE_EXEC_ELEMENTS = 2097152;
+var zrangeExecElements = nil;
+var ZRANGE_EXEC_TOO_MANY = "-ERR the ZRANGE work of this transaction is over its limit\r\n";
+
 // ZRANGE key start stop [WITHSCORES], by rank. It takes the members in its
 // step (a walk of M nodes is about 0.2 microseconds each), and the session
 // writes them in steps.
@@ -4595,8 +4604,14 @@ fun cmdZrange(ctx, argv) {
     if (withScores) {
         size = 2 * count;
     }
+    if (zrangeExecElements != nil and size > zrangeExecElements) {
+        return ZRANGE_EXEC_TOO_MANY;
+    }
     if (!spendElements(size)) {
         return EXEC_TOO_LARGE;
+    }
+    if (zrangeExecElements != nil) {
+        zrangeExecElements = zrangeExecElements - size;
     }
     var out = [];
     var x = z.nodeAt(start);

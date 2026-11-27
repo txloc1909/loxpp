@@ -313,7 +313,12 @@ sorted sets, where a new score of a member is a delete and an insert, also
 for a member that comes again in the same `ZADD`, and a pair that changes
 nothing is one unit (rule 6); `ZRANGE` in
 `EXEC` spends the element budget, and parses its options before it runs,
-with yields.
+with yields. One `EXEC` also takes at most 2097152 elements in the replies
+of its `ZRANGE` (a member, or a member and its score, with `WITHSCORES`),
+because the walk is Lox++ code in the step of `EXEC` (rule 6). A `ZRANGE`
+whose reply is over what is left gives `-ERR the ZRANGE work of this
+transaction is over its limit`, does nothing and spends nothing. A `ZRANGE`
+that is not in `EXEC` has no such limit.
 
 ### Geospatial
 
@@ -575,7 +580,8 @@ printed.
   `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
   `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
   members, a score has at most 64 bytes, and one `EXEC` does at most 32768
-  inserts and deletes of sorted sets; Redis has no such limits. A `ZRANGE`
+  inserts and deletes of sorted sets, and at most 2097152 elements in the
+  replies of the `ZRANGE` of one `EXEC`; Redis has no such limits. A `ZRANGE`
   index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
   gives an empty range. The RDB load does not read a sorted set.
 - Geospatial: `GEOPOS` writes a coordinate as the shortest text, as the
@@ -587,7 +593,7 @@ printed.
   converts it to an unsigned 64-bit value. `GEOPOS` names at most 16384
   members, and one `EXEC` walks at most 2097152 members of `GEOSEARCH`
   boxes. As for `ZADD`, the limit on the names of `GEOPOS` comes before
-  `WRONGTYPE`. The budgets of `EXEC` (elements, sorted set work, `GEOSEARCH`
+  `WRONGTYPE`. The budgets of `EXEC` (elements, sorted set work, `ZRANGE` elements, `GEOSEARCH`
   walk) are separate, so one `EXEC` can spend each of them (#1202). The coordinates in the error of `GEOADD`, and a distance, are
   rounded from the product by 10^d, so a value within one unit of the last
   place of a tie can round the other way from `printf`, and a coordinate
@@ -804,6 +810,7 @@ ruling on PR #1204. Every stage group keeps them.
 | PS8: 5 rounds of a client that joins 200000 new channels and goes | RSS grows less than 300 MB from round 2 to 5 (without the drop of empty channels: 380–470 MB). The growth with the drop moves with the baseline heap (#1206) | 241, 290, 394, 433, 498 MB |
 | Z1 (group `sorted-sets`, on a server of its own): `ZADD` of 16384 members to a set of 524288 | PING within 1.0 s (when every node has level 1: far over) | 0.24–0.28 s |
 | Z2: `ZRANGE 0 -1` of 524288 members | every member; PING within 1.0 s (rule 6 only) | 0.22–0.26 s |
+| Z7: `EXEC` of 16 `ZRANGE 0 -1` of 524288 members | 4 run and 12 are refused with the error of the `ZRANGE` limit; PING within 1.0 s (with no limit: 1.82–1.87 s, 16 of 524288 members, release build, incremental collector) | 0.45–0.47 s |
 | Z3: `EXEC` of two `ZADD` of 16384 members | PING within 1.0 s (rule 6 only) | 0.25–0.31 s |
 | Z4: `ZADD` of 16384 scores of 64 bytes in the costliest form (`0.` and 52 zeros, 4 digits, `e-256`), on a master | PING within 1.0 s (rule 6 only) | 0.13 s |
 | Z4 on a replica that applies it from its master | PING within 1.0 s (rule 6 only) | 0.18 s |
