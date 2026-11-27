@@ -44,8 +44,9 @@ def check(name, cond, detail=""):
 # hands to client sockets on the hosts these suites run on, so a connection
 # cannot take a port between the moment free_port() picks it and the moment the
 # server binds it; the retry of the start covers a host that differs. The counter
-# file is at a fixed path, not under tempfile.gettempdir(): suites that run with
-# a different TMPDIR must still share one counter.
+# file is at a fixed path, not under tempfile.gettempdir(), so suites that run with
+# a different TMPDIR share one counter. The path names the uid, so the suites of
+# two users keep one counter each.
 PORT_LOW = 20000
 PORT_HIGH = 30000
 PORT_FILE = "/tmp/loxpp-test-ports-%d" % os.getuid()
@@ -66,7 +67,7 @@ def port_taken(port):
 
 
 def free_port():
-    """A port that is free now and that no other suite of this host has taken.
+    """A port that is free now and that no other suite of this user has taken.
 
     Binding port 0 and closing the socket races: a second suite reads the same
     port, and then the two servers fight for it. One of them fails to bind, or,
@@ -128,8 +129,8 @@ class Server:
 
         A process outside the suites that binds the port in this window answers
         too, and no portable check tells whose listener it is. free_port() has
-        proved the port free and the counter keeps the other suites off it, so
-        only such a process can be that one.
+        proved the port free and the counter keeps the other suites of this
+        user off it, so only such a process can be that one.
         """
         deadline = time.time() + 5
         while time.time() < deadline:
