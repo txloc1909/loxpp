@@ -576,7 +576,7 @@ TEST_F(IncrementalTest, AForeignStringThatNothingReachedLeavesTheTable) {
     EXPECT_EQ(mm.findString("a string of another heap"), nullptr);
 }
 
-TEST_F(IncrementalTest, AnUnreachableFileIsFreedInTheFinishPause) {
+TEST_F(IncrementalTest, AnUnreachableFileIsFreedByTheFirstSweepStep) {
     ObjClass* klass = newClass("File");
     mm.pushTempRoot(klass);
     mm.create<ObjFile>(klass); // nothing reaches it
@@ -585,11 +585,38 @@ TEST_F(IncrementalTest, AnUnreachableFileIsFreedInTheFinishPause) {
     finishTracing();
     const std::size_t before = mm.store().objectCount();
     ic->finishMark();
-    // The finish pause freed it: the sweep has not started yet.
+    // The finish pause leaves the handle list to the sweep steps.
+    EXPECT_EQ(mm.store().objectCount(), before);
+    EXPECT_EQ(ic->handleCount(), 1u);
+    // A step of one unit frees the File and sweeps no span: the stages end
+    // before the first span is swept.
+    EXPECT_FALSE(ic->sweepStep(1));
     EXPECT_EQ(mm.store().objectCount(), before - 1);
     EXPECT_EQ(ic->handleCount(), 0u);
     while (!ic->sweepStep(4096)) {
     }
+}
+
+// A File object that owns no descriptor is a handle object for the list, so
+// the test needs no raised descriptor limit.
+TEST_F(IncrementalTest, TheHandleStageFreesAtMostTheUnitsOfAStep) {
+    ObjClass* klass = newClass("File");
+    mm.pushTempRoot(klass);
+    const std::size_t n = 12000;
+    for (std::size_t i = 0; i < n; ++i) {
+        mm.create<ObjFile>(klass);
+    }
+    ASSERT_EQ(ic->handleCount(), n);
+    ic->startCycle("test");
+    finishTracing();
+    ic->finishMark();
+    EXPECT_EQ(ic->handleCount(), n);
+    EXPECT_FALSE(ic->sweepStep(1000));
+    EXPECT_GE(ic->handleCount(), n - 1000);
+    EXPECT_LT(ic->handleCount(), n);
+    while (!ic->sweepStep(1000)) {
+    }
+    EXPECT_EQ(ic->handleCount(), 0u);
 }
 
 TEST_F(IncrementalTest, AReachableFileStaysInTheHandleList) {

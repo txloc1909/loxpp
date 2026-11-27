@@ -35,6 +35,13 @@ class ForeignSet {
 
     [[nodiscard]] std::size_t size() const { return m_size; }
 
+    // The work that one touch spends on a rehash: it moves at most
+    // kRehashBuckets chains, and it passes at most kRehashEmpty empty buckets.
+    static constexpr int kRehashBuckets = 4;
+    static constexpr int kRehashEmpty = 32;
+    // The next bucket of the old table to move, or -1 when no rehash runs.
+    [[nodiscard]] long rehashIndex() const { return m_rehashIdx; }
+
     // Every entry is unmarked.
     void beginCycle() { ++m_epoch; }
 
@@ -227,9 +234,6 @@ class ForeignSet {
         delete n;
         --m_size;
     }
-
-    static constexpr int kRehashBuckets = 4;
-    static constexpr int kRehashEmpty = 32;
 
     Node** m_table[2]{nullptr, nullptr};
     std::size_t m_cap[2]{0, 0};
