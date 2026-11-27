@@ -20,6 +20,9 @@ import sys
 # because the linker merges inline and template code by design.
 STRONG = {"T", "D", "B", "R", "S"}
 
+# ctest SKIP_RETURN_CODE for a build with nothing to compare.
+SKIP = 125
+
 
 def core_libraries(exe):
     out = subprocess.run(
@@ -50,6 +53,12 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     test_dir = pathlib.Path(argv[1])
+    # A build that targets no core-linked test (for example test_scanner alone)
+    # has no core library to compare with. ctest reports SKIP_RETURN_CODE as
+    # Skipped; the run that builds the core libraries still fails on a duplicate.
+    if not list(test_dir.glob("libloxpp_test_core*.so")):
+        print(f"no core library under {test_dir}: nothing to compare", file=sys.stderr)
+        return SKIP
     exes = sorted(
         p for p in test_dir.glob("test_*") if p.is_file() and os.access(p, os.X_OK)
     )

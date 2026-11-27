@@ -236,6 +236,7 @@ if(LOXPP_PYTHON3)
     add_test(NAME CoreSymbolsUnique
         COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_core_symbols.py
                 ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(CoreSymbolsUnique PROPERTIES SKIP_RETURN_CODE 125)
 
     # LOXPP_GC_TRACE must write a trace when set and nothing when unset. The
     # check drives the real loxpp binary and tools/gc_report.py end to end.
