@@ -345,13 +345,13 @@ replica parses a `ZADD` of its master with yields too. A score has the
 forms of `strtod` that Redis takes, and a value out of range or one that
 rounds to zero is refused, as in Redis. The hexadecimal forms (`0x10`,
 `-0x1.8p3`) are read too: the first 15 significant digits make an Int, a
-later digit that is not zero sets its lowest bit, and the Int is rounded once to
-a double (to a multiple of 2^-1074 when the result is under 2^-1022), so the
-value is the one that strtod gives. The parse is linear, and it checks
+later digit that is not zero sets its lowest bit, and the Int is rounded
+once to a double (to a multiple of 2^-1074 when the result is under 2^-1022),
+so the value is the one that strtod gives. The parse is linear, and it checks
 the range from the first digit that is not zero and the exponent before it
-makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM` that changes
-the set marks the watchers and is propagated; one that changes nothing is
-not, as in Redis.
+makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM`
+that changes the set marks the watchers and is propagated; one that changes
+nothing is not, as in Redis.
 
 An insert costs about 9 microseconds of Lox++ code, and a command runs in
 one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
@@ -390,8 +390,8 @@ difference. As in Redis 7.0, it reads the key first, decodes a
 `FROMMEMBER` member while it parses, and takes the last of an option that
 comes again. In `EXEC`, `GEOSEARCH` takes 4 units of the pool for
 each member of its boxes, so one `EXEC` walks at most 2097152 members of
-boxes alone (rule 6). `GEOPOS` names at most 16384 members, and spends the sorted set
-work of `EXEC`.
+boxes alone (rule 6). `GEOPOS` names at most 16384 members, and spends
+the sorted set work of `EXEC`.
 
 ### Bitmaps
 
@@ -621,15 +621,15 @@ printed.
   redis-server master makes a new RDB file each time).
 - Sorted sets: a score is written as the shortest text that reads back as
   the same double (`30.1`), as the stages ask; Redis 7.0 gives 17
-  significant digits (`30.100000000000001`). `ZADD` takes no options (`NX`, `XX`, `GT`,
-  `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
-  `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
-  members, a score has at most 64 bytes, and one `EXEC` does at most 32768
-  inserts and deletes of sorted sets, and at most 2097152 elements in the
-  replies of its `ZRANGE`, as part of the pool of `EXEC` below; Redis has
-  no such limits. A `ZRANGE`
-  index of more than 15 digits is "not an integer" (as for `LRANGE`); Redis
-  gives an empty range. The RDB load does not read a sorted set.
+  significant digits (`30.100000000000001`). `ZADD` takes no options (`NX`,
+  `XX`, `GT`, `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES`
+  (not `BYSCORE`, `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at
+  most 16384 members, a score has at most 64 bytes, and one `EXEC` does at
+  most 32768 inserts and deletes of sorted sets, and at most 2097152
+  elements in the replies of its `ZRANGE`, as part of the pool of `EXEC`
+  below; Redis has no such limits. A `ZRANGE` index of more than 15 digits is
+  "not an integer" (as for `LRANGE`); Redis gives an empty range. The RDB load
+  does not read a sorted set.
 - Geospatial: `GEOPOS` writes a coordinate as the shortest text, as the
   stages ask (`2.294471561908722`); Redis 7.0 gives 17 decimals.
   `GEOADD` takes no options (`NX`, `XX`, `CH`). `GEOSEARCH` takes only
