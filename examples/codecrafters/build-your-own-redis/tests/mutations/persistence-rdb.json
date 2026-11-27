@@ -384,6 +384,78 @@
   ]
  },
  {
+  "name": "FC of -1 tested by the lowest byte only",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 1]) {",
+  "cases": [
+   "local: an expiry in ms of 0x80FFFFFFFFFFFFFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested by the lowest 4 bytes only",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 4]) {",
+  "cases": [
+   "local: an expiry in ms of 0x80FFFFFFFFFFFFFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without the top byte",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 7]) {",
+  "cases": [
+   "local: an expiry in ms of 0x80FFFFFFFFFFFFFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 1",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 1] + r.data[r.pos + 2:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 2",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 2] + r.data[r.pos + 3:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 3",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 3] + r.data[r.pos + 4:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 4",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 4] + r.data[r.pos + 5:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 5",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 5] + r.data[r.pos + 6:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
+  "name": "FC of -1 tested without byte 6",
+  "old": "            for (var c in r.data[r.pos:r.pos + 8]) {",
+  "new": "            for (var c in r.data[r.pos:r.pos + 6] + r.data[r.pos + 7:r.pos + 8]) {",
+  "cases": [
+   "local: an expiry in ms of -1 with one middle byte not 0xFF has passed"
+  ]
+ },
+ {
   "name": "FC of -1 is a negative time",
   "old": "            if (allOnes) {\n                expiresAt = nil;\n            } else if (top >= 128) {",
   "new": "            if (top >= 128) {",
