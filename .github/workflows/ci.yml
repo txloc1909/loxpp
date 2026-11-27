@@ -1295,6 +1295,12 @@ jobs:
         working-directory: examples/codecrafters/build-your-own-redis
         run: python3 tests/mutate.py --check redis.lox tests/mutations/*.json
 
+      # Issue #1238: an interrupt of a mutation run stops the servers of the
+      # suites that are running. This runs mutate.py itself, with stub scripts,
+      # so it needs no loxpp build and takes a few seconds.
+      - name: Check that an interrupt of mutate.py stops its servers
+        run: python3 examples/codecrafters/build-your-own-redis/tests/check_mutate_interrupt.py
+
       # A change of the challenge runs the shards with `incremental`, the
       # default collector. A change of the heap runs them with each collector,
       # `incremental` and `stw` (decision, section 7).
