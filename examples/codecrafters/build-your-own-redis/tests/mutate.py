@@ -69,13 +69,13 @@ def end_on_signal(signum, frame):
 
     SIGTERM runs no code of its own, so the suites that are running, and the
     servers of each, would outlive the script. SIGINT takes the same path, so a
-    Ctrl-C exits with 130 and prints no traceback. The default action returns
-    first: a second signal ends the process at once, which matters when the
-    cleanup of the first one waits for a suite that ignores the kill.
+    Ctrl-C exits with 130 and prints no traceback. Both signals then take their
+    default action, so a second signal of either kind ends the process at once,
+    which matters when the cleanup of the first one waits for a suite that
+    ignores the kill.
     """
-    signal.signal(signum, signal.SIG_DFL)
-    if _stopping:
-        return  # the cleanup that an earlier signal started is running
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, signal.SIG_DFL)
     raise SystemExit(128 + signum)
 
 
