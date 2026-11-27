@@ -5433,7 +5433,9 @@ def stages_zset_limits(prog):
                   and isinstance(reply[5], Error) and "ZRANGE" in reply[5], repr(reply)[:100])
 
             # Z7: 16 ZRANGE of 524288 members in one EXEC. Without the limit
-            # the walk of 8388608 nodes stalls PING for 1.8 s.
+            # the walk of 8388608 nodes stalled PING for 1.82-1.87 s on one
+            # host and for 0.59-0.65 s on another. The times depend on the
+            # host, so the case holds only the bound of 1 s.
             def exec_ranges():
                 x = Client(srv.port)
                 x.sock.settimeout(120)
