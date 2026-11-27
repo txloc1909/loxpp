@@ -778,6 +778,7 @@ ruling on PR #1204. Every stage group keeps them.
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
 | W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 0.3 s (without the yield of `WATCH`: 0.76–1.13 s) | 0.10 s |
+| Not in the suite: the first `WATCH` of 1048575 keys that exist (W1 runs on an empty keyspace) | PING within 1.0 s (rule 6 only) | 0.057-0.066 s in 4 runs (release build, incremental collector; longest GC step in the trace 3.2 ms) |
 | W3: a second client that watches the same 1048575 keys | PING within 1.0 s (rule 6 only) | 0.19 s; 0.31 s in CI |
 | W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.016 s |
 | W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
