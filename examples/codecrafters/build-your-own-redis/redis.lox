@@ -1368,8 +1368,13 @@ fun idPart(digits, seq) {
 // fields as one slice of its arguments, and a read keeps only the bounds of
 // its entries, so neither costs more for an entry with more fields; the
 // session encodes the reply in steps.
+var streamSerial = 0;
+
 class Stream {
     init() {
+        // Names this Stream for a "$" wait, which must not hold the Stream.
+        streamSerial = streamSerial + 1;
+        this.serial = streamSerial;
         this.ms = [];
         this.seq = [];
         this.fields = [];
@@ -1657,12 +1662,13 @@ class StreamRead {
     }
 }
 
-// What "$" names: the Stream that the key held at the wait, and its top ID
-// at that time (ms, seq). The Stream can grow after the wait, in an EXEC that
-// then replaces the key, so its own top is not the top at the wait.
+// What "$" names: the serial of the Stream that the key held at the wait, and
+// its top ID at that time (ms, seq). The Stream can grow after the wait, in an
+// EXEC that then replaces the key, so its own top is not the top at the wait.
+// It keeps the serial and not the Stream, so a replaced Stream can be freed.
 class DollarAt {
-    init(held, ms, seq) {
-        this.held = held;
+    init(serial, ms, seq) {
+        this.serial = serial;
         this.ms = ms;
         this.seq = seq;
     }
@@ -1798,7 +1804,7 @@ fun cmdXread(ctx, argv) {
                 if (stream == nil) {
                     read.after[key] = ZERO_ID;
                 } else {
-                    read.after[key] = DollarAt(stream, stream.ms[stream.size() - 1], stream.seq[stream.size() - 1]);
+                    read.after[key] = DollarAt(stream.serial, stream.ms[stream.size() - 1], stream.seq[stream.size() - 1]);
                 }
             }
         } else {
@@ -1856,7 +1862,7 @@ fun wakeReaders(key, stream, firstNew) {
             // above the top that "$" named are the new ones, from firstNew.
             var from = firstNew;
             var waits = false;
-            if (!hasField(after, "held") or after.held != stream) {
+            if (!hasField(after, "serial") or after.serial != stream.serial) {
                 // "$" on a Stream that the key no longer holds compares with
                 // the top at the wait.
                 waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);

@@ -289,11 +289,19 @@
   ]
  },
  {
-  "name": "$ on a replaced key compares with the top of the old Stream now",
-  "old": "                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
-  "new": "                if (hasField(after, \"held\")) {\n                    after = StreamId(after.held.topMs(), after.held.topSeq());\n                }\n                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
+  "name": "$ on a replaced key is read as the same Stream",
+  "old": "after.serial != stream.serial",
+  "new": "false",
   "cases": [
-   "local: an EXEC that adds to a stream and replaces its key does not skip the $ reader"
+   "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
+  ]
+ },
+ {
+  "name": "an entry equal to the old top wakes a $ reader of a replaced key",
+  "old": "                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
+  "new": "                waits = after.ms > topMs or (after.ms == topMs and after.seq > topSeq);",
+  "cases": [
+   "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
   ]
  },
  {

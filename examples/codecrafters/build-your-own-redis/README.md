@@ -141,8 +141,8 @@ queues, `readers`. At the end of `XADD`, `wakeReaders` takes each reader of
 the key that now has entries to read, puts its reply in its `Waiter` and
 sends `Msg.Ready`. So the reply holds the entries up to this `XADD` and only
 this stream, as in Redis. For a key that the reader named with `$`, the
-wait stores a `DollarAt`: the `Stream` that the key held and its top ID at
-that time. Each `XADD` on that same `Stream` wakes the reader at once, so its
+wait stores a `DollarAt`: the serial of the `Stream` that the key held and
+its top ID at that time. Each `XADD` on that same `Stream` wakes the reader at once, so its
 reply is the entry of that `XADD`. When the key holds another `Stream` (the
 first one expired or was replaced), the reader compares with the top ID at the
 wait, not with the top of the first `Stream`: an `EXEC` can append to it and

@@ -1334,6 +1334,7 @@ def stages_streams(prog):
         c.call("SET", key, "x", "PX", "30")
         time.sleep(0.1)
         c.call("XADD", key, "1-1", "f", "low")
+        c.call("XADD", key, "5-1", "f", "equal")
         check("local: XREAD BLOCK $ ignores an entry below the old top of a replaced key",
               r.try_read(0.5) is TIMEOUT)
         c.call("XADD", key, "9-1", "f", "high")
@@ -1417,7 +1418,7 @@ def stages_streams(prog):
 
 class Asker:
     """A client whose call() never raises: when a reply does not come or
-    cannot be read, it gives TIMEOUT or CLOSED and opens a new connection.
+    cannot be read, it gives TIMEOUT, CLOSED or BAD_REPLY and opens a new connection.
     So one broken reply fails its own case, and the cases after it still
     run."""
 
