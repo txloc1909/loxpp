@@ -2761,10 +2761,12 @@ def stages_rdb(prog):
         now = int(time.time() * 1000)
         live, dead, live_s, plain, neg = (rand_word() for _ in range(5))
         neg_s, top_ms, minus1, fd_min, fd_max = (rand_word() for _ in range(5))
+        minus2 = rand_word()
         srv = with_rdb("expiry.rdb", [(live, "a", now + 600000, "ms"), (dead, "b", now - 600000, "ms"),
                                       (plain, "p", None, None), (live_s, "c", now + 600000, "s"),
                                       (neg, "n", 2 ** 63, "ms"),
                                       (minus1, "m", 2 ** 64 - 1, "ms"),
+                                      (minus2, "m2", 2 ** 64 - 2, "ms"),
                                       (neg_s, "ns", 0xFFFFFFFF * 1000, "s"),
                                       (fd_min, "fm", 0x80000000 * 1000, "s"),
                                       (fd_max, "fx", 0x7FFFFFFF * 1000, "s"),
@@ -2776,6 +2778,7 @@ def stages_rdb(prog):
                                  "local: a key with no expiry after an expired key",
                                  "local: a negative expiry in ms has passed",
                                  "local: an expiry in ms of -1 is no expiry",
+                                 "local: an expiry in ms of -2 has passed",
                                  "local: a negative expiry in seconds has passed",
                                  "local: an expiry in seconds of 2^31 has passed",
                                  "local: an expiry in seconds of 2^31-1 has not passed",
@@ -2790,6 +2793,7 @@ def stages_rdb(prog):
             check("local: a negative expiry in ms has passed", c.call("GET", neg) is None)
             check("local: an expiry in ms of -1 is no expiry",
                   c.call("GET", minus1) == "m")
+            check("local: an expiry in ms of -2 has passed", c.call("GET", minus2) is None)
             check("local: a negative expiry in seconds has passed", c.call("GET", neg_s) is None)
             check("local: an expiry in seconds of 2^31 has passed", c.call("GET", fd_min) is None)
             check("local: an expiry in seconds of 2^31-1 has not passed", c.call("GET", fd_max) == "fx")

@@ -232,12 +232,14 @@ At start, before it listens, the server loads `<--dir>/<--dbfilename>`
 (`loadRdb`). It reads the string keys of database 0: the length forms of
 6, 14, 32 and 64 bits, integer strings of 1, 2 and 4 bytes, LZF strings,
 expiries in seconds and in milliseconds (a negative one has passed, as
-Redis reads it, except an expiry in ms of -1, which is no expiry), and it skips the LRU and LFU fields. A key that has
-expired already is not loaded, as Redis does when it loads as a master. The version of the file is read as atoi reads it (white space,
-a sign, digits, then anything), and must be from 1 to 11, the version of
-Redis 7.2 that the tester writes; Redis 7.0 itself stops at 10. A missing file is
-an empty keyspace. A file that the server cannot load stops the start with
-a message, as in Redis. The load has no yield: no client is connected then.
+Redis reads it, except an expiry in ms of -1, which is no expiry), and it
+skips the LRU and LFU fields. A key that has expired already is not loaded,
+as Redis does when it loads as a master. The version of the file is read as
+atoi reads it (white space, a sign, digits, then anything), and must be
+from 1 to 11, the version of Redis 7.2 that the tester writes; Redis 7.0
+itself stops at 10. A missing file is an empty keyspace. A file that the
+server cannot load stops the start with a message, as in Redis. The load
+has no yield: no client is connected then.
 
 `KEYS` takes the keys and the entries of the keyspace with two native calls
 in its step, and the time of that step. The session filters them with the
