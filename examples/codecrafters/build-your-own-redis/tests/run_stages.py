@@ -1339,6 +1339,42 @@ def stages_streams(prog):
         check("streams-13 XREAD BLOCK with $ and no new entry times out",
               r.try_read(3) is None)
 
+        # An XADD wakes the readers whose ID is below its top and no other.
+        # The queue of a key keeps the lowest ID that a reader waits above,
+        # so the order of the joins and the later adds must not hide a
+        # reader below it.
+        def wake_order(label, ids, adds):
+            key = rand_word()
+            waiting = []
+            for id_ in ids:
+                w = srv.client()
+                w.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", key, id_))
+                waiting.append(w)
+                time.sleep(0.05)
+            time.sleep(0.2)
+            for add_id, who in adds:
+                c.call("XADD", key, add_id, "f", "v")
+                time.sleep(0.2)
+                for i, w in enumerate(waiting):
+                    got = w.try_read(1)
+                    if i in who:
+                        ok = isinstance(got, list) and got[0][0] == key and got[0][1][-1][0] == add_id
+                        w.close()
+                        waiting[i] = srv.client()
+                    else:
+                        ok = got is TIMEOUT
+                    check("local: XREAD BLOCK floor %s: XADD %s wakes reader %d %s"
+                          % (label, add_id, i, "yes" if i in who else "no"),
+                          ok, repr(got))
+            for w in waiting:
+                w.close()
+        wake_order("a lower reader joins second", ["100-0", "5-0"], [("10-0", {1})])
+        wake_order("a lower reader is first", ["5-0", "100-0"], [("10-0", {0})])
+        wake_order("a lower reader joins third", ["100-0", "100-0", "5-0"], [("10-0", {2})])
+        wake_order("the floor is renewed", ["5-0", "100-0", "200-0"],
+                   [("10-0", {0}), ("150-0", {1})])
+        wake_order("the same ms with a lower seq", ["10-5", "10-5"], [("10-6", {0, 1})])
+
         # Every reader of the key gets the entry, and a reader of two
         # streams gets only the stream that changed.
         key, other = rand_word(), rand_word()
@@ -2183,18 +2219,18 @@ def stages_transactions_large(prog):
         check("local: T6 that EXEC stalls PING at most 0.5 s",
               worst <= 0.5 and not wrong, "worst %.3f s" % worst)
 
-        # T7: 5 readers each wait above the top on 65535 keys, and one EXEC
-        # adds to each key. The pass after EXEC checks each reader on each
-        # key once, as Redis does.
+        # T7: 50 readers each wait above the top on 65535 keys, and one EXEC
+        # adds to each key. The pass after EXEC finds that no reader of a key
+        # is below its top, with one comparison for each key.
         keys = ["t7-%d" % i for i in range(65535)]
         waiting = []
-        for _ in range(5):
+        for _ in range(50):
             r = srv.client()
             r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", *keys, *(["999999999-0"] * len(keys))))
             waiting.append(r)
-        time.sleep(3)
+        time.sleep(6)
         worst, wrong, got = exec_stall([encode("XADD", k, "1-1", "f", "v") for k in keys])
-        check("local: T7 EXEC of 65535 XADD with 5 readers above the top on each key stalls PING at most 1 s",
+        check("local: T7 EXEC of 65535 XADD with 50 readers above the top on each key stalls PING at most 1 s",
               worst <= 1.0 and not wrong and isinstance(got, list) and len(got) == 65535,
               "worst %.3f s" % worst)
         for r in waiting:

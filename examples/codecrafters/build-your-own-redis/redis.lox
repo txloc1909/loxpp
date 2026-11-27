@@ -719,11 +719,33 @@ class Waiter {
 // without bound. A key with one waiter maps to the Waiter itself, and gets
 // a WaitQueue at the second waiter, because BLPOP on many keys joins all of
 // them in one step.
+// A queue of XREAD BLOCK readers also keeps floor, the lowest ID that one of
+// its readers waits above, or -1-0 for a reader that a "$" wait on a Stream
+// wakes at once. It never exceeds the ID of an active reader (a reader that
+// left may still hold it down), so an XADD whose top is not above it can wake
+// no reader and skips the pass. A full pass renews it.
 class WaitQueue {
     init(first, second) {
         this.items = [first, second];
         this.head = 0;
         this.live = 2;
+        this.hasFloor = false;
+        this.floorMs = 0;
+        this.floorSeq = 0;
+    }
+
+    // Lowers floor to ms-seq when that is below it.
+    lowerFloor(ms, seq) {
+        if (!this.hasFloor or ms < this.floorMs or (ms == this.floorMs and seq < this.floorSeq)) {
+            this.hasFloor = true;
+            this.floorMs = ms;
+            this.floorSeq = seq;
+        }
+    }
+
+    // True when no reader of this queue can wake for a stream with top ms-seq.
+    allAbove(ms, seq) {
+        return this.hasFloor and (this.floorMs > ms or (this.floorMs == ms and this.floorSeq >= seq));
     }
 
     size() {
@@ -1151,6 +1173,20 @@ fun leaveQueues(queues, w, keys) {
     }
 }
 
+// Lowers the floor of queue for the reader w of key. A BLPOP waiter has no
+// read, and its queue has no floor.
+fun noteFloor(queue, w, key) {
+    if (w.read == nil) {
+        return;
+    }
+    var after = w.read.after[key];
+    if (hasField(after, "serial")) {
+        queue.lowerFloor(-1, 0);
+    } else {
+        queue.lowerFloor(after.ms, after.seq);
+    }
+}
+
 // Puts w in the queue of each key, and returns the keys without repeats.
 // It has no suspend point: a push between two keys would not see w in the
 // queues that come after.
@@ -1164,9 +1200,13 @@ fun joinQueues(queues, w, keys) {
         } else if (queue == w) {
             // A repeated key: w already waits on it.
         } else if (isWaiter(queue)) {
-            queues[key] = WaitQueue(queue, w);
+            var pair = WaitQueue(queue, w);
+            noteFloor(pair, queue, key);
+            noteFloor(pair, w, key);
+            queues[key] = pair;
             joined.append(key);
         } else if (queue.add(w)) {
+            noteFloor(queue, w, key);
             joined.append(key);
         }
     }
@@ -1851,8 +1891,14 @@ fun wakeReaders(key, stream, firstNew) {
     var top = stream.size() - 1;
     var topMs = stream.ms[top];
     var topSeq = stream.seq[top];
+    if (!isWaiter(queue) and queue.allAbove(topMs, topSeq)) {
+        return;
+    }
     var served = 0;
     var n = len(items);
+    var floorSet = false;
+    var floorMs = 0;
+    var floorSeq = 0;
     while (i < n) {
         var w = items[i];
         if (w.active) {
@@ -1873,6 +1919,18 @@ fun wakeReaders(key, stream, firstNew) {
             if (!waits) {
                 serveReader(w, key, stream, from);
                 served = served + 1;
+            } else {
+                var lowMs = after.ms;
+                var lowSeq = after.seq;
+                if (hasField(after, "serial")) {
+                    lowMs = -1;
+                    lowSeq = 0;
+                }
+                if (!floorSet or lowMs < floorMs or (lowMs == floorMs and lowSeq < floorSeq)) {
+                    floorSet = true;
+                    floorMs = lowMs;
+                    floorSeq = lowSeq;
+                }
             }
         }
         i = i + 1;
@@ -1884,6 +1942,9 @@ fun wakeReaders(key, stream, firstNew) {
         return;
     }
     queue.live = queue.live - served;
+    queue.hasFloor = floorSet;
+    queue.floorMs = floorMs;
+    queue.floorSeq = floorSeq;
     if (queue.live == 0) {
         readers.del(key);
     } else {

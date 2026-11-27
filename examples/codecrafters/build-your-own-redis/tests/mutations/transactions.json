@@ -294,5 +294,13 @@
   "cases": [
    "local: a second EXEC on the same stream wakes its reader again"
   ]
+ },
+ {
+  "name": "the wake pass never skips a queue of readers above the top",
+  "old": "    if (!isWaiter(queue) and queue.allAbove(topMs, topSeq)) {\n        return;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: T7 EXEC of 65535 XADD with 50 readers above the top on each key stalls PING at most 1 s"
+  ]
  }
 ]
