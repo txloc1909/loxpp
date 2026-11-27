@@ -194,8 +194,8 @@ it has not joined yet comes before it, and no write after its reply is
 missed. Each command that writes the keyspace calls `touch(key)`, also a
 write that keeps the value, and a lazy expiry. `touch` marks each client
 that watches the key (`watchDirty`), and drops the marked clients from
-`watchers`: a marked client stays marked until its next `EXEC`, so each
-later write of the key costs one Map read. On a replica, the `DEL` from the
+`watchers`: a marked client stays marked until `unwatchAll` (`EXEC`, `DISCARD`,
+`UNWATCH` or a close), so each later write of the key costs one Map read. On a replica, the `DEL` from the
 master of a key that had expired at `WATCH` marks no client, and `touch`
 keeps that client in `watchers`. `EXEC` gives a null array when the mark is set, or when a
 watched key that had an expiry at `WATCH` has expired since, also with no
@@ -872,8 +872,8 @@ show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
 (the next read fails too). The `touch` in the lazy expiry of `lookup` has no case: the check
 of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
-key that expires, so no reply shows it. It stays for a client that watches
-the key after the read and before the removal.
+key that expires, so no reply shows it. It stays because Redis marks the watchers
+when a read removes an expired key, and because every write calls `touch`.
 
 The element budget that a `PUBLISH` in `EXEC` spends has no case: it
 needs 8388608 deliveries in one `EXEC`, such as 65536 `PUBLISH` to 128

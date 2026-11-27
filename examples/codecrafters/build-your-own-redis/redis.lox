@@ -2275,9 +2275,10 @@ var WATCH_MAX = 1048576;
 // command that writes the keyspace calls it, also a write that keeps the
 // value, as Redis does.
 //
-// A marked client stays marked until its next EXEC, so touch drops the key
-// from watchers after it marks them: each later write of the key costs one
-// Map read, not one step for each watcher, as in Redis.
+// A marked client stays marked until unwatchAll (EXEC, DISCARD, UNWATCH or
+// a close), so touch drops the key from watchers after it marks them: each
+// later write of the key costs one Map read, not one step for each watcher,
+// as in Redis.
 fun touch(key) {
     var w = watchers[key];
     if (w == nil) {
