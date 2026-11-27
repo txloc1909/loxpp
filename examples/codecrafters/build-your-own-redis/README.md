@@ -761,6 +761,8 @@ ruling on PR #1204. Every stage group keeps them.
 | Group `lists`: 150 waiters that reset the connection just before a push | each element stays in its list | as required (before the change: 249–283 of 300 lost) |
 | Group `lists`: the same, with a second waiter behind each one | each element goes to the second waiter | as required |
 | P10 (group `lists`): `LPOP k 4194291` of a list of 8388584 elements that `LPUSH` built | PING within 0.14 s (when the pop removes the elements one by one: 0.19–0.23 s) | 0.07–0.08 s |
+| Not in the suite: the one `LPOP k` that starts the compaction of the left List of a `Deque`, on a list of 31457190 / 62914380 elements that `LPUSH` built and `LPOP` with a count cut to half (the compaction slices the other half in one native call) | PING within 1.0 s (rule 6 only) | 0.061–0.063 s in 4 runs / 0.105–0.127 s in 3 runs (release build, incremental collector) |
+| Not in the suite: the same for the right List: the one `LPOP k` that starts its compaction, on a list of 31457190 / 62914380 elements that `RPUSH` built and `LPOP` with a count cut to half (there is no `RPOP`, so `LPOP` moves the head of the right List) | PING within 1.0 s (rule 6 only) | 0.045–0.060 s in 4 runs / 0.097–0.127 s in 3 runs (release build, incremental collector) |
 | Not in the suite: `RPUSH` / `LPUSH` of 1048573 elements | PING within 1.0 s | 0.10–0.13 s / 0.17–0.19 s |
 | Not in the suite: `LPOP k 2000000` of a list of 2097146 elements, from the right part / `LPOP k 1048000` from the left part | PING within 1.0 s | 0.08–0.09 s / 0.06–0.07 s |
 | Not in the suite: `LRANGE 0 -1` of a list of 1049146 elements that `LPUSH` built | PING within 0.2 s | 0.06–0.08 s |
