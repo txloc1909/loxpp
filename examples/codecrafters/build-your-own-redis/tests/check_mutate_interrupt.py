@@ -52,6 +52,9 @@ WAIT_SECONDS = 20
 GONE_SECONDS = 15
 # The window of the case that kills a parent before its suite starts the watch.
 RACE_SECONDS = 1
+# How long a cleanup that waits is given to reach its wait, before the case that
+# ends it with a second signal sends that signal.
+SECOND_SECONDS = 0.5
 
 # One server of its own, in the process group of the suite, as run_stages.py
 # starts the servers that it drives. The marker is in the command line of the
@@ -96,6 +99,23 @@ with open(os.environ["MUTATE_PROBE_STARTED"], "w") as f:
     f.write("1")
 time.sleep(float(os.environ["MUTATE_PROBE_RACE"]))
 run_stages.watch_parent()
+time.sleep(3600)
+'''
+
+# A suite whose server leads a session of its own, so the group kill of an
+# interrupt does not reach it. The cleanup of mutate.py then waits for the pipe
+# that the server holds, and a second signal can arrive while it waits.
+STUB_SESSION_SUITE = '''#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+import time
+
+server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3600)",
+                           os.environ["MUTATE_PROBE_MARKER"]],
+                          start_new_session=True)
+with open(os.environ["MUTATE_PROBE_PIDFILE"], "w") as f:
+    f.write(str(server.pid))
 time.sleep(3600)
 '''
 
@@ -365,6 +385,46 @@ def suite_case():
                 end_run(proc, [d])
 
 
+def second_signal_case(first, second):
+    """A cleanup that waits must end at once on a second signal, of either kind.
+
+    The first signal runs the handler, which gives both signals their default
+    action; a second signal must then end the process, and not reach a handler
+    that does nothing because a cleanup is already running.
+    """
+    with tempfile.TemporaryDirectory(prefix="mutprobe-") as d:
+        name = "second %s" % signal.Signals(second).name
+        marker = "mutate-probe-second-%d-%d" % (os.getpid(), int(second))
+        pidfile = os.path.join(d, "server.pid")
+        suite = write_script(d, "suite.py", STUB_SESSION_SUITE)
+        extra = {"MUTATE_PROBE_MARKER": marker, "MUTATE_PROBE_PIDFILE": pidfile}
+        out = os.path.join(d, "mutate.out")
+        with open(out, "w") as log:
+            proc = start_mutate(d, suite, extra, log)
+            try:
+                server = wait_for(pidfile, START_SECONDS)
+                if server is None:
+                    check("%s: the mutation suite starts its server" % name, False,
+                          "no server pid within %d s:\n%s"
+                          % (START_SECONDS, open(out).read()[-2000:]))
+                    return
+                proc.send_signal(first)
+                time.sleep(SECOND_SECONDS)
+                check("%s: the cleanup of the first signal waits" % name, proc.poll() is None,
+                      "the script ended within %.1f s, so no second signal can arrive"
+                      % SECOND_SECONDS)
+                proc.send_signal(second)
+                try:
+                    status = proc.wait(timeout=GONE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    status = None
+                check("%s: the second signal ends the script at once" % name,
+                      status == -second, "status %r after %d s:\n%s"
+                      % (status, GONE_SECONDS, open(out).read()[-2000:]))
+            finally:
+                end_run(proc, [marker, suite, d])
+
+
 def main():
     print("== mutate.py interrupts")
     # SIGINT is the interrupt that Ctrl-C gives: it holds that this file can see
@@ -378,6 +438,9 @@ def main():
     check_mutation_case(signal.SIGKILL, "SIGKILL", watch=True, status=-signal.SIGKILL)
     # The same kill, earlier: before the suite reaches its watch.
     early_case()
+    # A cleanup that waits ends at once on a second signal, of either kind.
+    second_signal_case(signal.SIGINT, signal.SIGTERM)
+    second_signal_case(signal.SIGTERM, signal.SIGINT)
     # The real suite, so that a dropped call of the watch in its main() fails.
     suite_case()
     print("\n%d failed" % FAILED)
