@@ -113,9 +113,11 @@ trace format. The `stw` collector ignores the barrier.
 2. **Mark (in steps):** an allocation runs a step of mark work when the
    pacing says so (4.8). A step takes gray objects and traces them.
 3. **Finish (a short pause):** the work that must be atomic: the held
-   objects again, the foreign-object order rule, and the objects that own
-   OS handles (4.5). The roots are not scanned again (4.3), and the weak
-   String table is not scanned here (4.7).
+   objects again and the foreign-object order rule. The handle objects (4.5)
+   and the unreached foreign objects are left to the first steps of the
+   sweep, which run them in parts before any span is swept. The roots are
+   not scanned again (4.3), and the weak String table is not scanned here
+   (4.7).
 4. **Sweep (in steps):** an allocation sweeps a part of the heap when the
    pacing says so. The sweep also removes each freed String from the
    intern table (4.7).
@@ -195,8 +197,15 @@ it. That read happens only during the mark.
 
 An unreachable `File`, `Socket`, `Server` or `Process` must close its
 handle soon, even when the program stops allocating. These objects are
-few. The heap keeps them in a separate list, and the finish pause frees the
-unmarked ones at once. The incremental sweep does not free them. Before a
+few. The heap keeps them in a separate list. The first sweep steps free the
+unmarked ones, in parts of at most the step units, before any span is swept:
+a sweep clears the marks that the list reads. The span sweep does not free
+them. The handle closes at the first sweep step after the finish pause, not
+in the finish pause. This is soon enough: the step follows at the next
+pacing call or at the idle burst, and the finish pause no longer follows the
+size of the list (#1299). A handle that the program makes while the stage
+runs is black, and it goes to a separate list that the stage does not read.
+Before a
 worker goes idle (before `epoll_wait` or the inbox wait), the collector uses
 the idle time for steps of the cycle, for at most 0.5 ms each time. It does
 not run the rest of the cycle at once: a wait can be one millisecond long,
@@ -611,11 +620,13 @@ the default; N7 made `incremental` the default (section 10.1).
   swept. This is the rule of 4.4 without a bit in the header.
 - **String read barrier.** During a mark, a lookup that finds a String marks
   it. During a sweep, it marks the String only when the span of the String is
-  not swept. `PollState::internBarrier` is true in the mark and the sweep.
+  not swept. A String of another heap is marked in the mark, and while the
+  foreign stage of the sweep (the Weak String table item) has not ended. `PollState::internBarrier` is true in the mark and the sweep.
   `PollState::marking` is true in the mark only, so the store hooks cost
   nothing in the sweep.
 - **Weak String table.** The sweep removes a String from the table when it
-  frees it. The finish pause removes the foreign Strings that it releases. No
+  frees it. The foreign stage of the first sweep steps removes each foreign
+  String that it releases, entry by entry, before it gives back the hold. No
   step scans the table.
 - **Gray stack and handle list.** Linked blocks of 2048 bytes from the buffer
   classes of the heap (`src/seg_stack.h`). No step copies an array.
@@ -633,9 +644,11 @@ the default; N7 made `incremental` the default (section 10.1).
   at the start of the cycle, the share rises to 45%. It stays under one
   half, so that MMU(10 ms) stays above 50%.
 - **Finish pause.** It reads the held objects, the inbox targets and the drain
-  batch again under their locks, traces what is left, runs the verifier,
-  frees the unmarked handle objects, calls `releaseUnreachedForeign`, and
-  starts the sweep. The count of a foreign object is raised when the mark
+  batch again under their locks, traces what is left, runs the verifier, sets
+  the handle stage and the foreign stage, and starts the sweep. The stages
+  run in the first sweep steps: `runReleaseStages` frees the unmarked handle
+  objects, then drops the unreached foreign entries (`ForeignSet::scanStep`),
+  each in parts of at most the step units. The count of a foreign object is raised when the mark
   reaches it (`markForeign`), not in the finish pause: the program can give
   back the count of an envelope in flight during a mark of many steps, and
   the owner would free the object. This was a defect of the first version of
@@ -678,10 +691,13 @@ to 45% of the time.
 
 Known gaps, and where they are filed:
 
-- The finish pause follows the size of the handle list and the foreign set,
-  and so do `beginForeignCycle` (start pause) and `markForeign` (a mark step:
-  the set can rehash). The finish pause also reads the held objects, the inbox
-  targets, the drain batch and what these make gray. #1299.
+- The finish pause reads the held objects, the inbox targets, the drain batch
+  and what these make gray. #1351. The handle list, the foreign set, the start
+  pause and `markForeign` no longer follow the size of the foreign set:
+  resolved in #1299 (PR #1350).
+- `MemoryManager::releaseHold` runs `delete this` when the owner heap is dead
+  and the hold is its last: one sweep step (or one `stw` collection) can
+  destroy a whole other heap. #1352.
 - A cycle with cause `exit` is one step of the whole heap. It runs after the
   program ends, and `tools/gc_report.py` shows it on its own line. #1300.
 - Function, Closure, Enum, DeferredCall and Bound* objects are not cut into

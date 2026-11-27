@@ -1,6 +1,7 @@
 #pragma once
 
 #include "collector.h"
+#include "foreign_set.h"
 #include "object.h"
 #include "size_class_heap.h"
 #include "stw_collector.h"
@@ -234,6 +235,15 @@ class MemoryManager : public VmAllocBase {
     // collector that does not scan the table (decision 4.7) removes the
     // Strings of this heap when it frees them, and these are the others.
     void releaseUnreachedForeign(bool dropStrings = false);
+    // The same in parts: begin, then call releaseForeignStep until
+    // foreignReleasing is false. A step visits at most `maxEntries` entries
+    // and returns the number that it visited. An entry that the program
+    // marks or adopts between the parts stays. endForeignRelease stops the
+    // scan; the entries that it did not visit stay in the set.
+    void beginForeignRelease();
+    std::size_t releaseForeignStep(std::size_t maxEntries, bool dropStrings);
+    [[nodiscard]] bool foreignReleasing() const;
+    void endForeignRelease();
     [[nodiscard]] std::size_t foreignCount() const { return m_foreign.size(); }
 
     // True when the allocation that is about to happen is a safe point at
@@ -272,11 +282,11 @@ class MemoryManager : public VmAllocBase {
 
     int m_workerNumber{0};
     std::uint16_t m_heapId{0};
-    // The foreign set and the side mark table in one: the keys are the
-    // objects of other heaps that this heap holds a count on, and the value
-    // is the side mark of the collection in progress. The header mark bit of
-    // a foreign object belongs to its owner's collector.
-    std::unordered_map<Obj*, bool> m_foreign;
+    // The foreign set and the side mark table in one: the objects of other
+    // heaps that this heap holds a count on, each with the side mark of the
+    // collection in progress. The header mark bit of a foreign object belongs
+    // to its owner's collector.
+    ForeignSet m_foreign;
     // An envelope batch that the drain took out of the inbox and has not
     // delivered yet: the receiver's roots while it delivers.
     std::vector<Envelope> m_draining;

@@ -28,7 +28,9 @@ Four parts:
      times with a large live heap must keep MMU(10 ms) at 50% or more, and a
      long churn on a fixed live heap must keep the peak heap within 2.5 times
      the live heap (the live heap is the largest bytes_after of a stw
-     collection of the same program).
+     collection of the same program). A worker that holds 400000 Strings of
+     another worker must keep the start and finish pauses short and every
+     step within the unit limit.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
 """
@@ -349,6 +351,54 @@ def check_peak(binary, work):
          f"{limits[-1]} needed)")
 
 
+# The largest time of a start pause and of a finish pause on the probe with a
+# large foreign set. The set has 400000 entries. A pause that visits the set
+# takes about 3 ms (start) and 28 ms (finish) there, and a pause with a bound
+# takes about 10 us.
+MAX_FOREIGN_PAUSE_US = 500.0
+FOREIGN_ATTEMPTS = 3
+
+
+def check_foreign_set(binary, work):
+    prog = os.path.join(PROBES, "latency", "foreign_set.lox")
+    worst = None
+    for attempt in range(FOREIGN_ATTEMPTS):
+        trace = os.path.join(work, f"foreign_set.{attempt}.trace")
+        r = run(binary, prog, {"LOXPP_GC": "incremental",
+                               "LOXPP_GC_TRACE": trace}, work)
+        if r.returncode != 0:
+            fail(f"foreign_set.lox: exit {r.returncode}, {r.stderr[:200]!r}")
+        cycles = [c for c in trace_fields(trace, "cycle")
+                  if c["cause"] != "exit"]
+        if len(cycles) < 3:
+            fail(f"foreign_set.lox: {len(cycles)} cycles, at least 3 needed")
+        steps = []
+        for line in trace_fields(trace, "step"):
+            steps.append((int(line["cycle"]), line["kind"],
+                          (int(line["t1"]) - int(line["t0"])) / 1000.0,
+                          int(line["units"])))
+        # The cycle of cause exit is the last cycle record, one step of the
+        # whole heap. Its id is the largest.
+        last = max(s[0] for s in steps)
+        steps = [s for s in steps if s[0] != last]
+        # The count does not depend on the host: no step has more units than
+        # the limit of a step, and a step of any kind counts the entries that
+        # it visits.
+        over = [s for s in steps if s[3] > MAX_STEP_UNITS]
+        if over:
+            fail(f"foreign_set.lox: a {over[0][1]} step of {over[0][3]} "
+                 f"units, over {MAX_STEP_UNITS}")
+        pause = max(s[2] for s in steps if s[1] in ("start", "finish"))
+        worst = pause if worst is None else min(worst, pause)
+        if pause <= MAX_FOREIGN_PAUSE_US:
+            print(f"ok   foreign_set.lox: start and finish pauses at most "
+                  f"{pause:.0f} us, {len(cycles)} cycles")
+            return
+    fail(f"foreign_set.lox: a start or finish pause of {worst:.0f} us in "
+         f"{FOREIGN_ATTEMPTS} runs, at most {MAX_FOREIGN_PAUSE_US:.0f} us "
+         "needed: a pause follows the size of the foreign set")
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -364,6 +414,7 @@ def main():
         check_exit_cycle(work)
         check_idle_latency(binary, work)
         check_peak(binary, work)
+        check_foreign_set(binary, work)
     print("OK")
 
 
