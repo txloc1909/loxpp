@@ -48,11 +48,12 @@ def check(name, cond, detail=""):
 
 # The ports of the brokers a suite starts. The range is outside the one the OS
 # hands to client sockets, so a connection cannot take a port between the moment
-# free_port() picks it and the moment the broker binds it.
+# free_port() picks it and the moment the broker binds it. The counter file is at
+# a fixed path, not under tempfile.gettempdir(): suites that run with a different
+# TMPDIR must still share one counter.
 PORT_LOW = 20000
 PORT_HIGH = 30000
-PORT_FILE = os.path.join(tempfile.gettempdir(),
-                         "loxpp-test-ports-%d" % os.getuid())
+PORT_FILE = "/tmp/loxpp-test-ports-%d" % os.getuid()
 START_ATTEMPTS = 5
 
 
@@ -415,14 +416,16 @@ def command(program, props):
 
 
 class Broker:
-    def __init__(self, program, topics=None):
+    def __init__(self, program, topics=None, port=None):
+        """`port` names the port of the first attempt, so a case can force a
+        port that another process takes. Later attempts take a fresh one."""
         self.program = program
         self.dir = tempfile.mkdtemp(prefix="loxpp-kafka-")
         self.log_dir = os.path.join(self.dir, "kraft-combined-logs")
         os.makedirs(self.log_dir, exist_ok=True)
         if topics:
             fixtures.write_metadata_log(self.log_dir, topics)
-        self.port = free_port()
+        self.port = free_port() if port is None else port
         self.props = fixtures.write_properties(
             os.path.join(self.dir, "server.properties"), self.log_dir, self.port)
         self.proc = None
@@ -445,6 +448,10 @@ class Broker:
             self.proc = subprocess.Popen(command(self.program, self.props), env=env,
                                          stdout=slave, stderr=subprocess.STDOUT)
             os.close(slave)
+            # A process outside the suites that binds the port in this window
+            # answers too, and no portable check tells whose listener it is.
+            # free_port() has proved the port free and the counter keeps the
+            # other suites off it, so only such a process can be that one.
             deadline = time.time() + 10
             while time.time() < deadline:
                 if self.proc.poll() is not None:
@@ -1151,6 +1158,22 @@ def case_local(prog):
               not os.path.exists(escape), escape)
         if os.path.isdir(escape):
             os.rmdir(escape)
+
+    # local: a port that another process takes between free_port() and the bind
+    # must not silence the suite: the broker starts on the next port.
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    taken = blocker.getsockname()[1]
+    moved = None
+    try:
+        with Broker(prog, ONE_TOPIC, port=taken) as b:
+            moved = b.port
+    except RuntimeError as exc:
+        moved = exc
+    finally:
+        blocker.close()
+    check("local: a port another process takes starts the broker on another one",
+          isinstance(moved, int) and moved != taken, "port %r, taken %r" % (moved, taken))
 
 
 # ---------------------------------------------------------------------------

@@ -43,11 +43,12 @@ def check(name, cond, detail=""):
 
 # The ports of the servers a suite starts. The range is outside the one the OS
 # hands to client sockets, so a connection cannot take a port between the moment
-# free_port() picks it and the moment the server binds it.
+# free_port() picks it and the moment the server binds it. The counter file is at
+# a fixed path, not under tempfile.gettempdir(): suites that run with a different
+# TMPDIR must still share one counter.
 PORT_LOW = 20000
 PORT_HIGH = 30000
-PORT_FILE = os.path.join(tempfile.gettempdir(),
-                         "loxpp-test-ports-%d" % os.getuid())
+PORT_FILE = "/tmp/loxpp-test-ports-%d" % os.getuid()
 START_ATTEMPTS = 5
 
 
@@ -95,6 +96,13 @@ def free_port():
 
 
 def wait_up(proc, port):
+    """True when a server answers on the port.
+
+    A process outside the suites that binds the port in this window answers too,
+    and no portable check tells whose listener it is. free_port() has proved the
+    port free and the counter keeps the other suites off it, so only such a
+    process can be that one.
+    """
     deadline = time.time() + 5
     while time.time() < deadline:
         if proc.poll() is not None:
