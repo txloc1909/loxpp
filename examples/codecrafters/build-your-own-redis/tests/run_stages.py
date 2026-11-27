@@ -2833,12 +2833,16 @@ def stages_rdb(prog):
         now = int(time.time() * 1000)
         live, dead, live_s, plain, neg = (rand_word() for _ in range(5))
         neg_s, top_ms, minus1, fd_min, fd_max = (rand_word() for _ in range(5))
-        minus2 = rand_word()
+        minus2, high_top = rand_word(), rand_word()
+        # An expiry of -1 with one byte (1 to 6) not 0xFF: a test of the
+        # sentinel that skips that byte takes it for -1.
+        mid = [(rand_word(), "mb%d" % k, 2 ** 64 - 1 - (1 << (8 * k)), "ms") for k in range(1, 7)]
         srv = with_rdb("expiry.rdb", [(live, "a", now + 600000, "ms"), (dead, "b", now - 600000, "ms"),
                                       (plain, "p", None, None), (live_s, "c", now + 600000, "s"),
                                       (neg, "n", 2 ** 63, "ms"),
                                       (minus1, "m", 2 ** 64 - 1, "ms"),
                                       (minus2, "m2", 2 ** 64 - 2, "ms"),
+                                      (high_top, "ht", 2 ** 63 + 2 ** 56 - 1, "ms")] + mid + [
                                       (neg_s, "ns", 0xFFFFFFFF * 1000, "s"),
                                       (fd_min, "fm", 0x80000000 * 1000, "s"),
                                       (fd_max, "fx", 0x7FFFFFFF * 1000, "s"),
@@ -2851,6 +2855,8 @@ def stages_rdb(prog):
                                  "local: a negative expiry in ms has passed",
                                  "local: an expiry in ms of -1 is no expiry",
                                  "local: an expiry in ms of -2 has passed",
+                                 "local: an expiry in ms of 0x80FFFFFFFFFFFFFF has passed",
+                                 "local: an expiry in ms of -1 with one middle byte not 0xFF has passed",
                                  "local: a negative expiry in seconds has passed",
                                  "local: an expiry in seconds of 2^31 has passed",
                                  "local: an expiry in seconds of 2^31-1 has not passed",
@@ -2866,6 +2872,9 @@ def stages_rdb(prog):
             check("local: an expiry in ms of -1 is no expiry",
                   c.call("GET", minus1) == "m")
             check("local: an expiry in ms of -2 has passed", c.call("GET", minus2) is None)
+            check("local: an expiry in ms of 0x80FFFFFFFFFFFFFF has passed", c.call("GET", high_top) is None)
+            check("local: an expiry in ms of -1 with one middle byte not 0xFF has passed",
+                  all(c.call("GET", k) is None for k, _, _, _ in mid))
             check("local: a negative expiry in seconds has passed", c.call("GET", neg_s) is None)
             check("local: an expiry in seconds of 2^31 has passed", c.call("GET", fd_min) is None)
             check("local: an expiry in seconds of 2^31-1 has not passed", c.call("GET", fd_max) == "fx")
