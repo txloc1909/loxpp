@@ -316,5 +316,21 @@
    "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget",
    "local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work"
   ]
+ },
+ {
+  "name": "a full pass does not renew the floor of its queue",
+  "old": "    queue.hasFloor = floorSet;\n    queue.floorMs = floorMs;\n    queue.floorSeq = floorSeq;\n",
+  "new": "",
+  "cases": [
+   "local: T8 an EXEC after a pass that found only readers above the top stalls PING at most 0.50 s"
+  ]
+ },
+ {
+  "name": "a full pass renews the floor of a $ reader on another Stream with -1-0",
+  "old": "                if (!floorSet or after.ms < floorMs or (after.ms == floorMs and after.seq < floorSeq)) {\n                    floorSet = true;\n                    floorMs = after.ms;\n                    floorSeq = after.seq;\n                }\n",
+  "new": "                if (!floorSet or after.ms < floorMs or (after.ms == floorMs and after.seq < floorSeq)) {\n                    floorSet = true;\n                    floorMs = after.ms;\n                    floorSeq = after.seq;\n                    if (hasField(after, \"serial\")) {\n                        floorMs = -1;\n                        floorSeq = 0;\n                    }\n                }\n",
+  "cases": [
+   "local: T9 an EXEC after the key lost the Stream of a $ reader stalls PING at most 0.50 s"
+  ]
  }
 ]
