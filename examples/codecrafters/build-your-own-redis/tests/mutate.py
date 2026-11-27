@@ -24,7 +24,10 @@
 # request, not at the next run.
 #
 # An interrupt cancels the mutations that have not started and kills the
-# suites that are running, so the script exits at once.
+# suites that are running, so the script exits at once. SIGINT and SIGTERM
+# both reach that cleanup, with exit status 130 and 143. A SIGKILL reaches no
+# handler of this script, so a suite ends its own servers when its parent is
+# gone (run_stages.py, watch_parent).
 import argparse
 import concurrent.futures
 import json
@@ -54,6 +57,21 @@ def start_suite(argv):
                              text=True, start_new_session=True)
         _live.add(p)
     return p
+
+
+def end_on_signal(signum, frame):
+    """Ends the run through the cleanup in the finally below.
+
+    SIGTERM runs no code of its own, so the suites that are running, and the
+    servers of each, would outlive the script. SIGINT takes the same path, so a
+    Ctrl-C exits with 130 and prints no traceback. The default action returns
+    first: a second signal ends the process at once, which matters when the
+    cleanup of the first one waits for a suite that ignores the kill.
+    """
+    signal.signal(signum, signal.SIG_DFL)
+    if _stopping:
+        return  # the cleanup that an earlier signal started is running
+    raise SystemExit(128 + signum)
 
 
 def kill_group(p):
@@ -177,6 +195,8 @@ def main():
     if not (os.path.isfile(args.loxpp) and os.access(args.loxpp, os.X_OK)):
         ap.error("loxpp is not an executable file: %s" % args.loxpp)
 
+    signal.signal(signal.SIGINT, end_on_signal)
+    signal.signal(signal.SIGTERM, end_on_signal)
     text = open(args.source).read()
     mutations = json.load(open(args.spec))
     bad = 0
