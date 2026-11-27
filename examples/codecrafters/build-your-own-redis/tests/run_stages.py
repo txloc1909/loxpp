@@ -685,21 +685,18 @@ def stages_maxclients(prog):
         check("maxclients: server starts", srv.up, srv.log_text())
         if not srv.up:
             return
-        # The probe that waited for the start may still count.
-        probe = srv.client()
-        probe.call("PING")
-        probe.close()
-        probe = srv.client()
+        # The server frees a slot when both tasks of a connection have ended,
+        # a little after the client closed. A client that connects at once may
+        # find the slot taken, so the first held client polls until the start
+        # probes are gone, and the others connect after that.
+        first = srv.client()
         check("local: maxclients 5 reports itself in CONFIG GET",
-              probe.call("CONFIG", "GET", "maxclients") == ["maxclients", "5"])
-        probe.close()
-        probe = srv.client()
-        base = clients_back(probe, 1)
-        probe.close()
+              first.call("CONFIG", "GET", "maxclients") == ["maxclients", "5"])
+        base = clients_back(first, 1)
         check("local: the clients of the start probes end", base == 1, "count %r" % base)
 
         # Exactly at the limit: 5 clients are served, the 6th is refused.
-        held = [srv.client() for _ in range(limit)]
+        held = [first] + [srv.client() for _ in range(limit - 1)]
         replies = [c.call("PING") for c in held]
         check("local: maxclients: as many clients as the limit are served",
               replies == ["PONG"] * limit, repr(replies))
@@ -728,13 +725,12 @@ def stages_maxclients(prog):
         check("local: maxclients: the slot is full again after it is taken",
               got == MAXCLIENTS_ERROR, repr(got))
         again.close()
-        for c in held:
+        for c in held[1:]:
             c.close()
-        c = srv.client()
-        n = clients_back(c, 1)
+        n = clients_back(held[0], 1)
+        held[0].close()
         check("local: maxclients: the count returns to one after all clients close",
               n == 1, "count %r" % n)
-        c.close()
     finally:
         srv.stop()
 
