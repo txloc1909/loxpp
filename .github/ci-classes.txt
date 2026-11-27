@@ -168,6 +168,7 @@ path tools/diff_runtimes.py                    harness
 path tools/check_coroutine_probes.sh           harness
 path tools/check_file_durability.sh            harness
 path tools/gc_report.py                        core,gc-heap
+path tools/check_core_symbols.py              core
 path tools/check_gc_*                          core,gc-heap
 path tools/diff_gc_collectors.py               core,gc-heap
 path tools/check_repl_session.py               core
@@ -192,7 +193,7 @@ path install.sh                                packaging
 
 # --- what each class runs
 class ci               gates=all labels=all
-class test-source      gates=format
+class test-source      gates=format tests=CoreSymbolsUnique
 class test-support     gates=format,probes labels=all
 class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
 class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend

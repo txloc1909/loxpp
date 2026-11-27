@@ -3,13 +3,13 @@ include(GoogleTest)
 
 # Every GTest binary needs the same 29 interpreter sources plus
 # test_harness.cpp. Listing them in each executable meant the 41 test targets
-# that use them compiled the set ~41 times over; the shared objects below
+# that use them compiled the set ~41 times over; the shared libraries below
 # compile it twice, once per flag variant.
 #
 # There are two variants because LOXPP_PROFILE changes the object code and
-# cannot be mixed at link time: it adds a member to MemoryManager and Runtime and
-# pulls in profiler.h. Each test executable links exactly one variant, so no
-# translation unit ever sees two definitions of the same symbol.
+# cannot be shared by one process: it adds a member to MemoryManager and Runtime
+# and pulls in profiler.h. Each test executable links exactly one variant, so
+# no process loads two definitions of the same symbol.
 #
 # GC stress (collect on every allocation) used to be a third variant
 # (LOXPP_STRESS_GC). It is a runtime flag now: the *_gc test targets link the
@@ -67,18 +67,18 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/task_api.cpp
 )
 
-add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+add_library(loxpp_test_core SHARED ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(loxpp_test_core PUBLIC Threads::Threads)
 
-add_library(loxpp_test_core_profile OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+add_library(loxpp_test_core_profile SHARED ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core_profile PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(loxpp_test_core_profile PUBLIC LOXPP_PROFILE)
 target_link_libraries(loxpp_test_core_profile PUBLIC Threads::Threads)
 
-# loxpp_add_test(<name> <source>... CORE <object-library> [PROBE])
+# loxpp_add_test(<name> <source>... CORE <core-library> [PROBE])
 #
-# CORE names the interpreter object library the executable links.
+# CORE names the shared core library the executable links.
 # PROBE adds LOXPP_PROJECT_SOURCE_DIR, the repo path a handful of backend
 # probe tests read to locate example programs at run time. Only those test
 # .cpp files use the macro, so it belongs on the executable, not the library.
@@ -230,6 +230,14 @@ add_test(NAME TestMain COMMAND test_main)
 # still configure and build the VM; these python-driven tests are simply skipped.
 find_program(LOXPP_PYTHON3 python3)
 if(LOXPP_PYTHON3)
+    # A test executable that defines a strong symbol its core library also
+    # defines links without error: the executable's copy silently replaces the
+    # library's copy at run time. This check fails the build's test run instead.
+    add_test(NAME CoreSymbolsUnique
+        COMMAND ${LOXPP_PYTHON3} ${PROJECT_SOURCE_DIR}/tools/check_core_symbols.py
+                ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(CoreSymbolsUnique PROPERTIES SKIP_RETURN_CODE 125)
+
     # LOXPP_GC_TRACE must write a trace when set and nothing when unset. The
     # check drives the real loxpp binary and tools/gc_report.py end to end.
     add_test(NAME GcTrace

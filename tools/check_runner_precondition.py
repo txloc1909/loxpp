@@ -124,6 +124,7 @@ EXTERNAL = {
 
 NOT_A_RUNNER_TOOL = {
     "check_docs_placement.py": "spawns git",
+    "check_core_symbols.py": "spawns nm and readelf on the build tree passed as an argument; no runner on the command line",
     "ci_classes.py": "spawns git; no runner on the command line",
     "check_nvim_syntax.py": "spawns nvim, a fixed tool",
     "check_gc_barrier_mutants.py": "spawns tools/check_gc_barrier_table.py by fixed repo path; no runner on the command line",

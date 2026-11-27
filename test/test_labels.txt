@@ -85,6 +85,7 @@ test_check_diagnostics core
 test_enum_names core
 TestMain core
 GcTrace core
+CoreSymbolsUnique core
 GcTraceV3 core
 GcCollectorChoice core
 GcLargeHeap core
