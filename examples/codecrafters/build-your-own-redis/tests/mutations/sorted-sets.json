@@ -218,8 +218,8 @@
  },
  {
   "name": "ZRANGE spends no elements",
-  "old": "    if (!spendElements(size)) {\n        return EXEC_TOO_LARGE;\n    }\n    var out = [];",
-  "new": "    var out = [];",
+  "old": "    if (!spendElements(size)) {\n        return EXEC_TOO_LARGE;\n    }\n    if (zrangeExecElements != nil) {",
+  "new": "    if (zrangeExecElements != nil) {",
   "cases": [
    "local: EXEC refuses a ZRANGE over the element budget"
   ]
@@ -350,6 +350,155 @@
   "new": "        } else if (had == nil) {\n            work = work + 1;\n        }\n        now[p[1]] = p[0];",
   "cases": [
    "local: a pair that changes nothing costs one unit of the sorted set work of EXEC"
+  ]
+ },
+ {
+  "name": "ZRANGE has no limit in EXEC",
+  "old": "    if (zrangeExecElements != nil and size > zrangeExecElements) {\n        return ZRANGE_EXEC_TOO_MANY;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
+   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "EXEC gives no limit to ZRANGE",
+  "old": "    zrangeExecElements = ZRANGE_EXEC_ELEMENTS;\n",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
+   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "ZRANGE refuses a range that fills the limit exactly",
+  "old": "size > zrangeExecElements",
+  "new": "size >= zrangeExecElements",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements"
+  ]
+ },
+ {
+  "name": "ZRANGE spends nothing from its limit",
+  "old": "    if (zrangeExecElements != nil) {\n        zrangeExecElements = zrangeExecElements - size;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
+   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s"
+  ]
+ },
+ {
+  "name": "a refused ZRANGE spends its size from the limit",
+  "old": "    if (zrangeExecElements != nil and size > zrangeExecElements) {\n        return ZRANGE_EXEC_TOO_MANY;\n    }\n",
+  "new": "    if (zrangeExecElements != nil and size > zrangeExecElements) {\n        zrangeExecElements = zrangeExecElements - size;\n        return ZRANGE_EXEC_TOO_MANY;\n    }\n",
+  "cases": [
+   "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements"
+  ]
+ },
+ {
+  "name": "a hexadecimal score is refused",
+  "old": "    if (i + 1 < len(s) and s[i] == \"0\" and (s[i + 1] == \"x\" or s[i + 1] == \"X\")) {\n        return parseHexScore(s, i + 2, sign);\n    }\n",
+  "new": "",
+  "cases": [
+   "local: ZADD reads the hexadecimal forms of strtod",
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "a digit after the 15 kept sets no sticky bit",
+  "old": "            if (d != 0) {\n                m = m | 1i;\n            }\n",
+  "new": "",
+  "cases": [
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "a result under 2^-1022 rounds twice",
+  "old": "    if (under > 52 and (under >= 62 or m < (1i << int(under)))) {\n        return hexSubnormal(m, under - 52, sign);\n    }\n",
+  "new": "",
+  "cases": [
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "a tie under 2^-1022 rounds up",
+  "old": "(rest == half and (q & 1i) == 1i)",
+  "new": "rest == half",
+  "cases": [
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "the binary exponent loses its sign",
+  "old": "        e = e + exp * expSign;",
+  "new": "        e = e + exp;",
+  "cases": [
+   "local: ZADD reads the hexadecimal forms of strtod",
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "a hexadecimal score loses its sign",
+  "old": "    if (v == 0 or v == ZSET_INF) {\n        return nil;\n    }\n    if (sign == \"-\") {\n        return -v;\n    }\n    return v;\n}\n\nfun parseScore(s) {",
+  "new": "    if (v == 0 or v == ZSET_INF) {\n        return nil;\n    }\n    return v;\n}\n\nfun parseScore(s) {",
+  "cases": [
+   "local: ZADD reads the hexadecimal forms of strtod"
+  ]
+ },
+ {
+  "name": "a hexadecimal score under 2^-1022 loses its sign",
+  "old": "    var v = float(q) * math.pow(2.0, -1074.0);\n    if (sign == \"-\") {\n        return -v;\n    }\n    return v;",
+  "new": "    var v = float(q) * math.pow(2.0, -1074.0);\n    return v;",
+  "cases": [
+   "local: ZADD rounds a long hexadecimal score once"
+  ]
+ },
+ {
+  "name": "an uppercase hexadecimal digit is refused",
+  "old": "    if (d >= 65 and d <= 70) {\n        return d - 55;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: ZADD reads the hexadecimal forms of strtod"
+  ]
+ },
+ {
+  "name": "a hexadecimal score past the range is read",
+  "old": "    if (v == 0 or v == ZSET_INF) {\n        return nil;\n    }\n    if (sign == \"-\") {\n        return -v;\n    }\n    return v;\n}\n\nfun parseScore(s) {",
+  "new": "    if (sign == \"-\") {\n        return -v;\n    }\n    return v;\n}\n\nfun parseScore(s) {",
+  "cases": [
+   "local: ZADD refuses the hexadecimal texts that strtod does not read whole"
+  ]
+ },
+ {
+  "name": "a hexadecimal score under the range is read as zero",
+  "old": "    if (q == 0i) {\n        return nil;\n    }\n",
+  "new": "",
+  "cases": [
+   "local: ZADD refuses the hexadecimal texts that strtod does not read whole"
+  ]
+ },
+ {
+  "name": "0x with no digit is read as zero",
+  "old": "    if (digits == 0) {\n        return nil;\n    }\n    if (i < len(s) and (s[i] == \"p\"",
+  "new": "    if (i < len(s) and (s[i] == \"p\"",
+  "cases": [
+   "local: ZADD refuses the hexadecimal texts that strtod does not read whole"
+  ]
+ },
+ {
+  "name": "p with no digit is read",
+  "old": "        if (i == start) {\n            return nil;\n        }\n        e = e + exp * expSign;",
+  "new": "        e = e + exp * expSign;",
+  "cases": [
+   "local: ZADD refuses the hexadecimal texts that strtod does not read whole"
+  ]
+ },
+ {
+  "name": "text after a hexadecimal score is read",
+  "old": "    if (i < len(s)) {\n        return nil;\n    }\n    if (m == 0i) {",
+  "new": "    if (m == 0i) {",
+  "cases": [
+   "local: ZADD refuses the hexadecimal texts that strtod does not read whole"
   ]
  }
 ]
