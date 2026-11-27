@@ -360,6 +360,14 @@
   ]
  },
  {
+  "name": "FD bound at 2147483647",
+  "old": "            if (expiresAt >= 2147483648) {",
+  "new": "            if (expiresAt >= 2147483647) {",
+  "cases": [
+   "local: an expiry in seconds of 2^31-1 has not passed"
+  ]
+ },
+ {
   "name": "FC of -1 is a negative time",
   "old": "            if (allOnes) {\n                expiresAt = nil;\n            } else if (top >= 128) {",
   "new": "            if (top >= 128) {",
