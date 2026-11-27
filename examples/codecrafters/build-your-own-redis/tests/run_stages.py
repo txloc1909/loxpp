@@ -4809,6 +4809,9 @@ def wait_count(srv, channel, want, seconds=5):
     return got
 
 
+PS9_OBJECT_LIMIT = 100000
+
+
 def stages_pubsub_limits(prog):
     # PS1: a subscriber that never reads is closed over the hard limit.
     srv = Server(prog, [])
@@ -4928,9 +4931,12 @@ def stages_pubsub_limits(prog):
     # collector run, the live OBJECT count is the baseline of the server, not
     # 600000 channels. It does not bound the live bytes: a hash table keeps
     # its capacity after its keys go (#1343), so the bytes still grow with the
-    # rounds. The probe reads only a record that starts after the churn. When
-    # the collector writes none then (a stop-the-world collector may not run
-    # in the churn), the case fails with a message that says so.
+    # rounds. The probe reads only a record that ends after the churn: a
+    # cycle that starts before the churn and ends after it counts, as its
+    # live count is read at its end. The end time is t4 in a "gc" line and t1
+    # in a "cycle" line. When the collector writes no such record (a
+    # stop-the-world collector may not run in the churn), the case fails with
+    # a message that says so.
     trace = tempfile.NamedTemporaryFile(prefix="loxpp-redis-gc-", suffix=".trace", delete=False)
     trace.close()
     srv = Server(prog, [], env={"LOXPP_GC_TRACE": trace.name})
@@ -4961,11 +4967,13 @@ def stages_pubsub_limits(prog):
             for line in f:
                 if line.startswith(("gc ", "cycle ")):
                     fields = dict(x.split("=", 1) for x in line.split()[1:])
-                    if fields.get("cause") != "exit" and int(fields["t0"]) > churn_at:
+                    ended = int(fields["t4" if line.startswith("gc ") else "t1"])
+                    if fields.get("cause") != "exit" and ended > churn_at:
                         last = int(fields["objs_after"])
         print("       measured: live objects at the last collection after the churn %r" % last)
-        check(name, last is not None and last < 100000,
-              "%r (no collection record after the churn)" % last)
+        check(name, last is not None and last < PS9_OBJECT_LIMIT,
+              "no collection record after the churn" if last is None
+              else "%d live objects, the limit is %d" % (last, PS9_OBJECT_LIMIT))
     os.unlink(trace.name)
 
     # PS2: the soft limit, with a soft time of 2 s.
