@@ -16,6 +16,7 @@ from the encoder instead and say so in the README.
 Usage: tests/run_stages.py [your_program.sh]
 """
 
+import fcntl
 import os
 import pty
 import select
@@ -45,12 +46,57 @@ def check(name, cond, detail=""):
         print("  FAIL %s  %s" % (name, detail))
 
 
-def free_port():
+# The ports of the brokers a suite starts. The range is outside the one the OS
+# hands to client sockets, so a connection cannot take a port between the moment
+# free_port() picks it and the moment the broker binds it.
+PORT_LOW = 20000
+PORT_HIGH = 30000
+PORT_FILE = os.path.join(tempfile.gettempdir(),
+                         "loxpp-test-ports-%d" % os.getuid())
+START_ATTEMPTS = 5
+
+
+def port_taken(port):
+    """True when a socket holds the port now."""
     s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        return True
+    finally:
+        s.close()
+    return False
+
+
+def free_port():
+    """A port that is free now and that no other suite of this host has taken.
+
+    Binding port 0 and closing the socket races: a second suite reads the same
+    port, and then the two brokers fight for it. One of them fails to bind, or,
+    worse, the loser is still starting while the winner serves, and a suite
+    talks to the broker of another suite. The counter under the lock gives
+    every caller a port of its own instead.
+    """
+    with open(PORT_FILE, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            text = f.read().strip()
+            port = int(text) if text.isdigit() else PORT_LOW
+            if not PORT_LOW <= port < PORT_HIGH:
+                port = PORT_LOW
+            for _ in range(PORT_HIGH - PORT_LOW):
+                if not port_taken(port):
+                    f.seek(0)
+                    f.truncate()
+                    f.write("%d\n" % (port + 1 if port + 1 < PORT_HIGH else PORT_LOW))
+                    f.flush()
+                    return port
+                port = PORT_LOW if port + 1 == PORT_HIGH else port + 1
+            raise RuntimeError("no free port in %d..%d" % (PORT_LOW, PORT_HIGH))
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -384,24 +430,39 @@ class Broker:
         self.pipe = ""
 
     def __enter__(self):
-        env = dict(os.environ)
-        env["LOXPP_KAFKA_PORT"] = str(self.port)
-        # A pseudo-terminal, so the broker's stdout is line-buffered: a fault
-        # message must be visible while the broker runs, not only at exit.
-        self.out, slave = pty.openpty()
-        self.proc = subprocess.Popen(command(self.program, self.props), env=env,
-                                     stdout=slave, stderr=subprocess.STDOUT)
-        os.close(slave)
-        deadline = time.time() + 10
-        while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise RuntimeError("broker exited: " + self.tail())
-            try:
-                socket.create_connection(("127.0.0.1", self.port), timeout=0.2).close()
-                return self
-            except OSError:
-                time.sleep(0.02)
-        raise RuntimeError("broker did not listen: " + self.tail())
+        for attempt in range(START_ATTEMPTS):
+            if attempt:
+                # The last attempt lost its port to another process: take a
+                # fresh one and write the properties file for it again.
+                self.port = free_port()
+                self.props = fixtures.write_properties(
+                    os.path.join(self.dir, "server.properties"), self.log_dir, self.port)
+            env = dict(os.environ)
+            env["LOXPP_KAFKA_PORT"] = str(self.port)
+            # A pseudo-terminal, so the broker's stdout is line-buffered: a fault
+            # message must be visible while the broker runs, not only at exit.
+            self.out, slave = pty.openpty()
+            self.proc = subprocess.Popen(command(self.program, self.props), env=env,
+                                         stdout=slave, stderr=subprocess.STDOUT)
+            os.close(slave)
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                if self.proc.poll() is not None:
+                    break
+                try:
+                    socket.create_connection(("127.0.0.1", self.port), timeout=0.2).close()
+                    return self
+                except OSError:
+                    time.sleep(0.02)
+            exited = self.proc.poll() is not None
+            if exited and port_taken(self.port) and attempt + 1 < START_ATTEMPTS:
+                # The broker exited and another process holds its port: the
+                # port was taken from it, so start the broker on a fresh one.
+                self.tail()
+                self.__exit__(None, None, None)
+                continue
+            raise RuntimeError("broker %s: %s"
+                               % ("exited" if exited else "did not listen", self.tail()))
 
     def __exit__(self, *exc):
         if self.proc and self.proc.poll() is None:
