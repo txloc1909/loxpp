@@ -1920,16 +1920,13 @@ fun wakeReaders(key, stream, firstNew) {
                 serveReader(w, key, stream, from);
                 served = served + 1;
             } else {
-                var lowMs = after.ms;
-                var lowSeq = after.seq;
-                if (hasField(after, "serial")) {
-                    lowMs = -1;
-                    lowSeq = 0;
-                }
-                if (!floorSet or lowMs < floorMs or (lowMs == floorMs and lowSeq < floorSeq)) {
+                // A "$" reader that waits here names a Stream that the key no
+                // longer holds, and that Stream never comes back, so it waits
+                // above the top at its wait like any other reader.
+                if (!floorSet or after.ms < floorMs or (after.ms == floorMs and after.seq < floorSeq)) {
                     floorSet = true;
-                    floorMs = lowMs;
-                    floorSeq = lowSeq;
+                    floorMs = after.ms;
+                    floorSeq = after.seq;
                 }
             }
         }

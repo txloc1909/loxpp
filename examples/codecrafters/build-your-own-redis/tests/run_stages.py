@@ -2198,6 +2198,9 @@ def stages_transactions(prog):
     stages_transactions_large(prog)
 
 
+T8_LIMIT = 0.5
+
+
 def stages_transactions_large(prog):
     """The byte bound of a transaction, and T3-T5, on servers of their
     own."""
@@ -2382,6 +2385,54 @@ def stages_transactions_large(prog):
         check("local: T7 EXEC of 65535 XADD with 50 readers above the top on each key stalls PING at most 1 s",
               worst <= 1.0 and not wrong and isinstance(got, list) and len(got) == 65535,
               "worst %.3f s" % worst)
+        for r in waiting:
+            r.close()
+
+        # T8: the pass that follows an EXEC renews the floor of a queue, so
+        # the next EXEC skips it. 100 readers wait above the top on each of
+        # 16384 keys, and one more reader waits below it on all of them. The
+        # first EXEC wakes that reader, and its pass finds only readers above
+        # the top. The second EXEC is the one that is timed.
+        keys = ["t8-%d" % i for i in range(16384)]
+        low = srv.client()
+        low.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", *keys, *(["0-0"] * len(keys))))
+        waiting = []
+        for _ in range(100):
+            r = srv.client()
+            r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", *keys, *(["999999999-0"] * len(keys))))
+            waiting.append(r)
+        time.sleep(2)
+        exec_stall([encode("XADD", k, "1-1", "f", "v") for k in keys])
+        got = low.try_read(10)
+        worst, wrong, got2 = exec_stall([encode("XADD", k, "1-2", "f", "v") for k in keys])
+        check("local: T8 an EXEC after a pass that found only readers above the top stalls PING at most %.2f s" % T8_LIMIT,
+              isinstance(got, list) and worst <= T8_LIMIT and not wrong and isinstance(got2, list) and len(got2) == 16384,
+              "worst %.3f s, %r" % (worst, got if not isinstance(got, list) else len(got)))
+        for r in waiting + [low]:
+            r.close()
+
+        # T9: a reader of "$" on a Stream that the key no longer holds waits
+        # above the top at its own wait, so the pass renews the floor with
+        # that ID and the next EXEC skips the pass. The timed EXEC is the
+        # second one after the keys changed their Stream.
+        waiting = []
+        keys = ["t9-%d" % i for i in range(16384)]
+        exec_stall([encode("XADD", k, "5-0", "f", "v") for k in keys])
+        for _ in range(100):
+            r = srv.client()
+            r.send_raw(encode("XREAD", "BLOCK", "0", "STREAMS", *keys, *(["$"] * len(keys))))
+            waiting.append(r)
+        time.sleep(2)
+        exec_stall([cmd for k in keys for cmd in (encode("DEL", k), encode("XADD", k, "1-1", "f", "v"))])
+        worst, wrong, got = exec_stall([encode("XADD", k, "2-0", "f", "v") for k in keys])
+        check("local: T9 an EXEC after the key lost the Stream of a $ reader stalls PING at most %.2f s" % T8_LIMIT,
+              worst <= T8_LIMIT and not wrong and isinstance(got, list) and len(got) == 16384,
+              "worst %.3f s" % worst)
+        c.call("XADD", keys[0], "6-0", "f", "v")
+        got = [r.try_read(10) for r in waiting[:3]]
+        check("local: T9 a $ reader still wakes when the key gets an entry above its top",
+              all(isinstance(g, list) and g[0][0] == keys[0] and g[0][1] == [["6-0", ["f", "v"]]] for g in got),
+              repr(got)[:200])
         for r in waiting:
             r.close()
         c.close()
