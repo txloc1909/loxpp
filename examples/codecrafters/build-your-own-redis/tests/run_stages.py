@@ -623,6 +623,104 @@ def stages_query_limit(prog):
         srv.stop()
 
 
+MAXCLIENTS_ERROR = b"-ERR max number of clients reached\r\n"
+
+
+def refused_bytes(port):
+    """Connects, reads until the server closes, and returns the bytes it
+    sent, or None when the server did not close within 5 s."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(5)
+    got = b""
+    try:
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return got
+            got += chunk
+    except (socket.timeout, ConnectionError):
+        return None
+    finally:
+        sock.close()
+
+
+def stages_maxclients(prog):
+    limit = 5
+    srv = Server(prog, ["--maxclients", str(limit)])
+    try:
+        check("maxclients: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        # The probe that waited for the start may still count.
+        probe = srv.client()
+        probe.call("PING")
+        probe.close()
+        probe = srv.client()
+        check("local: maxclients 5 reports itself in CONFIG GET",
+              probe.call("CONFIG", "GET", "maxclients") == ["maxclients", "5"])
+        probe.close()
+        probe = srv.client()
+        base = clients_back(probe, 1)
+        probe.close()
+        check("local: the clients of the start probes end", base == 1, "count %r" % base)
+
+        # Exactly at the limit: 5 clients are served, the 6th is refused.
+        held = [srv.client() for _ in range(limit)]
+        replies = [c.call("PING") for c in held]
+        check("local: maxclients: as many clients as the limit are served",
+              replies == ["PONG"] * limit, repr(replies))
+        got = refused_bytes(srv.port)
+        check("local: maxclients: the client above the limit gets the error and is closed",
+              got == MAXCLIENTS_ERROR, repr(got))
+        check("local: maxclients: the clients under the limit still work",
+              held[0].call("PING") == "PONG")
+
+        # A refused connection leaves no task and no count.
+        for _ in range(20):
+            refused_bytes(srv.port)
+        n = connected_clients(held[0])
+        check("local: maxclients: refused connections do not count in connected_clients",
+              n == limit, "count %r" % n)
+
+        # A slot that a client frees goes to the next client.
+        held[1].close()
+        n = clients_back(held[0], limit - 1)
+        check("local: maxclients: a client that closes frees its slot", n == limit - 1,
+              "count %r" % n)
+        again = srv.client()
+        check("local: maxclients: a new client gets the freed slot",
+              again.call("PING") == "PONG")
+        got = refused_bytes(srv.port)
+        check("local: maxclients: the slot is full again after it is taken",
+              got == MAXCLIENTS_ERROR, repr(got))
+        again.close()
+        for c in held:
+            c.close()
+        c = srv.client()
+        n = clients_back(c, 1)
+        check("local: maxclients: the count returns to one after all clients close",
+              n == 1, "count %r" % n)
+        c.close()
+    finally:
+        srv.stop()
+
+    # The default is the 10000 of Redis. The case reads the value and opens
+    # no 10000 sockets: that would need a raised descriptor limit.
+    srv = Server(prog, [])
+    try:
+        check("maxclients default: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        c = srv.client()
+        check("local: maxclients defaults to 10000",
+              c.call("CONFIG", "GET", "maxclients") == ["maxclients", "10000"])
+        c.close()
+    finally:
+        srv.stop()
+    aof_exits(prog, ["--maxclients", "0"], "local: --maxclients 0 is refused at start")
+    aof_exits(prog, ["--maxclients", "many"], "local: --maxclients with no integer is refused at start")
+
+
 def stages_fairness(prog):
     srv = Server(prog, [])
     try:
@@ -6791,6 +6889,7 @@ GROUPS = [
     ("authentication", stages_auth),
     ("fairness", stages_fairness),
     ("query limit", stages_query_limit),
+    ("maxclients", stages_maxclients),
 ]
 
 

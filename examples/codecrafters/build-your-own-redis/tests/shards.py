@@ -21,7 +21,7 @@ import run_stages  # noqa: E402
 
 SHARDS = [
     ["pub-sub", "transactions", "lists", "base"],
-    ["authentication", "sorted-sets", "optimistic-locking", "replication", "query limit"],
+    ["authentication", "sorted-sets", "optimistic-locking", "replication", "query limit", "maxclients"],
     ["persistence-rdb", "streams", "persistence-aof"],
     ["geospatial", "fairness", "bitmaps"],
 ]

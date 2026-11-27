@@ -224,5 +224,79 @@
   "cases": [
    "local: an inline command over the query limit closes the client"
   ]
+ },
+ {
+  "name": "maxclients limit is one too high",
+  "old": "if (connectedClients >= CONFIG_MAXCLIENTS) {",
+  "new": "if (connectedClients > CONFIG_MAXCLIENTS) {",
+  "cases": [
+   "local: maxclients: the client above the limit gets the error and is closed"
+  ]
+ },
+ {
+  "name": "maxclients refusal writes no error",
+  "old": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n",
+  "new": "            sock.write(\"\");\n",
+  "cases": [
+   "local: maxclients: the client above the limit gets the error and is closed"
+  ]
+ },
+ {
+  "name": "maxclients refused connection is not closed",
+  "old": "        sock.close();\n        return;\n    }\n    var conn = Conn(sock);",
+  "new": "        return;\n    }\n    var conn = Conn(sock);",
+  "cases": [
+   "local: maxclients: the client above the limit gets the error and is closed"
+  ]
+ },
+ {
+  "name": "maxclients refused connection counts",
+  "old": "    if (connectedClients >= CONFIG_MAXCLIENTS) {\n",
+  "new": "    if (connectedClients >= CONFIG_MAXCLIENTS) {\n        connectedClients = connectedClients + 1;\n",
+  "cases": [
+   "local: maxclients: refused connections do not count in connected_clients"
+  ]
+ },
+ {
+  "name": "maxclients closed client keeps its slot",
+  "old": "        connectedClients = connectedClients - 1;\n    }\n}\n\n// The reader sends",
+  "new": "    }\n}\n\n// The reader sends",
+  "cases": [
+   "local: maxclients: a client that closes frees its slot",
+   "local: maxclients: a new client gets the freed slot"
+  ]
+ },
+ {
+  "name": "maxclients default is 1000",
+  "old": "var CONFIG_MAXCLIENTS = 10000;",
+  "new": "var CONFIG_MAXCLIENTS = 1000;",
+  "cases": [
+   "local: maxclients defaults to 10000"
+  ]
+ },
+ {
+  "name": "maxclients flag is ignored",
+  "old": "    CONFIG_MAXCLIENTS = maxClients;\n",
+  "new": "",
+  "cases": [
+   "local: maxclients 5 reports itself in CONFIG GET",
+   "local: maxclients: the client above the limit gets the error and is closed"
+  ]
+ },
+ {
+  "name": "maxclients 0 is accepted",
+  "old": "maxClients == nil or maxClients < 1",
+  "new": "maxClients == nil or maxClients < 0",
+  "cases": [
+   "local: --maxclients 0 is refused at start"
+  ]
+ },
+ {
+  "name": "maxclients not an integer is accepted",
+  "old": "    var maxClients = parseInteger(flagValue(\"--maxclients\", str(CONFIG_MAXCLIENTS)));\n",
+  "new": "    var maxClients = parseInteger(flagValue(\"--maxclients\", str(CONFIG_MAXCLIENTS)));\n    if (maxClients == nil) {\n        maxClients = 10000;\n    }\n",
+  "cases": [
+   "local: --maxclients with no integer is refused at start"
+  ]
  }
 ]
