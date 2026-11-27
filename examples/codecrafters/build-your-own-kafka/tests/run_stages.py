@@ -47,10 +47,11 @@ def check(name, cond, detail=""):
 
 
 # The ports of the brokers a suite starts. The range is outside the one the OS
-# hands to client sockets, so a connection cannot take a port between the moment
-# free_port() picks it and the moment the broker binds it. The counter file is at
-# a fixed path, not under tempfile.gettempdir(): suites that run with a different
-# TMPDIR must still share one counter.
+# hands to client sockets on the hosts these suites run on, so a connection
+# cannot take a port between the moment free_port() picks it and the moment the
+# broker binds it; the retry of the start covers a host that differs. The counter
+# file is at a fixed path, not under tempfile.gettempdir(): suites that run with
+# a different TMPDIR must still share one counter.
 PORT_LOW = 20000
 PORT_HIGH = 30000
 PORT_FILE = "/tmp/loxpp-test-ports-%d" % os.getuid()
