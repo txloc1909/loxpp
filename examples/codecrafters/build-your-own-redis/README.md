@@ -148,7 +148,11 @@ first one expired or was replaced), the reader compares with the top ID at the
 wait, not with the top of the first `Stream`: an `EXEC` can append to it and
 then replace the key. A reader whose ID is still above the top joins the
 queue again. `XREAD` takes nothing from the stream, so a reply that the
-client cannot get is dropped.
+client cannot get is dropped. A queue of readers keeps `floor`, the lowest ID
+that one of its readers waits above (`-1-0` for a `$` reader). An `XADD` whose
+top is not above `floor` wakes no reader and skips the pass, so readers that
+wait above the top cost one comparison for each key, not one for each reader.
+`floor` never exceeds the ID of an active reader; a full pass renews it.
 
 ### Transactions
 
@@ -183,7 +187,7 @@ and does nothing, so the transaction stays atomic.
 
 The probes T1-T7 measure large steps of `EXEC` under these bounds. They do
 not prove a bound on every step: the cost of a command depends on the data
-it reads, and T7 shows one case that grows with the number of readers.
+it reads.
 
 ### Optimistic locking
 
@@ -850,7 +854,7 @@ ruling on PR #1204. Every stage group keeps them.
 | Not in the suite: `XADD` with 524286 field pairs with a replica | PING within 1.0 s | 0.11 s |
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
-| T7: `EXEC` of 65535 `XADD` while 5 readers wait above the top on each key | PING within 1.0 s; the pass checks each reader on each key, as in Redis | 0.40–0.44 s (before #1230: 0.59–0.60 s, about 0.95 s on CI; the readers cost only about 0.03 s, and the rest is the work of each `XADD`). At 50 readers: 1.47–2.02 s (before #1230: 2.27–2.39 s), of which up to about 0.47 s is a GC pause (redis-server 7.0: 1.32 s). This is over the 1 s of rule 6 in Lox++ code; the owner accepted it, and #1169 is the follow-up. |
+| T7: `EXEC` of 65535 `XADD` while 50 readers wait above the top on each key | PING within 1.0 s; the pass skips a key whose readers all wait above its top, with one comparison (without the skip: 1.31–1.38 s) | 0.24 s (5 readers: 0.29 s; the rest is the work of each `XADD`). The issue #1169 gave redis-server 7.0 as 1.32 s at 50 readers; that is the number of the issue, not measured here. |
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |
@@ -874,7 +878,7 @@ probe has a mutation in `tests/mutations/base.json`,
 `tests/mutations/persistence-aof.json` or `tests/mutations/pub-sub.json` or
 `tests/mutations/sorted-sets.json` or `tests/mutations/geospatial.json` or
 `tests/mutations/bitmaps.json` or `tests/mutations/authentication.json`
-that removes its guard (S4, T1, T7, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4, B5 and A1 hold rule 6 only: no single change removes their
+that removes its guard (S4, T1, W3, K1, RP2, AOF1, PS3, Z2, Z3, G1, G2, B1, B2, B4, B5 and A1 hold rule 6 only: no single change removes their
 guard). Three guards of replication have no case, because no client timing
 forces the order of events that they handle: the `LPUSH` that a give-back
 propagates (the same race as the give-back itself), the step in which a
