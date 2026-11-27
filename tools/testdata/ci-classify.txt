@@ -92,7 +92,7 @@ case a JVM unit test runs format and its own test target, and no job
 files test/test_jvm_emit.cpp
 gates placement,format,native-unit
 labels -
-names test_jvm_emit
+names CoreSymbolsUnique test_jvm_emit
 legs debug
 targets test_jvm_emit
 
@@ -100,7 +100,7 @@ case a QBE unit test runs format and its own test target, and no job
 files test/test_backend_qbe_emitter.cpp
 gates placement,format,native-unit
 labels -
-names test_backend_qbe_emitter
+names CoreSymbolsUnique test_backend_qbe_emitter
 legs debug
 targets test_backend_qbe_emitter
 
@@ -108,7 +108,7 @@ case a core unit test runs format and its own test target, not all core tests
 files test/test_scanner.cpp
 gates placement,format,native-unit
 labels -
-names test_scanner
+names CoreSymbolsUnique test_scanner
 legs debug
 targets test_scanner
 
@@ -302,7 +302,7 @@ case a unit test that reads programs runs its own test target and no job
 files test/test_tooling_parser.cpp
 gates placement,format,native-unit
 labels -
-names test_tooling_parser
+names CoreSymbolsUnique test_tooling_parser
 legs debug
 targets test_tooling_parser
 
@@ -317,26 +317,26 @@ case two unit tests of two consumers run both test targets
 files test/test_jvm_emit.cpp test/test_backend_rt_capi.cpp
 gates placement,format,native-unit
 labels -
-names test_jvm_emit test_backend_rt_capi
+names CoreSymbolsUnique test_jvm_emit test_backend_rt_capi
 
 case a unit test source with a program change runs its target and the corpus label
 files test/test_jvm_emit.cpp examples/fibonacci.lox
 gates placement,tables,format,native-unit,native-checks,jvm,qbe,tree-sitter
 labels corpus
-names test_jvm_emit
+names CoreSymbolsUnique test_jvm_emit
 
 case a test source builds a twin target that runs under GC stress, and both run
 files test/test_task.cpp
 gates placement,format,native-unit
 labels -
-names test_task test_task_gc
+names CoreSymbolsUnique test_task test_task_gc
 targets test_task test_task_gc
 
 case the benchmark unit test runs by name, and the benchmark label does not
 files test/test_richards_benchmark.cpp
 gates placement,format,native-unit
 labels -
-names test_richards_benchmark
+names CoreSymbolsUnique test_richards_benchmark
 
 case a test source that no target builds runs every test
 files test/test_not_built_by_any_target.cpp

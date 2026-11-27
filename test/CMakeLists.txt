@@ -7,9 +7,9 @@ include(GoogleTest)
 # compile it twice, once per flag variant.
 #
 # There are two variants because LOXPP_PROFILE changes the object code and
-# cannot be mixed at link time: it adds a member to MemoryManager and Runtime and
-# pulls in profiler.h. Each test executable links exactly one variant, so no
-# translation unit ever sees two definitions of the same symbol.
+# cannot be shared by one process: it adds a member to MemoryManager and Runtime
+# and pulls in profiler.h. Each test executable links exactly one variant, so
+# no process loads two definitions of the same symbol.
 #
 # GC stress (collect on every allocation) used to be a third variant
 # (LOXPP_STRESS_GC). It is a runtime flag now: the *_gc test targets link the

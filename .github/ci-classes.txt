@@ -193,7 +193,7 @@ path install.sh                                packaging
 
 # --- what each class runs
 class ci               gates=all labels=all
-class test-source      gates=format
+class test-source      gates=format tests=CoreSymbolsUnique
 class test-support     gates=format,probes labels=all
 class core             gates=tables,format,native-build,native-checks,jvm,qbe,cross,codecrafters,lsp,neovim,vscode,release-static labels=all
 class shared-backend   gates=format,native-build,jvm,qbe labels=shared-backend
