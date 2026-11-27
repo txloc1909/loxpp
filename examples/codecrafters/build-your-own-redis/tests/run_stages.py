@@ -4790,15 +4790,20 @@ def stages_pubsub_limits(prog):
     finally:
         srv.stop()
 
-    # PS9: the same rounds, on a server with the GC trace of the VM. The RSS
-    # of PS8 moves with the heap that the collector keeps, so it cannot tell
-    # a leak from garbage. The count of live objects at a collection can: after
-    # the clients go and large garbage makes the collector run, the live
-    # objects are the baseline of the server, not the 600000 channels.
+    # PS9: the same rounds, on a server with the GC trace of the VM. It shows
+    # that the channels themselves (the maps, the per-channel tables and the
+    # strings) are not kept: after the clients go and large garbage makes the
+    # collector run, the live OBJECT count is the baseline of the server, not
+    # 600000 channels. It does not bound the live bytes: a hash table keeps
+    # its capacity after its keys go (#1343), so the bytes still grow with the
+    # rounds. The probe reads only a record that starts after the churn. When
+    # the collector writes none then (a stop-the-world collector may not run
+    # in the churn), the case fails with a message that says so.
     trace = tempfile.NamedTemporaryFile(prefix="loxpp-redis-gc-", suffix=".trace", delete=False)
     trace.close()
     srv = Server(prog, [], env={"LOXPP_GC_TRACE": trace.name})
     name = "local: PS9 the channels that no client has leave no live objects"
+    churn_at = None
     try:
         if aof_started(srv, [name]):
             for cyc in range(3):
@@ -4809,6 +4814,7 @@ def stages_pubsub_limits(prog):
                     c.read()
                 c.close()
                 wait_count(srv, "c%d-199999" % cyc, 0, seconds=20)
+            churn_at = time.monotonic_ns()
             c = Client(srv.port)
             c.sock.settimeout(60)
             big = "v" * 8000
@@ -4817,16 +4823,18 @@ def stages_pubsub_limits(prog):
             c.close()
     finally:
         srv.stop()
-    last = None
-    with open(trace.name) as f:
-        for line in f:
-            if line.startswith(("gc ", "cycle ")):
-                fields = dict(x.split("=", 1) for x in line.split()[1:])
-                if fields.get("cause") != "exit":
-                    last = int(fields["objs_after"])
+    if churn_at is not None:
+        last = None
+        with open(trace.name) as f:
+            for line in f:
+                if line.startswith(("gc ", "cycle ")):
+                    fields = dict(x.split("=", 1) for x in line.split()[1:])
+                    if fields.get("cause") != "exit" and int(fields["t0"]) > churn_at:
+                        last = int(fields["objs_after"])
+        print("       measured: live objects at the last collection after the churn %r" % last)
+        check(name, last is not None and last < 100000,
+              "%r (no collection record after the churn)" % last)
     os.unlink(trace.name)
-    print("       measured: live objects at the last collection %r" % last)
-    check(name, last is not None and last < 100000, repr(last))
 
     # PS2: the soft limit, with a soft time of 2 s.
     srv = Server(prog, ["--pubsub-soft-seconds", "2"])
