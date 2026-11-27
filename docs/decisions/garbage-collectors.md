@@ -681,7 +681,7 @@ Known gaps, and where they are filed:
 - The finish pause reads the held objects, the inbox targets, the drain batch
   and what these make gray. The handle list, the foreign set, the start pause
   and `markForeign` no longer follow the size of the foreign set: resolved in
-  #1299 (PR PRNUM).
+  #1299 (PR #1350).
 - A cycle with cause `exit` is one step of the whole heap. It runs after the
   program ends, and `tools/gc_report.py` shows it on its own line. #1300.
 - Function, Closure, Enum, DeferredCall and Bound* objects are not cut into
