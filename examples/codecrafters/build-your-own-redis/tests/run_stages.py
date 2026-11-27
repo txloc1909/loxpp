@@ -2516,11 +2516,14 @@ def stages_rdb(prog):
 
         now = int(time.time() * 1000)
         live, dead, live_s, plain, neg = (rand_word() for _ in range(5))
-        neg_s, top_ms = rand_word(), rand_word()
+        neg_s, top_ms, minus1, fd_min, fd_max = (rand_word() for _ in range(5))
         srv = with_rdb("expiry.rdb", [(live, "a", now + 600000, "ms"), (dead, "b", now - 600000, "ms"),
                                       (plain, "p", None, None), (live_s, "c", now + 600000, "s"),
-                                      (neg, "n", 2 ** 64 - 1, "ms"),
+                                      (neg, "n", 2 ** 63, "ms"),
+                                      (minus1, "m", 2 ** 64 - 1, "ms"),
                                       (neg_s, "ns", 0xFFFFFFFF * 1000, "s"),
+                                      (fd_min, "fm", 0x80000000 * 1000, "s"),
+                                      (fd_max, "fx", 0x7FFFFFFF * 1000, "s"),
                                       (top_ms, "t", 2 ** 63 - 1, "ms")])
         try:
             if not started(srv, ["persistence-rdb-06 a key with a future expiry in ms",
@@ -2528,7 +2531,10 @@ def stages_rdb(prog):
                                  "local: a key with a future expiry in seconds",
                                  "local: a key with no expiry after an expired key",
                                  "local: a negative expiry in ms has passed",
+                                 "local: an expiry in ms of -1 is no expiry",
                                  "local: a negative expiry in seconds has passed",
+                                 "local: an expiry in seconds of 2^31 has passed",
+                                 "local: an expiry in seconds of 2^31-1 has not passed",
                                  "local: the greatest expiry in ms has not passed",
                                  "local: KEYS skips the expired key"]):
                 raise StopIteration
@@ -2538,10 +2544,14 @@ def stages_rdb(prog):
             check("local: a key with a future expiry in seconds", c.call("GET", live_s) == "c")
             check("local: a key with no expiry after an expired key", c.call("GET", plain) == "p")
             check("local: a negative expiry in ms has passed", c.call("GET", neg) is None)
+            check("local: an expiry in ms of -1 is no expiry",
+                  c.call("GET", minus1) == "m")
             check("local: a negative expiry in seconds has passed", c.call("GET", neg_s) is None)
+            check("local: an expiry in seconds of 2^31 has passed", c.call("GET", fd_min) is None)
+            check("local: an expiry in seconds of 2^31-1 has not passed", c.call("GET", fd_max) == "fx")
             check("local: the greatest expiry in ms has not passed", c.call("GET", top_ms) == "t")
             check("local: KEYS skips the expired key",
-                  sorted(c.call("KEYS", "*")) == sorted([live, live_s, plain, top_ms]))
+                  sorted(c.call("KEYS", "*")) == sorted([live, live_s, plain, top_ms, minus1, fd_max]))
             c.close()
         except StopIteration:
             pass
@@ -2613,6 +2623,20 @@ def stages_rdb(prog):
         refuses("db1.rdb", data.replace(b"\xfe\x00", b"\xfe\x01"), "a key in database 1")
         refuses("version.rdb", b"REDISxxxx" + data[9:], "a version that is not a number")
         refuses("version0.rdb", b"REDIS0000" + data[9:], "version 0")
+        refuses("version12.rdb", b"REDIS0012" + data[9:], "version 12")
+        refuses("versionneg.rdb", b"REDIS-011" + data[9:], "a negative version")
+        for name, ver, text in (("versionsp.rdb", b"  10", "a version with leading spaces"),
+                                ("versionplus.rdb", b"+011", "a version with a plus sign"),
+                                ("versiontail.rdb", b"10ab", "a version with letters after the digits")):
+            path = os.path.join(d, name)
+            with open(path, "wb") as f:
+                f.write(b"REDIS" + ver + data[9:])
+            srv = Server(prog, ["--dir", d, "--dbfilename", name])
+            try:
+                ok = srv.up and srv.client().call("GET", "k") == "v"
+                check("local: %s loads" % text, ok, srv.log_text()[-200:])
+            finally:
+                srv.stop()
         at = data.index(b"\x00\x01k")
         for name, op, text in (("lru.rdb", b"\xf8\x05", "an LRU idle time"),
                                ("lru14.rdb", b"\xf8\x40\x05", "an LRU idle time of 14 bits"),
