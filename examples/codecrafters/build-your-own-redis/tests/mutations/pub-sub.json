@@ -228,7 +228,8 @@
   "old": "        m.del(conn.id);\n        if (len(m) == 0) {\n            subscribers.del(channel);\n        }",
   "new": "        m.del(conn.id);",
   "cases": [
-   "local: PS8 the channels that no client has are dropped"
+   "local: PS8 the channels that no client has are dropped",
+   "local: PS9 the channels that no client has leave no live objects"
   ]
  },
  {
