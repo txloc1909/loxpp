@@ -1,6 +1,6 @@
 // redis.lox — Codecrafters "Build your own Redis" in pure Lox++.
 //
-//   your_program.sh [--port <n>]
+//   your_program.sh [--port <n>] [--maxclients <n>]
 //
 // Each connection runs as two tasks on the one worker:
 //
@@ -2508,6 +2508,7 @@ var CONFIG_APPENDONLY = "no";
 var CONFIG_APPENDDIRNAME = "appendonlydir";
 var CONFIG_APPENDFILENAME = "appendonly.aof";
 var CONFIG_APPENDFSYNC = "everysec";
+var CONFIG_MAXCLIENTS = 10000;
 
 // A fault in the RDB file. The server prints it and does not start, as
 // Redis does.
@@ -2823,7 +2824,7 @@ fun loadRdbData(data, target, forReplica, keepExpired) {
 }
 
 var CONFIG_NAMES = {"dir": true, "dbfilename": true, "appendonly": true, "appenddirname": true,
-                    "appendfilename": true, "appendfsync": true};
+                    "appendfilename": true, "appendfsync": true, "maxclients": true};
 
 fun configValue(name) {
     if (name == "dir") {
@@ -2840,6 +2841,9 @@ fun configValue(name) {
     }
     if (name == "appendfilename") {
         return CONFIG_APPENDFILENAME;
+    }
+    if (name == "maxclients") {
+        return str(CONFIG_MAXCLIENTS);
     }
     return CONFIG_APPENDFSYNC;
 }
@@ -7495,6 +7499,17 @@ fun replicaWrite(conn) {
 // handles are set before either task first runs: the accept loop does not
 // suspend between the two spawns.
 fun startConnection(sock) {
+    // As Redis does: above the limit the new connection gets a best-effort
+    // error and is closed, and no task starts for it, so it never counts in
+    // connected_clients.
+    if (connectedClients >= CONFIG_MAXCLIENTS) {
+        try {
+            sock.write("-ERR max number of clients reached\r\n");
+        } catch (ignored) {
+        }
+        sock.close();
+        return;
+    }
     var conn = Conn(sock);
     connectedClients = connectedClients + 1;
     fun runSession() {
@@ -7580,6 +7595,12 @@ fun main() {
         exit(64);
     }
     PUBSUB_SOFT_SECONDS = pubSoft;
+    var maxClients = parseInteger(flagValue("--maxclients", str(CONFIG_MAXCLIENTS)));
+    if (maxClients == nil or maxClients < 1) {
+        print "redis.lox: --maxclients needs a positive integer";
+        exit(64);
+    }
+    CONFIG_MAXCLIENTS = maxClients;
     CONFIG_DIR = flagValue("--dir", nil);
     if (CONFIG_DIR == nil) {
         // As Redis gives it: the directory where the server started.

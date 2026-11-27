@@ -63,6 +63,20 @@ reader. The close wakes a reader that waits in a read (its call raises
 the reader ends first, it sends `Msg.Closed`. So neither task outlives the
 connection.
 
+### Number of connections
+
+`--maxclients N` (10000 by default, as in Redis 7.0; `CONFIG GET maxclients`
+gives it) limits the connections. The accept loop compares the count that
+`INFO clients` reports as `connected_clients` with the limit. At or above it,
+the loop writes `-ERR max number of clients reached` and CRLF to the new
+socket, and closes it. It starts no task for that connection, so the refused
+connection does not count. This is the check of `acceptCommonHandler` in
+Redis. Differences: the count here includes replica connections (Redis
+leaves them out of `connected_clients`), `INFO` has no `maxclients` line, and
+`CONFIG SET maxclients` does not exist. The suite (group `maxclients`) runs
+a limit of 5 and reads the default 10000 from `CONFIG GET`; it does not
+open 10000 sockets.
+
 ### Messages
 
 A List is not a message (`spec/03-types.md`, Messages), also between two
@@ -570,7 +584,7 @@ printed.
 - The RDB load reads strings only, in database 0. A file with another
   value kind or another database stops the start. The load does not check
   the checksum. `CONFIG GET` knows `dir`, `dbfilename`, `appendonly`,
-  `appenddirname`, `appendfilename` and `appendfsync` only, and takes
+  `appenddirname`, `appendfilename`, `appendfsync` and `maxclients` only, and takes
   no glob pattern, and its order of names is one order that Redis can
   give (Redis has none that it promises). A glob pattern with more than 1000 stars matches in
   Redis only to a depth of 1000; here it has no such limit.
@@ -865,6 +879,7 @@ ruling on PR #1204. Every stage group keeps them.
 | Group `streams`: `XREAD BLOCK 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | Not in the suite: `XRANGE` / `XREAD` of 200000 entries | PING within 1.0 s | 0.07–0.13 s / 0.07–0.21 s |
 | Group `query limit`: a command above `--client-query-buffer-limit`, as an array or inline | client closed, nothing printed, server serves | as required |
+| Group `maxclients`: the client above `--maxclients` | the error `-ERR max number of clients reached`, then close; `connected_clients` does not count it | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
 
@@ -933,7 +948,6 @@ Known residuals, each with its own issue:
 - The `*` and `$` header lines have no length limit for the same reason as
   the inline line: a 64 MB header line stalls the other clients for about
   0.8–0.9 s, in the native `readline` (#1133).
-- The number of connections has no limit (Redis has `maxclients`) (#1144).
 - One `SET` with 1048573 options stalls the other clients for 0.70–0.98 s
   (the command takes 3.9 s in all, with yields during the hand-over of the
   arguments). The stall is the command itself, which rule 5 allows; it is
