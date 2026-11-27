@@ -53,38 +53,41 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     test_dir = pathlib.Path(argv[1])
-    # A build that targets no core-linked test (for example test_scanner alone)
-    # has no core library to compare with. ctest reports SKIP_RETURN_CODE as
-    # Skipped; the run that builds the core libraries still fails on a duplicate.
-    if not list(test_dir.glob("libloxpp_test_core*.so")):
-        print(f"no core library under {test_dir}: nothing to compare", file=sys.stderr)
-        return SKIP
+    if not test_dir.is_dir():
+        print(f"not a directory: {test_dir}", file=sys.stderr)
+        return 1
     exes = sorted(
         p for p in test_dir.glob("test_*") if p.is_file() and os.access(p, os.X_OK)
     )
+    linking = {exe: core_libraries(exe) for exe in exes}
+    linking = {exe: libs for exe, libs in linking.items() if libs}
+    # A build that has no core-linked test (for example test_scanner alone) has
+    # nothing to compare. ctest reports SKIP as Skipped. A core library that some
+    # executable needs, or that exists without one, is a failure, not a skip.
+    if not linking and not list(test_dir.glob("libloxpp_test_core*.so")):
+        print(f"no core-linked test under {test_dir}: nothing to compare", file=sys.stderr)
+        return SKIP
     lib_defs = {}
-    checked = 0
     bad = []
-    for exe in exes:
-        libs = core_libraries(exe)
-        if not libs:
-            continue
-        checked += 1
+    for exe, libs in linking.items():
         exe_defs = strong_defs(exe, dynamic=False)
         for lib in libs:
+            if not (test_dir / lib).is_file():
+                bad.append(f"{exe.name} needs {lib}, which is not under {test_dir}")
+                continue
             if lib not in lib_defs:
                 lib_defs[lib] = strong_defs(test_dir / lib, dynamic=True)
             for sym in sorted(exe_defs & lib_defs[lib]):
-                bad.append(f"{exe.name} {lib} {sym}")
-    # Zero checked executables would pass silently, so the check must see some.
-    if checked == 0:
-        print(f"no test executable under {test_dir} links a core library", file=sys.stderr)
+                bad.append(f"duplicate strong symbol: {exe.name} {lib} {sym}")
+    # Zero linking executables with a core library present would pass silently.
+    if not linking:
+        print(f"core library under {test_dir} but no test executable links it", file=sys.stderr)
         return 1
     if bad:
         for line in bad:
-            print(f"duplicate strong symbol: {line}", file=sys.stderr)
+            print(line, file=sys.stderr)
         return 1
-    print(f"checked {checked} test executables against their core libraries: no duplicates")
+    print(f"checked {len(linking)} test executables against their core libraries: no duplicates")
     return 0
 
 
