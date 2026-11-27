@@ -194,8 +194,8 @@ it has not joined yet comes before it, and no write after its reply is
 missed. Each command that writes the keyspace calls `touch(key)`, also a
 write that keeps the value, and a lazy expiry. `touch` marks each client
 that watches the key (`watchDirty`), and drops the marked clients from
-`watchers`: a marked client stays marked until its next `EXEC`, so each
-later write of the key costs one Map read. On a replica, the `DEL` from the
+`watchers`: a marked client stays marked until `unwatchAll` (`EXEC`, `DISCARD`,
+`UNWATCH` or a close), so each later write of the key costs one Map read. On a replica, the `DEL` from the
 master of a key that had expired at `WATCH` marks no client, and `touch`
 keeps that client in `watchers`. `EXEC` gives a null array when the mark is set, or when a
 watched key that had an expiry at `WATCH` has expired since, also with no
@@ -778,6 +778,7 @@ ruling on PR #1204. Every stage group keeps them.
 | T4: `EXEC` of 8 `GET` of a 64 MB value | every byte; PING within 0.3 s (when `GET` copies its value: 1.88 s) | 0.002–0.04 s |
 | T5: `EXEC` of 65535 `GET` of a 1 KB value | every byte; PING within 0.5 s (when the replies are written in one step: 1.94 s) | 0.10–0.11 s |
 | W1 (group `optimistic-locking`, on a server of its own): `WATCH` of 1048575 keys | PING within 0.3 s (without the yield of `WATCH`: 0.76–1.13 s) | 0.10 s |
+| Not in the suite: the first `WATCH` of 1048575 keys that exist (W1 runs on an empty keyspace) | PING within 1.0 s (rule 6 only) | 0.057-0.066 s in 4 runs (release build, incremental collector; longest GC step in the trace 3.2 ms) |
 | W3: a second client that watches the same 1048575 keys | PING within 1.0 s (rule 6 only) | 0.19 s; 0.31 s in CI |
 | W2: the `EXEC` after it, which forgets the 1048575 keys | PING within 0.15 s (without the yield of `unwatchAll`: 0.27–0.31 s) | 0.010–0.016 s |
 | W4: 100 clients watch one key, and one `EXEC` writes it 65535 times | PING within 0.5 s (when `touch` keeps the marked clients: 3.6 s) | 0.24 s |
@@ -872,8 +873,8 @@ show them: the skip of a key that expired before the load (GET and KEYS
 skip an expired key too), and the check of an early end in `need`
 (the next read fails too). The `touch` in the lazy expiry of `lookup` has no case: the check
 of expiring keys in `watchBroken` already makes `EXEC` fail for a watched
-key that expires, so no reply shows it. It stays for a client that watches
-the key after the read and before the removal.
+key that expires, so no reply shows it. It stays because Redis marks the watchers
+when a read removes an expired key, and because every write calls `touch`.
 
 The element budget that a `PUBLISH` in `EXEC` spends has no case: it
 needs 8388608 deliveries in one `EXEC`, such as 65536 `PUBLISH` to 128
