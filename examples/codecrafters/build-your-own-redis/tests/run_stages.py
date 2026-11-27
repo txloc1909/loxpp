@@ -63,8 +63,14 @@ def watch_parent(interval=0.2):
     interrupt that ends its parent reaches its servers through the group of the
     terminal, and a kill of a group that this suite does not lead would reach
     the processes of another program.
+
+    mutate.py names its own pid in LOXPP_SUITE_PARENT, so the first check is
+    right even when the parent ended before this line ran. A suite that started
+    after the kill would read the pid of the process that reaped it, and a
+    watch of that pid would never end.
     """
-    parent = os.getppid()
+    named = os.environ.get("LOXPP_SUITE_PARENT")
+    parent = int(named) if named and named.isdigit() else os.getppid()
 
     def watch():
         while os.getppid() == parent:

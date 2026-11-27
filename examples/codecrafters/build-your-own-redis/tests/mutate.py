@@ -53,8 +53,13 @@ def start_suite(argv):
     with _lock:
         if _stopping:
             raise Stopping()
+        # The suite must know this pid before it runs a line. A suite that starts
+        # after this process was killed reads the pid of the process that reaped
+        # it, and a watch of "whatever my parent is" cannot tell that pid from a
+        # live one, so the suite would run forever (see run_stages.watch_parent).
+        env = dict(os.environ, LOXPP_SUITE_PARENT=str(os.getpid()))
         p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, start_new_session=True)
+                             text=True, start_new_session=True, env=env)
         _live.add(p)
     return p
 
