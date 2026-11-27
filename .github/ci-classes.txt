@@ -168,6 +168,7 @@ path tools/diff_runtimes.py                    harness
 path tools/check_coroutine_probes.sh           harness
 path tools/check_file_durability.sh            harness
 path tools/gc_report.py                        core,gc-heap
+path tools/check_core_symbols.py              core
 path tools/check_gc_*                          core,gc-heap
 path tools/diff_gc_collectors.py               core,gc-heap
 path tools/check_repl_session.py               core
