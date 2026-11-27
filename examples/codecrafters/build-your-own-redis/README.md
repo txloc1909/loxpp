@@ -164,10 +164,15 @@ wait, not with the top of the first `Stream`: an `EXEC` can append to it and
 then replace the key. A reader whose ID is still above the top joins the
 queue again. `XREAD` takes nothing from the stream, so a reply that the
 client cannot get is dropped. A queue of readers keeps `floor`, the lowest ID
-that one of its readers waits above (`-1-0` for a `$` reader). An `XADD` whose
-top is not above `floor` wakes no reader and skips the pass, so readers that
-wait above the top cost one comparison for each key, not one for each reader.
-`floor` never exceeds the ID of an active reader; a full pass renews it.
+that one of its readers waits above (`-1-0` for a `$` reader that waits on the
+`Stream` that the key holds). An `XADD` whose top is not above `floor` wakes no
+reader and skips the pass, so readers that wait above the top cost one
+comparison for each key, not one for each reader. `floor` never exceeds the ID
+of an active reader. A full pass renews it from the readers that still wait.
+A `$` reader that waits there names a `Stream` that the key no longer holds,
+and that `Stream` never comes back, so the pass renews `floor` with the top at
+the wait of that reader, as for any other reader. Only the first pass after
+the key changed its `Stream` is full.
 
 ### Transactions
 
@@ -898,6 +903,16 @@ ruling on PR #1204. Every stage group keeps them.
 | Group `replication`: `WAIT 1 0` and 100 more commands, then the client closes | the tasks of the connection end | as required |
 | T6: `EXEC` of 200 `LRANGE` of a list of 1048573 elements, then two `LPOP` with a count | 8 replies, 192 refused, the LPOP over the budget refused; PING within 0.5 s (with no budget: 0.96 s at 200 and 1.6 GB, and no bound in memory) | 0.07–0.09 s |
 | T7: `EXEC` of 65535 `XADD` while 50 readers wait above the top on each key | PING within 1.0 s; the pass skips a key whose readers all wait above its top, with one comparison (without the skip: 1.31–1.38 s) | 0.24 s (5 readers: 0.29 s; the rest is the work of each `XADD`). The issue #1169 gave redis-server 7.0 as 1.32 s at 50 readers; that is the number of the issue, not measured here. |
+| T8: a second `EXEC` of 16384 `XADD` after a first one whose pass found 100 readers above the top on each key (and one reader below it, which it woke) | PING within 0.5 s; the first pass renews `floor`, so the second skips | 0.17–0.28 s under load (the same EXEC with the skip removed: 1.9–2.3 s) |
+| T9: the same with 100 `$` readers, after `DEL` and `XADD` gave each key another `Stream` | PING within 0.5 s; the pass renews `floor` with the top at the wait, not `-1-0` | 0.20–0.27 s under load |
+
+The margin of T7 is 0.24 s against its 1.0 s bound on the host that measured it,
+and a removed skip takes 1.3 s there. Under load (4 busy loops on the same 4
+CPUs as the server and the client, 5 runs for each collector) the worst PING
+was 0.99–1.15 s with the default collector (4 of 5 runs over the bound) and
+0.76–0.93 s with `LOXPP_GC=stw`; a removed skip took 4.3–4.6 s. At that load
+`T1` (bound 0.6 s, 0.78 s and more) fails first, so these probes need a runner
+that is not loaded; the bound of T7 is not changed.
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |
