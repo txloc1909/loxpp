@@ -24,7 +24,10 @@
 # request, not at the next run.
 #
 # An interrupt cancels the mutations that have not started and kills the
-# suites that are running, so the script exits at once.
+# suites that are running, so the script exits at once. SIGINT and SIGTERM
+# both reach that cleanup, with exit status 130 and 143. A SIGKILL reaches no
+# handler of this script, so a suite ends its own servers when its parent is
+# gone (run_stages.py, watch_parent).
 import argparse
 import concurrent.futures
 import json
@@ -50,10 +53,30 @@ def start_suite(argv):
     with _lock:
         if _stopping:
             raise Stopping()
+        # The suite must know this pid before it runs a line. A suite that starts
+        # after this process was killed reads the pid of the process that reaped
+        # it, and a watch of "whatever my parent is" cannot tell that pid from a
+        # live one, so the suite would run forever (see run_stages.watch_parent).
+        env = dict(os.environ, LOXPP_SUITE_PARENT=str(os.getpid()))
         p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, start_new_session=True)
+                             text=True, start_new_session=True, env=env)
         _live.add(p)
     return p
+
+
+def end_on_signal(signum, frame):
+    """Ends the run through the cleanup in the finally below.
+
+    SIGTERM runs no code of its own, so the suites that are running, and the
+    servers of each, would outlive the script. SIGINT takes the same path, so a
+    Ctrl-C exits with 130 and prints no traceback. Both signals then take their
+    default action, so a second signal of either kind ends the process at once,
+    which matters when the cleanup of the first one waits for a suite that
+    ignores the kill.
+    """
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, signal.SIG_DFL)
+    raise SystemExit(128 + signum)
 
 
 def kill_group(p):
@@ -177,6 +200,8 @@ def main():
     if not (os.path.isfile(args.loxpp) and os.access(args.loxpp, os.X_OK)):
         ap.error("loxpp is not an executable file: %s" % args.loxpp)
 
+    signal.signal(signal.SIGINT, end_on_signal)
+    signal.signal(signal.SIGTERM, end_on_signal)
     text = open(args.source).read()
     mutations = json.load(open(args.spec))
     bad = 0

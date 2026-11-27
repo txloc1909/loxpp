@@ -14,6 +14,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import socket
 import string
 import struct
@@ -98,6 +99,39 @@ def free_port():
 
 def rand_word(n=8):
     return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
+
+
+def watch_parent(interval=0.2):
+    """Ends this suite, and the servers it started, when its parent ends.
+
+    mutate.py kills the process group of each suite that it is ending, which
+    takes the servers of that suite with it, but a SIGKILL of mutate.py runs no
+    handler of mutate.py at all. mutate.py starts each suite as the leader of a
+    session of its own, so a suite can end its servers with one kill of the
+    group that it leads. A suite that leads no group was started by hand: the
+    interrupt that ends its parent reaches its servers through the group of the
+    terminal, and a kill of a group that this suite does not lead would reach
+    the processes of another program.
+
+    mutate.py names its own pid in LOXPP_SUITE_PARENT, so the first check is
+    right even when the parent ended before this line ran. A suite that started
+    after the kill would read the pid of the process that reaped it, and a
+    watch of that pid would never end.
+    """
+    named = os.environ.get("LOXPP_SUITE_PARENT")
+    parent = int(named) if named and named.isdigit() else os.getppid()
+
+    def watch():
+        while os.getppid() == parent:
+            time.sleep(interval)
+        if os.getpgid(0) != os.getpid():
+            return
+        try:
+            os.killpg(os.getpid(), signal.SIGKILL)
+        except OSError:
+            pass  # the group has already ended
+
+    threading.Thread(target=watch, name="parent-watch", daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -6899,6 +6933,9 @@ def main():
         print("entrypoint not found: %s" % prog)
         return 1
     random.seed(1)
+    # A suite whose parent is gone runs with no one to read its result, and its
+    # servers keep their ports. watch_parent ends them; see its docstring.
+    watch_parent()
     # REDIS_STAGE_GROUPS=a,b runs only those groups: a mutation run that
     # names cases of one group needs only that group.
     only = os.environ.get("REDIS_STAGE_GROUPS")

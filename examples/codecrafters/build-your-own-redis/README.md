@@ -18,6 +18,7 @@ The work runs one stage group at a time. Tracking issue: #1123.
 | `tests/run_stages.py` | Transcribed stage cases and `local:` cases, over raw TCP |
 | `tests/diff_redis.py` | Differential test against `redis-server` (Redis 7.0 in the dev image) |
 | `tests/mutate.py`, `tests/mutations/*.json` | Proof that the stage cases can fail: one change to `redis.lox` per mutation, and the cases it must fail |
+| `tests/check_mutate_interrupt.py` | Proof that a signal which ends `mutate.py` also ends the servers of its suites |
 
 ## Stage coverage
 
@@ -991,7 +992,13 @@ probes have time limits of 0.1 to 2 s, and a high load can fail a named case
 with no real defect, which `mutate.py` counts as a kill. Keep N low on a busy
 machine. The output keeps the order of the mutation file for every N, so one
 slow mutation delays the lines after it. Ctrl-C cancels the mutations that
-have not started and kills the running suites.
+have not started and kills the running suites. SIGTERM does the same, and both
+exit with the status of the signal (130 and 143). A SIGKILL runs no code of
+`mutate.py`, so `run_stages.py` ends its own servers instead: it starts a watch
+of its parent process, and when the parent is gone it kills the process group
+of the suite, which holds every server the suite started. The servers of a
+suite that was started by hand, in the group of a terminal, are left to the
+interrupt of that terminal, because a suite kills only a group that it leads.
 
 `mutate.py --check` runs no suite. It applies the edits of each mutation to
 `redis.lox` and fails when an `old` text is not found exactly once (the
