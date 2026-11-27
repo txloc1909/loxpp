@@ -1990,25 +1990,40 @@ var readyListSeen = nil;
 var readyStreamKeys = nil;
 var readyStreamList = nil;
 
-// During EXEC, how many more list elements the replies of the transaction
-// may copy (LRANGE, LPOP with a count). EXEC keeps every reply until its
-// step ends, so this bounds the step and its memory (README rules 1, 4 and
-// 6). nil outside EXEC: a command alone is bounded by its list.
-var EXEC_ELEMENTS = 8388608;
-var execElements = nil;
+// During EXEC, how much work the rest of the transaction may do. One pool
+// serves every budgeted command, so a mix of them is bounded as one kind is
+// (README rules 1, 4 and 6). EXEC keeps every reply until its step ends, so
+// the pool also bounds the memory of the replies. The unit is one list
+// element that a reply copies (LRANGE, LPOP with a count). A kind that costs
+// more per item has a weight, the pool divided by the limit that the kind
+// had alone: so a command that is over its limit alone is refused as it was
+// before. nil outside EXEC: a command alone is bounded by its data.
+var EXEC_WORK = 8388608;
+var execWork = nil;
+var WEIGHT_ZRANGE = 4;
+var WEIGHT_GEO = 4;
+var WEIGHT_BITMAP = 8;
+var WEIGHT_ACL = 16;
+var WEIGHT_ZSET = 256;
 var EXEC_TOO_LARGE = "-ERR the replies of this transaction are over the limit of list elements\r\n";
 
-// Takes k elements from the budget of EXEC. Returns false, and takes
-// nothing, when the budget is too small; the command then does nothing.
-fun spendElements(k) {
-    if (execElements == nil) {
+// Takes k items of the given weight from the pool of EXEC. Returns false,
+// and takes nothing, when the pool is too small; the command then does
+// nothing.
+fun spendWork(k, weight) {
+    if (execWork == nil) {
         return true;
     }
-    if (k > execElements) {
+    var cost = k * weight;
+    if (cost > execWork) {
         return false;
     }
-    execElements = execElements - k;
+    execWork = execWork - cost;
     return true;
+}
+
+fun spendElements(k) {
+    return spendWork(k, 1);
 }
 
 fun listReady(key) {
@@ -2240,12 +2255,7 @@ fun inTransaction(conn, name, argv, nbytes) {
 // wait (BLPOP, XREAD BLOCK) gives a null array at once, as in Redis.
 // Returns the List of the replies; the session writes them after the step.
 fun execQueued(tx) {
-    execElements = EXEC_ELEMENTS;
-    zsetExecWork = ZSET_EXEC_WORK;
-    geoExecCandidates = GEO_EXEC_CANDIDATES;
-    zrangeExecElements = ZRANGE_EXEC_ELEMENTS;
-    bitmapExecWork = BITMAP_EXEC_WORK;
-    aclExecWork = ACL_EXEC_WORK;
+    execWork = EXEC_WORK;
     replInExec = true;
     readyLists = [];
     readyListSeen = {};
@@ -2261,12 +2271,7 @@ fun execQueued(tx) {
         }
         replies.append(reply);
     }
-    execElements = nil;
-    zsetExecWork = nil;
-    geoExecCandidates = nil;
-    zrangeExecElements = nil;
-    bitmapExecWork = nil;
-    aclExecWork = nil;
+    execWork = nil;
     endExecReplication();
     serveReady();
     return replies;
@@ -4064,13 +4069,11 @@ fun aofSync(conn, before, target) {
 // -> score. Insert, delete and rank take O(log N) steps, and a range takes
 // O(log N + M). The order is by score, then by member.
 
-// At most ZSET_COMMAND_MEMBERS members in one ZADD or ZREM, and at most
-// ZSET_EXEC_WORK inserts and deletes in one EXEC: an insert costs about
-// 9 microseconds of Lox++ code, and a command runs in one step (README
-// rule 6). Redis has no such limits.
+// At most ZSET_COMMAND_MEMBERS members in one ZADD or ZREM, and in one EXEC
+// at most 32768 inserts and deletes (WEIGHT_ZSET of the pool): an insert
+// costs about 9 microseconds of Lox++ code, and a command runs in one step
+// (README rule 6). Redis has no such limits.
 var ZSET_COMMAND_MEMBERS = 16384;
-var ZSET_EXEC_WORK = 32768;
-var zsetExecWork = nil;
 var ZSET_MAX_LEVEL = 32;
 var ZSET_TOO_MANY = "-ERR the command names more than 16384 members of a sorted set\r\n";
 var ZSET_EXEC_TOO_MUCH = "-ERR the sorted set work of this transaction is over its limit\r\n";
@@ -4257,17 +4260,9 @@ class ZSet {
     }
 }
 
-// Takes k units of the sorted set work of EXEC. Returns false, and takes
-// nothing, when too few are left.
+// Takes k units of the sorted set work from the pool of EXEC.
 fun spendZsetWork(k) {
-    if (zsetExecWork == nil) {
-        return true;
-    }
-    if (k > zsetExecWork) {
-        return false;
-    }
-    zsetExecWork = zsetExecWork - k;
-    return true;
+    return spendWork(k, WEIGHT_ZSET);
 }
 
 fun zsetEntry(key) {
@@ -4760,11 +4755,10 @@ fun parseZrange(argv, mayYield) {
     return withScores;
 }
 
-// At most ZRANGE_EXEC_ELEMENTS elements in the replies of ZRANGE in one EXEC:
-// the walk of a range is Lox++ code in the step of EXEC (rule 6). A ZRANGE
-// over what is left does nothing and spends nothing.
-var ZRANGE_EXEC_ELEMENTS = 2097152;
-var zrangeExecElements = nil;
+// ZRANGE takes WEIGHT_ZRANGE units of the pool of EXEC for each element of
+// its reply (2097152 elements alone): the walk of a range is Lox++ code in
+// the step of EXEC (rule 6). A ZRANGE over what is left does nothing and
+// spends nothing.
 var ZRANGE_EXEC_TOO_MANY = "-ERR the ZRANGE work of this transaction is over its limit\r\n";
 
 // ZRANGE key start stop [WITHSCORES], by rank. It takes the members in its
@@ -4812,14 +4806,8 @@ fun cmdZrange(ctx, argv) {
     if (withScores) {
         size = 2 * count;
     }
-    if (zrangeExecElements != nil and size > zrangeExecElements) {
+    if (!spendWork(size, WEIGHT_ZRANGE)) {
         return ZRANGE_EXEC_TOO_MANY;
-    }
-    if (!spendElements(size)) {
-        return EXEC_TOO_LARGE;
-    }
-    if (zrangeExecElements != nil) {
-        zrangeExecElements = zrangeExecElements - size;
     }
     var out = [];
     var x = z.nodeAt(start);
@@ -4987,10 +4975,9 @@ fun geoUnit(text) {
     return nil;
 }
 
-// At most GEO_EXEC_CANDIDATES members of the boxes of GEOSEARCH in one
-// EXEC: the walk of a box is Lox++ code in the step of EXEC (rule 6).
-var GEO_EXEC_CANDIDATES = 2097152;
-var geoExecCandidates = nil;
+// GEOSEARCH takes WEIGHT_GEO units of the pool of EXEC for each member of
+// its boxes (2097152 members alone): the walk of a box is Lox++ code in the
+// step of EXEC (rule 6).
 var GEO_EXEC_TOO_MANY = "-ERR the GEOSEARCH work of this transaction is over its limit\r\n";
 
 var GEO_BAD_UNIT = "-ERR unsupported unit provided. please use M, KM, FT, MI\r\n";
@@ -5356,21 +5343,18 @@ fun cmdGeosearch(ctx, argv) {
             members.append(x.member);
             scores.append(x.score);
             x = x.forward[0];
-            // In EXEC the walk stops as soon as it is over the limit, so a
-            // refused GEOSEARCH costs no more than the limit.
-            if (geoExecCandidates != nil and len(members) > geoExecCandidates) {
-                // The walk spent what was left, so a later GEOSEARCH of this
-                // EXEC walks no more.
-                geoExecCandidates = 0;
+            // In EXEC the walk stops as soon as it is over the pool, so a
+            // refused GEOSEARCH costs no more than what is left.
+            if (execWork != nil and len(members) * WEIGHT_GEO > execWork) {
+                // The walk spent what was left, so a later command of this
+                // EXEC does no more.
+                execWork = 0;
                 return GEO_EXEC_TOO_MANY;
             }
         }
     }
-    if (geoExecCandidates != nil) {
-        geoExecCandidates = geoExecCandidates - len(members);
-    }
-    if (!spendElements(len(members))) {
-        return EXEC_TOO_LARGE;
+    if (!spendWork(len(members), WEIGHT_GEO)) {
+        return GEO_EXEC_TOO_MANY;
     }
     return GeoSearchReply(members, scores, from[0], from[1], meters);
 }
@@ -5465,19 +5449,11 @@ fun writeChunkedBulk(conn, reply) {
 
 // The bitmap work of one EXEC: the chunks that SETBIT adds or splits, and
 // the source bytes of BITOP. Each is Lox++ code in the step of EXEC.
-var BITMAP_EXEC_WORK = 1048576;
-var bitmapExecWork = nil;
+// Each unit takes WEIGHT_BITMAP of the pool of EXEC (1048576 alone).
 var BITMAP_EXEC_TOO_MUCH = "-ERR the bitmap work of this transaction is over its limit\r\n";
 
 fun spendBitmapWork(k) {
-    if (bitmapExecWork == nil) {
-        return true;
-    }
-    if (k > bitmapExecWork) {
-        return false;
-    }
-    bitmapExecWork = bitmapExecWork - k;
-    return true;
+    return spendWork(k, WEIGHT_BITMAP);
 }
 
 fun valueLength(value) {
@@ -6151,21 +6127,13 @@ var PASSWORDS_MAX = 256;
 // one unit, and a > or < rule, an AUTH and the copy that SETUSER makes also
 // cost the length of the list. GETUSER encodes each password, which costs
 // about GETUSER_UNITS units of scan time. The hashes are made when MULTI queues the command, but
-// EXEC runs the scans in one step (rule 6). nil outside EXEC.
-var ACL_EXEC_WORK = 524288;
+// EXEC runs the scans in one step (rule 6). Each unit takes WEIGHT_ACL of the
+// pool of EXEC (524288 alone).
 var GETUSER_UNITS = 16;
-var aclExecWork = nil;
 var ACL_EXEC_TOO_MUCH = "-ERR the ACL work of this transaction is over its limit\r\n";
 
 fun spendAclWork(k) {
-    if (aclExecWork == nil) {
-        return true;
-    }
-    if (k > aclExecWork) {
-        return false;
-    }
-    aclExecWork = aclExecWork - k;
-    return true;
+    return spendWork(k, WEIGHT_ACL);
 }
 
 fun hashBlocks(n) {

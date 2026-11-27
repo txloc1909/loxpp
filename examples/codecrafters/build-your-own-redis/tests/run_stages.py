@@ -2347,6 +2347,27 @@ def stages_transactions_large(prog):
         check("local: T6 that EXEC stalls PING at most 0.5 s",
               worst <= 0.5 and not wrong, "worst %.3f s" % worst)
 
+        # M2: every kind of work takes from the same pool. 8 LRANGE of the
+        # list of t6 and one of the rest of the 8388608 units use the pool,
+        # and then a ZADD, a SETBIT and an ACL SETUSER are each refused with
+        # the error of their own kind. A kind that is not counted runs.
+        m = c.call("LLEN", "t6")
+        rest = 8388608 - 8 * m
+        x = Client(srv.port)
+        x.sock.settimeout(120)
+        x.send_raw(encode("MULTI") + encode("LRANGE", "t6", "0", "-1") * 8 + encode("LRANGE", "t6", "0", str(rest - 1))
+                   + encode("ZADD", "m2z", "1", "a") + encode("SETBIT", "m2b", "7", "1")
+                   + encode("ACL", "SETUSER", "default") + encode("EXEC"))
+        for _ in range(13):
+            x.read()
+        r = x.read()
+        x.close()
+        check("local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work",
+              isinstance(r, list) and len(r) == 12 and all(len(e) == m for e in r[:8]) and len(r[8]) == rest
+              and all(isinstance(e, Error) for e in r[9:])
+              and "sorted set" in r[9] and "bitmap" in r[10] and "ACL" in r[11],
+              repr(r[9:])[:200] if isinstance(r, list) else repr(r)[:80])
+
         # T7: 50 readers each wait above the top on 65535 keys, and one EXEC
         # adds to each key. The pass after EXEC finds that no reader of a key
         # is below its top, with one comparison for each key.
@@ -5304,7 +5325,7 @@ def stages_zset_limits(prog):
                  "local: Z1 ZADD of 16384 members to a set of 524288 stalls PING at most 1 s",
                  "local: Z2 ZRANGE of 524288 members stalls PING at most 1 s",
                  "local: Z3 EXEC of two ZADD of 16384 members stalls PING at most 1 s",
-                 "local: EXEC refuses a ZRANGE over the element budget",
+                 "local: EXEC refuses a ZRANGE over the pool that LRANGE used",
                  "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
                  "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
                  "local: a new score costs two units of the sorted set work of EXEC",
@@ -5372,11 +5393,10 @@ def stages_zset_limits(prog):
             worst, wrong, _ = measure_while(srv, zrange)
             check(names[4], worst <= 1.0 and not wrong and isinstance(got[0], list) and len(got[0]) == 524288,
                   "worst %.3f s" % worst)
-            # The element budget of EXEC: 8 LRANGE of 1048576 elements fill
-            # it, and a ZRANGE after them is refused by the budget (the
-            # limit of ZRANGE alone is lower, so only other commands can
-            # fill the budget). An empty range first: it must spend
-            # nothing, and give back nothing either.
+            # The pool of EXEC: 8 LRANGE of 1048576 elements fill it, and a
+            # ZRANGE after them is refused (the limit of ZRANGE alone is
+            # lower, so only other commands can fill the pool). An empty range
+            # first: it must spend nothing, and give back nothing either.
             for _ in range(2):
                 c.raw().send_raw(encode("RPUSH", "L", *["v"] * 524288))
                 c.raw().try_read(60)
@@ -5389,10 +5409,10 @@ def stages_zset_limits(prog):
             reply = x.read()
             x.close()
             c.call("DEL", "L")
-            check("local: EXEC refuses a ZRANGE over the element budget",
+            check("local: EXEC refuses a ZRANGE over the pool that LRANGE used",
                   isinstance(reply, list) and len(reply) == 12 and reply[:3] == [[], [], []]
                   and all(len(r) == 1048576 for r in reply[3:11])
-                  and isinstance(reply[11], Error) and "elements" in reply[11],
+                  and isinstance(reply[11], Error) and "ZRANGE" in reply[11],
                   repr(reply[11])[:80] if isinstance(reply, list) else repr(reply)[:80])
             # The limit of ZRANGE in one EXEC is 2097152 elements. 3 ranges of
             # 524288 take 1572864; a range of 1048576 is over what is left and
@@ -5413,7 +5433,9 @@ def stages_zset_limits(prog):
                   and isinstance(reply[5], Error) and "ZRANGE" in reply[5], repr(reply)[:100])
 
             # Z7: 16 ZRANGE of 524288 members in one EXEC. Without the limit
-            # the walk of 8388608 nodes stalls PING for 1.8 s.
+            # the walk of 8388608 nodes stalled PING for 1.82-1.87 s on one
+            # host and for 0.59-0.65 s on another. The times depend on the
+            # host, so the case holds only the bound of 1 s.
             def exec_ranges():
                 x = Client(srv.port)
                 x.sock.settimeout(120)
@@ -5759,11 +5781,12 @@ def stages_geo_limits(prog):
                  "local: GEOADD of more than 16384 members is refused",
                  "local: H4 GEOSEARCH, PING and a half-close get both replies",
                  "local: H5 GEOSEARCH and a half-close get the reply, then the close",
-                 "local: EXEC refuses a GEOSEARCH over the element budget",
+                 "local: EXEC refuses a GEOSEARCH over the pool that LRANGE used",
                  "local: GEOPOS of more than 16384 members is refused",
                  "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
                  "local: G4 GEOADD parses its places in steps",
-                 "local: GEOPOS spends the sorted set work of EXEC"]
+                 "local: GEOPOS spends the sorted set work of EXEC",
+                 "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget"]
         if aof_started(srv, names):
             c = Asker(srv)
             c.c.sock.settimeout(60)
@@ -5844,9 +5867,39 @@ def stages_geo_limits(prog):
             reply = x.read()
             x.close()
             c.call("DEL", "L")
-            check("local: EXEC refuses a GEOSEARCH over the element budget",
+            check("local: EXEC refuses a GEOSEARCH over the pool that LRANGE used",
                   isinstance(reply, list) and len(reply) == 9 and isinstance(reply[8], Error)
-                  and "elements" in reply[8], repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
+                  and "GEOSEARCH" in reply[8], repr(reply[8])[:80] if isinstance(reply, list) else repr(reply)[:80])
+            # M1: the budgets of EXEC are one pool. Each command here is under
+            # its own limit alone (ZRANGE and GEOSEARCH 2097152 elements, LRANGE
+            # 8388608), and together they are 10 times the work of the pool of
+            # 8388608 units. 3 ZRANGE of 524288 take 6291456 units (4 each),
+            # one GEOSEARCH takes the last 2097152, and the rest is refused.
+            # Without a pool shared by the kinds, all 10 run.
+            for _ in range(2):
+                c.raw().send_raw(encode("RPUSH", "L", *["v"] * 524288))
+                c.raw().try_read(60)
+            mixed = [None]
+            search = encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km")
+
+            def exec_mixed():
+                x = Client(srv.port)
+                x.sock.settimeout(120)
+                x.send_raw(encode("MULTI") + encode("ZRANGE", "dense", "0", "-1") * 3 + search * 3
+                           + encode("LRANGE", "L", "0", "-1") * 4 + encode("EXEC"))
+                for _ in range(11):
+                    x.read()
+                mixed[0] = x.read()
+                x.close()
+            worst, wrong, _ = measure_while(srv, exec_mixed)
+            c.call("DEL", "L")
+            r = mixed[0]
+            check("local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget",
+                  worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 10
+                  and all(len(e) == 524288 for e in r[:3]) and len(r[3]) == 524288
+                  and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[4:6])
+                  and all(isinstance(e, Error) and "elements" in e for e in r[6:]),
+                  "worst %.3f s, %r" % (worst, repr(r)[-80:]))
             more = []
             for i in range(16384):
                 more += ["%.6f" % (10 + i * 0.0001), "%.6f" % (20 + i * 0.0001), "n%d" % i]

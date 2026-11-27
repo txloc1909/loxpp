@@ -380,14 +380,15 @@
   ]
  },
  {
-  "name": "no ACL budget in EXEC",
-  "old": "    aclExecWork = ACL_EXEC_WORK;\n",
-  "new": "",
+  "name": "ACL work is not counted into the pool of EXEC",
+  "old": "var WEIGHT_ACL = 16;\n",
+  "new": "var WEIGHT_ACL = 0;\n",
   "cases": [
    "local: A7 EXEC of 256 ACL SETUSER that each scan 256 passwords 1020 times stalls PING at most 0.5 s",
    "local: A8 EXEC of 65535 AUTH with 256 passwords stalls PING at most 0.5 s",
    "local: A9 EXEC of 4096 ACL GETUSER with 256 passwords stalls PING at most 0.5 s",
-   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s"
+   "local: A10 EXEC of 4096 ACL SETUSER with no rule and 256 passwords stalls PING at most 0.5 s",
+   "local: M2 an EXEC that used the pool refuses sorted set, bitmap and ACL work"
   ]
  },
  {
