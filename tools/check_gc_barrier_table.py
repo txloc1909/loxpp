@@ -211,7 +211,8 @@ def raw_accessors_of(st):
         head = head.strip()
         if head.startswith("const"):
             continue
-        writable = "&" in head or POINTEE_WRITABLE.search(head)
+        # A pointer to a pointer is the address of a slot, such as `ObjTask**`.
+        writable = "&" in head or re.search(r"\*\s*\*", head) or POINTEE_WRITABLE.search(head)
         if writable and re.search(r"return[^;]*\bm_\w+", inner):
             found.append(name)
     return found
