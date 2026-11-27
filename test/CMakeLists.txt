@@ -67,11 +67,11 @@ set(LOXPP_CORE_SRCS
     ${PROJECT_SOURCE_DIR}/src/stdlib/task_api.cpp
 )
 
-add_library(loxpp_test_core OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+add_library(loxpp_test_core SHARED ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(loxpp_test_core PUBLIC Threads::Threads)
 
-add_library(loxpp_test_core_profile OBJECT ${LOXPP_CORE_SRCS} test_harness.cpp)
+add_library(loxpp_test_core_profile SHARED ${LOXPP_CORE_SRCS} test_harness.cpp)
 target_include_directories(loxpp_test_core_profile PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(loxpp_test_core_profile PUBLIC LOXPP_PROFILE)
 target_link_libraries(loxpp_test_core_profile PUBLIC Threads::Threads)
