@@ -4979,6 +4979,41 @@ def stages_zset_on(srv):
         c.call("ZADD", "zf", text, "f%d" % i)
         got.append(c.call("ZSCORE", "zf", "f%d" % i))
     check("local: ZADD reads the score forms of strtod", got == [w for _, w in scores], repr(got))
+
+
+    def hex_scores(texts):
+        out = []
+        for i, text in enumerate(texts):
+            c.call("DEL", "zh")
+            if c.call("ZADD", "zh", text, "m") != 1:
+                out.append(None)
+                continue
+            out.append(c.call("ZSCORE", "zh", "m"))
+        return out
+    # The hexadecimal forms of strtod: the digits, a point, a binary exponent,
+    # a sign, any case. float.fromhex reads the same forms, and rounds to
+    # even as the C library does.
+    forms = ["0x10", "0X1.8p3", "-0x10", "+0x1p-2", "0x.8", "0x1.", "0xA.8", "0x1e5", "0Xf.FP+1", "0x0p9"]
+    got = hex_scores(forms)
+    check("local: ZADD reads the hexadecimal forms of strtod",
+          all(g is not None and float(g) == float.fromhex(t) for g, t in zip(got, forms)), repr(got))
+    # A long mantissa rounds once, to the nearest even: a tie, a tie with a
+    # digit after it, a digit beyond the 15 that Lox++ keeps, a dropped
+    # integer digit, and results under 2^-1022 that have fewer than 53 bits.
+    longs = ["0x1.00000000000008p0", "0x1.00000000000018p0", "0x1.00000000000008000000001p0",
+             "0x1.000000000000080000000000000000001", "0x10000000000000001p0", "0x20000000000000001p0",
+             "0x1.fffffffffffffffffp0", "0x399F60eF73e022A1686B.0A050p-1100", "0x1.8p-1074", "0x2.8p-1074", "0x1.00000000000008p-1022",
+             "0x1.000000000000000008p-1030", "-0x1.00000000000001p-1030", "0x1p-1074", "0x1.8p1023"]
+    got = hex_scores(longs)
+    check("local: ZADD rounds a long hexadecimal score once",
+          all(g is not None and float(g) == float.fromhex(t) for g, t in zip(got, longs)), repr(got))
+    # A text that strtod does not read whole is refused, as is a value that
+    # is past the range of a double or rounds to zero.
+    refused = ["0x", "0x.", "0xg", "0x1p", "0x1p+", "0xp1", "0x1.2.3", "0x1p1024", "0x1.fffffffffffff8p1023",
+               "0x1p-1075", "0x1 ", " 0x1", "0x1p1.5", "0x1h"]
+    got = hex_scores(refused)
+    check("local: ZADD refuses the hexadecimal texts that strtod does not read whole", got == [None] * len(refused),
+          repr(got))
     c.call("SET", "str", "v")
     for cmd in (("ZADD", "str", "1", "a"), ("ZREM", "str", "a"), ("ZCARD", "str"), ("ZSCORE", "str", "a"),
                 ("ZRANK", "str", "a"), ("ZRANGE", "str", "0", "1")):

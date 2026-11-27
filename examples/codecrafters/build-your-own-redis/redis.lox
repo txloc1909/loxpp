@@ -4217,8 +4217,10 @@ fun zsetEntry(key) {
 }
 
 // Reads a score as Redis reads it with strtod: an optional sign, then
-// digits with an optional point, and an optional exponent; or inf or
-// infinity, in any case. Nothing may come before or after; nan is refused.
+// digits with an optional point, and an optional exponent; or 0x and
+// hexadecimal digits with an optional point and an optional binary exponent
+// (p); or inf or infinity, in any case. Nothing may come before or after;
+// nan is refused.
 // Returns the Number, or nil. float() takes only plain decimals, and a
 // String of another form is a fault that catch cannot stop, so the form is
 // checked first and an exponent is moved into the digits.
@@ -4226,6 +4228,144 @@ var ZSET_INF = float("1" + "0000000000000000000000000000000000000000000000000000
 
 fun isDigitChar(c) {
     return c >= "0" and c <= "9";
+}
+
+fun hexValue(c) {
+    var d = ord(c);
+    if (d >= 48 and d <= 57) {
+        return d - 48;
+    }
+    if (d >= 97 and d <= 102) {
+        return d - 87;
+    }
+    if (d >= 65 and d <= 70) {
+        return d - 55;
+    }
+    return -1;
+}
+
+// m times 2^-shift, rounded to even, as a multiple of 2^-1074 (shift is at
+// least 1). Returns the Number, or nil when it rounds to zero.
+fun hexSubnormal(m, shift, sign) {
+    if (shift > 62) {
+        return nil;
+    }
+    var n = int(shift);
+    var q = m >> n;
+    var rest = m - (q << n);
+    var half = 1i << (n - 1i);
+    if (rest > half or (rest == half and (q & 1i) == 1i)) {
+        q = q + 1i;
+    }
+    if (q == 0i) {
+        return nil;
+    }
+    var v = float(q) * math.pow(2.0, -1074.0);
+    if (sign == "-") {
+        return -v;
+    }
+    return v;
+}
+
+// The hexadecimal form of strtod, from s[i] (after the 0x). The first 15
+// significant digits make an Int of at most 60 bits, and a later digit that
+// is not zero sets its lowest bit, so float() rounds the whole value once
+// as the C library does. Returns the Number, or nil.
+fun parseHexScore(s, i, sign) {
+    var m = 0i;
+    var taken = 0;
+    var e = 0;
+    var digits = 0;
+    var inFraction = false;
+    while (i < len(s)) {
+        var c = s[i];
+        if (c == "." and !inFraction) {
+            inFraction = true;
+            i = i + 1;
+            continue;
+        }
+        var d = hexValue(c);
+        if (d < 0) {
+            break;
+        }
+        digits = digits + 1;
+        if (taken < 15) {
+            m = m * 16i + int(d);
+            if (m > 0i) {
+                taken = taken + 1;
+            }
+            if (inFraction) {
+                e = e - 4;
+            }
+        } else {
+            if (d != 0) {
+                m = m | 1i;
+            }
+            if (!inFraction) {
+                e = e + 4;
+            }
+        }
+        i = i + 1;
+    }
+    if (digits == 0) {
+        return nil;
+    }
+    if (i < len(s) and (s[i] == "p" or s[i] == "P")) {
+        i = i + 1;
+        var expSign = 1;
+        if (i < len(s) and (s[i] == "+" or s[i] == "-")) {
+            if (s[i] == "-") {
+                expSign = -1;
+            }
+            i = i + 1;
+        }
+        var start = i;
+        var exp = 0;
+        while (i < len(s) and isDigitChar(s[i])) {
+            if (exp < 100000) {
+                exp = exp * 10 + (ord(s[i]) - 48);
+            }
+            i = i + 1;
+        }
+        if (i == start) {
+            return nil;
+        }
+        e = e + exp * expSign;
+    }
+    if (i < len(s)) {
+        return nil;
+    }
+    if (m == 0i) {
+        return float(sign + "0");
+    }
+    // m is at least 1, so a value under 2^-1200 rounds to zero. A step of
+    // 2^-900 keeps the value normal, so only the last step rounds.
+    if (e < -1200) {
+        return nil;
+    }
+    // A result under 2^-1022 has fewer than 53 bits, so m is rounded once,
+    // to a multiple of 2^-1074; float(m) first would round twice.
+    var under = -1022 - e;
+    if (under > 52 and (under >= 62 or m < (1i << int(under)))) {
+        return hexSubnormal(m, under - 52, sign);
+    }
+    var v = float(m);
+    while (e > 900 and v != ZSET_INF) {
+        v = v * math.pow(2.0, 900.0);
+        e = e - 900;
+    }
+    if (e < -900) {
+        v = v * math.pow(2.0, -900.0);
+        e = e + 900;
+    }
+    v = v * math.pow(2.0, float(e));
+    if (v == 0 or v == ZSET_INF) {
+        return nil;
+    }
+    if (sign == "-") {
+        return -v;
+    }
+    return v;
 }
 
 fun parseScore(s) {
@@ -4246,6 +4386,9 @@ fun parseScore(s) {
             return -ZSET_INF;
         }
         return ZSET_INF;
+    }
+    if (i + 1 < len(s) and s[i] == "0" and (s[i + 1] == "x" or s[i + 1] == "X")) {
+        return parseHexScore(s, i + 2, sign);
     }
     // The digits before and after the point, found by index and taken by
     // slices, so the parse is linear.

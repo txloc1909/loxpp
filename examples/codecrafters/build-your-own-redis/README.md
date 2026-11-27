@@ -300,7 +300,11 @@ the standard library has no random numbers. `ZADD` reads its scores before
 it runs (`parseZadd`, with yields), so a bad score changes nothing; a
 replica parses a `ZADD` of its master with yields too. A score has the
 forms of `strtod` that Redis takes, and a value out of range or one that
-rounds to zero is refused, as in Redis. The parse is linear, and it checks
+rounds to zero is refused, as in Redis. The hexadecimal forms (`0x10`,
+`-0x1.8p3`) are read too: the first 15 significant digits make an Int, a
+later digit that is not zero sets its lowest bit, and the Int is rounded once to
+a double (to a multiple of 2^-1074 when the result is under 2^-1022), so the
+value is the one that strtod gives. The parse is linear, and it checks
 the range from the first digit that is not zero and the exponent before it
 makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM` that changes
 the set marks the watchers and is propagated; one that changes nothing is
@@ -575,8 +579,7 @@ printed.
   redis-server master makes a new RDB file each time).
 - Sorted sets: a score is written as the shortest text that reads back as
   the same double (`30.1`), as the stages ask; Redis 7.0 gives 17
-  significant digits (`30.100000000000001`). A hexadecimal score (`0x10`)
-  is refused; Redis reads it. `ZADD` takes no options (`NX`, `XX`, `GT`,
+  significant digits (`30.100000000000001`). `ZADD` takes no options (`NX`, `XX`, `GT`,
   `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
   `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
   members, a score has at most 64 bytes, and one `EXEC` does at most 32768
