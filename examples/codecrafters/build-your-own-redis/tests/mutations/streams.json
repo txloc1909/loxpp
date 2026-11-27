@@ -354,8 +354,8 @@
  },
  {
   "name": "the renewed floor is the highest ID of the readers that wait",
-  "old": "                if (!floorSet or lowMs < floorMs or (lowMs == floorMs and lowSeq < floorSeq)) {",
-  "new": "                if (!floorSet or lowMs > floorMs or (lowMs == floorMs and lowSeq > floorSeq)) {",
+  "old": "                if (!floorSet or after.ms < floorMs or (after.ms == floorMs and after.seq < floorSeq)) {",
+  "new": "                if (!floorSet or after.ms > floorMs or (after.ms == floorMs and after.seq > floorSeq)) {",
   "cases": [
    "local: XREAD BLOCK floor the floor is renewed: XADD 150-0 wakes reader 1 yes"
   ]
