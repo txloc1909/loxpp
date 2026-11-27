@@ -11,6 +11,7 @@
 #
 # Usage: tests/run_stages.py [your_http.sh]
 
+import fcntl
 import gzip
 import os
 import pty
@@ -40,34 +41,96 @@ def check(name, cond, detail=""):
         print("  FAIL %s  %s" % (name, detail))
 
 
-def free_port():
+# The ports of the servers a suite starts. The range is outside the one the OS
+# hands to client sockets, so a connection cannot take a port between the moment
+# free_port() picks it and the moment the server binds it.
+PORT_LOW = 20000
+PORT_HIGH = 30000
+PORT_FILE = os.path.join(tempfile.gettempdir(),
+                         "loxpp-test-ports-%d" % os.getuid())
+START_ATTEMPTS = 5
+
+
+def port_taken(port):
+    """True when a socket holds the port now."""
     s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        return True
+    finally:
+        s.close()
+    return False
 
 
-def start_server(prog, directory, port, preexec_fn=None, out=None):
-    env = dict(os.environ, LOXPP_HTTP_PORT=str(port))
-    log = tempfile.NamedTemporaryFile(prefix="loxpp-http-", suffix=".log", delete=False)
-    proc = subprocess.Popen(
-        [prog, "--directory", directory],
-        env=env,
-        stdout=out if out is not None else log,
-        stderr=subprocess.STDOUT,
-        preexec_fn=preexec_fn,
-    )
+def free_port():
+    """A port that is free now and that no other suite of this host has taken.
+
+    Binding port 0 and closing the socket races: a second suite reads the same
+    port, and then the two servers fight for it. One of them fails to bind, or,
+    worse, the loser is still starting while the winner serves, and a suite
+    talks to the server of another suite. The counter under the lock gives
+    every caller a port of its own instead.
+    """
+    with open(PORT_FILE, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            text = f.read().strip()
+            port = int(text) if text.isdigit() else PORT_LOW
+            if not PORT_LOW <= port < PORT_HIGH:
+                port = PORT_LOW
+            for _ in range(PORT_HIGH - PORT_LOW):
+                if not port_taken(port):
+                    f.seek(0)
+                    f.truncate()
+                    f.write("%d\n" % (port + 1 if port + 1 < PORT_HIGH else PORT_LOW))
+                    f.flush()
+                    return port
+                port = PORT_LOW if port + 1 == PORT_HIGH else port + 1
+            raise RuntimeError("no free port in %d..%d" % (PORT_LOW, PORT_HIGH))
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def wait_up(proc, port):
     deadline = time.time() + 5
     while time.time() < deadline:
         if proc.poll() is not None:
-            return proc, log.name, False
+            return False
         try:
             socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-            return proc, log.name, True
+            return True
         except OSError:
             time.sleep(0.05)
-    return proc, log.name, False
+    return False
+
+
+def start_server(prog, directory, preexec_fn=None, out=None, port=None):
+    """Starts the server and returns (proc, port, log_path, up).
+
+    `port` names the port of the first attempt, so a case can force a port that
+    another process takes. Later attempts take a fresh one.
+    """
+    log = tempfile.NamedTemporaryFile(prefix="loxpp-http-", suffix=".log", delete=False)
+    for attempt in range(START_ATTEMPTS):
+        port = free_port() if attempt or port is None else port
+        env = dict(os.environ, LOXPP_HTTP_PORT=str(port))
+        proc = subprocess.Popen(
+            [prog, "--directory", directory],
+            env=env,
+            stdout=out if out is not None else log,
+            stderr=subprocess.STDOUT,
+            preexec_fn=preexec_fn,
+        )
+        up = wait_up(proc, port)
+        if up or proc.poll() is None or not port_taken(port):
+            break
+        # The server exited and another process holds its port: the port was
+        # taken from it, so start the server on a fresh one.
+        proc.wait()
+    return proc, port, log.name, up
 
 
 def parse_response(sock):
@@ -129,9 +192,7 @@ def main():
     with open(os.path.join(directory, "foo"), "wb") as f:
         f.write(b"Hello, World!")
 
-    port = free_port()
-    proc, log_path, up = start_server(prog, directory, port)
-
+    proc, port, log_path, up = start_server(prog, directory)
     try:
         check("base-01 bind to a port", up)
         if not up:
@@ -411,13 +472,27 @@ def main():
     finally:
         stop(proc)
 
+    # local: a port that another process takes between free_port() and the bind
+    # must not silence the suite: the server starts on the next port.
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    taken = blocker.getsockname()[1]
+    again_proc, again_port, again_log, again_up = start_server(prog, directory, port=taken)
+    try:
+        check("local: a port another process takes starts the server on another one",
+              again_up and again_port != taken,
+              "up %r, port %r, taken %r, log %r"
+              % (again_up, again_port, taken, open(again_log).read()[-200:]))
+    finally:
+        stop(again_proc)
+        blocker.close()
+
     # local: when accept() runs out of descriptors the server waits and keeps
     # running. This server gets a small descriptor limit of its own.
     def limit_descriptors():
         resource.setrlimit(resource.RLIMIT_NOFILE, (40, 40))
 
-    fd_port = free_port()
-    fd_proc, fd_log, fd_up = start_server(prog, directory, fd_port, limit_descriptors)
+    fd_proc, fd_port, fd_log, fd_up = start_server(prog, directory, limit_descriptors)
     stalled = []
     try:
         if not fd_up:
@@ -446,8 +521,7 @@ def main():
     # output is a terminal, as when a person runs the server: the VM buffers
     # stdout when it is a file or a pipe, and a killed server would lose it.
     master, slave = pty.openpty()
-    pty_port = free_port()
-    pty_proc, pty_log, pty_up = start_server(prog, directory, pty_port, out=slave)
+    pty_proc, pty_port, pty_log, pty_up = start_server(prog, directory, out=slave)
     try:
         if not pty_up:
             check("local: server with terminal output starts", False)
