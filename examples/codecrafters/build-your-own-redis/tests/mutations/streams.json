@@ -319,5 +319,61 @@
   "cases": [
    "local: S10 XRANGE of 1048004 arguments has at most 400000 heap objects at a collection"
   ]
+ },
+ {
+  "name": "a reader that joins a pair does not lower the floor",
+  "old": "            noteFloor(pair, w, key);\n",
+  "new": "",
+  "cases": [
+   "local: XREAD BLOCK floor a lower reader joins second: XADD 10-0 wakes reader 1 yes"
+  ]
+ },
+ {
+  "name": "the first reader of a pair does not set the floor",
+  "old": "            noteFloor(pair, queue, key);\n",
+  "new": "",
+  "cases": [
+   "local: XREAD BLOCK floor a lower reader is first: XADD 10-0 wakes reader 0 yes"
+  ]
+ },
+ {
+  "name": "a reader that joins a queue does not lower the floor",
+  "old": "            noteFloor(queue, w, key);\n",
+  "new": "",
+  "cases": [
+   "local: XREAD BLOCK floor a lower reader joins third: XADD 10-0 wakes reader 2 yes"
+  ]
+ },
+ {
+  "name": "the floor keeps the highest ID",
+  "old": "        if (!this.hasFloor or ms < this.floorMs or (ms == this.floorMs and seq < this.floorSeq)) {",
+  "new": "        if (!this.hasFloor or ms > this.floorMs or (ms == this.floorMs and seq > this.floorSeq)) {",
+  "cases": [
+   "local: XREAD BLOCK floor a lower reader is first: XADD 10-0 wakes reader 0 yes"
+  ]
+ },
+ {
+  "name": "the renewed floor is the highest ID of the readers that wait",
+  "old": "                if (!floorSet or lowMs < floorMs or (lowMs == floorMs and lowSeq < floorSeq)) {",
+  "new": "                if (!floorSet or lowMs > floorMs or (lowMs == floorMs and lowSeq > floorSeq)) {",
+  "cases": [
+   "local: XREAD BLOCK floor the floor is renewed: XADD 150-0 wakes reader 1 yes"
+  ]
+ },
+ {
+  "name": "the skip compares the seq the wrong way",
+  "old": "this.floorMs == ms and this.floorSeq >= seq",
+  "new": "this.floorMs == ms and this.floorSeq <= seq",
+  "cases": [
+   "local: XREAD BLOCK floor the same ms with a lower seq: XADD 10-6 wakes reader 0 yes"
+  ]
+ },
+ {
+  "name": "the skip compares the ms the wrong way",
+  "old": "this.hasFloor and (this.floorMs > ms or",
+  "new": "this.hasFloor and (this.floorMs < ms or",
+  "cases": [
+   "local: XREAD BLOCK floor a lower reader joins second: XADD 10-0 wakes reader 1 yes"
+  ]
  }
 ]
