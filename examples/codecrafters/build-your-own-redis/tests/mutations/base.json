@@ -322,5 +322,32 @@
   "cases": [
    "local: --maxclients 4294967295 starts and CONFIG GET returns it"
   ]
+ },
+ {
+  "name": "maxclients count is taken when the session starts",
+  "old": "    connectedClients = connectedClients + 1;\n    fun runSession() {\n        sessionLoop(conn);\n",
+  "new": "    fun runSession() {\n        connectedClients = connectedClients + 1;\n        sessionLoop(conn);\n",
+  "cases": [
+   "local: maxclients burst: exactly the free slots are served",
+   "local: maxclients burst: all the others are refused with the error",
+   "local: maxclients burst: connected_clients stays at the limit"
+  ]
+ },
+ {
+  "name": "maxclients refusal waits until the client reads",
+  "old": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n",
+  "new": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n            var pad = \"x\";\n            for (var i = 0; i < 25; i = i + 1) {\n                pad = pad + pad;\n            }\n            sock.write(pad);\n",
+  "cases": [
+   "local: maxclients silent: a new client is served in 1 s after the refused ones"
+  ]
+ },
+ {
+  "name": "maxclients replica link is not counted",
+  "old": "        conn.isReplica = true;\n        replicas.append(conn);\n",
+  "new": "        conn.isReplica = true;\n        connectedClients = connectedClients - 1;\n        replicas.append(conn);\n",
+  "cases": [
+   "local: maxclients replica: the replica takes a slot",
+   "local: maxclients replica: a third client is refused"
+  ]
  }
 ]
