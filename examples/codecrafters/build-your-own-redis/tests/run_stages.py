@@ -4895,6 +4895,23 @@ def wait_count(srv, channel, want, seconds=5):
 
 
 PS9_OBJECT_LIMIT = 100000
+PS9_BATCH = 20000
+PS9_EXTRA_BATCHES = 25
+
+
+def ps9_last_objects(path, churn_at):
+    """The live object count of the last collector record that ends after
+    churn_at, or None when there is none. The end time is t4 in a "gc" line
+    and t1 in a "cycle" line; an "exit" record does not count."""
+    last = None
+    with open(path) as f:
+        for line in f:
+            if line.startswith(("gc ", "cycle ")) and line.endswith("\n"):
+                fields = dict(x.split("=", 1) for x in line.split()[1:])
+                ended = int(fields["t4" if line.startswith("gc ") else "t1"])
+                if fields.get("cause") != "exit" and ended > churn_at:
+                    last = int(fields["objs_after"])
+    return last
 
 
 def stages_pubsub_limits(prog):
@@ -5043,21 +5060,24 @@ def stages_pubsub_limits(prog):
             big = "v" * 8000
             for _ in range(150000):
                 c.call("SET", "churn", big)
+            # The leak raises the threshold of the next collection, so more
+            # SET commands may be needed: send bounded batches until a record
+            # after the churn exists, up to PS9_EXTRA_BATCHES batches.
+            extra = 0
+            while extra < PS9_EXTRA_BATCHES and ps9_last_objects(trace.name, churn_at) is None:
+                for _ in range(PS9_BATCH):
+                    c.call("SET", "churn", big)
+                extra += 1
+            print("       measured: %d extra batches of %d SET commands" % (extra, PS9_BATCH))
             c.close()
     finally:
         srv.stop()
     if churn_at is not None:
-        last = None
-        with open(trace.name) as f:
-            for line in f:
-                if line.startswith(("gc ", "cycle ")):
-                    fields = dict(x.split("=", 1) for x in line.split()[1:])
-                    ended = int(fields["t4" if line.startswith("gc ") else "t1"])
-                    if fields.get("cause") != "exit" and ended > churn_at:
-                        last = int(fields["objs_after"])
+        last = ps9_last_objects(trace.name, churn_at)
         print("       measured: live objects at the last collection after the churn %r" % last)
         check(name, last is not None and last < PS9_OBJECT_LIMIT,
-              "no collection record after the churn" if last is None
+              "no collection record after the churn and %d more SET commands"
+              % (PS9_BATCH * PS9_EXTRA_BATCHES) if last is None
               else "%d live objects, the limit is %d" % (last, PS9_OBJECT_LIMIT))
     os.unlink(trace.name)
 
