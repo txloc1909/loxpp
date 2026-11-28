@@ -67,16 +67,32 @@ connection.
 ### Number of connections
 
 `--maxclients N` (10000 by default, as in Redis 7.0; `CONFIG GET maxclients`
-gives it) limits the connections. The accept loop compares the count that
-`INFO clients` reports as `connected_clients` with the limit. At or above it,
-the loop writes `-ERR max number of clients reached` and CRLF to the new
-socket, and closes it. It starts no task for that connection, so the refused
-connection does not count. This is the check of `acceptCommonHandler` in
-Redis. Differences: the count here includes replica connections (Redis
-leaves them out of `connected_clients`), `INFO` has no `maxclients` line, and
-`CONFIG SET maxclients` does not exist. The suite (group `maxclients`) runs
-a limit of 5 and reads the default 10000 from `CONFIG GET`; it does not
-open 10000 sockets.
+gives it) limits the connections. N is an integer from 1 to 4294967295, the
+range of Redis; any other value exits with code 64. The accept loop compares
+the count that `INFO clients` reports as `connected_clients` with the limit.
+At or above it, the loop writes `-ERR max number of clients reached` and CRLF
+to the new socket, and closes it. It starts no task for that connection, so
+the refused connection does not count. The write is best effort and the loop
+does not wait for the client, so a refused client that never reads does not
+stop the next accept. The check and the count come one after the other in the
+accept loop, with no suspend point between them, so connections that arrive
+together are not served above the limit. This is the check of
+`acceptCommonHandler` in Redis. The suite (group `maxclients`) runs a limit
+of 3 or 5 and reads the default 10000 from `CONFIG GET`; it does not open
+10000 sockets. It probes a burst of 30 connections at a limit of 3, 20
+refused clients that never read, and a replica at a limit of 2.
+
+Differences from Redis:
+
+- The count includes replica connections that a master holds; Redis leaves
+  them out of `connected_clients`. A replica takes a slot of the master here.
+- The link of a replica to its master is not counted. It does not go through
+  the accept loop, so it takes no slot of the replica; Redis counts that link
+  as a client of the replica.
+- `INFO` has no `stats` section, so there is no `rejected_connections`
+  counter (`stat_rejected_conn` in Redis). A refused connection leaves no
+  trace except the error that the client reads.
+- `INFO` has no `maxclients` line, and `CONFIG SET maxclients` does not exist.
 
 ### Messages
 

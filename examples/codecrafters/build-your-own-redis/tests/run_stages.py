@@ -678,6 +678,63 @@ def refused_bytes(port):
         sock.close()
 
 
+def burst_connect(srv, n):
+    """Opens n connections at the same moment from n threads while the
+    server is stopped, so the kernel holds all of them in the accept queue
+    and the server finds them one after the other with no wait between. Each
+    client reads first, because a refused client gets its error with no
+    request, and the server closes it; a request sent to it first could reset
+    the connection and drop the error. A silent connection is then asked with
+    PING. Returns the kinds ("served", "refused", other) and the sockets,
+    which the caller closes."""
+    kinds = [None] * n
+    socks = [None] * n
+    connected = threading.Semaphore(0)
+    go = threading.Event()
+
+    def one(i):
+        try:
+            s = socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+        except OSError as e:
+            kinds[i] = repr(e)
+            connected.release()
+            return
+        socks[i] = s
+        connected.release()
+        go.wait()
+        s.settimeout(2)
+        try:
+            data = s.recv(4096)
+        except socket.timeout:
+            s.settimeout(5)
+            try:
+                s.sendall(encode("PING"))
+                data = s.recv(4096)
+            except OSError as e:
+                kinds[i] = repr(e)
+                return
+            kinds[i] = "served" if data == b"+PONG\r\n" else repr(data)
+            return
+        except OSError as e:
+            kinds[i] = repr(e)
+            return
+        kinds[i] = "refused" if data == MAXCLIENTS_ERROR else repr(data)
+
+    threads = [threading.Thread(target=one, args=(i,)) for i in range(n)]
+    os.kill(srv.proc.pid, signal.SIGSTOP)
+    try:
+        for t in threads:
+            t.start()
+        for _ in range(n):
+            connected.acquire()
+    finally:
+        os.kill(srv.proc.pid, signal.SIGCONT)
+        go.set()
+    for t in threads:
+        t.join()
+    return kinds, socks
+
+
 def stages_maxclients(prog):
     limit = 5
     srv = Server(prog, ["--maxclients", str(limit)])
@@ -734,6 +791,8 @@ def stages_maxclients(prog):
     finally:
         srv.stop()
 
+    stages_maxclients_probes(prog)
+
     # The default is the 10000 of Redis. The case reads the value and opens
     # no 10000 sockets: that would need a raised descriptor limit.
     srv = Server(prog, [])
@@ -749,6 +808,144 @@ def stages_maxclients(prog):
         srv.stop()
     aof_exits(prog, ["--maxclients", "0"], "local: --maxclients 0 is refused at start")
     aof_exits(prog, ["--maxclients", "many"], "local: --maxclients with no integer is refused at start")
+    aof_exits(prog, ["--maxclients", "4294967296"],
+              "local: --maxclients above 4294967295 is refused at start")
+    srv = Server(prog, ["--maxclients", "4294967295"])
+    try:
+        got = None
+        if srv.up:
+            c = srv.client()
+            got = c.call("CONFIG", "GET", "maxclients")
+            c.close()
+        check("local: --maxclients 4294967295 starts and CONFIG GET returns it",
+              got == ["maxclients", "4294967295"], "up=%s got=%r" % (srv.up, got))
+    finally:
+        srv.stop()
+
+
+def stages_maxclients_probes(prog):
+    # A burst: the check and the count must not have a suspend point between
+    # them, or connections that arrive together all pass the check.
+    limit = 3
+    n = 30
+    srv = Server(prog, ["--maxclients", str(limit)])
+    try:
+        check("maxclients burst: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        first = srv.client()
+        base = clients_back(first, 1)
+        check("local: maxclients burst: the clients of the start probes end",
+              base == 1, "count %r" % base)
+        kinds, socks = burst_connect(srv, n)
+        try:
+            served = kinds.count("served")
+            refused = kinds.count("refused")
+            # The held client takes one slot, so limit - 1 of the burst fit.
+            check("local: maxclients burst: exactly the free slots are served",
+                  served == limit - 1, "served %d of %d: %r" % (served, n, kinds))
+            check("local: maxclients burst: all the others are refused with the error",
+                  refused == n - (limit - 1), "refused %d of %d: %r" % (refused, n, kinds))
+            now = connected_clients(first)
+            check("local: maxclients burst: connected_clients stays at the limit",
+                  now == limit, "count %r" % now)
+        finally:
+            for x in socks:
+                if x is not None:
+                    x.close()
+        first.close()
+    finally:
+        srv.stop()
+
+    # Refused clients that never read and never close must not stop the
+    # accept loop: the error is only best effort.
+    srv = Server(prog, ["--maxclients", str(limit)])
+    try:
+        check("maxclients silent: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        first = srv.client()
+        base = clients_back(first, 1)
+        held = [first] + [srv.client() for _ in range(limit - 1)]
+        check("local: maxclients silent: the start probes end and the limit is reached",
+              base == 1 and [c.call("PING") for c in held] == ["PONG"] * limit, "count %r" % base)
+        silent = [socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+                  for _ in range(20)]
+        try:
+            start = time.time()
+            held[0].sock.settimeout(1)
+            try:
+                got = held[0].call("PING")
+            except (socket.timeout, EOFError, OSError):
+                got = None
+            check("local: maxclients silent: a held client is answered in 1 s",
+                  got == "PONG" and time.time() - start < 1,
+                  "%r after %.2f s" % (got, time.time() - start))
+            held[0].sock.settimeout(5)
+            # The accept loop still runs: a client that frees a slot is
+            # followed by a client that is served.
+            held[1].close()
+            n = clients_back(held[0], limit - 1)
+            late = srv.client()
+            late.sock.settimeout(1)
+            start = time.time()
+            try:
+                got = late.call("PING")
+            except (socket.timeout, EOFError, OSError):
+                got = None
+            check("local: maxclients silent: a new client is served in 1 s after the refused ones",
+                  n == limit - 1 and got == "PONG" and time.time() - start < 1,
+                  "count %r, %r after %.2f s" % (n, got, time.time() - start))
+            late.close()
+            # The error waits in the buffer of each silent client.
+            errors = 0
+            for x in silent:
+                x.settimeout(2)
+                try:
+                    if x.recv(4096) == MAXCLIENTS_ERROR:
+                        errors += 1
+                except OSError:
+                    pass
+            check("local: maxclients silent: each silent client finds the error when it reads",
+                  errors == len(silent), "%d of %d" % (errors, len(silent)))
+        finally:
+            for x in silent:
+                x.close()
+        for c in held:
+            c.close()
+    finally:
+        srv.stop()
+
+    # A replica holds a slot like a client.
+    srv = Server(prog, ["--maxclients", "2"])
+    try:
+        check("maxclients replica: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        first = srv.client()
+        base = clients_back(first, 1)
+        check("local: maxclients replica: the clients of the start probes end",
+              base == 1, "count %r" % base)
+        r, full, rdb = replica_handshake(srv.port)
+        info = first.call("INFO", "replication")
+        check("local: maxclients replica: the replica is connected",
+              isinstance(info, str) and "connected_slaves:1" in info, repr(info)[:120])
+        now = connected_clients(first)
+        check("local: maxclients replica: the replica takes a slot", now == 2, "count %r" % now)
+        got = refused_bytes(srv.port)
+        check("local: maxclients replica: a third client is refused",
+              got == MAXCLIENTS_ERROR, repr(got))
+        r.close()
+        now = clients_back(first, 1)
+        check("local: maxclients replica: a replica that goes frees its slot",
+              now == 1, "count %r" % now)
+        again = srv.client()
+        check("local: maxclients replica: a client takes the slot of the replica",
+              again.call("PING") == "PONG")
+        again.close()
+        first.close()
+    finally:
+        srv.stop()
 
 
 def stages_fairness(prog):
