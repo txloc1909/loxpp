@@ -1,0 +1,16 @@
+// Many tasks wait in task.receive, so each is a root of the collector. The
+// churn that follows makes the collector run cycles. The start pause of a
+// cycle reads each waiting task: its size follows the number of tasks, one
+// unit for each (docs/decisions/garbage-collectors.md, section 14, #1302).
+class Node { init(i) { this.i = i; } }
+
+fun waiter() { task.receive(); }
+
+var n = 0;
+while (n < 100000) { task.spawn(waiter); n = n + 1; }
+sleep(0.01);
+
+var sum = 0;
+var j = 0;
+while (j < 2000000) { var t = Node(j); sum = sum + t.i; j = j + 1; }
+print sum;
