@@ -69,7 +69,12 @@ const PS_READ_PROBE_MS = 500;
  * end: the run it passes starts no child, so the file can never arrive.
  */
 const LIMIT_PROBE_MS = 200;
-/** Every wait and every `ps` read in one test draws on this budget, so their sum cannot exceed it. */
+/**
+ * Every wait, and every `ps` read that asks for the host allowance, draws on
+ * this budget, so their sum cannot exceed it. Two reads keep their own limit
+ * and this budget does not bound them: `parentArgs`, whose empty answer a run
+ * allows, and `state`, whose `ps` takes no limit of its own (#1376).
+ */
 const WAIT_BUDGET_MS = 90_000;
 
 /**
@@ -80,8 +85,8 @@ const WAIT_BUDGET_MS = 90_000;
  * or the `ps` start behind a start time — and `left` for a wait on the watch,
  * which is capped at `TIMEOUT_MS` so a single slow step cannot take the whole
  * budget and hide a regression. The outer bound holds the whole budget, which
- * holds the `ps` reads, the two start waits and the three watch waits that the
- * longest test uses, plus the fixed sleeps, the setup and the teardown.
+ * holds the budgeted `ps` reads, the two start waits and the three watch waits
+ * that the longest test uses, plus the fixed sleeps, the setup and the teardown.
  */
 function processTest(
   name: string,
