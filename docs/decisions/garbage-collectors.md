@@ -858,7 +858,7 @@ close, and the issues answer "is it done".
 | #1294 | The `std` containers that objects own are not timed. | Section 14, allocator stalls. |
 | #1295 | The gray stack of `stw` is one array. | Section 14, allocator stalls. |
 | #1296 | The `std` containers of `MemoryManager` are not timed. | Section 14, allocator stalls. |
-| #1297 | Resolved by PR #PRNUM. The large-block release work of one step was not bounded as a sum. | Sections 4.2 and 6.1, item 5, and section 14. |
+| #1297 | Resolved by PR #1373. The large-block release work of one step was not bounded as a sum. | Sections 4.2 and 6.1, item 5, and section 14. |
 | #1299 | The finish pause, the start pause and `markForeign` follow the foreign set and the handle list. | Section 14, known gaps. |
 | #1300 | The `exit` cycle is one step of the whole heap. | Section 14, known gaps. |
 | #1301 | Function, Closure, Enum, DeferredCall and Bound objects are not cut into parts. | Section 14, known gaps. |
