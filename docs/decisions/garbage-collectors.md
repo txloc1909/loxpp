@@ -733,7 +733,7 @@ on a large heap (6.1, "a missed barrier"). We do not take that risk for a
 case that the language does not need often. If a program needs it, a new
 decision can replace this limit with the parts and the barriers above.
 
-**Goal 1 does not hold for a program with more than about 275000 waiting tasks
+**Goal 1 does not hold for a program with more than about 250000 waiting tasks
 or about 125000 globals.** The start step grows with the roots, and the p99.99
 of the steps is then above 5 ms. This is a defect against goal 1 that we
 accept for now, and not a case that goal 1 leaves out. The contract gap that
@@ -742,7 +742,10 @@ goes with it is #1368.
 The cost model: the start step is the roots, about 18 ns for each task that
 waits (release build; 100000 tasks in `task.receive` are 100113 units, 1.8 to
 1.95 ms in 5 runs) and about 39 ns for each global. The step passes 5 ms at
-about 275000 waiting tasks, or about 125000 globals. The probe has about 1200
+about 250000 waiting tasks, or about 125000 globals. The task figure comes
+from the measured rows below (21.5 ns for each task at 200000 tasks, 19.5 ns
+at 300000), not from the low end of the model. The global figure comes from
+the 39 ns of the model, because no measured row has more globals. The probe has about 1200
 steps, so its p99.99 is its largest step, and a cycle that is not often does
 not lower it. Measured on the probe with more tasks (release build):
 
@@ -752,7 +755,7 @@ not lower it. Measured on the probe with more tasks (release build):
 | 200000 | 200113 | 4308 us | 56.9% |
 | 300000 | 300113 | 5853 us | 41.5% |
 
-The start step and the p99.99 limit are broken above about 275000 tasks. The
+The start step and the p99.99 limit are broken above about 250000 tasks. The
 MMU(10 ms) limit of 50% is broken between 200000 and 300000 tasks.
 `test/gc_incremental/latency/many_tasks.lox` and
 `check_many_tasks` in `tools/check_gc_incremental.py` assert the limit: the
