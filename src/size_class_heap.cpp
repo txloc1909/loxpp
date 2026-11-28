@@ -430,6 +430,13 @@ void SizeClassHeap::freeBuffer(void* p, std::size_t bytes) noexcept {
 }
 
 void SizeClassHeap::releaseBytes(std::size_t bytes) {
+    // Invariant: one call does at most kReleaseBudget bytes of release work,
+    // so the time of an allocation does not grow with the size of the block.
+    // The remainder stays in the queue. A free or a sweep step gives back one
+    // slice (releaseStep), and an allocation that maps new memory gives back
+    // one budget. A program that drops large blocks faster than that holds
+    // more memory until the queue drains.
+    bytes = std::min(bytes, kReleaseBudget);
     while (bytes > 0) {
         std::size_t released = releaseStep(true);
         if (released == 0) {

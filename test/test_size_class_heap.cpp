@@ -391,6 +391,29 @@ TEST(SizeClassHeap, AFreedLargeBlockGoesBackInSlices) {
     EXPECT_EQ(store.footprintBytes(), base);
 }
 
+TEST(SizeClassHeap, OneReleaseBytesCallIsCappedAtTheBudget) {
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    constexpr std::size_t kBlock = std::size_t{96} << 20;
+    std::size_t base = store.footprintBytes();
+    void* p = mm.rawAlloc(kBlock);
+    mm.rawFree(p, kBlock);
+    std::size_t pending = store.pendingReleaseBytes();
+    ASSERT_GT(pending, SizeClassHeap::kReleaseBudget);
+    std::size_t before = store.footprintBytes();
+    store.releaseBytes(kBlock);
+    std::size_t gave = before - store.footprintBytes();
+    EXPECT_GT(gave, 0u);
+    EXPECT_LE(gave, SizeClassHeap::kReleaseBudget);
+    EXPECT_GT(store.pendingReleaseBytes(), 0u);
+    std::size_t calls = 0;
+    while (store.pendingReleaseBytes() != 0) {
+        store.releaseBytes(kBlock);
+        ASSERT_LT(++calls, 100u);
+    }
+    EXPECT_EQ(store.footprintBytes(), base);
+}
+
 TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
     MemoryManager mm;
     SizeClassHeap& store = mm.store();
