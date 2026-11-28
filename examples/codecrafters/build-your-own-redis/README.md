@@ -190,6 +190,17 @@ and that `Stream` never comes back, so the pass renews `floor` with the top at
 the wait of that reader, as for any other reader. Only the first pass after
 the key changed its `Stream` is full.
 
+The wait of a `$` reader makes one `DollarAt` object for each key. This costs
+memory. Two clients that run `XREAD BLOCK 0` with `$` on 524286 existing
+streams (`tests/gc_load.py`, release build, `LOXPP_GC=incremental`) reach a
+peak RSS (`VmHWM`) of 969, 972 and 972 MB. A wait that stores the `Stream`
+itself (no new object, but it holds a replaced `Stream` and loses the top at
+the wait) reaches 854 MB. So the objects cost about 115 MB, or 13%, for 1048572
+waits: about 110 bytes for each key of each wait. A wait that names an ID
+makes one `StreamId` for each key in the same way. A smaller form needs the
+top ID (two numbers) and the serial (a third) with no new object for each key;
+no such form is known.
+
 ### Transactions
 
 After `MULTI`, the session keeps a `Transaction` in its `Conn` and queues
