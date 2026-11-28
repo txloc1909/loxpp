@@ -5271,9 +5271,15 @@ def stages_pubsub_limits(prog):
     # rounds. The probe reads only a record that ends after the churn: a
     # cycle that starts before the churn and ends after it counts, as its
     # live count is read at its end. The end time is t4 in a "gc" line and t1
-    # in a "cycle" line. When the collector writes no such record (a
-    # stop-the-world collector may not run in the churn), the case fails with
-    # a message that says so.
+    # in a "cycle" line. A leak can keep the collector from running after the
+    # churn, so the probe sends up to PS9_EXTRA_BATCHES more batches of
+    # PS9_BATCH SET commands until such a record exists. When there is still
+    # none, the case fails with "no collection record after the churn and
+    # 500000 more SET commands". A server that never collects keeps the
+    # garbage of all 650000 SET commands (150000 and 500000 more): about 0.8
+    # KB for each command, not 8000 bytes, and 1.0 GB from the churn. Its
+    # peak RSS is then about 1.5 GB (measured with the stw threshold raised
+    # so that it never runs).
     trace = tempfile.NamedTemporaryFile(prefix="loxpp-redis-gc-", suffix=".trace", delete=False)
     trace.close()
     srv = Server(prog, [], env={"LOXPP_GC_TRACE": trace.name})
