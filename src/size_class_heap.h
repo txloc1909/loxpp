@@ -46,6 +46,8 @@ class SizeClassHeap {
     static constexpr std::size_t kMaxObject = kMaxSmall;
     // The most that one call gives back to the kernel.
     static constexpr std::size_t kReleaseSlice = std::size_t{1} << 20;
+    // The most that one call of releaseBytes gives back.
+    static constexpr std::size_t kReleaseBudget = 64 * kReleaseSlice;
     static constexpr std::size_t kSlotAlign = 16;
     // The default limit of a stall record, in nanoseconds.
     static constexpr std::uint64_t kDefaultStallLimitNs = 100'000;
@@ -146,8 +148,10 @@ class SizeClassHeap {
     // cached blocks of other classes are the least useful memory.
     std::size_t releaseStep(bool evictCache = false);
     // Gives back `bytes` from the queue, in calls of at most kReleaseSlice, or
-    // all of it when the queue holds less. The heap calls it before it maps
-    // new memory, so the queue falls at least as fast as the mappings grow.
+    // all of it when the queue holds less. One call gives back at most
+    // kReleaseBudget bytes; the rest stays queued. The heap calls it before it
+    // maps new memory, so the queue falls at least as fast as the mappings
+    // grow.
     void releaseBytes(std::size_t bytes);
     // The `stall` records go to `trace`, one for each timed call that takes
     // longer than the limit. nullptr turns them off, and then a timed call
