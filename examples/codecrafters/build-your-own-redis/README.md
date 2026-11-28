@@ -223,6 +223,11 @@ the limit alone gets the same error as before the pool. For example, 3
 `ZRANGE` of 524288 elements and one `GEOSEARCH` of 524288 members use the
 whole pool (6291456 and 2097152 units), and the next `GEOSEARCH`, `ZRANGE`
 or `LRANGE` is refused, where each of them is under its own limit alone.
+A `GEOSEARCH` that is refused has walked up to what is left of the pool,
+so it takes all of it: each later budgeted command of that `EXEC` is refused
+too, also a small `LRANGE`. If it took nothing, a client could queue many
+such walks, and one `EXEC` would walk more than its bound. Another kind that
+is refused takes nothing, because it is refused before it does any work.
 Redis has no such pool: this is a difference of the example (see Known
 differences from Redis). Case M1 measures such an `EXEC`, and case M2 shows
 that the sorted set, bitmap and ACL work take from the pool too.
@@ -358,18 +363,18 @@ makes any text, so `1e-999999` costs no more than `1e-9`. A `ZADD` or `ZREM`
 that changes the set marks the watchers and is propagated; one that changes
 nothing is not, as in Redis.
 
-An insert costs about 9 microseconds of Lox++ code, and a command runs in
-one step. So one `ZADD` or `ZREM` names at most 16384 members, a score has
-at most 64 bytes, and one `EXEC` does at most 32768 inserts and deletes of
-sorted sets, where a new score of a member is a delete and an insert, also
-for a member that comes again in the same `ZADD`, and a pair that changes
-nothing is one unit (rule 6); `ZRANGE` parses its options before it runs,
-with yields. In `EXEC`, each element of its reply (a member, or a member
-and its score, with `WITHSCORES`) takes 4 units of the pool, because the
-walk is Lox++ code in the step of `EXEC` (rule 6): 2097152 elements alone.
-A `ZRANGE` whose reply is over what is left of the pool gives `-ERR the
-ZRANGE work of this transaction is over its limit`, does nothing and
-spends nothing. A `ZRANGE` that is not in `EXEC` has no such limit.
+An insert costs about 9 microseconds of Lox++ code, and a command runs in one
+step. So one `ZADD` or `ZREM` names at most 16384 members, a score has at most
+64 bytes, and one `EXEC` does at most 32768 inserts and deletes of sorted sets
+alone, where a new score of a member is a delete and an insert, also for a
+member that comes again in the same `ZADD`, and a pair that changes nothing is
+one unit (rule 6); `ZRANGE` parses its options before it runs, with yields. In
+`EXEC`, each element of its reply (a member, or a member and its score, with
+`WITHSCORES`) takes 4 units of the pool, because the walk is Lox++ code in the
+step of `EXEC` (rule 6): 2097152 elements alone. A `ZRANGE` whose reply is
+over what is left of the pool gives `-ERR the ZRANGE work of this transaction
+is over its limit`, does nothing and spends nothing. A `ZRANGE` that is not in
+`EXEC` has no such limit.
 
 ### Geospatial
 
@@ -389,9 +394,9 @@ order. In its step it takes the members and scores of those boxes, a walk
 from the first score of each box; the session keeps the members within the
 radius in steps (`writeGeoSearch`), so the command stays atomic and the
 other clients go on. It answers every command read before the end of the
-stream, also after a half-close (rule 7). The order of the reply is the order of Redis: a fuzz
-of 2400 searches and distances against redis-server 7.0 gave no
-difference. As in Redis 7.0, it reads the key first, decodes a
+stream, also after a half-close (rule 7). The order of the reply is the
+order of Redis: a fuzz of 2400 searches and distances against redis-server
+7.0 gave no difference. As in Redis 7.0, it reads the key first, decodes a
 `FROMMEMBER` member while it parses, and takes the last of an option that
 comes again. In `EXEC`, `GEOSEARCH` takes 4 units of the pool for
 each member of its boxes, so one `EXEC` walks at most 2097152 members of
@@ -624,17 +629,17 @@ printed.
   queued in `MULTI`. A Lox++ replica of a master whose RDB file has a list
   or a stream key cannot load it, so it connects again every second (and a
   redis-server master makes a new RDB file each time).
-- Sorted sets: a score is written as the shortest text that reads back as
-  the same double (`30.1`), as the stages ask; Redis 7.0 gives 17
-  significant digits (`30.100000000000001`). `ZADD` takes no options (`NX`,
-  `XX`, `GT`, `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES`
-  (not `BYSCORE`, `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at
-  most 16384 members, a score has at most 64 bytes, and one `EXEC` does at
-  most 32768 inserts and deletes of sorted sets, and at most 2097152
-  elements in the replies of its `ZRANGE`, as part of the pool of `EXEC`
-  below; Redis has no such limits. A `ZRANGE` index of more than 15 digits is
-  "not an integer" (as for `LRANGE`); Redis gives an empty range. The RDB load
-  does not read a sorted set.
+- Sorted sets: a score is written as the shortest text that reads back as the
+  same double (`30.1`), as the stages ask; Redis 7.0 gives 17 significant
+  digits (`30.100000000000001`). `ZADD` takes no options (`NX`, `XX`, `GT`,
+  `LT`, `CH`, `INCR`), and `ZRANGE` takes only `WITHSCORES` (not `BYSCORE`,
+  `BYLEX`, `REV` or `LIMIT`). One `ZADD` or `ZREM` names at most 16384
+  members, a score has at most 64 bytes, and one `EXEC` does at most 32768
+  inserts and deletes of sorted sets alone, and at most 2097152 elements in
+  the replies of its `ZRANGE` alone, as part of the pool of `EXEC` below;
+  Redis has no such limits. A `ZRANGE` index of more than 15 digits is "not an
+  integer" (as for `LRANGE`); Redis gives an empty range. The RDB load does
+  not read a sorted set.
 - Geospatial: `GEOPOS` writes a coordinate as the shortest text, as the
   stages ask (`2.294471561908722`); Redis 7.0 gives 17 decimals.
   `GEOADD` takes no options (`NX`, `XX`, `CH`). `GEOSEARCH` takes only
@@ -643,7 +648,7 @@ printed.
   whose score is negative or at least 2^63 gives a null array; Redis
   converts it to an unsigned 64-bit value. `GEOPOS` names at most 16384
   members, and one `EXEC` walks at most 2097152 members of `GEOSEARCH`
-  boxes. As for `ZADD`, the limit on the names of `GEOPOS` comes before
+  boxes alone. As for `ZADD`, the limit on the names of `GEOPOS` comes before
   `WRONGTYPE`. The coordinates in the error of `GEOADD`, and a distance, are
   rounded from the product by 10^d, so a value within one unit of the last
   place of a tie can round the other way from `printf`, and a coordinate

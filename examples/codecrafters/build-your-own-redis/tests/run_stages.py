@@ -5868,6 +5868,7 @@ def stages_geo_limits(prog):
                  "local: EXEC refuses a GEOSEARCH over the pool that LRANGE used",
                  "local: GEOPOS of more than 16384 members is refused",
                  "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+                 "local: EXEC refuses a small LRANGE after a GEOSEARCH that the pool refused",
                  "local: G4 GEOADD parses its places in steps",
                  "local: GEOPOS spends the sorted set work of EXEC",
                  "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget"]
@@ -5936,6 +5937,28 @@ def stages_geo_limits(prog):
             check("local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
                   worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 64 and all(len(x) == 524289 for x in r[:3])
                   and all(isinstance(e, Error) and "GEOSEARCH" in e for e in r[3:]), "worst %.3f s, %r" % (worst, repr(r)[-80:]))
+            # A refused walk spends the whole pool, so a small command after
+            # it is refused too; a walk that spent nothing would leave the
+            # small LRANGE to run. 3 GEOSEARCH run (6291468 units of the
+            # pool), the fourth is refused, and the LRANGE of 3 elements after
+            # it is refused with the error of the elements.
+            c.call("RPUSH", "sm", "a", "b", "c")
+            x = Client(srv.port)
+            x.sock.settimeout(120)
+            x.send_raw(encode("MULTI") + encode("LRANGE", "sm", "0", "-1")
+                       + encode("GEOSEARCH", "dense", "FROMLONLAT", "2.004", "48.004", "BYRADIUS", "100", "km") * 4
+                       + encode("LRANGE", "sm", "0", "-1") + encode("EXEC"))
+            for _ in range(7):
+                x.read()
+            r = x.read()
+            x.close()
+            c.call("DEL", "sm")
+            check("local: EXEC refuses a small LRANGE after a GEOSEARCH that the pool refused",
+                  isinstance(r, list) and len(r) == 6 and r[0] == ["a", "b", "c"]
+                  and all(len(e) == 524289 for e in r[1:4])
+                  and isinstance(r[4], Error) and "GEOSEARCH" in r[4]
+                  and isinstance(r[5], Error) and "elements" in r[5],
+                  repr(r)[-120:])
             c.call("ZREM", "dense", "extra")
             # The element budget: 8 LRANGE of 1048576 fill it, and a GEOSEARCH
             # after them is refused.

@@ -319,7 +319,8 @@
   "old": "                execWork = 0;\n                return GEO_EXEC_TOO_MANY;",
   "new": "                return GEO_EXEC_TOO_MANY;",
   "cases": [
-   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused"
+   "local: G3 EXEC of GEOSEARCH stalls PING at most 1 s, and the searches over the limit are refused",
+   "local: EXEC refuses a small LRANGE after a GEOSEARCH that the pool refused"
   ]
  },
  {
