@@ -749,6 +749,19 @@ def stages_maxclients(prog):
         srv.stop()
     aof_exits(prog, ["--maxclients", "0"], "local: --maxclients 0 is refused at start")
     aof_exits(prog, ["--maxclients", "many"], "local: --maxclients with no integer is refused at start")
+    aof_exits(prog, ["--maxclients", "4294967296"],
+              "local: --maxclients above 4294967295 is refused at start")
+    srv = Server(prog, ["--maxclients", "4294967295"])
+    try:
+        got = None
+        if srv.up:
+            c = srv.client()
+            got = c.call("CONFIG", "GET", "maxclients")
+            c.close()
+        check("local: --maxclients 4294967295 starts and CONFIG GET returns it",
+              got == ["maxclients", "4294967295"], "up=%s got=%r" % (srv.up, got))
+    finally:
+        srv.stop()
 
 
 def stages_fairness(prog):

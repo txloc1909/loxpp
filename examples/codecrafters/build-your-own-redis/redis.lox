@@ -7561,8 +7561,9 @@ fun main() {
     }
     PUBSUB_SOFT_SECONDS = pubSoft;
     var maxClients = parseInteger(flagValue("--maxclients", str(CONFIG_MAXCLIENTS)));
-    if (maxClients == nil or maxClients < 1) {
-        print "redis.lox: --maxclients needs a positive integer";
+    // Redis takes 1 to UINT_MAX.
+    if (maxClients == nil or maxClients < 1 or maxClients > 4294967295) {
+        print "redis.lox: --maxclients needs an integer from 1 to 4294967295";
         exit(64);
     }
     CONFIG_MAXCLIENTS = maxClients;

@@ -298,5 +298,29 @@
   "cases": [
    "local: --maxclients with no integer is refused at start"
   ]
+ },
+ {
+  "name": "maxclients upper bound removed",
+  "old": " or maxClients > 4294967295",
+  "new": "",
+  "cases": [
+   "local: --maxclients above 4294967295 is refused at start"
+  ]
+ },
+ {
+  "name": "maxclients upper bound one too high",
+  "old": "maxClients > 4294967295",
+  "new": "maxClients > 4294967296",
+  "cases": [
+   "local: --maxclients above 4294967295 is refused at start"
+  ]
+ },
+ {
+  "name": "maxclients upper bound one too low",
+  "old": "maxClients > 4294967295",
+  "new": "maxClients > 4294967294",
+  "cases": [
+   "local: --maxclients 4294967295 starts and CONFIG GET returns it"
+  ]
  }
 ]
