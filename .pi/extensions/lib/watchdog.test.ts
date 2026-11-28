@@ -736,7 +736,7 @@ processTest("a ps that is slow to start still gives the parent's start time", as
   });
 });
 
-processTest("a ps that gives no answer names the read that gave it", async (_left, _startLeft) => {
+processTest("a ps that gives no answer names the read that gave it", async () => {
   await withTempDir(async (dir) => {
     // A `ps` that is not installed, or one that a policy stops, answers
     // nothing. Each read the test makes must then say which one it was: the
