@@ -391,6 +391,34 @@ TEST(SizeClassHeap, AFreedLargeBlockGoesBackInSlices) {
     EXPECT_EQ(store.footprintBytes(), base);
 }
 
+// A program that maps a larger block in each round and drops the one of the
+// round before. A heap that gives back less than it maps lets the queue hold
+// the sum of the dropped blocks, and the peak follows that sum, not the live
+// heap (#1297).
+TEST(SizeClassHeap, DroppedBlocksOfGrowingSizeDoNotPileUpInTheQueue) {
+    MemoryManager mm;
+    SizeClassHeap& store = mm.store();
+    std::size_t base = store.footprintBytes();
+    void* buffer = nullptr;
+    std::size_t size = 0;
+    std::size_t largestLive = 0;
+    std::size_t peak = 0;
+    for (std::size_t round = 1; round <= 60; ++round) {
+        std::size_t next = round * (std::size_t{3} << 20);
+        void* bigger = mm.rawAlloc(next);
+        largestLive = std::max(largestLive, size + next);
+        peak = std::max(peak, store.footprintBytes() - base);
+        if (buffer != nullptr) {
+            mm.rawFree(buffer, size);
+        }
+        buffer = bigger;
+        size = next;
+    }
+    mm.rawFree(buffer, size);
+    EXPECT_LE(static_cast<double>(peak),
+              2.5 * static_cast<double>(largestLive));
+}
+
 TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
     MemoryManager mm;
     SizeClassHeap& store = mm.store();

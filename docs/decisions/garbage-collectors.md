@@ -710,6 +710,53 @@ Known gaps, and where they are filed:
 - The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
   them (#1294, #1295, #1296).
 
+### The release work of one step (#1297)
+
+Open. `SizeClassHeap::releaseBytes` loops `releaseStep` until it has given
+back the size of the new block. One allocation of N bytes makes about
+N / 1 MiB `munmap` calls in one operation (a test with a 256 MiB block in the
+queue and a new 96 MiB block: 97 calls and 96 MiB). Each call is bound, the
+sum is not.
+
+An attempt to bound the sum failed on goal 3. The attempt gave back at most
+4 MiB for each operation, and then also paid the bytes of the queue over a
+limit at a map. The probe is a string that grows by 1 MiB for each round, so
+each round maps a larger block and drops the one before (60 rounds, the
+largest live heap is about 120 MiB). Maximum resident size, 3 runs, native
+VM:
+
+| Rule | `incremental` | `stw` |
+|---|---|---|
+| main (a map gives back N bytes) | 445 MiB | 186 MiB |
+| 4 MiB for each operation, no other rule | 1627 MiB | 1600 MiB |
+| and the queue at most the largest large bytes ever in use | 1627 MiB | 498 MiB |
+| and the queue at most the large bytes in use after the map | 1445 MiB | 437 MiB |
+
+A string that doubles to 128 MiB and is dropped, 10 times (largest live heap
+192 MiB): 397 MiB on main, 648 to 654 MiB with each rule above (`stw`: 391
+against 632 to 651). The 120-round probe was killed by the OOM killer with
+the first rule.
+
+The two goals conflict for this path. Goal 3 needs the queue to fall as fast
+as the heap maps (main gives back N for a map of N), so the work of a map
+follows N. A fixed limit on that work, or a limit that is a multiple of the
+live bytes, lets the footprint follow the sum of the dropped blocks, or it
+leaves a peak above main by 2.7 times or more. The case that a limit would
+keep (a 256 MiB block dropped and then a 96 MiB map) is the case where the
+queue is 2.7 times the live bytes, and goal 3 does not allow that. I found no
+rule that is a function of the sizes in the heap and meets both. So the cap is not
+applied, and the source is as on main.
+
+What stays: the test `DroppedBlocksOfGrowingSizeDoNotPileUpInTheQueue`
+(a map of a larger block in each round, peak at most 2.5 times the largest
+live heap). It passes on main and it fails for the first rule in the table (a peak
+of 6.0 GB against 0.9 GB). It passes for the other two rules, so it is not
+enough alone: the Lox probe above shows their cost. A later change of the
+release work must keep both. A way to meet both goals needs
+the release to run apart from the map (for example `munmap` on another
+thread, or a release that the collector paces over the time that the program
+needs to fill the new block). That is a new design, not a fix of this issue.
+
 ### The limit of the start pause (#1302)
 
 The start pause reads the roots of the program in one step. Its size is the
@@ -808,7 +855,7 @@ close, and the issues answer "is it done".
 | #1294 | The `std` containers that objects own are not timed. | Section 14, allocator stalls. |
 | #1295 | The gray stack of `stw` is one array. | Section 14, allocator stalls. |
 | #1296 | The `std` containers of `MemoryManager` are not timed. | Section 14, allocator stalls. |
-| #1297 | The large-block release work of one step is not bounded as a sum. | Sections 4.2 and 6.1, item 5. |
+| #1297 | The large-block release work of one step is not bounded as a sum. A cap fails goal 3 (PR #1373). | Section 14, "The release work of one step". |
 | #1299 | The finish pause, the start pause and `markForeign` follow the foreign set and the handle list. | Section 14, known gaps. |
 | #1300 | The `exit` cycle is one step of the whole heap. | Section 14, known gaps. |
 | #1301 | Function, Closure, Enum, DeferredCall and Bound objects are not cut into parts. | Section 14, known gaps. |
