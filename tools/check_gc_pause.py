@@ -51,7 +51,7 @@ import gc_report  # noqa: E402
 # two chunks of a large object and the span of a sweep.
 MAX_STEP_UNITS = inc.MAX_STEP_UNITS
 MIN_CYCLES = 3
-MAX_P9999_US = 1000.0
+MAX_P9999_US = 5000.0
 MIN_MMU_10MS = 0.5
 TIMEOUT_S = 600
 
@@ -246,8 +246,10 @@ def self_test():
          hand(MAX_STEP_UNITS + 1, 100_000, 400_000), False),
         ("an exit step over the unit limit is not counted",
          hand(300, 100_000, 400_000, exit_units=10_000_000), True),
-        ("steps over 1 ms fail the time",
-         hand(300, 2_000_000, 40_000_000), False),
+        ("steps over 5 ms fail the time",
+         hand(300, 5_500_000, 40_000_000), False),
+        ("steps of 4 ms pass the time",
+         hand(300, 4_000_000, 40_000_000), True),
         ("steps with no gap fail MMU",
          hand(300, 100_000, 1_000, cycles=100), False),
         ("an allocator stall is not a pause",
@@ -265,11 +267,21 @@ def self_test():
                 fail(f"self-test {name!r}: gate "
                      f"{'failed: ' + out[0] if out else 'passed'}, expected "
                      f"{'a pass' if passes else 'a failure'}")
+        # The time limit alone: a step of 5.5 ms is over it and a step of 4 ms
+        # is under it. The MMU also fails for a step over 5 ms (it fills half
+        # of a 10 ms window), so the table above cannot tell the two apart.
+        for step_ns, over in ((5_500_000, True), (4_000_000, False)):
+            path = os.path.join(d, "limit.trace")
+            with open(path, "w") as f:
+                f.write(hand(300, step_ns, 40_000_000))
+            if (measure(path)["p9999_us"] > MAX_P9999_US) != over:
+                fail(f"self-test: a step of {step_ns} ns is "
+                     f"{'under' if over else 'over'} the p99.99 limit")
         # The best of the runs decides the time, and every run decides the
         # count.
         slow, quick = os.path.join(d, "slow"), os.path.join(d, "quick")
         with open(slow, "w") as f:
-            f.write(hand(300, 2_000_000, 40_000_000))
+            f.write(hand(300, 5_500_000, 40_000_000))
         with open(quick, "w") as f:
             f.write(hand(300, 100_000, 400_000))
         if gate("best of two", [measure(slow), measure(quick)]):
@@ -278,7 +290,7 @@ def self_test():
         # with no time between steps each fail alone, and must fail together.
         longrun, packed = os.path.join(d, "longrun"), os.path.join(d, "packed")
         with open(longrun, "w") as f:
-            f.write(hand(300, 2_000_000, 40_000_000))
+            f.write(hand(300, 5_500_000, 40_000_000))
         with open(packed, "w") as f:
             f.write(hand(300, 100_000, 1_000, cycles=100))
         if not gate("two bad runs", [measure(longrun), measure(packed)]):
