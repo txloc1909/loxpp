@@ -30,7 +30,9 @@ Four parts:
      the live heap (the live heap is the largest bytes_after of a stw
      collection of the same program). A worker that holds 400000 Strings of
      another worker must keep the start and finish pauses short and every
-     step within the unit limit. A program with 100000 tasks in task.receive
+     step within the unit limit. A program that drops the last count of a dead
+     heap must keep every step within the unit limit and short in time: the
+     dead heap is destroyed in parts, not inside a step (#1352). A program with 100000 tasks in task.receive
      must show a start step of one to 1.5 units for each task (the stated
      limit of the start pause); LOXPP_CHECK_UNITS_PER_TASK is for the test of
      this check only.
@@ -437,6 +439,63 @@ def check_many_tasks(binary, work):
     print(f"ok   many_tasks.lox: start step {units} units, {us:.0f} us")
 
 
+# The last count of a dead heap is dropped in a sweep step, and the dead heap
+# must not be destroyed inside that step (issue #1352). The probe holds a dead
+# heap of about 600000 objects. A step that destroys it takes about 8 ms, and
+# the step count still reads 2, so only the time shows it. Run on b2cadf2d: the
+# largest step of the main heap is 8.2 to 8.7 ms.
+MAX_DEAD_HEAP_STEP_US = 1000.0
+DEAD_HEAP_ATTEMPTS = 3
+
+
+def check_dead_heap(binary, work):
+    prog = os.path.join(PROBES, "latency", "dead_heap.lox")
+    ref = run(binary, prog, {"LOXPP_GC": "stw"}, work)
+    if ref.returncode != 0 or not ref.stdout.strip():
+        fail(f"dead_heap.lox with stw: exit {ref.returncode}, "
+             f"stdout {ref.stdout!r}, stderr {ref.stderr[:200]!r}")
+    worst = None
+    for attempt in range(DEAD_HEAP_ATTEMPTS):
+        trace = os.path.join(work, f"dead_heap.{attempt}.trace")
+        r = run(binary, prog, {"LOXPP_GC": "incremental",
+                               "LOXPP_GC_TRACE": trace}, work)
+        if r.returncode != 0 or r.stdout != ref.stdout:
+            fail(f"dead_heap.lox: exit {r.returncode}, stdout "
+                 f"{r.stdout[:200]!r} (reference {ref.stdout[:200]!r}), "
+                 f"stderr {r.stderr[:200]!r}")
+        if not os.path.exists(trace + ".w1"):
+            fail("dead_heap.lox: the worker wrote no trace")
+        # The probe has a dead heap only when the worker ran its exit
+        # collection.
+        if not any(c["cause"] == "exit"
+                   for c in trace_fields(trace + ".w1", "cycle")):
+            fail("dead_heap.lox: the worker ran no exit collection")
+        cycles = [c for c in trace_fields(trace, "cycle")
+                  if c["cause"] != "exit"]
+        if len(cycles) < 2:
+            fail(f"dead_heap.lox: {len(cycles)} cycles, at least 2 needed")
+        steps = [(int(line["cycle"]), line["kind"],
+                  (int(line["t1"]) - int(line["t0"])) / 1000.0,
+                  int(line["units"])) for line in trace_fields(trace, "step")]
+        # The cycle of cause exit is the last one, and it is not a pause of
+        # the program.
+        last = max(s[0] for s in steps)
+        steps = [s for s in steps if s[0] != last]
+        over = [s for s in steps if s[3] > MAX_STEP_UNITS]
+        if over:
+            fail(f"dead_heap.lox: a {over[0][1]} step of {over[0][3]} units, "
+                 f"over {MAX_STEP_UNITS}")
+        pause = max(s[2] for s in steps)
+        worst = pause if worst is None else min(worst, pause)
+        if pause <= MAX_DEAD_HEAP_STEP_US:
+            print(f"ok   dead_heap.lox: largest step {pause:.0f} us, "
+                  f"{len(cycles)} cycles")
+            return
+    fail(f"dead_heap.lox: a step of {worst:.0f} us in {DEAD_HEAP_ATTEMPTS} "
+         f"runs, at most {MAX_DEAD_HEAP_STEP_US:.0f} us needed: the last "
+         "count of a dead heap destroyed it inside a step")
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -453,6 +512,7 @@ def main():
         check_idle_latency(binary, work)
         check_peak(binary, work)
         check_foreign_set(binary, work)
+        check_dead_heap(binary, work)
         check_many_tasks(binary, work)
     print("OK")
 

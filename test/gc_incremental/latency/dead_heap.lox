@@ -1,0 +1,28 @@
+// A worker builds a large Tree, sends it to the main task, and ends. Its heap
+// stays as a dead heap, and only the Tree that the main worker holds keeps it
+// alive. The main worker drops the Tree and the handle, then churns: the
+// sweep of its collector drops the last count of the dead heap. That must not
+// destroy the whole dead heap inside one step (issue #1352): the step count
+// and the step time stay bounded, and the heap is destroyed in parts.
+enum Tree { Leaf(v) Node(l, r) }
+
+fun make(main) {
+    var t = Tree.Leaf("x");
+    var i = 0;
+    while (i < 200000) { t = Tree.Node(t, Tree.Leaf("v" + str(i))); i = i + 1; }
+    task.send(main, t);
+    // The worker returns here. Its heap retires, and the held Tree keeps it.
+}
+
+var w = task.spawn_worker(make, task.self());
+var big = task.receive();
+// Let the worker end, so that its heap is a dead heap here.
+sleep(0.5);
+print "received";
+big = nil;
+w = nil;
+// Churn: the collector of the main heap marks neither the Tree nor the
+// handle, so its sweep drops the last count of the dead heap.
+var i = 0;
+while (i < 300000) { var t = Tree.Leaf("g" + str(i)); i = i + 1; }
+print "done";

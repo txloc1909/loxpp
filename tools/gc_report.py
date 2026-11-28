@@ -59,7 +59,8 @@ The last gc record of a heap whose worker ended normally has cause=exit:
 the collection that worker ran as it ended, with the held messages as its
 only roots. Its objs_after and bytes_after are what the heap keeps as a dead
 heap while another worker holds those messages; its end record follows when
-the last of them is dropped.
+the last of them is dropped and the heap is destroyed in parts (see
+MemoryManager::reapPendingPart).
 
 Each worker writes its own file: the main worker writes the path in
 LOXPP_GC_TRACE, and worker N (N >= 1, in the order of task.spawn_worker
