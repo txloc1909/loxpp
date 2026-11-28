@@ -108,6 +108,12 @@ class SizeClassHeap {
     void forEachObject(Fn&& fn);
     // Destroys every committed object.
     void destroyAllObjects();
+    // Destroys at most `budget` committed objects of the object spans at and
+    // after `cursor`, and moves `cursor` to the last span that still has one,
+    // or to nullptr when no object is left. A cursor of nullptr starts at the
+    // first span. Object spans are never unlinked, so a cursor stays valid
+    // until the last object is gone. Returns the number that it destroyed.
+    std::size_t destroyObjectsStep(Span*& cursor, std::size_t budget);
 
     // --- Buffers (VmAllocator memory) ------------------------------------
 

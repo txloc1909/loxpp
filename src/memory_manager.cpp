@@ -56,7 +56,7 @@ MemoryManager::~MemoryManager() {
     m_foreign.forEach([&foreign](Obj* obj) { foreign.push_back(obj); });
     m_foreign.clear();
     for (Obj* obj : foreign) {
-        heapOf(obj)->releaseHold(obj);
+        releaseCount(obj);
     }
     std::vector<Envelope> rest;
     {
@@ -68,6 +68,10 @@ MemoryManager::~MemoryManager() {
             releaseValue(env.msg);
         }
     }
+    // The counts that this destructor dropped can be the last ones of other
+    // dead heaps. The thread of this heap ends, so it destroys them now: no
+    // other thread may touch them.
+    drainPendingDeadHeaps();
     // The collector closes the trace file.
     m_store.setStallTrace(nullptr, 0);
     m_stw = nullptr;
@@ -80,6 +84,7 @@ void* MemoryManager::rawAlloc(std::size_t bytes) {
     bytesAllocated += bytes;
     if (shouldPoll()) {
         m_collector->poll();
+        reapPendingPart();
     }
     return m_store.allocBuffer(bytes);
 }
@@ -220,24 +225,18 @@ void MemoryManager::hold(const Obj* obj) {
     ++m_heldTotal;
 }
 
-void MemoryManager::releaseHold(const Obj* obj) {
-    bool freeNow = false;
-    {
-        std::lock_guard<std::mutex> lock(m_holdMutex);
-        auto it = m_holders.find(obj);
-        if (it == m_holders.end()) {
-            std::fprintf(stderr, "BUG: a release of an object with no hold.\n");
-            std::abort();
-        }
-        if (--it->second == 0) {
-            m_holders.erase(it);
-        }
-        --m_heldTotal;
-        freeNow = !m_ownerAlive && m_heldTotal == 0;
+bool MemoryManager::releaseHold(const Obj* obj) {
+    std::lock_guard<std::mutex> lock(m_holdMutex);
+    auto it = m_holders.find(obj);
+    if (it == m_holders.end()) {
+        std::fprintf(stderr, "BUG: a release of an object with no hold.\n");
+        std::abort();
     }
-    if (freeNow) {
-        delete this;
+    if (--it->second == 0) {
+        m_holders.erase(it);
     }
+    --m_heldTotal;
+    return !m_ownerAlive && m_heldTotal == 0;
 }
 
 std::uint32_t MemoryManager::holderCount(const Obj* obj) {
@@ -255,8 +254,14 @@ void MemoryManager::holdValue(const Value& v) {
 
 void MemoryManager::releaseValue(const Value& v) {
     if (isObj(v) && as<Obj*>(v)->heapId != 0) {
-        Obj* obj = as<Obj*>(v);
-        heapOf(obj)->releaseHold(obj);
+        releaseCount(as<Obj*>(v));
+    }
+}
+
+void MemoryManager::releaseCount(Obj* obj) {
+    MemoryManager* owner = heapOf(obj);
+    if (owner->releaseHold(obj)) {
+        m_destroying.push_back(owner);
     }
 }
 
@@ -285,28 +290,30 @@ void MemoryManager::endForeignRelease() { m_foreign.endScan(); }
 bool MemoryManager::foreignReleasing() const { return m_foreign.scanning(); }
 
 std::size_t MemoryManager::releaseForeignStep(std::size_t maxEntries,
-                                              bool dropStrings) {
-    return m_foreign.scanStep(maxEntries, [this, dropStrings](Obj* obj) {
-        // Before the release: the owner can free a String as soon as its
-        // count drops, and the table must not hold it by then.
-        if (dropStrings && obj->type == ObjType::STRING) {
-            m_strings.del(static_cast<ObjString*>(obj));
-        }
-        heapOf(obj)->releaseHold(obj);
-    });
+                                              bool dropStrings,
+                                              MemoryManager* reaper) {
+    return m_foreign.scanStep(
+        maxEntries, [this, dropStrings, reaper](Obj* obj) {
+            // Before the release: the owner can free a String as soon as its
+            // count drops, and the table must not hold it by then.
+            if (dropStrings && obj->type == ObjType::STRING) {
+                m_strings.del(static_cast<ObjString*>(obj));
+            }
+            reaper->releaseCount(obj);
+        });
 }
 
 void MemoryManager::releaseUnreachedForeign(bool dropStrings) {
     beginForeignRelease();
     while (foreignReleasing()) {
-        releaseForeignStep(std::numeric_limits<std::size_t>::max(),
-                           dropStrings);
+        releaseForeignStep(std::numeric_limits<std::size_t>::max(), dropStrings,
+                           this);
     }
 }
 
 void MemoryManager::adoptForeign(Obj* obj) {
     if (!m_foreign.touch(obj)) {
-        heapOf(obj)->releaseHold(obj);
+        releaseCount(obj);
     }
 }
 
@@ -316,7 +323,7 @@ Value MemoryManager::receiveMessage(Value msg) {
     }
     Obj* obj = as<Obj*>(msg);
     if (obj->heapId == m_heapId) {
-        releaseHold(obj);
+        releaseCount(obj);
         return msg;
     }
     if (obj->type == ObjType::STRING) {
@@ -330,7 +337,7 @@ Value MemoryManager::receiveMessage(Value msg) {
         }
         if (found != nullptr) {
             noteInternHit(found);
-            heapOf(str)->releaseHold(str);
+            releaseCount(str);
             return Value{static_cast<Obj*>(found)};
         }
         adoptForeign(str);
@@ -367,6 +374,9 @@ void MemoryManager::retire() {
 }
 
 void MemoryManager::dropOwner() {
+    // The thread of this heap ends, so the dead heaps that it took are
+    // destroyed now: no other thread may touch them.
+    drainPendingDeadHeaps();
     bool freeNow = false;
     {
         std::lock_guard<std::mutex> lock(m_holdMutex);
@@ -376,4 +386,84 @@ void MemoryManager::dropOwner() {
     if (freeNow) {
         delete this;
     }
+}
+
+std::size_t MemoryManager::reapPendingPart() {
+    if (m_destroyingNow == nullptr) {
+        if (m_destroying.empty()) {
+            return 0;
+        }
+        m_destroyingNow = m_destroying.back();
+        m_destroying.pop_back();
+    }
+    bool finished = false;
+    // A part with no units would never finish, so the smallest part is one
+    // unit.
+    const std::size_t units = m_destroyUnits != 0 ? m_destroyUnits : 1;
+    const std::size_t done =
+        m_destroyingNow->destroyStep(*this, units, finished);
+    if (finished) {
+        MemoryManager* heap = m_destroyingNow;
+        m_destroyingNow = nullptr;
+        delete heap;
+    }
+    return done;
+}
+
+void MemoryManager::reapPendingIdle() {
+    const std::uint64_t end = gcMonotonicNs() + kDestroyIdleNs;
+    while (pendingDeadHeaps() != 0 && gcMonotonicNs() < end) {
+        reapPendingPart();
+    }
+}
+
+void MemoryManager::drainPendingDeadHeaps() {
+    while (m_destroyingNow != nullptr || !m_destroying.empty()) {
+        reapPendingPart();
+    }
+}
+
+std::size_t MemoryManager::destroyStep(MemoryManager& reaper, std::size_t units,
+                                       bool& finished) {
+    finished = false;
+    std::size_t done = 0;
+    if (m_destroyStage == 0) {
+        done = m_store.destroyObjectsStep(m_destroySpan, units);
+        if (m_destroySpan != nullptr) {
+            return done;
+        }
+        m_destroyStage = 1;
+    }
+    if (m_destroyStage == 1) {
+        if (!m_destroyForeignStarted) {
+            // Every entry is unmarked now, so the scan drops each one. A
+            // mark of the last cycle may have touched it.
+            m_foreign.beginCycle();
+            beginForeignRelease();
+            m_destroyForeignStarted = true;
+        }
+        while (foreignReleasing() && done < units) {
+            done += releaseForeignStep(units - done, false, &reaper);
+        }
+        if (foreignReleasing()) {
+            return done;
+        }
+        m_destroyStage = 2;
+    }
+    if (!m_destroyInboxTaken) {
+        std::lock_guard<std::mutex> lock(m_inbox.mutex);
+        m_destroyEnvelopes.swap(m_inbox.queue);
+        m_inbox.nonEmpty.store(false);
+        m_destroyInboxTaken = true;
+    }
+    while (!m_destroyEnvelopes.empty() && done < units) {
+        Envelope env = m_destroyEnvelopes.back();
+        m_destroyEnvelopes.pop_back();
+        ++done;
+        if (isObj(env.msg) && as<Obj*>(env.msg)->heapId != m_heapId) {
+            reaper.releaseValue(env.msg);
+        }
+    }
+    finished = m_destroyEnvelopes.empty();
+    return done;
 }

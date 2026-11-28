@@ -407,6 +407,51 @@ void SizeClassHeap::destroyAllObjects() {
     }
 }
 
+std::size_t SizeClassHeap::destroyObjectsStep(Span*& cursor,
+                                              std::size_t budget) {
+    if (budget == 0) {
+        return 0;
+    }
+    std::size_t done = 0;
+    Span* s = cursor != nullptr ? cursor : m_objectSpans;
+    while (s != nullptr) {
+        if (s->kind != static_cast<std::uint8_t>(Kind::Object)) {
+            s = s->objectNext;
+            continue;
+        }
+        bool spent = false;
+        for (std::uint32_t w = 0; w < s->bitmapWords; ++w) {
+            std::uint64_t bits = s->allocs()[w];
+            while (bits != 0) {
+                if (done == budget) {
+                    spent = true;
+                    break;
+                }
+                std::uint32_t i =
+                    w * 64 + static_cast<std::uint32_t>(__builtin_ctzll(bits));
+                bits &= bits - 1;
+                Obj* obj = reinterpret_cast<Obj*>(s->slot(i));
+                obj->~Obj();
+                s->allocs()[w] &= ~(std::uint64_t{1} << (i & 63));
+                --m_objects;
+                freeSlot(s, obj);
+                ++done;
+            }
+            if (spent) {
+                break;
+            }
+            s->marks()[w] = 0;
+        }
+        if (spent) {
+            break;
+        }
+        releaseIfEmpty(s);
+        s = s->objectNext;
+    }
+    cursor = s;
+    return done;
+}
+
 void* SizeClassHeap::allocBuffer(std::size_t bytes) {
     if (bytes <= kMaxSmall) [[likely]] {
         std::size_t cls = smallClass(bytes);

@@ -469,7 +469,7 @@ std::size_t IncrementalCollector::runReleaseStages(std::size_t units,
             return done;
         }
         done += m_heap.releaseForeignStep(std::min(units - done, kChunkUnits),
-                                          true);
+                                          true, &m_heap);
         if (deadlineNs != 0 && gcMonotonicNs() >= deadlineNs) {
             return done;
         }

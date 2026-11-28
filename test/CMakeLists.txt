@@ -110,6 +110,8 @@ loxpp_add_test(test_table_gc        test_table.cpp           CORE loxpp_test_cor
 loxpp_add_test(test_allocator       test_allocator.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector       test_collector.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_collector_gc    test_collector.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_dead_heap       test_dead_heap.cpp       CORE loxpp_test_core)
+loxpp_add_test(test_dead_heap_gc    test_dead_heap.cpp       CORE loxpp_test_core)
 loxpp_add_test(test_incremental_collector test_incremental_collector.cpp CORE loxpp_test_core)
 loxpp_add_test(test_foreign_set     test_foreign_set.cpp     CORE loxpp_test_core)
 loxpp_add_test(test_barrier        test_barrier.cpp         CORE loxpp_test_core)
@@ -643,6 +645,7 @@ set(LOXPP_GC_STRESS_TARGETS
     test_map_gc test_enum_gc test_class_pattern_gc test_or_pattern_gc
     test_list_pattern_gc test_at_binding_gc test_handler_stack_leak_gc
     test_table_gc test_allocator_gc test_size_class_heap_gc test_collector_gc test_barrier_gc test_net_process_gc test_coroutine_gc
+    test_dead_heap_gc
     test_task_gc test_task_wait_gc test_socket_wait_gc test_connect_wait_gc
     test_worker_gc
     test_repl_gc)
@@ -654,6 +657,7 @@ set(LOXPP_GC_STRESS_TARGETS
 set(LOXPP_GTEST_TARGETS
     test_scanner test_parser_vm test_parser_bytecode test_table test_table_gc
     test_allocator test_allocator_gc test_size_class_heap test_size_class_heap_gc test_collector test_collector_gc
+    test_dead_heap test_dead_heap_gc
     test_incremental_collector test_foreign_set
     test_barrier test_barrier_gc test_value
     test_local_variables test_control_flow test_vm_runtime test_print_nul test_file_nul
