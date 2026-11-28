@@ -342,6 +342,14 @@
   ]
  },
  {
+  "name": "maxclients refusal write has no try/catch",
+  "old": "        try {\n            sock.write(\"-ERR max number of clients reached\\r\\n\");\n        } catch (ignored) {\n        }\n        sock.close();\n",
+  "new": "        sock.write(\"-ERR max number of clients reached\\r\\n\");\n        sock.close();\n",
+  "cases": [
+   "local: maxclients RST: a client that comes after 50 reset clients gets the error in 0.5 s"
+  ]
+ },
+ {
   "name": "maxclients replica link is not counted",
   "old": "        conn.isReplica = true;\n        replicas.append(conn);\n",
   "new": "        conn.isReplica = true;\n        connectedClients = connectedClients - 1;\n        replicas.append(conn);\n",

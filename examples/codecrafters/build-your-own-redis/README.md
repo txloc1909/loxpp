@@ -80,7 +80,8 @@ together are not served above the limit. This is the check of
 `acceptCommonHandler` in Redis. The suite (group `maxclients`) runs a limit
 of 3 or 5 and reads the default 10000 from `CONFIG GET`; it does not open
 10000 sockets. It probes a burst of 30 connections at a limit of 3, 20
-refused clients that never read, and a replica at a limit of 2.
+refused clients that never read, 50 refused clients that reset the connection
+at once (at a limit of 1), and a replica at a limit of 2.
 
 Differences from Redis:
 
