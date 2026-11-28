@@ -67,8 +67,8 @@ clients for most of a second does not meet that goal.
      10 ms window, the program runs for at least 5 ms.
    - **Not yet counted:** the release calls that the allocation path makes
      (`releaseBytes`, #1297) are not collector steps. The gate does not
-     count them. The budget of 64 MiB bounds each call (section 4.2), and
-     the longest call can still be near the 5 ms limit (#1382).
+     count them. The budget of 32 MiB bounds each call (section 4.2). The
+     longest call is about 2.5 ms, which is half the limit (#1382).
    - **Not part of this goal:** the time that the C allocator (`malloc` and
      `free`) spends inside one call. The gates report it on its own, as the
      allocator stall, and phase 8 limits it (section 13, item 4).
@@ -82,10 +82,11 @@ clients for most of a second does not meet that goal.
    - with the current collector, the new barrier code costs at most **2%**;
    - the peak heap is at most **2.5×** the live heap (now it is about 2×).
      This limit is **not met** for a long-running program that drops large
-     blocks faster than the release budget of 64 MiB (section 4.2). The
-     queue then grows. On `vary.lox` (120 rounds, one run), the peak RSS was
-     2033 MiB with the budget and 944 MiB with no cap. The owner accepted
-     this on 2026-11-28 (option 1 of #1297). #1383 tracks a background
+     blocks faster than the release budget of 32 MiB (section 4.2). The
+     queue then grows. On `vary.lox` (120 rounds, one run each), the peak RSS
+     was 4049 MiB with the 32 MiB budget (2033 MiB with 64 MiB) and 944 MiB
+     with no cap. The owner accepted this on 2026-11-28 (option 1 of #1297,
+     budget of 32 MiB). #1383 tracks a background
      release as the candidate fix.
 4. **No change to the language.** The spec makes the timing of garbage
    collection implementation-defined (`spec/README.md`, "Conformance",
@@ -158,19 +159,36 @@ freed slot joins a chain that goes through the slots, and an allocation
 takes the first slot of the chain.
 
 The same rule holds for the release of large blocks (#1297). One call of
-`releaseBytes` gives back at most `kReleaseBudget` bytes, 64 MiB. The
+`releaseBytes` gives back at most `kReleaseBudget` bytes, 32 MiB. The
 allocation of a new large block calls it, so the work of one allocation does
-not follow the block size. The rest of the queue stays queued. The next
-allocations, frees and sweep steps give it back, one budget at a time. The
-owner chose this limit on 2026-11-28 (option 1 of #1297). Measured on a
-host under load (load average about 10), longest release call, 3 runs of
-`vary60.lox`: 6.7, 9.4 and 11.4 ms; of `double.lox`: 4.7 to 11.8 ms;
-`repeat96.lox`: 0.3 to 0.6 ms. The earlier runs on a quiet host gave 2.4 to
-4.0 ms, 3.1 to 5.0 ms and 0.27 to 0.38 ms. Uncapped, the longest call was
-8.1 ms (`vary.lox`) and 8.7 ms (`double.lox`) on the quiet host. The
-`benchmarks/` suite, default collector against `LOXPP_GC=stw`, 3 runs, load
-average 6 to 7: geometric mean ratio 1.002, 0.961 and 0.975 (goal 3: at most
-1.10).
+not follow the block size. The rest stays in the queue. A free or a sweep
+step gives back one slice of 1 MiB. Only an allocation that maps new memory
+gives back a budget. The owner chose option 1 of #1297 on 2026-11-28 and then
+the budget of 32 MiB.
+
+The time of a release call is about 75 us for each MiB of budget. The
+reviewer measured the longest call of `double.lox` at load 4 to 6: 1.2 ms at
+16 MiB, 2.5 to 2.7 ms at 32 MiB, 3.2 to 5.1 ms at 64 MiB (2 of 15 runs above
+5 ms), 7.5 ms uncapped. This is why the budget is 32 MiB: the margin to the
+5 ms limit of goal 1 is about 2x. Measured at 32 MiB, 3 runs of `double.lox`
+at load 5.6 to 5.8: 2.1, 2.2 and 3.2 ms. Other probes at 32 MiB, one run, load
+about 6: `vary60.lox` 2.5 ms, `vary.lox` 2.6 ms. Earlier runs at 64 MiB at
+load 3 to 5: 2.4 to 4.0 ms (`vary60.lox`), 3.1 to 5.0 ms (`double.lox`), 0.27
+to 0.38 ms (`repeat96.lox`). Uncapped, at load 3 to 5: 8.1 ms (`vary.lox`),
+8.7 ms (`double.lox`). The gate does not count these calls (#1382).
+
+The memory cost at 32 MiB. Peak RSS of `vary60.lox`: 745 MiB (the reviewer
+measured 739; main 445). Peak RSS of `double.lox`: 568 MiB (402 uncapped). Peak
+RSS of `vary.lox` (120 rounds): 4049 MiB with a 6 GB address-space limit, one
+run, where 944 MiB is the uncapped value. Under a 3.5 GB limit the run
+aborted. At 64 MiB the same program needed 2033 MiB. Goal 3 is not met for
+this shape of program (section 2).
+
+The `benchmarks/` suite, default collector against `LOXPP_GC=stw`, 3 runs at
+load 6 to 7, with the budget of 64 MiB: geometric mean ratio 1.002, 0.961 and
+0.975 (goal 3: at most 1.10). I did not run it again at 32 MiB. The change lowers
+the work of one call, and only a program that maps a block above 32 MiB
+sees it. I did not check each benchmark program for such a block.
 
 ### 4.3 The write barrier
 
@@ -404,7 +422,7 @@ must check every other place that uses the same data.
    the sweep or a step frees.
 
    The first form is limited since #1297: one `releaseBytes` call gives back
-   at most 64 MiB (section 4.2). Two gaps stay open: the gate does not count
+   at most 32 MiB (section 4.2). Two gaps stay open: the gate does not count
    these calls (#1382), and the queue grows on long runs (#1383).
 
 ## 7. How we show that it is correct
@@ -740,7 +758,7 @@ Known gaps, and where they are filed:
   and sleeps. #1303.
 - The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
   them (#1294, #1295, #1296).
-- The large-block release of one operation is limited to 64 MiB (#1297,
+- The large-block release of one operation is limited to 32 MiB (#1297,
   section 4.2). The gate does not count these calls (#1382), and memory
   grows on long runs that drop large blocks (#1383).
 
@@ -845,7 +863,7 @@ close, and the issues answer "is it done".
 | #1294 | The `std` containers that objects own are not timed. | Section 14, allocator stalls. |
 | #1295 | The gray stack of `stw` is one array. | Section 14, allocator stalls. |
 | #1296 | The `std` containers of `MemoryManager` are not timed. | Section 14, allocator stalls. |
-| #1297 | Resolved: one release call gives back at most 64 MiB (sections 4.2 and 6.1, item 5). | The row stays for the record. |
+| #1297 | Resolved: one release call gives back at most 32 MiB (sections 4.2 and 6.1, item 5). | The row stays for the record. |
 | #1382 | The goal 1 gate does not count the release calls of the allocation path. | Section 2, goal 1. |
 | #1383 | Memory grows on long runs that drop large blocks faster than the release budget. | Section 2, goal 3. |
 | #1299 | The finish pause, the start pause and `markForeign` follow the foreign set and the handle list. | Section 14, known gaps. |
