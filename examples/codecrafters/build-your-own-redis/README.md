@@ -394,9 +394,9 @@ order. In its step it takes the members and scores of those boxes, a walk
 from the first score of each box; the session keeps the members within the
 radius in steps (`writeGeoSearch`), so the command stays atomic and the
 other clients go on. It answers every command read before the end of the
-stream, also after a half-close (rule 7). The order of the reply is the order of Redis: a fuzz
-of 2400 searches and distances against redis-server 7.0 gave no
-difference. As in Redis 7.0, it reads the key first, decodes a
+stream, also after a half-close (rule 7). The order of the reply is the
+order of Redis: a fuzz of 2400 searches and distances against redis-server
+7.0 gave no difference. As in Redis 7.0, it reads the key first, decodes a
 `FROMMEMBER` member while it parses, and takes the last of an option that
 comes again. In `EXEC`, `GEOSEARCH` takes 4 units of the pool for
 each member of its boxes, so one `EXEC` walks at most 2097152 members of
