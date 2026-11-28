@@ -223,6 +223,11 @@ the limit alone gets the same error as before the pool. For example, 3
 `ZRANGE` of 524288 elements and one `GEOSEARCH` of 524288 members use the
 whole pool (6291456 and 2097152 units), and the next `GEOSEARCH`, `ZRANGE`
 or `LRANGE` is refused, where each of them is under its own limit alone.
+A `GEOSEARCH` that is refused has walked up to what is left of the pool,
+so it takes all of it: each later budgeted command of that `EXEC` is refused
+too, also a small `LRANGE`. If it took nothing, a client could queue many
+such walks, and one `EXEC` would walk more than its bound. Another kind that
+is refused takes nothing, because it is refused before it does any work.
 Redis has no such pool: this is a difference of the example (see Known
 differences from Redis). Case M1 measures such an `EXEC`, and case M2 shows
 that the sorted set, bitmap and ACL work take from the pool too.
