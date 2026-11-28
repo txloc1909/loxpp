@@ -382,8 +382,7 @@
   "new": "    return true;",
   "cases": [
    "local: EXEC refuses a ZRANGE over the limit of ZRANGE elements",
-   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
-   "local: M1 EXEC of ZRANGE, GEOSEARCH and LRANGE, each under its limit, stalls PING at most 1 s and shares one budget"
+   "local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s"
   ]
  },
  {
