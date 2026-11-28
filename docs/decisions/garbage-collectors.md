@@ -145,6 +145,13 @@ in the prototype). The sweep does not compact the list of all objects: a
 freed slot joins a chain that goes through the slots, and an allocation
 takes the first slot of the chain.
 
+The same rule holds for the work that gives memory back to the kernel. One
+operation of the heap (a large allocation, a large free, a step of the sweep)
+gives back at most `kReleaseBudget` (4 MiB, in calls of 1 MiB at most). The
+queue of freed large blocks keeps the rest. A new large block of N bytes
+gives back at most the budget, not N bytes, so its release work does not
+follow N.
+
 ### 4.3 The write barrier
 
 **Decided on 2026-11-21: snapshot at the beginning (Yuasa).** A barrier
@@ -370,7 +377,9 @@ must check every other place that uses the same data.
    report any more. The constraint: each call of the C allocator or the
    kernel on a heap path is timed, is bounded by a fixed size, and has a
    test that does not depend on time (a count, such as
-   `largestReleaseBytes()`). A call that is not covered is listed in
+   `largestReleaseBytes()`, and `largestOperationReleaseBytes()` for the sum of
+   one operation: the first limit bound each call, and the sum of an
+   allocation was not bound, #1297). A call that is not covered is listed in
    `docs/reference/gc-runtime-contract.md`, section 1, with an issue (#1294,
    #1295, #1296). N5 and N6 must check every other pass that uses the same
    data: the gray stack, the pause log, the gates, and every container that
@@ -710,6 +719,47 @@ Known gaps, and where they are filed:
 - The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
   them (#1294, #1295, #1296).
 
+### The release work of one step (#1297)
+
+Resolved. `SizeClassHeap::releaseBytes` looped `releaseStep` until it had
+given back the size of the new block, so one allocation of N bytes made
+about N / 1 MiB `munmap` calls. A test with a 256 MiB block in the queue and
+a new 96 MiB block gave back 96 MiB in 96 calls in one operation. Now an
+operation gives back at most `kReleaseBudget` (4 MiB, 4 calls) and the queue
+keeps the rest. The test `AMapOfANewLargeBlockGivesBackAtMostTheBudget`
+checks the sum with `largestOperationReleaseBytes()` and checks that the queue
+drains to the base footprint. With the cap removed, the test fails (97 calls
+and 96 MiB in one operation).
+
+The cost is the speed at which the queue falls. The old rule gave back as
+many bytes as the heap mapped, so the queue never grew when the program
+grew. Now the queue can hold more for some time, and the sweep, the frees and
+the next allocations drain it. In the test of a doubling buffer without any
+collector step (`AGrowingBufferThatIsMadeAndDroppedStaysInGoal3`), the peak
+was 2.57 times the largest live heap, over the limit of 2.5. The test now runs
+8 release steps between two allocations, as the steps of a collector do. The
+gates on real programs (`churn_peak.lox` and the large-heap programs) still
+pass.
+
+A new chunk takes a cached large block into the queue when the queue is
+empty (`releaseStep(true)`). The change does not touch this rule. A program
+that makes and drops buffers of two sizes (150 rounds of 0.7 and 1.3 million
+elements) ran in 6.5 to 7.2 s before and after with the default collector
+(3 runs each, within the noise of the host), so no cost showed. The rule stays.
+
+Measurement of the release work and of the benchmarks, on one host, pinned to
+one cpu, with the default collector and `LOXPP_GC=stw` run one after the other
+for each program, 3 runs each:
+
+| | Before | After |
+|---|---|---|
+| Largest release work of one operation, new 96 MiB block | 96 MiB (97 calls) | 4 MiB (at most 5 calls) |
+| `benchmarks/`, 18 programs, geometric mean of default / `stw` | 1.017, 1.005, 1.025 | 0.975, 1.022, 0.977 |
+| `benchmarks/gc_large_heap/`, 4 programs, geometric mean of default / `stw` | 1.218, 1.202, 1.233 | 1.197, 1.166, 1.282 |
+
+The run-to-run change of the host (0.975 to 1.025) is larger than the
+change between before and after.
+
 ### The limit of the start pause (#1302)
 
 The start pause reads the roots of the program in one step. Its size is the
@@ -808,7 +858,7 @@ close, and the issues answer "is it done".
 | #1294 | The `std` containers that objects own are not timed. | Section 14, allocator stalls. |
 | #1295 | The gray stack of `stw` is one array. | Section 14, allocator stalls. |
 | #1296 | The `std` containers of `MemoryManager` are not timed. | Section 14, allocator stalls. |
-| #1297 | The large-block release work of one step is not bounded as a sum. | Sections 4.2 and 6.1, item 5. |
+| #1297 | Resolved by PR #PRNUM. The large-block release work of one step was not bounded as a sum. | Sections 4.2 and 6.1, item 5, and section 14. |
 | #1299 | The finish pause, the start pause and `markForeign` follow the foreign set and the handle list. | Section 14, known gaps. |
 | #1300 | The `exit` cycle is one step of the whole heap. | Section 14, known gaps. |
 | #1301 | Function, Closure, Enum, DeferredCall and Bound objects are not cut into parts. | Section 14, known gaps. |
