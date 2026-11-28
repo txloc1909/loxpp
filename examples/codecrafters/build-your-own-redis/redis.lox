@@ -1873,8 +1873,10 @@ fun cmdXread(ctx, argv) {
 // reply holds the entries up to that point. firstNew is the index of the
 // first entry that this XADD or EXEC added. A reader whose ID is still above
 // the top stays where it is in the queue: the pass serves in place. It can
-// run once for each reader on each key of an EXEC, so it checks a reader
-// with no call and makes no object for a reader that waits on.
+// run once for each reader on each key of an EXEC, so a reader that waits on
+// costs one Map access and one hasField call, makes no object, and calls no
+// method of ours (a reader with a "$" on another Stream, or one that is
+// served, costs more).
 fun wakeReaders(key, stream, firstNew) {
     var queue = readers[key];
     if (queue == nil) {
