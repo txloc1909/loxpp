@@ -30,7 +30,10 @@ Four parts:
      the live heap (the live heap is the largest bytes_after of a stw
      collection of the same program). A worker that holds 400000 Strings of
      another worker must keep the start and finish pauses short and every
-     step within the unit limit.
+     step within the unit limit. A program with 100000 tasks in task.receive
+     must show a start step of one to 1.5 units for each task (the stated
+     limit of the start pause); LOXPP_CHECK_UNITS_PER_TASK is for the test of
+     this check only.
 
 Exit status: 0 pass, 1 fail, 2 usage error or a binary that cannot run.
 """
@@ -399,6 +402,41 @@ def check_foreign_set(binary, work):
          "needed: a pause follows the size of the foreign set")
 
 
+# The start pause reads each root once (decision, section 14, "The limit of
+# the start pause"). The probe has TASKS tasks in task.receive, so the start
+# step has about one unit for each of them. The count does not depend on the
+# host. The time limit is loose: it is ten times the measured 1.9 ms.
+MANY_TASKS = 100000
+MAX_UNITS_PER_TASK = float(os.environ.get("LOXPP_CHECK_UNITS_PER_TASK", "1.5"))
+MAX_START_US = 10000.0
+
+
+def check_many_tasks(binary, work):
+    prog = os.path.join(PROBES, "latency", "many_tasks.lox")
+    trace = os.path.join(work, "many_tasks.trace")
+    r = run(binary, prog, {"LOXPP_GC": "incremental",
+                           "LOXPP_GC_TRACE": trace}, work)
+    if r.returncode != 0:
+        fail(f"many_tasks.lox: exit {r.returncode}, {r.stderr[:200]!r}")
+    starts = [(int(s["units"]), (int(s["t1"]) - int(s["t0"])) / 1000.0)
+              for s in trace_fields(trace, "step") if s["kind"] == "start"]
+    if not starts:
+        fail("many_tasks.lox: no start step in the trace")
+    units = max(u for u, _ in starts)
+    us = max(t for _, t in starts)
+    if units < MANY_TASKS:
+        fail(f"many_tasks.lox: the start step has {units} units, at least "
+             f"{MANY_TASKS} needed: the probe does not make the roots, or "
+             "the start pause does not read them")
+    if units > MAX_UNITS_PER_TASK * MANY_TASKS + 2000:
+        fail(f"many_tasks.lox: the start step has {units} units, at most "
+             f"{MAX_UNITS_PER_TASK} for each of {MANY_TASKS} tasks stated")
+    if us > MAX_START_US:
+        fail(f"many_tasks.lox: the start step took {us:.0f} us, at most "
+             f"{MAX_START_US:.0f} us stated")
+    print(f"ok   many_tasks.lox: start step {units} units, {us:.0f} us")
+
+
 def main():
     if len(sys.argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -415,6 +453,7 @@ def main():
         check_idle_latency(binary, work)
         check_peak(binary, work)
         check_foreign_set(binary, work)
+        check_many_tasks(binary, work)
     print("OK")
 
 
