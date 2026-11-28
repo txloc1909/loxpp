@@ -212,13 +212,17 @@ function differingZone(pid: number, psLeft: () => number): string | undefined {
 }
 
 /**
- * Run `read` with a `ps` on `PATH` that sleeps `SLOW_PS_S` before its first
- * answer, so a read whose limit is shorter than that delay gives no answer.
- * `PATH` is restored when `read` returns, so the run a test starts next uses the
- * real `ps`. Each call makes its own bin directory, so the first read of each
- * guarded call site is the slow one.
+ * Run `read` with a `ps` on `PATH` that sleeps `SLOW_PS_S` before each of its
+ * first `slowCalls` answers, so a read whose limit is shorter than that delay
+ * gives no answer. `PATH` is restored when `read` returns, so the run a test
+ * starts next uses the real `ps`.
+ *
+ * Each call makes its own bin directory and its own counter, so each guarded
+ * call site gets its own slow answers. A search of several reads passes 2, so
+ * the first read and the first read of its loop are both forced through their
+ * limit: a limit that only one of them asks for would stay unproven.
  */
-async function withSlowPs<T>(dir: string, name: string, read: () => T): Promise<T> {
+async function withSlowPs<T>(dir: string, name: string, read: () => T, slowCalls = 1): Promise<T> {
   const bin = path.join(dir, name);
   await fs.promises.mkdir(bin);
   const asked = path.join(bin, "asked");
@@ -226,8 +230,11 @@ async function withSlowPs<T>(dir: string, name: string, read: () => T): Promise<
     path.join(bin, "ps"),
     [
       "#!/bin/sh",
-      `if ! command [ -e ${shellQuote(asked)} ]; then`,
-      `  : > ${shellQuote(asked)}`,
+      "n=0",
+      `command [ -e ${shellQuote(asked)} ] && n=$(command cat ${shellQuote(asked)})`,
+      "n=$((n + 1))",
+      `command printf '%s' "$n" > ${shellQuote(asked)}`,
+      `if command [ "$n" -le ${slowCalls} ]; then`,
       `  command sleep ${SLOW_PS_S}`,
       "fi",
       'exec /bin/ps "$@"',
@@ -732,7 +739,7 @@ processTest("a parent token read in another time zone still names the same proce
     // difference reads a live parent as dead. A host whose zone database cannot
     // print a different answer cannot show the difference, and this test would
     // prove nothing.
-    const zone = await withSlowPs(dir, "slow-zone", () => differingZone(parent.pid!, startLeft));
+    const zone = await withSlowPs(dir, "slow-zone", () => differingZone(parent.pid!, startLeft), 2);
     if (zone === undefined) return;
 
     const script = spawn("/bin/sh", [scriptPath, String(parent.pid), start], {
