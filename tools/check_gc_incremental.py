@@ -405,7 +405,7 @@ def check_foreign_set(binary, work):
 # The start pause reads each root once (decision, section 14, "The limit of
 # the start pause"). The probe has TASKS tasks in task.receive, so the start
 # step has about one unit for each of them. The count does not depend on the
-# host. The time limit is loose: it is ten times the measured 1.9 ms.
+# host. The time limit is loose: it is about five times the measured 1.9 ms.
 MANY_TASKS = 100000
 MAX_UNITS_PER_TASK = float(os.environ.get("LOXPP_CHECK_UNITS_PER_TASK", "1.5"))
 MAX_START_US = 10000.0

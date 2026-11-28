@@ -703,8 +703,8 @@ Known gaps, and where they are filed:
 - Function, Closure, Enum, DeferredCall and Bound* objects are not cut into
   parts. The language bounds the size of each. #1301.
 - The start pause reads all roots at once: it grows with the number of tasks
-  and of globals. This is a stated limit, not a defect: see "The limit of the
-  start pause" below. #1302.
+  and of globals. This breaks goal 1 above the sizes of "The limit of the start pause"
+  below. #1302.
 - A worker that waits for a long time on one wait runs 0.5 ms of its cycle
   and sleeps. #1303.
 - The allocator stalls of section 13 (item 4) stay. Goal 1 does not count
@@ -731,15 +731,28 @@ on a large heap (6.1, "a missed barrier"). We do not take that risk for a
 case that the language does not need often. If a program needs it, a new
 decision can replace this limit with the parts and the barriers above.
 
+**Goal 1 does not hold for a program with more than about 55000 waiting tasks
+or about 25000 globals.** The start step grows with the roots, and the p99.99
+of the steps is then above 1 ms. This is a defect against goal 1 that we
+accept for now, and not a case that goal 1 leaves out. The contract gap that
+goes with it is #1368.
+
 The cost model: the start step is the roots, about 18 ns for each task that
 waits (release build; 100000 tasks in `task.receive` are 100113 units, 1.8 to
 1.95 ms in 5 runs) and about 39 ns for each global. The step passes 1 ms at
-about 55000 waiting tasks, or about 25000 globals. A program with fewer
-tasks meets goal 1 (p99.99 of a step at most 1 ms). A program with more has
-one longer step in each cycle: at 100000 tasks it is about 1.9 ms, and it
-grows in the same ratio. A cycle starts at 1.5 times the live heap, so the
-long step is rare, and MMU(10 ms) stays above 50% up to several hundred
-thousand tasks. `test/gc_incremental/latency/many_tasks.lox` and
+about 55000 waiting tasks, or about 25000 globals. The probe has about 1200
+steps, so its p99.99 is its largest step, and a cycle that is not often does
+not lower it. Measured on the probe with more tasks (release build):
+
+| Waiting tasks | Start step units | p99.99 of the steps | MMU(10 ms) |
+|---|---|---|---|
+| 100000 | 100113 | 1777 us | 62.5% |
+| 200000 | 200113 | 4308 us | 56.9% |
+| 300000 | 300113 | 5853 us | 41.5% |
+
+The start step and the p99.99 limit are broken above about 55000 tasks. The
+MMU(10 ms) limit of 50% is broken between 200000 and 300000 tasks.
+`test/gc_incremental/latency/many_tasks.lox` and
 `check_many_tasks` in `tools/check_gc_incremental.py` assert the limit: the
 start step has between one and 1.5 units for each task, and at most 10 ms.
 
