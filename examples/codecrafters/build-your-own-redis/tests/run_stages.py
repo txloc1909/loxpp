@@ -1703,6 +1703,11 @@ def stages_streams(prog):
         # waits above. XADD 8-4 is the next ID, one seq above that floor.
         wake_order("the renewed floor keeps its seq", ["5-0", "8-3"],
                    [("6-0", {0}), ("8-3", set()), ("8-4", {1})])
+        # The floor is 5-0, so XADD 8-3 runs the full pass. Reader 1 waits
+        # above 8-3, the top, and must stay: the test of a reader that waits
+        # is "at or above the top".
+        wake_order("a reader above the top, under a lower floor", ["5-0", "8-3"],
+                   [("8-3", {0})])
 
         # Every reader of the key gets the entry, and a reader of two
         # streams gets only the stream that changed.

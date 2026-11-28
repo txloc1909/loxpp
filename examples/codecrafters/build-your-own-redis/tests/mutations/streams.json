@@ -305,6 +305,14 @@
   ]
  },
  {
+  "name": "a reader above the top is served by an XADD of the top",
+  "old": "                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
+  "new": "                waits = after.ms > topMs or (after.ms == topMs and after.seq > topSeq);",
+  "cases": [
+   "local: XREAD BLOCK floor a reader above the top, under a lower floor: XADD 8-3 wakes reader 1 no"
+  ]
+ },
+ {
   "name": "XADD in EXEC wakes the readers at once",
   "old": "    if (readyStreamKeys == nil) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
   "new": "    if (true) {\n        wakeReaders(key, stream, stream.size() - 1);\n        return;\n    }",
