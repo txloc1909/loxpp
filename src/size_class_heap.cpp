@@ -430,13 +430,16 @@ void SizeClassHeap::freeBuffer(void* p, std::size_t bytes) noexcept {
 }
 
 void SizeClassHeap::releaseBytes(std::size_t bytes) {
-    while (bytes > 0) {
+    bytes = std::min(bytes, kReleaseBudget);
+    std::size_t total = 0;
+    while (total < bytes) {
         std::size_t released = releaseStep(true);
         if (released == 0) {
-            return;
+            break;
         }
-        bytes -= std::min(bytes, released);
+        total += released;
     }
+    m_largestOperationRelease = std::max(m_largestOperationRelease, total);
 }
 
 void* SizeClassHeap::allocLarge(std::size_t bytes) {
@@ -449,9 +452,12 @@ void* SizeClassHeap::allocLarge(std::size_t bytes) {
         m_largeFree[cls] = *static_cast<void**>(p);
         m_largeCachedBytes -= mapBytes;
     } else {
-        // New memory: give back as much from the queue first.
+        // New memory: give back from the queue first, up to the budget. The
+        // call is the whole release work of this allocation.
         releaseBytes(mapBytes);
         p = osMap(mapBytes);
+        m_largeLiveBytes += mapBytes;
+        return p;
     }
     m_largeLiveBytes += mapBytes;
     releaseStep();
@@ -519,10 +525,13 @@ std::size_t SizeClassHeap::releaseStep(bool evictCache) {
         m_pending = node->next;
         m_largePendingBytes -= bytes;
         osUnmap(node, bytes);
+        m_largestOperationRelease = std::max(m_largestOperationRelease, bytes);
         return bytes;
     }
     node->remaining -= kReleaseSlice;
     m_largePendingBytes -= kReleaseSlice;
     osUnmap(reinterpret_cast<char*>(node) + node->remaining, kReleaseSlice);
+    m_largestOperationRelease =
+        std::max(m_largestOperationRelease, kReleaseSlice);
     return kReleaseSlice;
 }

@@ -16,8 +16,9 @@
 //   - Every call that the heap itself makes to the C allocator or the kernel
 //     is timed and bounded: a new chunk (operator new, one call of a fixed
 //     size), the map of a large block (mmap), and the release of a large
-//     block (munmap, in slices of kReleaseSlice at most, one slice for each
-//     step; see releaseStep). The timed calls write the `stall` records.
+//     block (munmap, in slices of kReleaseSlice at most, and at most
+//     kReleaseBudget for one operation; see releaseStep). The timed calls write
+//     the `stall` records.
 //   - A span, once taken from the C allocator, stays until the heap ends. An
 //     empty span goes to a pool that every size class takes from.
 //   - No operation walks or copies an array whose size follows the heap size.
@@ -46,6 +47,9 @@ class SizeClassHeap {
     static constexpr std::size_t kMaxObject = kMaxSmall;
     // The most that one call gives back to the kernel.
     static constexpr std::size_t kReleaseSlice = std::size_t{1} << 20;
+    // The most that one heap operation gives back to the kernel, in all its
+    // calls together. What the queue still holds waits for later operations.
+    static constexpr std::size_t kReleaseBudget = 4 * kReleaseSlice;
     static constexpr std::size_t kSlotAlign = 16;
     // The default limit of a stall record, in nanoseconds.
     static constexpr std::uint64_t kDefaultStallLimitNs = 100'000;
@@ -132,6 +136,12 @@ class SizeClassHeap {
     [[nodiscard]] std::size_t largestReleaseBytes() const {
         return m_largestRelease;
     }
+    // The largest number of bytes that one heap operation (a large allocation,
+    // a large free, releaseStep or releaseBytes) has given back, in all its
+    // calls together. It is at most kReleaseBudget.
+    [[nodiscard]] std::size_t largestOperationReleaseBytes() const {
+        return m_largestOperationRelease;
+    }
     // The bytes of large blocks that wait to go back to the kernel.
     [[nodiscard]] std::size_t pendingReleaseBytes() const {
         return m_largePendingBytes;
@@ -146,8 +156,10 @@ class SizeClassHeap {
     // cached blocks of other classes are the least useful memory.
     std::size_t releaseStep(bool evictCache = false);
     // Gives back `bytes` from the queue, in calls of at most kReleaseSlice, or
-    // all of it when the queue holds less. The heap calls it before it maps
-    // new memory, so the queue falls at least as fast as the mappings grow.
+    // all of it when the queue holds less. It gives back at most
+    // kReleaseBudget in one call; the queue keeps the rest. The heap calls it
+    // before it maps new memory, so the queue falls as the mappings grow, at
+    // a rate that has a limit for each operation.
     void releaseBytes(std::size_t bytes);
     // The `stall` records go to `trace`, one for each timed call that takes
     // longer than the limit. nullptr turns them off, and then a timed call
@@ -208,6 +220,7 @@ class SizeClassHeap {
     std::size_t m_largeCachedBytes{0};
     std::size_t m_largePendingBytes{0};
     std::size_t m_largestRelease{0};
+    std::size_t m_largestOperationRelease{0};
     struct ReleaseNode;
     ReleaseNode* m_pending{nullptr};
     std::size_t m_chunkBytes{0};
