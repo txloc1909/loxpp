@@ -1875,8 +1875,8 @@ fun cmdXread(ctx, argv) {
 // the top stays where it is in the queue: the pass serves in place. It can
 // run once for each reader on each key of an EXEC, so a reader that waits on
 // costs one Map access and one hasField call, makes no object, and calls no
-// method of ours (a reader with a "$" on another Stream, or one that is
-// served, costs more).
+// method of ours. A "$" reader on another Stream that still waits adds only
+// one serial compare and no call. A reader that is served costs more.
 fun wakeReaders(key, stream, firstNew) {
     var queue = readers[key];
     if (queue == nil) {
