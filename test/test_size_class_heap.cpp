@@ -391,41 +391,32 @@ TEST(SizeClassHeap, AFreedLargeBlockGoesBackInSlices) {
     EXPECT_EQ(store.footprintBytes(), base);
 }
 
-// One large allocation of N bytes must not give back N bytes in one
-// operation: the queue keeps the rest for later operations, and it drains.
-TEST(SizeClassHeap, AMapOfANewLargeBlockGivesBackAtMostTheBudget) {
+// A program that maps a larger block in each round and drops the one of the
+// round before. A heap that gives back less than it maps lets the queue hold
+// the sum of the dropped blocks, and the peak follows that sum, not the live
+// heap (#1297).
+TEST(SizeClassHeap, DroppedBlocksOfGrowingSizeDoNotPileUpInTheQueue) {
     MemoryManager mm;
     SizeClassHeap& store = mm.store();
-    constexpr std::size_t kOld = std::size_t{256} << 20;
-    constexpr std::size_t kNew = std::size_t{96} << 20;
     std::size_t base = store.footprintBytes();
-    void* old = mm.rawAlloc(kOld);
-    mm.rawFree(old, kOld);
-    std::size_t pending = store.pendingReleaseBytes();
-    ASSERT_GT(pending, 4 * SizeClassHeap::kReleaseBudget);
-    std::size_t calls = store.osCalls();
-    void* fresh = mm.rawAlloc(kNew);
-    // The allocation made one map call and at most the budget of release
-    // calls.
-    EXPECT_LE(store.osCalls() - calls,
-              1 + SizeClassHeap::kReleaseBudget / SizeClassHeap::kReleaseSlice);
-    EXPECT_LE(store.largestOperationReleaseBytes(),
-              SizeClassHeap::kReleaseBudget);
-    EXPECT_GT(store.pendingReleaseBytes(), 0u);
-    mm.rawFree(fresh, kNew);
-    // The queue drains: no byte stays after enough steps.
-    std::size_t steps = 0;
-    while (store.pendingReleaseBytes() != 0) {
-        store.releaseStep(true);
-        ASSERT_LT(++steps, 1000u);
+    void* buffer = nullptr;
+    std::size_t size = 0;
+    std::size_t largestLive = 0;
+    std::size_t peak = 0;
+    for (std::size_t round = 1; round <= 60; ++round) {
+        std::size_t next = round * (std::size_t{3} << 20);
+        void* bigger = mm.rawAlloc(next);
+        largestLive = std::max(largestLive, size + next);
+        peak = std::max(peak, store.footprintBytes() - base);
+        if (buffer != nullptr) {
+            mm.rawFree(buffer, size);
+        }
+        buffer = bigger;
+        size = next;
     }
-    EXPECT_LE(store.largestOperationReleaseBytes(),
-              SizeClassHeap::kReleaseBudget);
-    while (store.footprintBytes() > base) {
-        store.releaseStep(true);
-        ASSERT_LT(++steps, 2000u);
-    }
-    EXPECT_EQ(store.footprintBytes(), base);
+    mm.rawFree(buffer, size);
+    EXPECT_LE(static_cast<double>(peak),
+              2.5 * static_cast<double>(largestLive));
 }
 
 TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
@@ -464,8 +455,8 @@ TEST(SizeClassHeap, TheSweepGivesBackASliceForEachSpan) {
 TEST(SizeClassHeap, AGrowingBufferThatIsMadeAndDroppedStaysInGoal3) {
     // A List grows by doubling, is dropped, and is made again. The blocks that
     // wait to go back must not pile up beside the new ones: the heap gives
-    // back the bytes of its queue in the steps. Goal 3 of the decision: the
-    // peak is at most 2.5 times the largest live heap.
+    // back as many bytes as it maps. Goal 3 of the decision: the peak is at
+    // most 2.5 times the largest live heap.
     MemoryManager mm;
     SizeClassHeap& store = mm.store();
     constexpr std::size_t kFinal = std::size_t{128} << 20;
@@ -482,12 +473,6 @@ TEST(SizeClassHeap, AGrowingBufferThatIsMadeAndDroppedStaysInGoal3) {
             peak = std::max(peak, store.footprintBytes() - base);
             if (buffer != nullptr) {
                 mm.rawFree(buffer, size);
-            }
-            // The steps of the collector that run before the next allocation.
-            // One operation gives back at most kReleaseBudget, so the queue
-            // needs these steps to fall as fast as the mappings grow.
-            for (int step = 0; step < 8; ++step) {
-                store.releaseStep();
             }
             buffer = bigger;
             size = next;
