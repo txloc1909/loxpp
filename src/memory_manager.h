@@ -240,7 +240,8 @@ class MemoryManager : public VmAllocBase {
     // follow.
     void retire();
     // The owner of the heap is gone. Frees the heap when no count is left;
-    // otherwise it is a dead heap, and the last releaseHold() frees it.
+    // otherwise it is a dead heap, and its last releaseHold() hands it to the
+    // heap that dropped the count, which destroys it in parts.
     void dropOwner();
 
   private:

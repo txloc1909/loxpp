@@ -116,3 +116,43 @@ TEST(DeadHeapTest, APartHandsTheNextDeadHeapToTheSameHeap) {
     }
     EXPECT_EQ(releaser.pendingDeadHeaps(), 0U);
 }
+
+// A collection of the heap that owns the dead heap runs a part, so a program
+// that only calls collectGarbage() frees it.
+TEST(DeadHeapTest, ACollectionRunsAPart) {
+    MemoryManager releaser;
+    Obj* held = nullptr;
+    MemoryManager* dead = makeDeadHeap(5, held);
+    const std::uint16_t id = dead->heapId();
+    releaser.releaseValue(Value{held});
+    ASSERT_NE(heapById(id), nullptr);
+    releaser.collectGarbage();
+    EXPECT_EQ(heapById(id), nullptr);
+}
+
+// The end of the heap that took a dead heap destroys it, also when that heap
+// stays as a dead heap because a count is left on it.
+TEST(DeadHeapTest, TheEndOfTheTakingHeapDestroysWhatItTook) {
+    auto* owner = new MemoryManager(1);
+    const std::uint16_t ownerId = owner->heapId();
+    Obj* keep = owner->create<ObjInt>(1);
+    owner->hold(keep); // a count that no heap drops yet
+    Obj* held = nullptr;
+    MemoryManager* dead = makeDeadHeap(5, held);
+    const std::uint16_t deadId = dead->heapId();
+    owner->releaseValue(Value{held});
+    ASSERT_EQ(owner->pendingDeadHeaps(), 1U);
+    // The count keeps the owner alive, so its end leaves it as a dead heap.
+    owner->dropOwner();
+    EXPECT_EQ(heapById(deadId), nullptr);
+    ASSERT_NE(heapById(ownerId), nullptr);
+    // Drop the last count of the owner, and destroy the owner in parts.
+    MemoryManager releaser;
+    releaser.releaseValue(Value{keep});
+    std::size_t parts = 0;
+    while (heapById(ownerId) != nullptr) {
+        ASSERT_LT(parts++, 10000U);
+        releaser.reapPendingPart();
+    }
+    EXPECT_EQ(releaser.pendingDeadHeaps(), 0U);
+}

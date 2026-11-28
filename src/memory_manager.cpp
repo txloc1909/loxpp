@@ -375,7 +375,10 @@ void MemoryManager::retire() {
 
 void MemoryManager::dropOwner() {
     // The thread of this heap ends, so the dead heaps that it took are
-    // destroyed now: no other thread may touch them.
+    // destroyed now: no other thread may touch them. The drain comes before
+    // m_ownerAlive is cleared: a part of a drained heap can drop the last
+    // count of this heap, and that would make this heap queue itself on
+    // itself after the clear.
     drainPendingDeadHeaps();
     bool freeNow = false;
     {
