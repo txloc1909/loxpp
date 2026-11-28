@@ -167,7 +167,10 @@ host under load (load average about 10), longest release call, 3 runs of
 `vary60.lox`: 6.7, 9.4 and 11.4 ms; of `double.lox`: 4.7 to 11.8 ms;
 `repeat96.lox`: 0.3 to 0.6 ms. The earlier runs on a quiet host gave 2.4 to
 4.0 ms, 3.1 to 5.0 ms and 0.27 to 0.38 ms. Uncapped, the longest call was
-8.1 ms (`vary.lox`) and 8.7 ms (`double.lox`) on the quiet host.
+8.1 ms (`vary.lox`) and 8.7 ms (`double.lox`) on the quiet host. The
+`benchmarks/` suite, default collector against `LOXPP_GC=stw`, 3 runs, load
+average 6 to 7: geometric mean ratio 1.002, 0.961 and 0.975 (goal 3: at most
+1.10).
 
 ### 4.3 The write barrier
 
