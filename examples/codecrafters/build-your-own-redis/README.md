@@ -80,12 +80,15 @@ together are not served above the limit. This is the check of
 `acceptCommonHandler` in Redis. The suite (group `maxclients`) runs a limit
 of 3 or 5 and reads the default 10000 from `CONFIG GET`; it does not open
 10000 sockets. It probes a burst of 30 connections at a limit of 3, 20
-refused clients that never read, and a replica at a limit of 2.
+refused clients that never read, 50 refused clients that reset the connection
+at once (at a limit of 1), and a replica at a limit of 2.
 
 Differences from Redis:
 
 - The count includes replica connections that a master holds; Redis leaves
   them out of `connected_clients`. A replica takes a slot of the master here.
+  Redis also counts them in the limit check, so the limit has the same
+  effect there; only the `connected_clients` figure differs.
 - The link of a replica to its master is not counted. It does not go through
   the accept loop, so it takes no slot of the replica; Redis counts that link
   as a client of the replica.
@@ -195,11 +198,12 @@ memory. Two clients that run `XREAD BLOCK 0` with `$` on 524286 existing
 streams (`tests/gc_load.py`, release build, `LOXPP_GC=incremental`) reach a
 peak RSS (`VmHWM`) of 969, 972 and 972 MB. A wait that stores the `Stream`
 itself (no new object, but it holds a replaced `Stream` and loses the top at
-the wait) reaches 854 MB. So the objects cost about 115 MB, or 13%, for 1048572
-waits: about 110 bytes for each key of each wait. A wait that names an ID
-makes one `StreamId` for each key in the same way. A smaller form needs the
-top ID (two numbers) and the serial (a third) with no new object for each key;
-no such form is known.
+the wait) reaches 854 MB. So the objects cost about 115 MB, or 13%, for
+1048572 waits: about 110 bytes for each key of each wait. A wait that names an
+ID makes one `StreamId` for each key in the same way. A smaller form needs the
+top ID (two numbers) and the serial (a third) with no new object for each key.
+Three parallel Maps (serial, ms and seq) would save about half, about 49 MB,
+but they add two Map accesses for each reader in `wakeReaders`.
 
 ### Transactions
 

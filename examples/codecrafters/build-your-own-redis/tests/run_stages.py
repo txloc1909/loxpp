@@ -704,6 +704,24 @@ def refused_bytes(port):
         sock.close()
 
 
+def client_when_free(srv, seconds=5):
+    """A client that the server serves (a PING is answered), tried again
+    while the limit refuses it, or None after `seconds`."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        c = srv.client()
+        c.sock.settimeout(1)
+        try:
+            if c.call("PING") == "PONG":
+                c.sock.settimeout(5)
+                return c
+        except (socket.timeout, EOFError, OSError):
+            pass
+        c.close()
+        time.sleep(0.05)
+    return None
+
+
 def burst_connect(srv, n):
     """Opens n connections at the same moment from n threads while the
     server is stopped, so the kernel holds all of them in the accept queue
@@ -939,6 +957,49 @@ def stages_maxclients_probes(prog):
                 x.close()
         for c in held:
             c.close()
+    finally:
+        srv.stop()
+
+    # Refused clients that reset the connection at once: the refusal write
+    # fails for each of them, and the failure must not reach the accept loop,
+    # which would print "accept fault", wait 20 ms and keep the socket open.
+    # The server is stopped while the clients connect and reset, so the kernel
+    # holds every reset connection in the accept queue. The wait of 20 ms for
+    # each client is the signal: 50 clients delay the next client by 1.0 s,
+    # and a server that handles them takes about 1 ms. The log cannot show
+    # the fault: the server writes its output when it exits, and the suite
+    # ends it with SIGTERM.
+    srv = Server(prog, ["--maxclients", "1"])
+    try:
+        check("maxclients RST: server starts", srv.up, srv.log_text())
+        if not srv.up:
+            return
+        # At a limit of 1 the start probe may still hold the slot.
+        first = client_when_free(srv)
+        check("local: maxclients RST: the start probes end and the limit is reached",
+              first is not None and clients_back(first, 1) == 1)
+        if first is None:
+            return
+        os.kill(srv.proc.pid, signal.SIGSTOP)
+        try:
+            reset = [socket.create_connection(("127.0.0.1", srv.port), timeout=5)
+                     for _ in range(50)]
+            for x in reset:
+                x.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                x.close()
+        finally:
+            os.kill(srv.proc.pid, signal.SIGCONT)
+        start = time.time()
+        got = refused_bytes(srv.port)
+        took = time.time() - start
+        check("local: maxclients RST: a client that comes after 50 reset clients gets the error in 0.5 s",
+              got == MAXCLIENTS_ERROR and took < 0.5, "%r after %.2f s" % (got, took))
+        first.close()
+        late = client_when_free(srv)
+        check("local: maxclients RST: a client is served when the held client goes",
+              late is not None)
+        if late is not None:
+            late.close()
     finally:
         srv.stop()
 

@@ -336,9 +336,17 @@
  {
   "name": "maxclients refusal waits until the client reads",
   "old": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n",
-  "new": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n            var pad = \"x\";\n            for (var i = 0; i < 25; i = i + 1) {\n                pad = pad + pad;\n            }\n            sock.write(pad);\n",
+  "new": "            sock.write(\"-ERR max number of clients reached\\r\\n\");\n            var pad = \"x\";\n            for (var i = 0; i < 23; i = i + 1) {\n                pad = pad + pad;\n            }\n            sock.write(pad);\n",
   "cases": [
    "local: maxclients silent: a new client is served in 1 s after the refused ones"
+  ]
+ },
+ {
+  "name": "maxclients refusal write has no try/catch",
+  "old": "        try {\n            sock.write(\"-ERR max number of clients reached\\r\\n\");\n        } catch (ignored) {\n        }\n        sock.close();\n",
+  "new": "        sock.write(\"-ERR max number of clients reached\\r\\n\");\n        sock.close();\n",
+  "cases": [
+   "local: maxclients RST: a client that comes after 50 reset clients gets the error in 0.5 s"
   ]
  },
  {
