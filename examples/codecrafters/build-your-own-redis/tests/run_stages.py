@@ -1502,6 +1502,10 @@ def stages_streams(prog):
         wake_order("the floor is renewed", ["5-0", "100-0", "200-0"],
                    [("10-0", {0}), ("150-0", {1})])
         wake_order("the same ms with a lower seq", ["10-5", "10-5"], [("10-6", {0, 1})])
+        # The pass of XADD 6-0 renews the floor to 8-3, the ID that reader 1
+        # waits above. XADD 8-4 is the next ID, one seq above that floor.
+        wake_order("the renewed floor keeps its seq", ["5-0", "8-3"],
+                   [("6-0", {0}), ("8-3", set()), ("8-4", {1})])
 
         # Every reader of the key gets the entry, and a reader of two
         # streams gets only the stream that changed.

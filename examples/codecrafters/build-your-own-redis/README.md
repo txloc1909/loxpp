@@ -905,14 +905,6 @@ ruling on PR #1204. Every stage group keeps them.
 | T7: `EXEC` of 65535 `XADD` while 50 readers wait above the top on each key | PING within 1.0 s; the pass skips a key whose readers all wait above its top, with one comparison (without the skip: 1.31–1.38 s) | 0.24 s (5 readers: 0.29 s; the rest is the work of each `XADD`). The issue #1169 gave redis-server 7.0 as 1.32 s at 50 readers; that is the number of the issue, not measured here. |
 | T8: a second `EXEC` of 16384 `XADD` after a first one whose pass found 100 readers above the top on each key (and one reader below it, which it woke) | PING within 0.5 s; the first pass renews `floor`, so the second skips | 0.17–0.28 s under load (the same EXEC with the skip removed: 1.9–2.3 s) |
 | T9: the same with 100 `$` readers, after `DEL` and `XADD` gave each key another `Stream` | PING within 0.5 s; the pass renews `floor` with the top at the wait, not `-1-0` | 0.20–0.27 s under load |
-
-The margin of T7 is 0.24 s against its 1.0 s bound on the host that measured it,
-and a removed skip takes 1.3 s there. Under load (4 busy loops on the same 4
-CPUs as the server and the client, 5 runs for each collector) the worst PING
-was 0.99–1.15 s with the default collector (4 of 5 runs over the bound) and
-0.76–0.93 s with `LOXPP_GC=stw`; a removed skip took 4.3–4.6 s. At that load
-`T1` (bound 0.6 s, 0.78 s and more) fails first, so these probes need a runner
-that is not loaded; the bound of T7 is not changed.
 | T2: `EXEC` of one `XREAD` of 524286 streams | PING within 0.5 s (when the parse runs in the step of `EXEC`: 0.84 s) | 0.12–0.15 s |
 | Group `transactions`: `EXEC` of 20000 `INCR` while another client reads the key | the other client sees the value before or after, never in between | as required |
 | Not in the suite: `EXEC` of 65536 `INCR` / `SET` / `GET`, of 4 `LPUSH` of 262142 elements, of one `BLPOP` on 1048574 keys | PING within 1.0 s | 0.18 s / 0.12 s / 0.09 s / 0.16–0.18 s / 0.25 s |
@@ -925,6 +917,14 @@ that is not loaded; the bound of T7 is not changed.
 | Group `maxclients`: the client above `--maxclients` | the error `-ERR max number of clients reached`, then close; `connected_clients` does not count it | as required |
 | Not in the suite (it sends 512 MB): `SET k` with a bulk of 512 MB, the bulk limit | over 1 s is allowed only in a native call | 1.30–1.50 s, nearly all in the native `read_bytes` after the last byte arrives (#1132, #1134); RSS 530 MB |
 | Not in the suite (it sends 1.2 GB): a command of four 300 MB bulks at the default 1 GB query limit | client closed; PING within 1.0 s | 0.75 s, in the native `read_bytes` of the first three bulks (#1132) |
+
+The margin of T7 is 0.24 s against its 1.0 s bound on the host that measured it,
+and a removed skip takes 1.3 s there. Under load (4 busy loops on the same 4
+CPUs as the server and the client, 5 runs for each collector) the worst PING
+was 0.99–1.15 s with the default collector (4 of 5 runs over the bound) and
+0.76–0.93 s with `LOXPP_GC=stw`; a removed skip took 4.3–4.6 s. At that load
+`T1` (bound 0.6 s, 0.78 s and more) fails first, so these probes need a runner
+that is not loaded; the bound of T7 is not changed.
 
 Measured in the dev container with the `release` preset, on 16 CPUs; a
 range is the spread between runs on different days and hosts. Each

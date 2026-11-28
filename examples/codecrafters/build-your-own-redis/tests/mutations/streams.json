@@ -375,5 +375,21 @@
   "cases": [
    "local: XREAD BLOCK floor a lower reader joins second: XADD 10-0 wakes reader 1 yes"
   ]
+ },
+ {
+  "name": "the renewed floor is one seq above the reader that waits",
+  "old": "floorSeq = after.seq;",
+  "new": "floorSeq = after.seq + 1;",
+  "cases": [
+   "local: XREAD BLOCK floor the renewed floor keeps its seq: XADD 8-4 wakes reader 1 yes"
+  ]
+ },
+ {
+  "name": "the renewed floor is one ms above the reader that waits",
+  "old": "floorMs = after.ms;",
+  "new": "floorMs = after.ms + 1;",
+  "cases": [
+   "local: XREAD BLOCK floor the renewed floor keeps its seq: XADD 8-4 wakes reader 1 yes"
+  ]
  }
 ]
