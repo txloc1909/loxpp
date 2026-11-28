@@ -5,9 +5,10 @@
 # Proves that the stage cases can fail. For each mutation (old, new, cases),
 # it writes a copy of redis.lox with that replacement (or edits), runs the stage
 # suite against the copy, and checks that each named case fails. A suite
-# that crashes or times out on the copy also counts as a kill. Prints one
+# that crashes on the copy also counts as a kill. Prints one
 # line per mutation, and exits 1 when a mutation stays alive, when its suite
-# prints no check (ERROR), or when its old text is not found exactly once. CI does not run a suite for each mutation: it
+# prints no check (ERROR), when a suite hits its 420 s limit before every named
+# case has failed (TIMEOUT, not a kill), or when its old text is not found exactly once. CI does not run a suite for each mutation: it
 # starts one server per mutation and takes minutes. Set REDIS_STAGE_GROUPS (see run_stages.py) to
 # run only the group of the named cases.
 #
@@ -87,11 +88,12 @@ def kill_group(p):
 
 
 def run_suite(argv):
-    """Returns (stdout, timed_out) for one suite run, with a 420 s limit."""
+    """Returns (stdout, timed_out) for one suite run, with a 420 s limit.
+    MUTATE_SUITE_TIMEOUT sets the limit in seconds, so a test can reach it."""
     p = start_suite(argv)
     try:
         try:
-            return p.communicate(timeout=420)[0], False
+            return p.communicate(timeout=float(os.environ.get("MUTATE_SUITE_TIMEOUT", 420)))[0], False
         except subprocess.TimeoutExpired:
             kill_group(p)
             return p.communicate()[0], True
@@ -148,9 +150,15 @@ def run_mutation(m, text, loxpp, suite):
         return ("ERROR %-40s no named case ran" % m["name"], True)
     failed = [c for c in cases if ("FAIL " + c) in out]
     missing = [c for c in cases if c not in failed]
-    if missing and "(timeout)" not in out and "group ran to the end" not in out:
+    # A timeout proves nothing about the named cases: a run of all groups,
+    # with no REDIS_STAGE_GROUPS, can reach the limit before the group of the
+    # mutation ends. It is a bad result, not a kill.
+    if missing and timed_out:
+        return ("TIMEOUT %-39s the suite hit the limit before these cases failed: %s (not a kill)"
+                % (m["name"], missing), True)
+    if missing and "group ran to the end" not in out:
         return ("ALIVE %-40s cases that still pass: %s" % (m["name"], missing), True)
-    how = "killed" if not missing else "killed (suite crash/timeout)"
+    how = "killed" if not missing else "killed (suite crash)"
     return ("%s %-40s" % (how, m["name"]), False)
 
 

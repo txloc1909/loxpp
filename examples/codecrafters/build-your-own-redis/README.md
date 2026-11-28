@@ -864,7 +864,7 @@ ruling on PR #1204. Every stage group keeps them.
 | S5 / S6 (on a server of their own): `XREAD` / `XRANGE` with 524000 `COUNT` options | PING within 0.2 s (without the yield of the parse: about 1.4 s) | 0.007–0.010 s (with one cell for each argument: 0.04–0.05 s, and 0.16–0.23 s on CI) |
 | S7: `XRANGE` of 64 entries of almost 1 MB | PING within 0.5 s (without the byte bound of `Output`: 1.38 s) | 0.08–0.09 s |
 | S8 (on a new server): `XREAD` of 131072 streams that have entries | every stream; PING within 0.45 s (when the command copies the entries of each stream: 0.61–0.72 s) | 0.18–0.22 s |
-| S9: `XRANGE` of one field of 64 MB | the field; PING within 0.25 s (when the field is copied into its bulk: 0.37 s) | 0.10–0.11 s |
+| S9: `XRANGE` of one field of 64 MB | the field; the peak RSS grows by at most 32 MB (when the field is copied into its bulk: 70–131 MB, by 0 KiB without the copy); PING within 0.25 s in at least one of 3 runs. The copy costs about 0.17 s, which a loaded host also reaches, so only the growth tells the copy from the real write | 0.09–0.20 s, 0 KiB growth |
 | S10 (on a new server with `LOXPP_GC_TRACE`): `XRANGE` of 1048004 arguments | at most 400000 heap objects at a collection, a count that does not depend on the speed of the host (with one cell for each argument: 1050219) | 129504 |
 | T1 (group `transactions`): `EXEC` of 65535 `RPUSH` of 14 elements, the most commands and arguments that a transaction holds | PING within 0.6 s | 0.28–0.30 s |
 | T3 (on a server of their own, as T4 and T5): `EXEC` of 10000 `XADD` with 400 readers that wait above the top | PING within 0.5 s (when each `XADD` wakes the readers at once: 1.0 s; with 200 readers only 0.54 s, too near the limit, #1230) | 0.04 s |
@@ -1060,10 +1060,20 @@ CI runs the groups in four shard jobs. `tests/shards.py` lists the shards and
 checks that each group is in exactly one. A new group must be added to a shard
 there, or the `redis-shard-plan` job fails.
 
+A stall probe of one long command (S9, Z7) runs up to 3 times and passes in
+the first run that is within its bound, as the churn peak check of
+`tools/check_gc_incremental.py` does. A server with no limit stalls in every
+run. A wrong reply fails at once.
+
+`mutate.py` prints `TIMEOUT ... (not a kill)` and exits 1 when a suite reaches
+its 420 s limit before every named case has failed. That happens when no
+`REDIS_STAGE_GROUPS` is set and the suite runs all groups. `MUTATE_SUITE_TIMEOUT`
+sets the limit in seconds, so a test can reach it.
+
 `mutate.py -j N` runs N mutations at once. The default N is a quarter of the
 CPU cores, and at least 1, so `-j 1` runs them one at a time. Some stall
 probes have time limits of 0.1 to 2 s, and a high load can fail a named case
-with no real defect, which `mutate.py` counts as a kill. Keep N low on a busy
+with no real defect, which `mutate.py` counts as a kill (the stall probes run again before they fail). Keep N low on a busy
 machine. The output keeps the order of the mutation file for every N, so one
 slow mutation delays the lines after it. Ctrl-C cancels the mutations that
 have not started and kills the running suites. SIGTERM does the same, and both

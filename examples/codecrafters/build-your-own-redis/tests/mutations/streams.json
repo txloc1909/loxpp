@@ -229,7 +229,7 @@
   "old": "    addBulk(s) {\n        if (len(s) >= STEP_BYTES) {",
   "new": "    addBulk(s) {\n        if (false) {",
   "cases": [
-   "local: S9 XRANGE of a 64 MB field stalls PING at most 0.25 s"
+   "local: S9 XRANGE of a 64 MB field grows the peak RSS by at most 32 MB"
   ]
  },
  {
@@ -302,6 +302,14 @@
   "new": "                waits = after.ms > topMs or (after.ms == topMs and after.seq > topSeq);",
   "cases": [
    "local: XREAD BLOCK $ ignores an entry below the old top of a replaced key"
+  ]
+ },
+ {
+  "name": "a reader above the top is served by an XADD of the top",
+  "old": "                waits = after.ms > topMs or (after.ms == topMs and after.seq >= topSeq);",
+  "new": "                waits = after.ms > topMs or (after.ms == topMs and after.seq > topSeq);",
+  "cases": [
+   "local: XREAD BLOCK floor a reader above the top, under a lower floor: XADD 8-3 wakes reader 1 no"
   ]
  },
  {
