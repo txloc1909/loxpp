@@ -1352,10 +1352,8 @@ class Runtime {
     PollHandler m_pollHandler;
 
     CallFrame m_frames[FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE];
-    int m_frameCount{0};
     Value stack[STACK_MAX + STACK_OVERFLOW_STACK_RESERVE];
     Value* stackTop;
-    bool m_stackOverflow{false};
     Table m_globals;
     std::array<ObjString*, static_cast<std::size_t>(Protocol::Count)>
         m_protocolNames{};
@@ -1383,10 +1381,6 @@ class Runtime {
     // Workers and tasks (see runTasks()). m_mainTask lives as long as this
     // Runtime, so its handle stays valid from one REPL line to the next.
     ObjTask* m_mainTask{nullptr};
-    // Set when the script of one session line ended (a return, a yield to the
-    // end, or an uncaught fault). The scheduler leaves the line with OK then,
-    // while the main task itself stays alive for the next line.
-    bool m_mainLineDone{false};
     // The state of the task that runs now, or of no task. Set with
     // m_currentTask by enterTask().
     TaskOwned m_noTaskOwned;
@@ -1399,11 +1393,6 @@ class Runtime {
     std::deque<ObjTask*> m_runQueue;
     // Counts the runs of runTasks(). A task whose epoch is older has ended.
     std::uint64_t m_taskEpoch{0};
-    // Set by task.receive on an empty mailbox, and kept while each coroutine
-    // between the receive and the task's base suspends in turn (callNative
-    // after a `resume` native, opIterHasNext, resumeWaitingInner). The
-    // scheduler clears it when the task's own coroutine is suspended.
-    bool m_taskSwitchPending{false};
     // The coroutine that suspended last in the task switch in progress.
     ObjCoroutine* m_taskSwitchInner{nullptr};
     // The tasks that wait in task.receive(), rooted so the deadlock report
@@ -1433,8 +1422,6 @@ class Runtime {
     ObjTask* m_faultTask{nullptr};
     Poller::Clock::time_point m_lastPoll{};
     SchedulerClock m_schedulerClock{&Poller::Clock::now};
-    // Tasks of this run that have not ended, the main task included.
-    int m_liveTasks{0};
     std::uint64_t m_nextTaskSerial{0};
     // The declaration tables of this session's compiles. A REPL line can use
     // an enum or a class that an earlier line declared, and a constructor tag
@@ -1444,7 +1431,6 @@ class Runtime {
     // The workers of the current run (one per runTasks() on the main
     // worker), and whether this Runtime is the main worker.
     std::shared_ptr<WorkerGroup> m_group;
-    bool m_isMainWorker{true};
     // QBE global slots (#592): parallel to m_globalSlotNames, index = slot.
     // Both are fixed for a program's lifetime, so globalSlotBase() is stable.
     std::vector<Value> m_globalSlots;
@@ -1458,8 +1444,6 @@ class Runtime {
     // new worker gets the list, so it defines the declarations of all of them
     // again. A source that did not compile is not here: it made no declaration.
     std::vector<std::shared_ptr<const std::string>> m_sources;
-    // See setSessionMode().
-    bool m_sessionMode{false};
 
     // Handler stack for try/catch — parallel to m_frames[].
     // m_handlerStack[i] records {frameCount, stackTop, catchIp} for the
@@ -1490,25 +1474,48 @@ class Runtime {
     std::array<std::vector<Value>, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_deferLists;
 
-    // Parallel to m_frames[]: the result-type contract Op::RETURN enforces
-    // for this frame's operator-overloading method (None for ordinary frames).
-    // Set by dispatchMethod(), cleared by RETURN, callCompiled(),
-    // handleThrow()'s unwind loop, and resetStack(). Sized to match m_frames.
-    std::array<ResultCheck, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
-        m_frameResultCheck{};
-
-    // Parallel to m_frames[]: when m_frameResultOverrideSet[i] is true,
-    // Op::RETURN pushes m_frameResultOverride[i] instead of the method's
-    // actual return (__index_set__'s assignment value). Same set/clear sites
-    // as m_frameResultCheck.
-    std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
-        m_frameResultOverrideSet{};
     std::array<Value, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
         m_frameResultOverride{};
 
     // See setInterpretLoop() above.
     std::function<InterpretResult(int)> m_runLoop;
 
+    // See setCodeAttacher() above. Read once per worker start only.
+    CodeAttacher m_attachCode;
+
+    int m_frameCount{0};
+    // Tasks of this run that have not ended, the main task included.
+    int m_liveTasks{0};
+    // The stopAtFrameCount of the run() invocation that called the native
+    // currently executing. Saved/restored around each callNative() so a native
+    // re-entering the VM judges a caught throw against the right boundary.
+    int m_nativeStopAtFrameCount{0};
+    // The enclosing run()'s boundary for the canonical stringify in progress,
+    // and the outcome of a __str__ dispatch inside it. stringifyObj
+    // (object.cpp) reaches __str__ through stringifyInstanceStr() below, so it
+    // never sees the boundary itself: opStr() (print/str) and handleThrow()
+    // (the report of an uncaught non-Error throw) both set it, and each
+    // saves/restores it around its own stringify.
+    int m_stringifyBoundary{0};
+    // Non-zero while a canonical stringify is in progress (print/str, or the
+    // report of an uncaught non-Error throw): stringifyObj's INSTANCE case
+    // dispatches __str__ only then, so an internal stringify (the debug
+    // trace's stack dump, the disassembler) still renders the default form
+    // with no user-code side effect.
+    int m_stringifyCanonicalDepth{0};
+    bool m_stackOverflow{false};
+    // Set when the script of one session line ended (a return, a yield to the
+    // end, or an uncaught fault). The scheduler leaves the line with OK then,
+    // while the main task itself stays alive for the next line.
+    bool m_mainLineDone{false};
+    // Set by task.receive on an empty mailbox, and kept while each coroutine
+    // between the receive and the task's base suspends in turn (callNative
+    // after a `resume` native, opIterHasNext, resumeWaitingInner). The
+    // scheduler clears it when the task's own coroutine is suspended.
+    bool m_taskSwitchPending{false};
+    bool m_isMainWorker{true};
+    // See setSessionMode().
+    bool m_sessionMode{false};
     // Coroutine mode (QBE #530/#535). True only while runCompiledFrames()
     // invokes a compiled frame's code. When set, the op*() helpers push a
     // callable frame and return OpResult::Call instead of running it, so the
@@ -1517,40 +1524,28 @@ class Runtime {
     // a YIELD there is a native-callback error, exactly as native's own
     // reentrantRunDepth check makes it.
     bool m_resumableMode{false};
-
     // Set by invokeCallableFromNative() when a native's re-entrant call did
     // not return a value (Stop/Fatal/Resumed). callNative() reads it after the
     // native returns and propagates it instead of pushing the native's
     // placeholder result. Reset to OK before each native call.
     OpResult m_reentrantOutcome{OpResult::OK};
-
     // Set by hashMapKey() or mapKeyEq() when a key operation's __hash__/__eq__
     // fails: Stop/Fatal to propagate, or Resumed if a caught error continued
     // inside the enclosing run(). Reset to OK before each map key operation.
     OpResult m_mapKeyStatus{OpResult::OK};
-
-    // The stopAtFrameCount of the run() invocation that called the native
-    // currently executing. Saved/restored around each callNative() so a native
-    // re-entering the VM judges a caught throw against the right boundary.
-    int m_nativeStopAtFrameCount{0};
-
-    // The enclosing run()'s boundary for the canonical stringify in progress,
-    // and the outcome of a __str__ dispatch inside it. stringifyObj
-    // (object.cpp) reaches __str__ through stringifyInstanceStr() below, so it
-    // never sees the boundary itself: opStr() (print/str) and handleThrow()
-    // (the report of an uncaught non-Error throw) both set it, and each
-    // saves/restores it around its own stringify.
-    int m_stringifyBoundary{0};
     OpResult m_stringifyStatus{OpResult::OK};
-    // Non-zero while a canonical stringify is in progress (print/str, or the
-    // report of an uncaught non-Error throw): stringifyObj's INSTANCE case
-    // dispatches __str__ only then, so an internal stringify (the debug
-    // trace's stack dump, the disassembler) still renders the default form
-    // with no user-code side effect.
-    int m_stringifyCanonicalDepth{0};
-
-    // See setCodeAttacher() above. Read once per worker start only.
-    CodeAttacher m_attachCode;
+    // Parallel to m_frames[]: when m_frameResultOverrideSet[i] is true,
+    // Op::RETURN pushes m_frameResultOverride[i] instead of the method's
+    // actual return (__index_set__'s assignment value). Same set/clear sites
+    // as m_frameResultCheck.
+    std::array<bool, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameResultOverrideSet{};
+    // Parallel to m_frames[]: the result-type contract Op::RETURN enforces
+    // for this frame's operator-overloading method (None for ordinary frames).
+    // Set by dispatchMethod(), cleared by RETURN, callCompiled(),
+    // handleThrow()'s unwind loop, and resetStack(). Sized to match m_frames.
+    std::array<ResultCheck, FRAMES_MAX + STACK_OVERFLOW_FRAME_RESERVE>
+        m_frameResultCheck{};
 
 #ifdef LOXPP_PROFILE
     ProfilerData m_profilerData;
