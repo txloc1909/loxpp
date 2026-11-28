@@ -1060,6 +1060,11 @@ CI runs the groups in four shard jobs. `tests/shards.py` lists the shards and
 checks that each group is in exactly one. A new group must be added to a shard
 there, or the `redis-shard-plan` job fails.
 
+`mutate.py` prints `TIMEOUT ... (not a kill)` and exits 1 when a suite reaches
+its 420 s limit before every named case has failed. That happens when no
+`REDIS_STAGE_GROUPS` is set and the suite runs all groups. `MUTATE_SUITE_TIMEOUT`
+sets the limit in seconds, so a test can reach it.
+
 `mutate.py -j N` runs N mutations at once. The default N is a quarter of the
 CPU cores, and at least 1, so `-j 1` runs them one at a time. Some stall
 probes have time limits of 0.1 to 2 s, and a high load can fail a named case
