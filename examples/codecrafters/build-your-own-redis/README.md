@@ -87,6 +87,8 @@ Differences from Redis:
 
 - The count includes replica connections that a master holds; Redis leaves
   them out of `connected_clients`. A replica takes a slot of the master here.
+  Redis also counts them in the limit check, so the limit has the same
+  effect there; only the `connected_clients` figure differs.
 - The link of a replica to its master is not counted. It does not go through
   the accept loop, so it takes no slot of the replica; Redis counts that link
   as a client of the replica.
