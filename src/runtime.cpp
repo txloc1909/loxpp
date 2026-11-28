@@ -1409,7 +1409,7 @@ bool Runtime::sendMessage(ObjTask* task, Value msg) {
     // its owner's collector from freeing it.
     MemoryManager::holdValue(msg);
     if (!postEnvelope(heapOf(task)->inbox(), Envelope{task, msg})) {
-        MemoryManager::releaseValue(msg);
+        m_mm.releaseValue(msg);
         return false;
     }
     return true;
@@ -1725,7 +1725,7 @@ void Runtime::drainInbox() {
             // after it ended is discarded with it.
             Value dropped = env.msg;
             env.msg = Value{};
-            MemoryManager::releaseValue(dropped);
+            m_mm.releaseValue(dropped);
             continue;
         }
         // From here the receiver keeps the value that receiveMessage
@@ -1755,9 +1755,12 @@ Runtime::WaitResult Runtime::waitForWork() {
             quiet = inbox.queue.empty();
         }
         // The worker may sleep. A collector with a cycle open ends it now, so
-        // that a quiet worker keeps no garbage and no handle.
+        // that a quiet worker keeps no garbage and no handle. The dead heaps
+        // that this worker released the last count of are destroyed now too,
+        // in parts: this goes idle, and the wait is no pause (issue #1352).
         if (quiet) {
             m_mm.collector().onIdle();
+            m_mm.reapPendingIdle();
         }
     }
     std::unique_lock<std::mutex> lock(inbox.mutex);

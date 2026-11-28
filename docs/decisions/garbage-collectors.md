@@ -655,6 +655,13 @@ the default; N7 made `incremental` the default (section 10.1).
   back the count of an envelope in flight during a mark of many steps, and
   the owner would free the object. This was a defect of the first version of
   N5 (review of #1298, found with `foreign_string.lox`).
+- **The end of a dead heap.** The heap that drops the last count of a dead
+  heap owns it, and destroys it in parts (`reapPendingPart`). One part is at
+  most 8192 units: an object destroyed, a foreign entry visited or an
+  envelope released. A part runs after a step of that heap's collector, in
+  its idle time for at most 0.5 ms, or as the heap ends, and never inside a
+  step of another heap. A part that drops the last count of a second dead
+  heap hands that heap to the same owner. Resolved in #1352.
 - **Idle and abort.** `Collector::onIdle` runs steps of the cycle for at most
   0.5 ms before a worker sleeps. `collectNow` (and so `retire` and a dead heap) cuts a cycle
   in progress short and runs one full cycle.
@@ -697,9 +704,6 @@ Known gaps, and where they are filed:
   and what these make gray. #1351. The handle list, the foreign set, the start
   pause and `markForeign` no longer follow the size of the foreign set:
   resolved in #1299 (PR #1350).
-- `MemoryManager::releaseHold` runs `delete this` when the owner heap is dead
-  and the hold is its last: one sweep step (or one `stw` collection) can
-  destroy a whole other heap. #1352.
 - A cycle with cause `exit` is one step of the whole heap. It runs after the
   program ends, and `tools/gc_report.py` shows it on its own line. #1300.
 - Function, Closure, Enum, DeferredCall and Bound* objects are not cut into

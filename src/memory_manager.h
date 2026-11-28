@@ -47,6 +47,10 @@ class MemoryManager : public VmAllocBase {
         // path.
         if (shouldPoll()) {
             m_collector->poll();
+            // A step of the collector can drop the last count of a dead heap
+            // (issue #1352). The part that destroys it runs here, after the
+            // step, on this heap's thread.
+            reapPendingPart();
         }
         static_assert(sizeof(T) <= SizeClassHeap::kMaxObject &&
                           alignof(T) <= SizeClassHeap::kSlotAlign,
@@ -133,7 +137,10 @@ class MemoryManager : public VmAllocBase {
     // The roots and the references that the runtime finds go to the collector.
     void markObject(Obj* obj) { m_collector->markObject(obj); }
     void markValue(const Value& v) { m_collector->markValue(v); }
-    void collectGarbage() { m_collector->collectNow(CollectCause::Auto); }
+    void collectGarbage() {
+        m_collector->collectNow(CollectCause::Auto);
+        reapPendingPart();
+    }
     // The number of completed collectGarbage() calls of this heap. Tests read
     // it to prove that an allocation path reaches the threshold check.
     [[nodiscard]] std::size_t collectionCount() const {
@@ -170,15 +177,42 @@ class MemoryManager : public VmAllocBase {
 
     // Raises the count of `obj`, an object of this heap. Any thread.
     void hold(const Obj* obj);
-    // Drops the count of `obj`, an object of this heap. Any thread. Frees
-    // this heap when it is dead and that was its last count; the caller must
-    // not touch the heap or its objects after that.
-    void releaseHold(const Obj* obj);
+    // Drops the count of `obj`, an object of this heap. Any thread. Returns
+    // true when that was the last count of a heap whose owner is dead: the
+    // heap is then owed to the caller, which destroys it in parts with
+    // reapPendingPart(), or drains it as it ends. Nobody may touch the heap
+    // or its objects until the last part.
+    bool releaseHold(const Obj* obj);
     // The holder count of `obj`, an object of this heap. For tests.
     [[nodiscard]] std::uint32_t holderCount(const Obj* obj);
     // hold()/releaseHold() on the owner of `v`, when `v` is an object.
     static void holdValue(const Value& v);
-    static void releaseValue(const Value& v);
+    // Drops the count of `v`, and takes the heap when that was its last one
+    // (see releaseHold). A member, not a static, because the heap that calls
+    // it owns the dead heap (m_destroying).
+    void releaseValue(const Value& v);
+
+    // --- The destruction of a dead heap (issue #1352) ----------------------
+    //
+    // The heap that drops the last count of a dead heap destroys it, in parts
+    // of at most `units` work units. One unit is an object destroyed, a
+    // foreign entry visited or an envelope released. A part is program work
+    // and not a collector step, so it runs on this heap's own thread after a
+    // step, in its idle time, or as it ends -- never inside a step.
+    static constexpr std::size_t kDestroyUnits = 8192;
+    // One part of the first dead heap of this heap. Returns its work units, or
+    // 0 when no dead heap waits. A test calls it to count the parts.
+    std::size_t reapPendingPart();
+    // Runs parts for the idle time of this heap, about 0.5 ms: the limit that
+    // the collector's own idle burst uses.
+    void reapPendingIdle();
+    static constexpr std::uint64_t kDestroyIdleNs = 500'000;
+    // The dead heaps that wait for this heap, and the one part in progress.
+    [[nodiscard]] std::size_t pendingDeadHeaps() const {
+        return m_destroying.size() + (m_destroyingNow != nullptr ? 1 : 0);
+    }
+    // For tests: the units of one part. A test sets 1 and counts the parts.
+    void setDestroyPartUnits(std::size_t units) { m_destroyUnits = units; }
 
     // A message that a send from another worker delivered to this heap: the
     // sender raised one count for it. Registers or releases that count, and
@@ -206,7 +240,8 @@ class MemoryManager : public VmAllocBase {
     // follow.
     void retire();
     // The owner of the heap is gone. Frees the heap when no count is left;
-    // otherwise it is a dead heap, and the last releaseHold() frees it.
+    // otherwise it is a dead heap, and its last releaseHold() hands it to the
+    // heap that dropped the count, which destroys it in parts.
     void dropOwner();
 
   private:
@@ -239,12 +274,30 @@ class MemoryManager : public VmAllocBase {
     // foreignReleasing is false. A step visits at most `maxEntries` entries
     // and returns the number that it visited. An entry that the program
     // marks or adopts between the parts stays. endForeignRelease stops the
-    // scan; the entries that it did not visit stay in the set.
+    // scan; the entries that it did not visit stay in the set. `reaper` is
+    // the heap that takes a heap whose last count the step drops: the
+    // collector's own heap for a sweep, and the owning heap for the
+    // destruction of a dead heap.
     void beginForeignRelease();
-    std::size_t releaseForeignStep(std::size_t maxEntries, bool dropStrings);
+    std::size_t releaseForeignStep(std::size_t maxEntries, bool dropStrings,
+                                   MemoryManager* reaper);
     [[nodiscard]] bool foreignReleasing() const;
     void endForeignRelease();
     [[nodiscard]] std::size_t foreignCount() const { return m_foreign.size(); }
+
+    // Drops the count of `obj`, an object of another heap, and takes that
+    // heap when it was its last one (releaseHold). For every count that this
+    // heap drops.
+    void releaseCount(Obj* obj);
+    // One part of the destruction of the dead heap `this`. `reaper` takes a
+    // heap whose last count the part drops. Sets `finished` when this heap is
+    // empty, and returns the work units of the part.
+    std::size_t destroyStep(MemoryManager& reaper, std::size_t units,
+                            bool& finished);
+    // Runs reapPendingPart() until no dead heap waits. The parts follow one
+    // another on one thread, so no limit is needed here: the caller is
+    // ending.
+    void drainPendingDeadHeaps();
 
     // True when the allocation that is about to happen is a safe point at
     // which the collector has work. One compare of members of the heap.
@@ -297,6 +350,20 @@ class MemoryManager : public VmAllocBase {
     std::unordered_map<const Obj*, std::uint32_t> m_holders;
     std::size_t m_heldTotal{0};
     bool m_ownerAlive{true};
+
+    // The dead heaps whose last count this heap dropped, and the one part
+    // that runs now. Every count that this heap drops runs on its own thread,
+    // so no lock is needed.
+    std::vector<MemoryManager*> m_destroying;
+    MemoryManager* m_destroyingNow{nullptr};
+    std::size_t m_destroyUnits{kDestroyUnits};
+    // The progress of destroyStep: the span cursor of the objects, the stage
+    // (0 objects, 1 foreign set, 2 inbox), and the envelopes it took.
+    SizeClassHeap::Span* m_destroySpan{nullptr};
+    std::uint8_t m_destroyStage{0};
+    bool m_destroyForeignStarted{false};
+    bool m_destroyInboxTaken{false};
+    std::vector<Envelope> m_destroyEnvelopes;
 
   public:
     // The drain's batch (see m_draining).

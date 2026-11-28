@@ -599,11 +599,13 @@ TEST_F(WorkerTest, PollingIsFalseOnceTheWorkerWokeFromItsPoller) {
 // destroyed, and the inbox outlives the runtime while a message is held.
 TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
     MemoryManager* heap = nullptr;
+    std::uint16_t heapId = 0;
     Value held;
     {
         VM vm;
         ASSERT_EQ(vm.interpret("var s = [1];"), InterpretResult::OK);
         heap = &vm.runtime().memoryManager();
+        heapId = heap->heapId();
         vm.runtime().poller();
         {
             std::lock_guard<std::mutex> lock(heap->inbox().mutex);
@@ -620,7 +622,13 @@ TEST_F(WorkerTest, RuntimeClearsItsPollerFromTheInboxOnTeardown) {
         EXPECT_EQ(heap->inbox().poller, nullptr);
         EXPECT_FALSE(heap->inbox().polling);
     }
-    MemoryManager::releaseValue(held);
+    // The heap of the VM is dead now, and this thread drops its last count.
+    // It owns the heap, so a heap takes that count (issue #1352).
+    {
+        MemoryManager releaser;
+        releaser.releaseValue(held);
+    }
+    EXPECT_EQ(heapById(heapId), nullptr);
 }
 
 // When the registered wait ends and nothing can send, the deadlock is real.

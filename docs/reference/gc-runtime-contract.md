@@ -219,8 +219,11 @@ workers":
   receives the same object) before the end, and the owner would free the
   object.
 - `retire` runs one last collection whose only roots are the held objects
-  (trace cause `exit`). A dead heap stays until its last hold is released,
-  and the last `releaseHold`, on any thread, frees it.
+  (trace cause `exit`). A dead heap stays until its last hold is released.
+  The last `releaseHold`, on any thread, hands the heap to the heap that
+  dropped the count, and that heap destroys it in parts of at most 8192 units
+  (`reapPendingPart`): after a step of its collector, in its idle time, or as
+  it ends. No part runs inside a step of another heap (issue #1352).
 
 ## 7. Stores of a reference into a heap object
 

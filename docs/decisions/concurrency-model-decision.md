@@ -332,8 +332,11 @@ message; a drain; the new worker's receipt of its start message; a
 collection; a worker exit; and the free of a heap, which releases the
 foreign counts that the heap still holds. The free runs in `dropOwner` when
 the owner is gone and no count is left, or in the last `releaseHold` of a
-dead heap. The creating worker's collector treats an object with a count
-above zero as a root. The receiver's collector marks foreign objects in a
+dead heap: that release hands the heap to the heap that dropped the count,
+which destroys it in parts, and no part runs inside a step of another heap
+(`docs/decisions/garbage-collectors.md`, section 14). The creating
+worker's collector treats an object with a count above zero as a root. The
+receiver's collector marks foreign objects in a
 side table of its own, never in the object header, because the header's
 mark bit belongs to the owner's collector; a foreign
 object the receiver's mark phase did not reach leaves its foreign set and
