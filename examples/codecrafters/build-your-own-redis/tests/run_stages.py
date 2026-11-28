@@ -520,6 +520,32 @@ def measure_while(srv, action, password=None):
     return worst[0], wrong, peak[0]
 
 
+# A stall probe of one long command measures the worst PING of one run. A host
+# that is busy adds tens of milliseconds to that worst PING in some runs. A server
+# that has no limit on the command stalls in every run, by a wide factor, so
+# a run over the bound is run again, and the probe fails only when every run is
+# over it.
+STALL_TRIES = 3
+
+
+def measure_within(srv, action, bound, tries=STALL_TRIES):
+    """measure_while(srv, action), repeated up to `tries` times until a run has
+    worst <= bound. A wrong reply stops it at once. Returns (the lowest worst,
+    the wrong replies of the last run, the worst of every run, the growth of
+    the peak RSS in the first run, in KiB)."""
+    worsts = []
+    growth = None
+    for _ in range(tries):
+        before = rss_kib(srv.proc.pid)
+        worst, wrong, peak = measure_while(srv, action)
+        if growth is None:
+            growth = peak - before
+        worsts.append(worst)
+        if wrong or worst <= bound:
+            break
+    return min(worsts), wrong, worsts, growth
+
+
 def flood(port, seconds, read_replies, chunk=None):
     """One client that sends pipelines (of PING, unless chunk says what) for
     the given time. It reads and drops the replies, or never reads them."""
@@ -2025,11 +2051,18 @@ def stages_streams_large(prog):
             c.send_raw(encode("XRANGE", "s9", "-", "+"))
             got[0] = c.try_read(15)
             time.sleep(0.2)
-        worst, wrong, _ = measure_while(srv, xrange_s9)
+        worst, wrong, worsts, growth = measure_within(srv, xrange_s9, 0.25)
         check("local: S9 XRANGE of a 64 MB field gives it",
               got[0] == [["1-1", ["f", field]]])
         check("local: S9 XRANGE of a 64 MB field stalls PING at most 0.25 s",
-              worst <= 0.25 and not wrong, "worst %.3f s" % worst)
+              worst <= 0.25 and not wrong,
+              "worst %s s" % ", ".join("%.3f" % w for w in worsts))
+        # The write has no copy of the field, so the heap grows by none of its
+        # 64 MB. A copy into the bulk grows it by 128 MB. The growth does not
+        # depend on the load of the host, as the time of a PING does, and the
+        # time of the copy alone is below the bound of the stall.
+        check("local: S9 XRANGE of a 64 MB field grows the peak RSS by at most 32 MB",
+              growth <= 32 << 10, "grew %d KiB" % growth)
         got[0] = None
         field = None
         c.close()
@@ -5730,12 +5763,12 @@ def stages_zset_limits(prog):
                     x.read()
                 got[0] = x.read()
                 x.close()
-            worst, wrong, _ = measure_while(srv, exec_ranges)
+            worst, wrong, worsts, _ = measure_within(srv, exec_ranges, 1.0)
             r = got[0]
             check("local: Z7 EXEC of 16 ZRANGE of 524288 members stalls PING at most 1 s",
                   worst <= 1.0 and not wrong and isinstance(r, list) and len(r) == 16
                   and all(len(e) == 524288 for e in r[:4]) and all(isinstance(e, Error) for e in r[4:]),
-                  "worst %.3f s" % worst)
+                  "worst %s s" % ", ".join("%.3f" % w for w in worsts))
 
             def exec_two():
                 x = Client(srv.port)

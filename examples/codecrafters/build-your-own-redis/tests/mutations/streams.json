@@ -229,7 +229,7 @@
   "old": "    addBulk(s) {\n        if (len(s) >= STEP_BYTES) {",
   "new": "    addBulk(s) {\n        if (false) {",
   "cases": [
-   "local: S9 XRANGE of a 64 MB field stalls PING at most 0.25 s"
+   "local: S9 XRANGE of a 64 MB field grows the peak RSS by at most 32 MB"
   ]
  },
  {
