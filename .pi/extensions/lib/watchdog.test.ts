@@ -53,23 +53,40 @@ const CHILD_START_TIMEOUT_MS = 30_000;
  */
 const SLOW_START_S = 9;
 /**
+ * How late a `ps` start can be, in the tests that prove the read allowance. It
+ * only has to outlast the limit `startTimeOf` gives its `ps` call, which is a
+ * bound on a launch, not on a host: a read that kept that limit returns no
+ * answer while this one gives the token.
+ */
+const SLOW_PS_S = 3;
+/**
+ * A limit short enough to probe the message of a `ps` call that gives no
+ * answer, in a test whose fake `ps` exits at once or outlasts the limit.
+ */
+const PS_READ_PROBE_MS = 500;
+/**
  * A limit short enough to probe the end of a wait, in the test that forces that
  * end: the run it passes starts no child, so the file can never arrive.
  */
 const LIMIT_PROBE_MS = 200;
-/** Every wait in one test draws on this budget, so their sum cannot exceed it. */
+/**
+ * Every wait, and every `ps` read that asks for the host allowance, draws on
+ * this budget, so their sum cannot exceed it. Two reads keep their own limit
+ * and this budget does not bound them: `parentArgs`, whose empty answer a run
+ * allows, and `state`, whose `ps` takes no limit of its own (#1376).
+ */
 const WAIT_BUDGET_MS = 90_000;
 
 /**
  * A test that drives real processes. Its waits share one deadline, so no sum of
  * waits can reach the outer bound first: each wait asks for what is left and
  * fails with the cause it names. The body picks the limit its wait measures:
- * `startLeft` for a wait on a spawned run to come up, which the host decides, and
- * `left` for a wait on the watch, which is capped at `TIMEOUT_MS` so a single
- * slow step cannot take the whole budget and hide a regression. The outer bound
- * holds the whole budget, which holds the two start waits and the three watch
- * waits that the longest test uses, plus the fixed sleeps, the setup and the
- * teardown.
+ * `startLeft` for host work that the host decides — a spawned run to come up,
+ * or the `ps` start behind a start time — and `left` for a wait on the watch,
+ * which is capped at `TIMEOUT_MS` so a single slow step cannot take the whole
+ * budget and hide a regression. The outer bound holds the whole budget, which
+ * holds the budgeted `ps` reads, the two start waits and the three watch waits
+ * that the longest test uses, plus the fixed sleeps, the setup and the teardown.
  */
 function processTest(
   name: string,
@@ -150,14 +167,30 @@ function parentArgs(parent: ChildProcess): string[] {
 
 /**
  * The raw `ps` answer for one pid under one time zone, normalized as both sides
- * of the watch normalize it.
+ * of the watch normalize it, read within `timeoutMs`.
+ *
+ * A read that gives no answer fails with the call it names, because a starved
+ * host loses this read first and a message about the run the test was setting up
+ * does not say which read gave up.
  */
-function rawStart(pid: number, tz: string): string {
-  const out = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+function rawStart(pid: number, tz: string, timeoutMs: number): string {
+  const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C", TZ: tz },
-  }).stdout;
-  return out.replace(/\s+/g, "");
+    timeout: timeoutMs,
+  });
+  const answer = (r.stdout ?? "").replace(/\s+/g, "");
+  assert.ok(
+    r.error === undefined && r.status === 0 && answer !== "",
+    `ps gave no answer for the start time of pid ${pid} in ${tz} within ${timeoutMs} ms (${psFailure(r)})`,
+  );
+  return answer;
+}
+
+/** What a `ps` call that gave no answer reported, for the message that names it. */
+function psFailure(r: { error?: Error; signal: NodeJS.Signals | null; status: number | null }): string {
+  const cause = r.error === undefined ? "" : `: ${r.error.message}`;
+  return r.signal !== null ? `signal ${r.signal}${cause}` : `exit ${r.status}${cause}`;
 }
 
 /**
@@ -165,13 +198,69 @@ function rawStart(pid: number, tz: string): string {
  * use, or undefined when this host's zone database offers none. A run started in
  * such a zone is the test of the token's zone: a token that carried the caller's
  * zone would read a live parent as dead.
+ *
+ * Each read draws on `psLeft`, the test's allowance for host work, so the reads
+ * of the search share the budget with the waits that follow. A read that gives
+ * no answer names itself instead of reading as a zone that differs.
  */
-function differingZone(pid: number): string | undefined {
-  const utc = rawStart(pid, "UTC");
+function differingZone(pid: number, psLeft: () => number): string | undefined {
+  const utc = rawStart(pid, "UTC", psLeft());
   for (const zone of ["Asia/Tokyo", "America/Los_Angeles", "Pacific/Kiritimati"]) {
-    if (rawStart(pid, zone) !== utc) return zone;
+    if (rawStart(pid, zone, psLeft()) !== utc) return zone;
   }
   return undefined;
+}
+
+/**
+ * Run `read` with a `ps` on `PATH` that sleeps `SLOW_PS_S` before each of its
+ * first `slowCalls` answers, so a read whose limit is shorter than that delay
+ * gives no answer. `PATH` is restored when `read` returns, so the run a test
+ * starts next uses the real `ps`.
+ *
+ * Each call makes its own bin directory and its own counter, so each guarded
+ * call site gets its own slow answers. A search of several reads passes 2, so
+ * the first read and the first read of its loop are both forced through their
+ * limit: a limit that only one of them asks for would stay unproven.
+ */
+async function withSlowPs<T>(dir: string, name: string, read: () => T, slowCalls = 1): Promise<T> {
+  const bin = path.join(dir, name);
+  await fs.promises.mkdir(bin);
+  const asked = path.join(bin, "asked");
+  await fs.promises.writeFile(
+    path.join(bin, "ps"),
+    [
+      "#!/bin/sh",
+      "n=0",
+      `command [ -e ${shellQuote(asked)} ] && n=$(command cat ${shellQuote(asked)})`,
+      "n=$((n + 1))",
+      `command printf '%s' "$n" > ${shellQuote(asked)}`,
+      `if command [ "$n" -le ${slowCalls} ]; then`,
+      `  command sleep ${SLOW_PS_S}`,
+      "fi",
+      'exec /bin/ps "$@"',
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  const before = process.env.PATH;
+  process.env.PATH = `${bin}:${before}`;
+  try {
+    return read();
+  } finally {
+    process.env.PATH = before;
+  }
+}
+
+/**
+ * The parent's start time as production reads it, within the test's allowance
+ * for host work. The `ps` start is a fork and an exec, which a loaded runner
+ * delays past the limit that bounds production's read, so this read gets the
+ * allowance and its failure names the call.
+ */
+function parentStart(pid: number, timeoutMs: number): string {
+  const answer = startTimeOf(pid, timeoutMs);
+  assert.notEqual(answer, "", `ps gave no answer for the start time of pid ${pid} within ${timeoutMs} ms`);
+  return answer;
 }
 
 /**
@@ -585,8 +674,11 @@ processTest("a parent pid that another process holds does not keep the run alive
     });
 
     const parent = standInParent();
-    const start = startTimeOf(parent.pid!);
-    assert.notEqual(start, "", "ps can read the stand-in parent");
+    // The read draws on the start allowance, and this fake `ps` is slow enough
+    // that the 2 s default would return no answer: a call site that reverts to
+    // that limit fails here. `PATH` is restored before the run starts, so the
+    // run's own `ps` calls are the real ones.
+    const start = await withSlowPs(dir, "slow-token", () => parentStart(parent.pid!, startLeft()));
 
     // The kernel hands a dead process's number to a new one, and the new owner's
     // `S` state is what a state-only watch reads as a live parent: the wrapper
@@ -636,15 +728,18 @@ processTest("a parent token read in another time zone still names the same proce
     });
 
     const parent = standInParent();
-    const start = startTimeOf(parent.pid!);
-    assert.notEqual(start, "", "ps can read the stand-in parent");
+    // Both reads draw on the start allowance, and this fake `ps` is slow enough
+    // that the 2 s default would return no answer, so a call site that reverts
+    // to that limit fails here. `PATH` is restored before the run starts, so
+    // the run's own `ps` calls are the real ones.
+    const start = await withSlowPs(dir, "slow-token", () => parentStart(parent.pid!, startLeft()));
     // kitty forwards a short list of environment keys, so a `TZ` that reaches
     // pi need not reach the window's script. `ps -o lstart=` answers in local
     // time, so both sides of the comparison set TZ=UTC; without that, a zone
     // difference reads a live parent as dead. A host whose zone database cannot
     // print a different answer cannot show the difference, and this test would
     // prove nothing.
-    const zone = differingZone(parent.pid!);
+    const zone = await withSlowPs(dir, "slow-zone", () => differingZone(parent.pid!, startLeft), 2);
     if (zone === undefined) return;
 
     const script = spawn("/bin/sh", [scriptPath, String(parent.pid), start], {
@@ -662,6 +757,59 @@ processTest("a parent token read in another time zone still names the same proce
       parent.kill("SIGKILL");
       await stopRun(script, left());
     }
+  });
+});
+
+processTest("a ps that is slow to start still gives the parent's start time", async (left, startLeft) => {
+  await withTempDir(async (dir) => {
+    // A loaded host delays the fork and exec of `ps` itself. `startTimeOf`'s
+    // default limit bounds what that delay may cost a launch, so a read that
+    // kept it returns no answer here; the test's read draws on the start
+    // allowance instead, which fits the host it measures.
+    const slow = await withSlowPs(dir, "slow-token", () => parentStart(process.pid, startLeft()));
+    // The delay changes when the answer arrives, not what it says: the token is
+    // the one a `ps` that answered at once gives.
+    const direct = rawStart(process.pid, "UTC", startLeft());
+    assert.equal(slow, direct, "the late answer names the same start time");
+  });
+});
+
+processTest("a ps that gives no answer names the read that gave it", async () => {
+  await withTempDir(async (dir) => {
+    // A `ps` that is not installed, or one that a policy stops, answers
+    // nothing. Each read the test makes must then say which one it was: the
+    // parent's start time, or one zone of the search.
+    const bin = path.join(dir, "bin");
+    await fs.promises.mkdir(bin);
+    await fs.promises.writeFile(path.join(bin, "ps"), ["#!/bin/sh", "exit 3", ""].join("\n"), { mode: 0o700 });
+
+    const before = process.env.PATH;
+    process.env.PATH = `${bin}:${before}`;
+    try {
+      assert.throws(
+        () => parentStart(process.pid, PS_READ_PROBE_MS),
+        new RegExp(`ps gave no answer for the start time of pid ${process.pid} within ${PS_READ_PROBE_MS} ms`),
+        "the read of the parent's start time names itself",
+      );
+      assert.throws(
+        () => differingZone(process.pid, () => PS_READ_PROBE_MS),
+        new RegExp(`ps gave no answer for the start time of pid ${process.pid} in UTC within ${PS_READ_PROBE_MS} ms`),
+        "the search names the read that failed, and its zone",
+      );
+    } finally {
+      process.env.PATH = before;
+    }
+
+    // A `ps` that outlasts its limit must be cut off, not waited out. Without
+    // the limit, this read answers after the sleep and the search returns a
+    // zone, so the assertion below fails.
+    await assert.rejects(
+      withSlowPs(dir, "hang", () => differingZone(process.pid, () => PS_READ_PROBE_MS)),
+      new RegExp(
+        `ps gave no answer for the start time of pid ${process.pid} in UTC within ${PS_READ_PROBE_MS} ms \\(signal SIGTERM`,
+      ),
+      "the read that outlasts its limit names itself, with what ps reported",
+    );
   });
 });
 

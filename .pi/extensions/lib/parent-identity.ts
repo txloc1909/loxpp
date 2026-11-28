@@ -26,20 +26,30 @@
 
 import { spawnSync } from "node:child_process";
 
-/** The longest one `ps` call may take before its answer counts as unreadable. */
+/**
+ * The longest one `ps` call may take before its answer counts as unreadable.
+ * The call blocks its caller, and `parentStartTime` runs while a run is about to
+ * start, so this limit is what a `ps` that hangs may cost that launch. A caller
+ * that measures a loaded host, and cannot afford to read no answer, passes its
+ * own limit to `startTimeOf` instead.
+ */
 export const START_TIMEOUT_MS = 2000;
 
 /**
  * The start time of one process, or an empty string when `ps` cannot read it.
  * An empty answer is not evidence of anything, so callers keep the state-only
  * check for it.
+ *
+ * `timeoutMs` bounds this one call. The default keeps a launch moving on a host
+ * whose `ps` hangs; a caller that measures a host slower than that limit passes
+ * a limit that fits what it reads.
  */
-export function startTimeOf(pid: number): string {
+export function startTimeOf(pid: number, timeoutMs: number = START_TIMEOUT_MS): string {
   const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
     // A `ps` that hangs must not hold the run that is about to start.
-    timeout: START_TIMEOUT_MS,
+    timeout: timeoutMs,
   });
   if (r.error !== undefined || r.status !== 0) return "";
   return r.stdout.replace(/\s+/g, "");
